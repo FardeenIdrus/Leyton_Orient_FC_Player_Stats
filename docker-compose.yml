@@ -1,0 +1,59 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lofc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lofc}
+      POSTGRES_DB: ${POSTGRES_DB:-lofc}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lofc} -d ${POSTGRES_DB:-lofc}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Inside the compose network the DB host is "db", not localhost.
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://lofc:lofc@db:5432/lofc}
+    volumes:
+      # Live-mount source for development; the image still installs the package.
+      - ./src:/app/src
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+      - ./tests:/app/tests
+      - ./data:/app/data
+    # Keep the container alive so `docker-compose run` / `exec` are convenient.
+    command: ["tail", "-f", "/dev/null"]
+
+  # Visual database browser at http://localhost:5050 (no SQL needed).
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@lofc.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      # Open straight into the UI, no pgAdmin login or master password prompts.
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      # Pre-register the LOFC database so it appears in the sidebar automatically.
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  pgadmin_data:

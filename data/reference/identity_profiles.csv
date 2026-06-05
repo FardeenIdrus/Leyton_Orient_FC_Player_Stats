@@ -1,0 +1,52 @@
+position_group,metric,weight,min_percentile,notes
+Goalkeeper,save_pct,0.45,0.5,Must-have floor for an on-profile player.
+Goalkeeper,gk_saves_p90,0.2,,
+Goalkeeper,pass_completion_pct,0.2,0.4,Must-have floor for an on-profile player.
+Goalkeeper,passes_p90,0.15,,
+Centre Back,interceptions_p90,0.2,0.45,Must-have floor for an on-profile player.
+Centre Back,clearances_p90,0.15,,
+Centre Back,blocks_p90,0.1,,
+Centre Back,ball_recoveries_p90,0.1,,
+Centre Back,tackles_p90,0.15,,
+Centre Back,pass_completion_pct,0.15,0.5,Must-have floor for an on-profile player.
+Centre Back,progressive_passes_p90,0.15,,
+Full Back,progressive_passes_p90,0.18,,Primary attribute for this position.
+Full Back,passes_into_final_third_p90,0.15,,
+Full Back,passes_into_box_p90,0.15,,
+Full Back,progressive_carries_p90,0.15,,
+Full Back,tackles_p90,0.15,0.4,Must-have floor for an on-profile player.
+Full Back,interceptions_p90,0.12,,
+Full Back,pressures_p90,0.1,,
+Defensive Mid,interceptions_p90,0.18,0.45,Must-have floor for an on-profile player.
+Defensive Mid,tackles_p90,0.15,0.45,Must-have floor for an on-profile player.
+Defensive Mid,ball_recoveries_p90,0.15,,
+Defensive Mid,pressures_p90,0.15,,
+Defensive Mid,pass_completion_pct,0.17,0.5,Must-have floor for an on-profile player.
+Defensive Mid,progressive_passes_p90,0.2,,Primary attribute for this position.
+Central Mid,progressive_passes_p90,0.18,,Primary attribute for this position.
+Central Mid,passes_into_final_third_p90,0.15,,
+Central Mid,xa_p90,0.12,,
+Central Mid,key_passes_p90,0.12,,
+Central Mid,progressive_carries_p90,0.13,,
+Central Mid,pressures_p90,0.15,,
+Central Mid,pass_completion_pct,0.15,,
+Winger,xa_p90,0.18,,Primary attribute for this position.
+Winger,key_passes_p90,0.15,,
+Winger,dribbles_completed_p90,0.17,0.5,Must-have floor for an on-profile player.
+Winger,progressive_carries_p90,0.15,,
+Winger,passes_into_box_p90,0.13,,
+Winger,np_xg_p90,0.12,,
+Winger,pressures_p90,0.1,,
+Attacking Mid,xa_p90,0.2,,Primary attribute for this position.
+Attacking Mid,key_passes_p90,0.18,,
+Attacking Mid,np_xg_p90,0.15,,
+Attacking Mid,passes_into_box_p90,0.15,,
+Attacking Mid,progressive_passes_p90,0.12,,
+Attacking Mid,dribbles_completed_p90,0.1,,
+Attacking Mid,pressures_p90,0.1,,
+Centre Forward,np_xg_p90,0.28,0.55,Must-have floor for an on-profile player.
+Centre Forward,np_goals_p90,0.2,,
+Centre Forward,shots_p90,0.15,,
+Centre Forward,xa_p90,0.1,,
+Centre Forward,passes_into_box_p90,0.1,,
+Centre Forward,pressures_p90,0.17,,

@@ -1,0 +1,113 @@
+============================================================
+LOFC Recruitment Platform - CLI command reference
+Commands to run each phase and (later) the full pipeline.
+Updated as we build. Run all commands from the project root.
+============================================================
+
+
+# ----- Phase 0: Scaffold (environment) -----
+
+# Build the app Docker image (installs all Python dependencies)
+docker compose build app
+
+# Start the stack (Postgres 16 + app container) in the background
+docker compose up -d
+
+# Check both containers are up (db should report "healthy")
+docker compose ps
+
+# Confirm config loads from .env (prints settings, open-data mode)
+docker compose exec -T app python -c "from lofc.config import settings; print(settings)"
+
+# Apply database migrations (currently the empty baseline schema)
+docker compose exec -T app alembic upgrade head
+
+# Run the test suite
+docker compose exec -T app pytest -q
+
+# Stop the stack when done (keeps the Postgres data volume)
+docker compose down
+
+
+# ----- Phase 1: Ingest -----
+# Phase 1 lands raw JSON files under data/raw/. It does NOT load Postgres (that is Phase 3).
+
+# Pull all 3 leagues (resumable; skips files already saved)
+docker compose exec app python -m lofc.ingest.run
+
+# Pull one league only (2 = Premier League, 11 = La Liga, 12 = Serie A)
+docker compose exec app python -m lofc.ingest.run --competition 2
+
+# Quick test: first 5 matches of the Premier League
+docker compose exec app python -m lofc.ingest.run --competition 2 --limit 5
+
+# Force a re-pull even if files already exist
+docker compose exec app python -m lofc.ingest.run --competition 2 --force
+
+# Check what landed on disk
+du -sh data/raw
+find data/raw/2/27/events -type f | wc -l    # count of PL matches pulled so far
+find data/raw -maxdepth 3 -type d            # folder layout
+
+
+# ----- Phase 2: Aggregate -----
+# Reads data/raw/, writes one row per player-season to data/processed/ (parquet + CSV).
+
+# Aggregate all 3 leagues into the player-season metrics table
+docker compose exec app python -m lofc.aggregate.run
+
+# Aggregate one league only (2 = Premier League, 11 = La Liga, 12 = Serie A)
+docker compose exec app python -m lofc.aggregate.run --competition 2
+
+# Open the result (CSV is human-readable; parquet feeds the next phases)
+open data/processed/player_season_metrics.csv          # opens in your spreadsheet app
+docker compose exec app python -c "import pandas as pd; print(pd.read_parquet('data/processed/player_season_metrics.parquet').shape)"
+
+
+# ----- Phase 3: Store -----
+# Creates the database tables, loads the player table + the club reference data.
+
+# Apply database migrations (creates the 4 tables)
+docker compose exec app alembic upgrade head
+
+# (Re)generate the constructed reference files in data/reference/
+docker compose exec app python -m lofc.store.reference_data
+
+# Load everything into Postgres (idempotent: safe to re-run, no duplicates)
+docker compose exec app python -m lofc.store.load
+
+
+# ----- Phase 4: Normalise & Score -----
+# Ranks players vs positional peers (percentiles), builds performance + fit scores.
+
+# Compute percentiles + scores and write them to Postgres (prints a spot-check)
+docker compose exec app python -m lofc.model.run
+
+# See the top centre-forwards by fit, or any position
+docker compose exec db psql -U lofc -d lofc -c "SELECT m.player_name, s.performance_score, s.fit_score FROM player_scores s JOIN player_season_metrics m ON s.player_id=m.player_id AND s.competition_id=m.competition_id AND s.season_id=m.season_id WHERE s.competition_id=2 AND s.position_group='Centre Forward' ORDER BY s.fit_score DESC LIMIT 10;"
+
+# ----- Phase 5: Archetypes -----
+# Groups players by playing style within each position (k-means), labels each group.
+
+# Cluster players into style archetypes and write them to Postgres
+docker compose exec app python -m lofc.model.archetypes
+
+# See the archetype labels and example players for a position
+docker compose exec db psql -U lofc -d lofc -c "SELECT DISTINCT a.position_group, a.cluster_label FROM archetypes a WHERE a.position_group='Centre Forward';"
+
+
+# ----- pgAdmin: visual database browser -----
+# Open http://localhost:5050 in your browser (no pgAdmin login needed).
+# The "LOFC Postgres" server is pre-listed; click it, password is: lofc
+# Browse: Servers > LOFC Postgres > Databases > lofc > Schemas > public > Tables
+
+
+# ----- Inspecting Postgres with SQL (now holds player + reference data) -----
+
+# Open an interactive SQL shell (inside: \dt to list tables, \q to quit)
+docker compose exec db psql -U lofc -d lofc
+
+# One-liners (no interactive shell)
+docker compose exec db psql -U lofc -d lofc -c "\dt"                       # list tables
+docker compose exec db psql -U lofc -d lofc -c "SELECT count(*) FROM player_season_metrics;"
+docker compose exec db psql -U lofc -d lofc -c "SELECT player_name, goals FROM player_season_metrics ORDER BY goals DESC LIMIT 5;"

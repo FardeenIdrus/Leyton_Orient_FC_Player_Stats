@@ -1,0 +1,23 @@
+# Secrets / local config
+.env
+
+# Landed raw data (large, reproducible from source)
+data/raw/*
+!data/raw/.gitkeep
+
+# Aggregated tables (derived from raw, reproducible by re-running aggregation)
+data/processed/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+
+# OS / editor
+.DS_Store

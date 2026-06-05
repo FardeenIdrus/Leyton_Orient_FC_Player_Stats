@@ -1,0 +1,41 @@
+position_group,age_band,weekly_wage_ceiling_gbp,notes
+Goalkeeper,U21,1500,U21 academy graduates are EFL wage-cap exempt (cheaper and outside the budget).
+Goalkeeper,21-24,3000,"Pre-peak, rising value."
+Goalkeeper,25-29,4500,Prime years; ceiling anchored to LOFC top earners ~£6.5k/week (estimate).
+Goalkeeper,30-32,4000,Just past peak.
+Goalkeeper,33+,2750,Veteran; reduced ceiling.
+Centre Back,U21,1750,U21 academy graduates are EFL wage-cap exempt (cheaper and outside the budget).
+Centre Back,21-24,3250,"Pre-peak, rising value."
+Centre Back,25-29,5000,Prime years; ceiling anchored to LOFC top earners ~£6.5k/week (estimate).
+Centre Back,30-32,4500,Just past peak.
+Centre Back,33+,3000,Veteran; reduced ceiling.
+Full Back,U21,1750,U21 academy graduates are EFL wage-cap exempt (cheaper and outside the budget).
+Full Back,21-24,3000,"Pre-peak, rising value."
+Full Back,25-29,4500,Prime years; ceiling anchored to LOFC top earners ~£6.5k/week (estimate).
+Full Back,30-32,4000,Just past peak.
+Full Back,33+,2750,Veteran; reduced ceiling.
+Defensive Mid,U21,1750,U21 academy graduates are EFL wage-cap exempt (cheaper and outside the budget).
+Defensive Mid,21-24,3250,"Pre-peak, rising value."
+Defensive Mid,25-29,5000,Prime years; ceiling anchored to LOFC top earners ~£6.5k/week (estimate).
+Defensive Mid,30-32,4500,Just past peak.
+Defensive Mid,33+,3000,Veteran; reduced ceiling.
+Central Mid,U21,2000,U21 academy graduates are EFL wage-cap exempt (cheaper and outside the budget).
+Central Mid,21-24,3750,"Pre-peak, rising value."
+Central Mid,25-29,5500,Prime years; ceiling anchored to LOFC top earners ~£6.5k/week (estimate).
+Central Mid,30-32,5000,Just past peak.
+Central Mid,33+,3250,Veteran; reduced ceiling.
+Winger,U21,2250,U21 academy graduates are EFL wage-cap exempt (cheaper and outside the budget).
+Winger,21-24,4250,"Pre-peak, rising value."
+Winger,25-29,6000,Prime years; ceiling anchored to LOFC top earners ~£6.5k/week (estimate).
+Winger,30-32,5250,Just past peak.
+Winger,33+,3500,Veteran; reduced ceiling.
+Attacking Mid,U21,2250,U21 academy graduates are EFL wage-cap exempt (cheaper and outside the budget).
+Attacking Mid,21-24,4250,"Pre-peak, rising value."
+Attacking Mid,25-29,6000,Prime years; ceiling anchored to LOFC top earners ~£6.5k/week (estimate).
+Attacking Mid,30-32,5250,Just past peak.
+Attacking Mid,33+,3500,Veteran; reduced ceiling.
+Centre Forward,U21,2500,U21 academy graduates are EFL wage-cap exempt (cheaper and outside the budget).
+Centre Forward,21-24,4750,"Pre-peak, rising value."
+Centre Forward,25-29,6500,Prime years; ceiling anchored to LOFC top earners ~£6.5k/week (estimate).
+Centre Forward,30-32,5750,Just past peak.
+Centre Forward,33+,3750,Veteran; reduced ceiling.
