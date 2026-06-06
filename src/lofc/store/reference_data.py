@@ -97,6 +97,40 @@ IDENTITY_PROFILES: dict[str, list[tuple[str, float, float | None]]] = {
 }
 
 
+# --- Modelled player wage estimates (for the Phase 7 wage gate) ----------------------
+# A player's estimated weekly wage = base (their position, as a top-tier prime player)
+# x performance-tier multiplier x age multiplier. Anchored to Capology / SalarySport
+# orders of magnitude for the demo leagues (top-flight wages, present-day). This is a
+# MODELLED stand-in, never derived from market value, and is replaced wholesale when real
+# club wage data arrives. Performance tier = terciles of performance score within position.
+PERFORMANCE_TIERS = ["Top", "Mid", "Squad"]
+
+WAGE_BASE_TOP_PRIME = {  # weekly GBP for a top-tier player in their prime (25-29)
+    "Centre Forward": 130000, "Winger": 110000, "Attacking Mid": 105000,
+    "Central Mid": 90000, "Defensive Mid": 80000, "Centre Back": 75000,
+    "Full Back": 65000, "Goalkeeper": 60000,
+}
+TIER_MULTIPLIER = {"Top": 1.0, "Mid": 0.42, "Squad": 0.16}
+WAGE_AGE_MULTIPLIER = {"U21": 0.45, "21-24": 0.75, "25-29": 1.0, "30-32": 0.90, "33+": 0.65}
+WAGE_SOURCE = "modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+
+
+def build_wage_estimates() -> pd.DataFrame:
+    rows = []
+    for position, base in WAGE_BASE_TOP_PRIME.items():
+        for band in AGE_BANDS:
+            for tier in PERFORMANCE_TIERS:
+                wage = base * TIER_MULTIPLIER[tier] * WAGE_AGE_MULTIPLIER[band]
+                rows.append({
+                    "position_group": position,
+                    "age_band": band,
+                    "performance_tier": tier,
+                    "estimated_weekly_wage_gbp": int(round(wage / 500.0) * 500),
+                    "source": WAGE_SOURCE,
+                })
+    return pd.DataFrame(rows)
+
+
 def build_wage_framework() -> pd.DataFrame:
     rows = []
     for position, by_band in WAGE_CEILINGS.items():
@@ -124,8 +158,9 @@ def build_identity_profiles() -> pd.DataFrame:
             rows.append({
                 "position_group": position,
                 "metric": metric,
+                # Stored on the 0-100 percentile scale (0.55 -> 55) to match player_percentiles.
+                "min_percentile": round(floor * 100, 1) if floor is not None else None,
                 "weight": weight,
-                "min_percentile": floor,
                 "notes": note,
             })
     return pd.DataFrame(rows)
@@ -137,14 +172,17 @@ def main() -> None:
 
     wage = build_wage_framework()
     identity = build_identity_profiles()
+    wage_estimates = build_wage_estimates()
     wage.to_csv(out / "wage_framework.csv", index=False)
     identity.to_csv(out / "identity_profiles.csv", index=False)
+    wage_estimates.to_csv(out / "wage_estimates.csv", index=False)
 
     # Weights must sum to 1.0 per position, or the Phase 4 score is mis-scaled.
     sums = identity.groupby("position_group")["weight"].sum().round(3)
     assert (sums == 1.0).all(), f"identity weights must sum to 1.0 per position: {sums.to_dict()}"
 
-    print(f"Wrote wage_framework.csv ({len(wage)} rows) and identity_profiles.csv ({len(identity)} rows) to {out}/")
+    print(f"Wrote wage_framework.csv ({len(wage)} rows), identity_profiles.csv "
+          f"({len(identity)} rows), wage_estimates.csv ({len(wage_estimates)} rows) to {out}/")
     print("Identity weights per position all sum to 1.0:", sums.to_dict())
 
 

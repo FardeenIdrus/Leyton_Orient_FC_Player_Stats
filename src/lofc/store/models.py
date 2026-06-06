@@ -15,11 +15,13 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Date,
+    DateTime,
     Float,
     ForeignKey,
     Integer,
     String,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -230,3 +232,92 @@ class Archetype(Base):
     cluster_id: Mapped[int] = mapped_column(Integer)
     cluster_label: Mapped[str] = mapped_column(String, index=True)
     distance_to_centroid: Mapped[float] = mapped_column(Float)
+
+
+class Valuation(Base):
+    """Fair value vs actual market value per player. Phase 6 output.
+
+    market_value_eur is the real Transfermarkt 2015/16 value (the model's target).
+    fair_value_eur is what the model predicts a player at this performance/age/position
+    should be worth. undervaluation_eur = fair - actual (positive = a bargain). Fair
+    values are out-of-fold cross-validation predictions, so no player is priced by a
+    model that trained on them.
+    """
+
+    __tablename__ = "valuations"
+    __table_args__ = (
+        UniqueConstraint("player_id", "competition_id", "season_id",
+                         name="uq_valuation_player_competition_season"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("players.player_id"), index=True)
+    competition_id: Mapped[int] = mapped_column(Integer, index=True)
+    season_id: Mapped[int] = mapped_column(Integer)
+    position_group: Mapped[str] = mapped_column(String, index=True)
+
+    age: Mapped[float | None] = mapped_column(Float, nullable=True)
+    market_value_eur: Mapped[float] = mapped_column(Float)
+    fair_value_eur: Mapped[float] = mapped_column(Float)
+    undervaluation_eur: Mapped[float] = mapped_column(Float)
+    undervaluation_pct: Mapped[float] = mapped_column(Float, index=True)
+    model_version: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class WageEstimate(Base):
+    """Modelled weekly wage by position group, age band and performance tier.
+
+    A constructed stand-in (source flagged), anchored to Capology/SalarySport orders of
+    magnitude. Never derived from market value. Replaced wholesale when real wage data
+    arrives. Drives the Phase 7 wage affordability gate.
+    """
+
+    __tablename__ = "wage_estimates"
+    __table_args__ = (
+        UniqueConstraint("position_group", "age_band", "performance_tier",
+                         name="uq_wage_estimate_position_age_tier"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    position_group: Mapped[str] = mapped_column(String, index=True)
+    age_band: Mapped[str] = mapped_column(String)
+    performance_tier: Mapped[str] = mapped_column(String)
+    estimated_weekly_wage_gbp: Mapped[int] = mapped_column(Integer)
+    source: Mapped[str] = mapped_column(String)
+
+
+class Shortlist(Base):
+    """The final ranked shortlist per position. Phase 7 output.
+
+    One row per candidate, with both affordability gates (transfer fee and modelled wage)
+    and the on-profile flag, ranked within position. is_near_miss marks rows shown only
+    because nothing passed all gates (so the screen is never blank).
+    """
+
+    __tablename__ = "shortlists"
+    __table_args__ = (
+        UniqueConstraint("player_id", "competition_id", "season_id",
+                         name="uq_shortlist_player_competition_season"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("players.player_id"), index=True)
+    competition_id: Mapped[int] = mapped_column(Integer, index=True)
+    season_id: Mapped[int] = mapped_column(Integer)
+    position_group: Mapped[str] = mapped_column(String, index=True)
+
+    rank: Mapped[int] = mapped_column(Integer)
+    affordable_fee: Mapped[bool] = mapped_column(Boolean)
+    affordable_wage: Mapped[bool] = mapped_column(Boolean)
+    on_profile: Mapped[bool] = mapped_column(Boolean)
+    is_near_miss: Mapped[bool] = mapped_column(Boolean, index=True)
+
+    performance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fit_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    undervaluation_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    market_value_eur: Mapped[float | None] = mapped_column(Float, nullable=True)
+    estimated_weekly_wage_gbp: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    wage_ceiling_gbp: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    transfer_budget_eur: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())

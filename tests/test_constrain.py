@@ -1,0 +1,58 @@
+"""Tests for the shortlist gates and ranking. Small fixtures, no database."""
+
+import pandas as pd
+
+from lofc.constrain.filters import age_band, compute_on_profile, rank_position
+
+
+def test_age_band_boundaries():
+    assert age_band(19) == "U21"
+    assert age_band(23) == "21-24"
+    assert age_band(27) == "25-29"
+    assert age_band(31) == "30-32"
+    assert age_band(35) == "33+"
+    assert age_band(None) is None
+
+
+def test_on_profile_threshold_and_no_floor_positions():
+    percentiles = pd.DataFrame([
+        {"player_id": 1, "position_group": "Centre Forward", "metric": "np_xg_p90", "percentile": 60},
+        {"player_id": 2, "position_group": "Centre Forward", "metric": "np_xg_p90", "percentile": 40},
+        {"player_id": 3, "position_group": "Central Mid", "metric": "passes_p90", "percentile": 10},
+    ])
+    floors = pd.DataFrame([{"position_group": "Centre Forward", "metric": "np_xg_p90", "min_percentile": 55}])
+    on = compute_on_profile(percentiles, floors)
+
+    assert 1 in on          # 60 >= 55 floor
+    assert 2 not in on      # 40 < 55 floor
+    assert 3 in on          # Central Mid has no floor -> auto pass
+
+
+def _candidate(pid, value, wage, ceiling, on_profile, fit):
+    return {"player_id": pid, "market_value_eur": value, "estimated_weekly_wage_gbp": wage,
+            "wage_ceiling_gbp": ceiling, "on_profile": on_profile, "fit_score": fit}
+
+
+def test_qualifying_passes_both_gates_and_profile():
+    cand = pd.DataFrame([
+        _candidate(1, 1_000_000, 2000, 5000, True, 80),    # cheap, low wage, on profile -> qualifies
+        _candidate(2, 50_000_000, 90000, 5000, True, 90),  # too expensive + too high wage
+        _candidate(3, 1_000_000, 2000, 5000, False, 95),   # affordable but off profile
+    ])
+    out = rank_position(cand, transfer_budget_eur=5_000_000)
+
+    assert list(out["player_id"]) == [1]
+    assert not out["is_near_miss"].any()
+    assert out["rank"].tolist() == [1]
+
+
+def test_near_miss_fallback_when_nobody_qualifies():
+    # Both are on profile but wages blow the ceiling -> nobody qualifies -> near-misses by fit.
+    cand = pd.DataFrame([
+        _candidate(1, 1_000_000, 90000, 5000, True, 80),
+        _candidate(2, 1_000_000, 90000, 5000, True, 90),
+    ])
+    out = rank_position(cand, transfer_budget_eur=5_000_000)
+
+    assert out["is_near_miss"].all()
+    assert list(out["player_id"]) == [2, 1]   # ranked by fit, best first

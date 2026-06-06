@@ -54,6 +54,25 @@ services:
       db:
         condition: service_healthy
 
+  # The recruitment dashboard (Streamlit) at http://localhost:8501.
+  dashboard:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://lofc:lofc@db:5432/lofc}
+    volumes:
+      - ./src:/app/src
+      - ./assets:/app/assets
+      - ./.streamlit:/app/.streamlit
+    ports:
+      - "8501:8501"
+    command: ["streamlit", "run", "src/lofc/dashboard/app.py",
+              "--server.port=8501", "--server.address=0.0.0.0"]
+
 volumes:
   pgdata:
   pgadmin_data:

@@ -12,11 +12,11 @@
 
 ## ▶ STATUS AT A GLANCE
 
-- **Current phase:** Phase 5 complete ✅ → **next up: Phase 6 (Valuation)**
+- **Current phase:** 🎉 **ALL PHASES COMPLETE (0–9).** Platform runs end to end via `python -m lofc.pipeline`; dashboard at http://localhost:8501.
 - **Workflow rule:** I pause at the start of each phase, show the plan, and wait for
   your explicit go-ahead before building. After a phase passes its acceptance
   criteria, we checkpoint here before the next phase starts.
-- **Last updated:** 2026-06-05
+- **Last updated:** 2026-06-06 (all phases complete)
 
 | Phase | Name | Status |
 |---|---|---|
@@ -26,10 +26,10 @@
 | 3 | Store | ✅ Complete (verified) |
 | 4 | Normalise & Score | ✅ Complete (verified) |
 | 5 | Archetypes | ✅ Complete (verified) |
-| 6 | Valuation | ⬜ Not started |
-| 7 | Constrain & Rank | ⬜ Not started |
-| 8 | Dashboard | ⬜ Not started |
-| 9 | Package & Document | ⬜ Not started |
+| 6 | Valuation | ✅ Complete (verified) |
+| 7 | Constrain & Rank | ✅ Complete (verified) |
+| 8 | Dashboard | ✅ Complete (verified) |
+| 9 | Package & Document | ✅ Complete (verified) |
 
 ---
 
@@ -81,6 +81,19 @@ Pipeline: StatsBomb data → Ingest → Aggregate → Store → Normalise/Score 
 - **Design decision (Phase 7 + 8): never show a blank screen.** If a filter returns zero
   players, show the closest near-misses instead ("no exact matches; here are the 5
   closest"), so a demo or a tight budget never looks broken.
+- **Decision (affordability, amended): the wage gate ships live, not dormant.** Phase 7
+  runs **two gates**: real market value vs a transfer budget, AND a **modelled weekly wage**
+  vs the wage-framework ceiling. The wage is from an anchored lookup
+  (`data/reference/wage_estimates.csv`, position group x age band x performance tier, source
+  flagged `modelled`, anchored to Capology/SalarySport orders of magnitude for the demo
+  leagues), NOT derived from market value (a flat % of value is rejected: it underestimates
+  cheap players and inflates their affordability). Wages are labelled "modelled estimate"
+  wherever shown; real club wage data dropped into `data/reference/` replaces the table with
+  no logic change. Honest caveats: on demo data the two gates largely overlap (wage and value
+  both track performance/age), so the wage gate is mainly demonstrative here and earns its
+  keep on real data (cheap-to-sign-but-high-wage cases); the Capology anchors are present-day,
+  consistent with the present-day ceiling. Performance tier = terciles of performance score
+  within position.
 
 ---
 
@@ -205,36 +218,51 @@ These rules apply to every file we write. Add new rules here as they come up.
 - **Validation (labels were auto-generated, not hand-written):** Centre Back split into ball-players (Fonte, Koscielny, Sakho) vs stoppers (Prödl, Ogbonna, Mbemba); Centre Forward into goalscorers (Vardy, Kane, Iheanacho) vs link/work forwards (Walters, Origi); Winger into creators (Willian, Redmond) vs goal-threat (Pedro, Arnautović). The classic positional archetypes, found by the data.
 - **Result in Postgres:** archetypes 1,241; k=2-3 per position. Silhouettes 0.16-0.29 (modest, honest — styles are a continuum). 25 tests total pass.
 
-### Phase 6 — Valuation ⬜
-- [ ] Load Transfermarkt values (Kaggle `davidcariboo/player-scores`) from `data/reference/`; take each player's value at the 2015/16 season date
-- [ ] Join values to players by **name + date of birth + season** (club as tiebreaker), fuzzy matching; log unmatched players, never fail silently
-- [ ] Target = **log(market value)** (skew); back-transform for the fair-value estimate
-- [ ] Features = normalised performance metrics PLUS age, position group, minutes (omitting age makes the model flag old players as "cheap")
-- [ ] Model = Ridge regression (defensible coefficients); gradient boosting documented as an upgrade if the linear fit is poor
-- [ ] Undervaluation score = residual (actual value below model-implied); persist with model version
-- [ ] Report R² and MAE on a held-out split
-- [ ] Test: a synthetic deliberately underpriced player gets flagged as undervalued
-- [ ] Write up methodology in `docs/methodology.md`
-- **Acceptance:** valuations stored; undervalued players surface sensibly; methodology documented.
+### Phase 6 — Valuation ✅ COMPLETE (verified 2026-06-06)
+- [x] Transfermarkt data via auth-free R2 bucket (`ingest/transfermarkt.py`); also gives age + appearances (gitignored). Kaggle/data.world are documented fallbacks.
+- [x] Take each player's latest 2015/16-era market value; backfill **age** (which StatsBomb lacked) into `players.birth_date`
+- [x] Match by **name, scoped per league via real appearance records** (the TM valuation league tag is unreliable). Exact + token + fuzzy; **98.4% matched** (1,221/1,241), 20 unmatched logged
+- [x] Target = **log(market value)**; back-transformed for fair value
+- [x] Features = performance percentiles + age + minutes + position + **league** (league added: it genuinely affects value and removes league bias from undervaluation)
+- [x] Model = **RidgeCV** (auto-tuned regularisation); **cross-validation** so every fair value is out-of-fold (no player priced by a model that trained on them) — this is the answer to "what's the test set": held-out players, every player held out once
+- [x] Undervaluation = fair value − market value; persisted to `valuations` (clear-then-insert, fully idempotent) with model version + timestamp
+- [x] Reported **CV R² 0.51 (log), MAE €4.4m, median AE €1.9m** — honest: on-ball stats + age + position + league explain ~half of market value
+- [x] Tests (4): name normalise, exact/token/fuzzy match, collision keeps higher value, **synthetic underpriced player flagged** (fair 10.6× actual)
+- **Data-quality guard:** name matching across nickname vs full legal names leaves rare mismatches (e.g. "Juanfran"), visible as implausible ages; we reject ages outside 16-38 and log them. Club-level disambiguation is the documented upgrade.
+- **Result:** valuations 1,221; ~half undervalued. Sensible bargains (newly-promoted Bournemouth squad, young talents priced below output). 29 tests pass.
+- [ ] Write up methodology in `docs/methodology.md` (deferred to Phase 9 docs)
 
-### Phase 7 — Constrain & Rank ⬜
-- [ ] Filter candidates vs wage ceiling + identity thresholds; rank into `shortlists`; persist
-- [ ] Wage ceiling passed in as a parameter (not hardcoded), so the UI can drive it
-- [ ] Near-misses fallback: if zero players pass, return the N closest instead of nothing
-- **Acceptance:** every shortlisted player is affordable + on-profile; ranking reproducible from stored data; a too-low budget returns near-misses, never an empty result.
+### Phase 7 — Constrain & Rank ✅ COMPLETE (verified 2026-06-06)
+- [x] **Two affordability gates** (`constrain/filters.py`): real market value vs transfer budget AND **modelled wage vs wage-framework ceiling** (wage from `wage_estimates`, position x age x performance tier, source-flagged, never value-derived)
+- [x] On-profile = clears the identity min-percentile floors for the position (no-floor positions auto-pass)
+- [x] Budget + wage-ceiling multiplier are **parameters**, so Phase 8 sliders drive them live
+- [x] Near-misses fallback: if nobody passes, return the closest on-profile players, flagged `is_near_miss`
+- [x] Ranked into `shortlists` (clear-then-insert), via `constrain/run.py`
+- [x] Tests (4): age band, on-profile threshold + no-floor pass, qualifying path, near-miss fallback
+- **Two bugs found and fixed during validation:** `min_percentile` stored as a fraction (0.55) vs percentiles on 0-100 (made everyone on-profile); and no-floor positions were wrongly excluded instead of auto-passing.
+- **Acceptance — all passing:** ① shortlisted players are affordable + on-profile ✓ ② reproducible from stored data ✓ ③ too-low budget returns near-misses, never empty ✓
+- **Result (honest):** at LOFC's real ceiling, **0 qualify / all near-misses** — top-league modelled wages (£58k-130k/wk) dwarf the £2.5-6.5k ceiling, so even fee-affordable players (Iheanacho, €5m) fail the wage gate. The wage gate adds independent signal. Relaxing the ceiling to real lower-league levels yields 300+ qualifying players, proving the engine. 33 tests pass.
 
-### Phase 8 — Dashboard ⬜
-- [ ] Streamlit app: position selector, shortlist table, player profile (percentile bars),
-      comparison view; wired to Postgres
-- [ ] Budget control: a slider AND a typed number field, kept in sync, defaulting to LOFC's real ceiling
-- [ ] Show closest near-misses when a filter returns zero players (no blank screen)
-- **Acceptance:** a non-technical user selects a position and reads a shortlist; profile + comparison work; budget slider/number update live; zero-match shows near-misses.
+### Phase 8 — Dashboard ✅ COMPLETE (verified 2026-06-06)
+- [x] Streamlit app (`dashboard/app.py`): branded header, position selector, Shortlist + Player profile + Compare tabs; wired to Postgres; calls the Phase 7 filter live
+- [x] Budget control: a slider AND a typed number field, **kept in sync** (`synced_budget`); plus wage-budget and minimum-minutes sliders
+- [x] Shortlist table with fit/performance progress bars, market value, undervaluation, archetype, and fee/wage/on-profile tick columns; near-miss banner when nothing qualifies
+- [x] Player profile: percentile chart with a **Bars / Radar toggle** (plotly), scores, value vs fair value, modelled-wage caption
+- [x] Compare: 2-3 players overlaid on a radar + a side-by-side table
+- [x] **Methodology tab:** a graphviz pipeline diagram + a clickable stage selector that reveals each stage's plain-English what-it-does, key assumption, and how it extends with more data (built for technical + non-technical readers)
+- [x] Polish: KPI strip (players analysed / leagues / season / matches-this-filter), club-red metric + tab accents, transparent header; **fixed the collapsed-sidebar reopen** (the earlier CSS hid the header that holds the toggle)
+- [x] **Leyton Orient themed:** club red theme (`.streamlit/config.toml`) + custom CSS (hides default chrome); crest loads from `assets/logo.png` (user-supplied) with a styled wordmark fallback
+- [x] Runs as a Docker service at http://localhost:8501 (up with `docker compose up`)
+- [x] Verified headlessly with Streamlit AppTest: full script runs with **zero exceptions**, all tabs/widgets render
+- **Acceptance — all passing:** non-technical user picks a position and reads a shortlist; profile + compare work; budget slider/number sync and update live; zero-match shows near-misses.
+- **Design intent:** clean and professional (restrained palette, whitespace, no emoji/animation clutter), not the default-Streamlit look.
 
-### Phase 9 — Package & Document ⬜
-- [ ] Finalise Docker so the whole stack deploys as one unit
-- [ ] Complete `docs/architecture.md`, `methodology.md`, `scaling.md` (Mongo/MinIO/BI path)
-- [ ] README run instructions; consider a dependency lock file
-- **Acceptance:** fresh clone runs end-to-end with `docker compose up` + a documented ingest→dashboard sequence.
+### Phase 9 — Package & Document ✅ COMPLETE (verified 2026-06-06)
+- [x] **One-command end-to-end runner** `lofc/pipeline.py` (schema → ingest → ... → shortlists), each step idempotent
+- [x] Whole stack deploys with `docker compose up` (db + app + dashboard + pgAdmin)
+- [x] `docs/architecture.md`, `docs/methodology.md`, `docs/scaling.md` written (methodology covers the modelling + honest assumptions; scaling covers the Mongo/MinIO/BI path)
+- [x] `README.md` finalised (quick start, pipeline, interfaces, docs map); `requirements.lock` pins exact versions
+- **Acceptance — all passing:** `docker compose up` + `python -m lofc.pipeline` runs all 10 stages clean (exit 0) and fully populates the database (players 1622, metrics 1640, scores 1241, archetypes 1241, valuations 1221, shortlists, reference tables); dashboard live at :8501.
 
 ---
 
@@ -277,4 +305,26 @@ Running record of where Claude Code accelerated the build vs needed correction.
   players?" critique. Auto-labelled clusters from standout metrics; the result reproduced the
   classic positional archetypes (ball-player vs stopper CB, poacher vs link forward) with no
   hand-labelling. Kept the modest silhouette scores honest rather than overstating separation.
-- *(append per phase)*
+- **Phase 6:** found an auth-free public source for the Transfermarkt data (no Kaggle login).
+  Caught two data traps by inspecting first: the valuation league tag is unreliable (Jordi Alba
+  tagged "MLS1"), so matching is scoped by real appearance records instead; and short-name vs
+  full-legal-name mismatches (Juanfran) survive even league scoping, so implausible ages are
+  rejected and logged. Used cross-validation for out-of-fold fair values after the user asked
+  the right question about the test set. R² 0.51 reported honestly, not inflated. Fixed a
+  stale-row bug (upsert left rejected matches behind) by switching valuations to clear-then-insert.
+- **Phase 7:** adopted the user's amendment to ship the wage gate live (anchored synthetic
+  wages, not value-derived), and pushed back on the flat-% approach for bias. Built both gates
+  with everything editable (CSV + config). Caught two bugs by validating before trusting:
+  a 0-1 vs 0-100 scale mismatch that made everyone on-profile, and no-floor positions being
+  excluded instead of auto-passing. Kept the demo result honest (all near-misses at LOFC's real
+  ceiling) and demonstrated the qualifying path separately rather than faking a populated default.
+- **Phase 8:** built a clean, club-themed Streamlit app (restrained red/white palette, custom
+  CSS over the default look) rather than a generic dashboard. Verified the whole script
+  headlessly with Streamlit's AppTest (zero exceptions) since there is no browser here, and
+  fixed a real deprecation (`use_container_width` -> `width="stretch"`, now past its removal
+  date). Crest is user-supplied via assets/ with a styled fallback, so no copyrighted asset is
+  bundled. Reused the Phase 7 filter live behind the sliders rather than duplicating logic.
+- **Phase 9:** packaged the whole pipeline behind one idempotent command, wrote the three docs
+  (architecture, methodology, scaling) honestly including the assumptions and limitations, and
+  verified the full `docker compose up` + `python -m lofc.pipeline` flow runs all ten stages
+  clean and populates the database. Pinned dependencies for reproducibility.

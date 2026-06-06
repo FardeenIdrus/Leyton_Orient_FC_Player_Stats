@@ -1,0 +1,15 @@
+# Leyton Orient brand theme. primaryColor is the club red (adjust to the exact brand
+# shade when available). This is what gives the app its on-brand, non-default look.
+[theme]
+primaryColor = "#C8102E"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F5F7"
+textColor = "#1A1A1A"
+font = "sans serif"
+
+[server]
+headless = true
+fileWatcherType = "poll"
+
+[browser]
+gatherUsageStats = false

@@ -5,6 +5,13 @@ Updated as we build. Run all commands from the project root.
 ============================================================
 
 
+# ===== Run the WHOLE pipeline (one command) =====
+# Populates a fresh database end to end (schema -> ingest -> ... -> shortlists).
+# Idempotent. First run downloads ~2.6GB and takes 20-40 min. Then open localhost:8501.
+docker compose up -d
+docker compose exec app python -m lofc.pipeline
+
+
 # ----- Phase 0: Scaffold (environment) -----
 
 # Build the app Docker image (installs all Python dependencies)
@@ -27,6 +34,19 @@ docker compose exec -T app pytest -q
 
 # Stop the stack when done (keeps the Postgres data volume)
 docker compose down
+
+
+# ----- Tests & coverage -----
+
+# Run the full test suite
+docker compose exec app pytest -q
+
+# Run tests with a coverage report in the terminal (lists untested lines)
+docker compose exec app pytest --cov=lofc --cov-report=term-missing
+
+# Generate a browsable HTML coverage report, then open it on your Mac
+docker compose exec app pytest --cov=lofc --cov-report=html:data/coverage_html
+open data/coverage_html/index.html
 
 
 # ----- Phase 1: Ingest -----
@@ -94,6 +114,43 @@ docker compose exec app python -m lofc.model.archetypes
 
 # See the archetype labels and example players for a position
 docker compose exec db psql -U lofc -d lofc -c "SELECT DISTINCT a.position_group, a.cluster_label FROM archetypes a WHERE a.position_group='Centre Forward';"
+
+
+# ----- Phase 6: Valuation -----
+# Estimates fair market value from performance and flags undervalued players.
+
+# Download the Transfermarkt market-value data (one-time; gitignored, re-downloadable)
+docker compose exec app python -m lofc.ingest.transfermarkt
+
+# Train the valuation model and write fair value + undervaluation to Postgres
+docker compose exec app python -m lofc.model.valuation
+
+# See the biggest bargains (high fair value vs low market value), with names
+docker compose exec db psql -U lofc -d lofc -c "SELECT m.player_name, m.team_name, v.position_group, v.age, v.market_value_eur, v.fair_value_eur, v.undervaluation_pct FROM valuations v JOIN player_season_metrics m USING(player_id,competition_id,season_id) WHERE m.minutes>1500 ORDER BY v.undervaluation_pct DESC LIMIT 10;"
+
+
+# ----- Phase 7: Constrain & Rank -----
+# Filters to affordable (fee + modelled wage) + on-profile players, ranks the shortlist.
+
+# Generate the default shortlists for every position and write them to Postgres
+docker compose exec app python -m lofc.constrain.run
+
+# See a position's shortlist (or near-misses), with names
+docker compose exec db psql -U lofc -d lofc -c "SELECT s.rank, m.player_name, m.team_name, s.fit_score, s.market_value_eur, s.estimated_weekly_wage_gbp, s.wage_ceiling_gbp, s.is_near_miss FROM shortlists s JOIN player_season_metrics m USING(player_id,competition_id,season_id) WHERE s.position_group='Centre Forward' ORDER BY s.rank;"
+
+
+# ----- Phase 8: Dashboard (Streamlit) -----
+# The recruiter-facing app. Comes up automatically with `docker compose up -d`.
+
+# Open the dashboard in your browser
+open http://localhost:8501
+
+# Drop the official crest here to brand the header (optional)
+#   cp /path/to/leyton-orient-crest.png assets/logo.png
+
+# Restart or watch the dashboard
+docker compose restart dashboard
+docker compose logs -f dashboard
 
 
 # ----- pgAdmin: visual database browser -----

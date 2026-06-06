@@ -19,6 +19,7 @@ from lofc.store.models import (
     IdentityProfile,
     Player,
     PlayerSeasonMetric,
+    WageEstimate,
     WageFramework,
 )
 
@@ -90,11 +91,14 @@ def main() -> None:
 
     n_wage = load_reference_csv(engine, "wage_framework.csv", WageFramework, ["position_group", "age_band"])
     n_identity = load_reference_csv(engine, "identity_profiles.csv", IdentityProfile, ["position_group", "metric"])
+    n_estimates = load_reference_csv(engine, "wage_estimates.csv", WageEstimate,
+                                     ["position_group", "age_band", "performance_tier"])
     print(f"wage_framework: upserted {n_wage}")
     print(f"identity_profiles: upserted {n_identity}")
+    print(f"wage_estimates: upserted {n_estimates}")
 
     print("\nRow counts now in Postgres:")
-    for table in (Player, PlayerSeasonMetric, WageFramework, IdentityProfile):
+    for table in (Player, PlayerSeasonMetric, WageFramework, IdentityProfile, WageEstimate):
         print(f"  {table.__tablename__}: {_count(engine, table)}")
 
 
