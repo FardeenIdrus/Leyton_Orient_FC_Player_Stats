@@ -1,0 +1,75 @@
+# Production stack — a server deployment, not local dev.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml exec app python -m lofc.pipeline
+#
+# Only the dashboard is public, via Caddy (automatic HTTPS + a login). The database, the
+# app container and the admin tools are NOT published to the internet. Set the required
+# values in a .env file next to this one first (see DEPLOY.md).
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a strong POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-lofc}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-lofc}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    # No host port: the database is reachable only from inside the compose network.
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    volumes:
+      - appdata:/app/data          # persist raw pulls across container restarts
+    command: ["tail", "-f", "/dev/null"]   # idle helper; run the pipeline via `exec`
+    restart: unless-stopped
+
+  dashboard:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    command: ["streamlit", "run", "src/lofc/dashboard/app.py",
+              "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+    restart: unless-stopped
+    # No host port: Caddy reaches it over the internal network and serves it publicly.
+
+  caddy:
+    image: caddy:2.8-alpine
+    depends_on:
+      - dashboard
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN:?set DASHBOARD_DOMAIN in .env}
+      DASHBOARD_USER: ${DASHBOARD_USER:-recruiter}
+      DASHBOARD_PASSWORD_HASH: ${DASHBOARD_PASSWORD_HASH:?set DASHBOARD_PASSWORD_HASH in .env, see DEPLOY.md}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  appdata:
+  caddy_data:
+  caddy_config:

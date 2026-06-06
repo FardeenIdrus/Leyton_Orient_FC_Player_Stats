@@ -73,6 +73,24 @@ services:
     command: ["streamlit", "run", "src/lofc/dashboard/app.py",
               "--server.port=8501", "--server.address=0.0.0.0"]
 
+  # Business-intelligence / self-serve reporting layer at http://localhost:3000.
+  # Demonstrates the wider-BI growth path (commercial, academy, board) over the same
+  # database. Free and open-source; first run needs a one-time setup in the browser.
+  metabase:
+    image: metabase/metabase:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      # Metabase stores its own config in an embedded H2 file on a persisted volume.
+      MB_DB_TYPE: h2
+      MB_DB_FILE: /metabase-data/metabase.db
+    volumes:
+      - metabase_data:/metabase-data
+
 volumes:
   pgdata:
   pgadmin_data:
+  metabase_data:

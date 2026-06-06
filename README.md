@@ -45,6 +45,8 @@ You can also run any stage on its own (see `cli_commands.txt`).
   with percentile charts, side-by-side comparison, live budget/wage sliders, methodology tab).
 - **pgAdmin** — http://localhost:5050 (visual database browser; the LOFC server is pre-listed,
   password `lofc`).
+- **Metabase (BI)** — http://localhost:3000 (self-serve reporting layer over the same database,
+  demonstrating the wider-BI growth path; one-time setup, then connect to host `db` / `lofc` / `lofc`).
 - **psql / SQL** — `docker compose exec db psql -U lofc -d lofc`.
 
 ## Documentation
@@ -53,6 +55,13 @@ You can also run any stage on its own (see `cli_commands.txt`).
 - [`docs/methodology.md`](docs/methodology.md) — the modelling: normalisation, scoring, archetypes, valuation, and the honest assumptions.
 - [`docs/scaling.md`](docs/scaling.md) — what was left out of v1 (MongoDB, MinIO, BI tools) and when to add it; the wider-BI growth path.
 - [`plan/BUILD_PLAN.md`](plan/BUILD_PLAN.md) — the full phase-by-phase build plan and decisions.
+
+## Deployment
+
+`docker compose up` is the whole stack, so deploying is running it on a server. See
+[`DEPLOY.md`](DEPLOY.md) for: a production setup (`docker-compose.prod.yml` + Caddy for HTTPS and
+a dashboard login, database/admin tools kept internal) for a permanent URL, and a quick tunnel
+option to get a shareable link from your laptop for a demo.
 
 ## Tech stack
 

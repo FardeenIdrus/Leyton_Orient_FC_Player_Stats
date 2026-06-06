@@ -1,0 +1,10 @@
+# Caddy serves the dashboard publicly with automatic HTTPS and a login.
+# DASHBOARD_DOMAIN must be a real domain pointing at this server's IP (Caddy then gets a
+# free Let's Encrypt certificate automatically). The password is a bcrypt hash; generate it
+# with:  docker run --rm caddy:2.8-alpine caddy hash-password --plaintext 'yourpassword'
+{$DASHBOARD_DOMAIN} {
+	basic_auth {
+		{$DASHBOARD_USER} {$DASHBOARD_PASSWORD_HASH}
+	}
+	reverse_proxy dashboard:8501
+}

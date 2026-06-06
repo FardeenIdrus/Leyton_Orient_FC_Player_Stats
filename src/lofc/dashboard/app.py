@@ -378,12 +378,12 @@ STAGES = {
     },
     "4 · Score": {
         "tag": "percentiles + weights", "method": "percentile rank within position+league, then a weighted blend",
-        "source": "StatsBomb (real) + identity profile (stand-in)", "kind": "standin",
+        "source": "StatsBomb (real) + club style profile (stand-in)", "kind": "standin",
         "what": "Rank each player against peers in the same position and league (percentiles), then blend those "
                 "into two 0–100 scores: Performance (how good) and Fit (how well they match the club's style).",
-        "assume": "Performance is purely data-driven. Fit uses a club identity profile we constructed as a "
-                  "stand-in, since LOFC's real recruitment profile wasn't provided.",
-        "extend": "Swap in the club's real identity profile to retune Fit — it's a data file, no code change.",
+        "assume": "Performance is purely data-driven. Fit uses a club 'style profile' we built — which stats "
+                  "matter most for each position — as a stand-in, since LOFC's real one wasn't provided.",
+        "extend": "Swap in the club's real recruitment/style profile to retune Fit — it's a data file, no code change.",
     },
     "5 · Archetypes": {
         "tag": "PCA + k-means", "method": "standardise, PCA, then k-means clustering (k chosen by silhouette)",
@@ -430,59 +430,27 @@ def _node(stage_key: str) -> str:
 
 
 def _pipeline_dot(selected: str) -> str:
-    """Flow diagram: each stage box shows its name and method; the selected one is solid red."""
-    lines = ['digraph {', 'rankdir=LR; bgcolor="transparent"; nodesep=0.22; ranksep=0.5;',
-             'node [shape=box, style="rounded,filled", color="#C8102E", penwidth=1.3, '
-             'fontname="Helvetica", margin="0.2,0.13"];',
-             'edge [color="#C8102E", arrowsize=0.7, penwidth=1.1];']
-    for key, stage in STAGES.items():
+    """Flow diagram of the pipeline; the selected stage is solid red. The method for each
+    stage is shown in the detail card below, not crammed into the box."""
+    lines = ['digraph {', 'rankdir=LR; bgcolor="transparent"; nodesep=0.3; ranksep=0.55;',
+             'node [shape=box, style="rounded,filled", color="#C8102E", penwidth=1.4, '
+             'fontname="Helvetica", fontsize=13, margin="0.3,0.18"];',
+             'edge [color="#C8102E", arrowsize=0.8, penwidth=1.2];']
+    for key in STAGES:
         node = _node(key)
         if node == selected:
-            label = (f'<<b><font color="white" point-size="11">{key}</font></b>'
-                     f'<br/><font color="#ffd6dd" point-size="9">{stage["tag"]}</font>>')
-            fill = RED
+            lines.append(f'"{node}" [label="{key}", fillcolor="{RED}", fontcolor="white"];')
         else:
-            label = (f'<<b><font point-size="11">{key}</font></b>'
-                     f'<br/><font color="#6b6b6b" point-size="9">{stage["tag"]}</font>>')
-            fill = "#FCE8EB"
-        lines.append(f'"{node}" [label={label}, fillcolor="{fill}"];')
+            lines.append(f'"{node}" [label="{key}", fillcolor="#FCE8EB", fontcolor="{DARK}"];')
     lines.append(" -> ".join(f'"{_node(k)}"' for k in STAGES) + ";")
     lines.append("}")
     return "\n".join(lines)
 
 
-# "Stand-in today -> real with access" swap diagram. Amber = current stand-in, green = real.
-DATA_SWAP_DOT = """
-digraph {
-  rankdir=LR; bgcolor="transparent"; nodesep=0.3; ranksep=1.3;
-  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, margin="0.24,0.16"];
-  edge [color="#9aa0a6", penwidth=1.2, arrowsize=0.8, fontname="Helvetica", fontsize=9, fontcolor="#5f6368"];
-
-  node [fillcolor="#FBEAD2", color="#E8920C"];
-  a1 [label="Player data\\n2015/16 PL · La Liga · Serie A\\n(free open data stand-in)"];
-  a2 [label="Market values\\nTransfermarkt, top leagues only"];
-  a3 [label="Wages\\nmodelled estimate"];
-  a4 [label="Club identity\\nour constructed profile"];
-
-  node [fillcolor="#E2F0E3", color="#2E7D32"];
-  b1 [label="Player data\\ncurrent League One + target leagues"];
-  b2 [label="Market values\\n+ League One (scrape GB3)"];
-  b3 [label="Wages\\nclub's real salary data"];
-  b4 [label="Club identity\\nclub's recruitment document"];
-
-  a1 -> b1 [label="paid StatsBomb API"];
-  a2 -> b2 [label="add source"];
-  a3 -> b3 [label="club data"];
-  a4 -> b4 [label="club document"];
-}
-"""
-
-
 def _methodology(tab) -> None:
     with tab:
-        st.markdown("**How a player becomes a recommendation.** Each box is a pipeline stage; the small text is the "
-                    "method it uses. Select a stage to see its data source, the assumption behind it, and how it "
-                    "extends with the club's data.")
+        st.markdown("**How a player becomes a recommendation.** Each box is a pipeline stage. Select one to see "
+                    "its method, data source, the assumption behind it, and how it extends with the club's data.")
 
         diagram = st.container()  # filled after we know the selection, so it sits above the buttons
         choice = st.segmented_control("Pipeline stage", list(STAGES.keys()),
@@ -500,21 +468,24 @@ def _methodology(tab) -> None:
             st.markdown(f"**With paid / club data** — {stage['extend']}")
 
         st.divider()
-        st.markdown("#### What's real today, and what the club's data unlocks")
-        st.caption("Every input is either real data (green) or a clearly-labelled stand-in (amber). The model logic "
-                   "doesn't change — only the inputs improve. Each stand-in is a one-for-one swap:")
-        st.graphviz_chart(DATA_SWAP_DOT)
-        c1, c2 = st.columns(2)
-        with c1.container(border=True):
-            st.markdown("**Today (this demo)**")
-            st.markdown("- Top-flight 2015/16 players (no League One on the free tier)\n"
-                        "- Wages and club identity are modelled stand-ins\n"
-                        "- Proves the method works end-to-end")
-        with c2.container(border=True):
-            st.markdown("**With a paid licence + club data**")
-            st.markdown("- Score the club's actual targets in current League One\n"
-                        "- Real wages and the club's own recruitment profile\n"
-                        "- Shortlists become real, affordable signings")
+        st.markdown("#### What's real, what we modelled, and what the club's data unlocks")
+        st.markdown(
+            "Nothing is hidden. Two kinds of input feed the model. **Real data** is genuine StatsBomb / "
+            "Transfermarkt data that simply comes from the demo leagues. **Modelled** inputs are figures we "
+            "built ourselves, because the club's own documents and a paid data feed weren't available. "
+            "Improving any input is a file or config change — the model logic never changes."
+        )
+        st.markdown(
+            "| Input | What the demo uses now | Real or modelled? | With the club's data + a paid StatsBomb licence |\n"
+            "|---|---|---|---|\n"
+            "| Player performance | StatsBomb 2015/16 (PL, La Liga, Serie A) | Real data, demo leagues | Current **League One** + your target leagues |\n"
+            "| Market values | Transfermarkt, top leagues | Real data, demo leagues | **+ League One** market values |\n"
+            "| Player wages | modelled from position, age and quality | **Modelled** (salaries aren't public) | the club's **real salary data** |\n"
+            "| Wage budget (the ceiling) | EFL 50%-of-turnover rule + LOFC's published accounts | Part fact, part assumption | the club's **real wage budget** |\n"
+            "| Style profile (what we want per position) | our football-judgement profile | **Modelled** (no club document yet) | the club's **recruitment document** |\n"
+        )
+        st.caption("So the only invented pieces are wages and the club's style/budget preferences — and each is a "
+                   "one-line swap for the club's real figures. The performance and market-value data are already real.")
 
 
 if __name__ == "__main__":

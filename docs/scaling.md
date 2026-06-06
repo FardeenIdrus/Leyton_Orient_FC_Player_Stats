@@ -25,6 +25,10 @@ when data volume or scope earns it, not before.
   unit with no licensing tie to the club server.
 - **When to add:** when the commercial, academy or board side wants self-serve reporting over the
   same warehouse. A BI tool then sits alongside the recruitment app, not instead of it.
+- **In this build:** a **Metabase** instance is included (open-source, http://localhost:3000) as a
+  working demonstration of this reporting layer over the same Postgres warehouse. It is kept
+  deliberately separate from the recruitment app: the recruitment engine remains the focused v1
+  deliverable, and Metabase shows how the wider self-serve BI function grows on the same foundation.
 
 The narrative: these tools are known and were used on prior work; the call was to keep v1 lean
 with a documented path to add them when the data volume justifies it.

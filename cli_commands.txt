@@ -153,10 +153,29 @@ docker compose restart dashboard
 docker compose logs -f dashboard
 
 
+# ----- Share the dashboard as a public link (temporary demo, e.g. for an interview) -----
+# Needs the stack running (docker compose up -d) and cloudflared installed.
+
+# Start a tunnel -> prints a public https URL (it changes each run). Keep the terminal open.
+cloudflared tunnel --url http://localhost:8501
+
+# Stop the tunnel (the public link dies; your local app keeps running)
+pkill cloudflared
+
+# Check if a tunnel is running (no output = stopped)
+pgrep cloudflared
+
+
 # ----- pgAdmin: visual database browser -----
 # Open http://localhost:5050 in your browser (no pgAdmin login needed).
 # The "LOFC Postgres" server is pre-listed; click it, password is: lofc
 # Browse: Servers > LOFC Postgres > Databases > lofc > Schemas > public > Tables
+
+
+# ----- Metabase: business-intelligence / self-serve reporting (the wider-BI demo) -----
+# Open http://localhost:3000. FIRST RUN ONLY: create an admin account, then connect the database:
+#   Database type: PostgreSQL | Host: db | Port: 5432 | Database: lofc | Username: lofc | Password: lofc
+# Then drag-and-drop charts/dashboards over the same data (e.g. goals by team, value vs performance).
 
 
 # ----- Inspecting Postgres with SQL (now holds player + reference data) -----

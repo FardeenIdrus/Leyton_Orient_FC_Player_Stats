@@ -31,6 +31,7 @@ One command runs all of it: `python -m lofc.pipeline`.
 | `app` | built from `Dockerfile` | runs the pipeline and tests; the Python environment |
 | `dashboard` | same image | the Streamlit app at http://localhost:8501 |
 | `pgadmin` | dpage/pgadmin4 | optional visual database browser at http://localhost:5050 |
+| `metabase` | metabase/metabase | optional BI / self-serve reporting layer at http://localhost:3000 (demonstrates the wider-BI path) |
 
 Everything lifts onto a server as one unit with `docker compose up`.
 

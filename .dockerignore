@@ -1,0 +1,20 @@
+# Keep the image lean and free of secrets/large data. The pipeline regenerates data/
+# at runtime, so none of it needs to be baked into the image.
+.git
+.gitignore
+data/
+.env
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.coverage
+htmlcov
+data/coverage_html
+.vscode
+plan
+docs
+CLAUDE.md
+requirements.lock
+pgadmin
