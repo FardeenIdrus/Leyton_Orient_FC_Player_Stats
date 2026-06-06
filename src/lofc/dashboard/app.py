@@ -65,6 +65,12 @@ def load_percentiles() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=600)
+def load_wage_framework() -> pd.DataFrame:
+    return pd.read_sql("SELECT position_group, age_band, weekly_wage_ceiling_gbp FROM wage_framework",
+                       get_engine())
+
+
+@st.cache_data(ttl=600)
 def headline() -> tuple[int, int]:
     """Top-level counts for the KPI strip: players analysed and leagues covered."""
     engine = get_engine()
@@ -192,6 +198,11 @@ def main() -> None:
              "Slide up to model a bigger wage budget and see who that would make affordable. "
              "On this top-flight demo data the real (1×) ceiling is far below most players' wages, "
              "so this is the slider that opens up the shortlist. Wages are modelled estimates.")
+    # Show the actual £ ceiling this implies for the chosen position, so the multiplier is concrete.
+    pos_ceiling = load_wage_framework().query("position_group == @position")["weekly_wage_ceiling_gbp"] * wage_multiplier
+    if not pos_ceiling.empty:
+        st.sidebar.caption(f"≈ £{int(pos_ceiling.min()):,}–£{int(pos_ceiling.max()):,}/week ceiling for a "
+                           f"{position} (varies by age; modelled).")
     min_minutes = st.sidebar.slider("Minimum minutes", 450, 3500, 450, step=90)
 
     candidates = load_candidates(wage_multiplier)
@@ -234,12 +245,12 @@ def _shortlist(tab, pool: pd.DataFrame, position: str) -> None:
         fee_ok = int(pool["affordable_fee"].sum())
         wage_ok = int(pool["affordable_wage"].sum())
         st.caption(f"**{len(pool)}** {position}s with enough minutes · **{fee_ok}** within the transfer budget · "
-                   f"**{wage_ok}** within the wage budget · **{len(qualifying)}** pass both gates and the profile.")
+                   f"**{wage_ok}** within the wage budget · **{len(qualifying)}** pass both gates and meet the requirements.")
         if qualifying.empty:
-            st.info("No player passes both budget gates and the profile at these settings — showing the "
-                    "closest on-profile targets. Raise the transfer or wage budget in the sidebar to open it up.")
+            st.info("No player passes both budget gates and the requirements at these settings — showing the "
+                    "closest players that meet the requirements. Raise the transfer or wage budget in the sidebar to open it up.")
 
-        only_qualifying = st.toggle("Show only signable players (in budget and on style)",
+        only_qualifying = st.toggle("Show only signable players (in budget and meeting requirements)",
                                     value=not qualifying.empty)
         view = (qualifying if (only_qualifying and not qualifying.empty) else pool).copy()
         view.insert(0, "Rank", range(1, len(view) + 1))
@@ -250,11 +261,11 @@ def _shortlist(tab, pool: pd.DataFrame, position: str) -> None:
             "player_name": "Player", "team_name": "Club", "age": "Age", "fit_score": "Style fit",
             "performance_score": "Quality", "cluster_label": "Player type",
             "affordable_fee": "Fee in budget", "affordable_wage": "Wages in budget",
-            "on_profile": "Fits our style",
+            "on_profile": "Meets requirements",
         })
         st.dataframe(
             table[["Rank", "Player", "Club", "Age", "Quality", "Style fit", "Player type",
-                   "Market value", "Below fair value", "Fee in budget", "Wages in budget", "Fits our style"]],
+                   "Market value", "Below fair value", "Fee in budget", "Wages in budget", "Meets requirements"]],
             hide_index=True, width="stretch", height=720,
             column_config={
                 "Quality": st.column_config.ProgressColumn(
@@ -270,11 +281,11 @@ def _shortlist(tab, pool: pd.DataFrame, position: str) -> None:
                     format="%d%%"),
                 "Fee in budget": st.column_config.CheckboxColumn("Fee in budget", help="The transfer fee fits the budget set in the sidebar."),
                 "Wages in budget": st.column_config.CheckboxColumn("Wages in budget", help="The player's modelled wage fits the club's wage ceiling."),
-                "Fits our style": st.column_config.CheckboxColumn("Fits our style", help="Meets the club's minimum requirements for this position."),
+                "Meets requirements": st.column_config.CheckboxColumn("Meets requirements", help="Meets the club's minimum requirements for this position."),
             },
         )
         st.caption("**Quality** = how good · **Style fit** = how well they suit our play · **Below fair value** = how much of a bargain · "
-                   "the three ✓ columns are the checks a signing must pass: fee affordable, wages affordable, and fits the position profile.")
+                   "the three ✓ columns are the checks a signing must pass: fee affordable, wages affordable, and meets the position's minimum requirements.")
 
 
 def _profile(tab, pool: pd.DataFrame, percentiles: pd.DataFrame, metrics: list[str]) -> None:
@@ -339,6 +350,8 @@ def _compare(tab, pool: pd.DataFrame, percentiles: pd.DataFrame, metrics: list[s
 # --- methodology ----------------------------------------------------------------------
 STAGES = {
     "1 · Ingest": {
+        "tag": "API pull", "method": "statsbombpy API pull, idempotent landing on disk",
+        "source": "StatsBomb open data", "kind": "real",
         "what": "Download every match's raw events (passes, shots, tackles) and line-ups for the three demo "
                 "leagues from StatsBomb, and store them untouched so the source is auditable.",
         "assume": "We use free StatsBomb open data — the 2015/16 Premier League, La Liga and Serie A — as a "
@@ -347,6 +360,8 @@ STAGES = {
                   "in the pipeline changes.",
     },
     "2 · Aggregate": {
+        "tag": "per-90 rates", "method": "event roll-up to per-player-season, per-90 normalisation",
+        "source": "StatsBomb open data", "kind": "real",
         "what": "Roll those millions of events into one row per player per season, converted to per-90-minute "
                 "rates so a regular starter and a substitute are compared fairly.",
         "assume": "Minutes are derived from line-ups, correctly handling the half-time clock reset. Players with "
@@ -354,12 +369,16 @@ STAGES = {
         "extend": "Runs unchanged on any league or season's data.",
     },
     "3 · Store": {
+        "tag": "PostgreSQL", "method": "PostgreSQL via SQLAlchemy, schema versioned with Alembic",
+        "source": "—", "kind": "none",
         "what": "Load the player-season table, plus the wage and identity reference data, into a Postgres "
                 "database that every later stage reads from.",
         "assume": "Structured tables (one row per player-season); large raw files stay on disk, not in the database.",
         "extend": "Scales to many more leagues and seasons simply by adding rows.",
     },
     "4 · Score": {
+        "tag": "percentiles + weights", "method": "percentile rank within position+league, then a weighted blend",
+        "source": "StatsBomb (real) + identity profile (stand-in)", "kind": "standin",
         "what": "Rank each player against peers in the same position and league (percentiles), then blend those "
                 "into two 0–100 scores: Performance (how good) and Fit (how well they match the club's style).",
         "assume": "Performance is purely data-driven. Fit uses a club identity profile we constructed as a "
@@ -367,12 +386,16 @@ STAGES = {
         "extend": "Swap in the club's real identity profile to retune Fit — it's a data file, no code change.",
     },
     "5 · Archetypes": {
+        "tag": "PCA + k-means", "method": "standardise, PCA, then k-means clustering (k chosen by silhouette)",
+        "source": "StatsBomb open data", "kind": "real",
         "what": "Group players within a position by playing style — for example poacher, target man or pressing "
                 "forward — using k-means clustering on their relative strengths.",
         "assume": "The grouping is fully data-driven; only the plain-English labels are our reading of each cluster.",
         "extend": "Re-runs automatically whenever new data is loaded.",
     },
     "6 · Valuation": {
+        "tag": "Ridge regression", "method": "Ridge regression on log market value, cross-validated (out-of-fold)",
+        "source": "Transfermarkt market values", "kind": "real",
         "what": "Train a model to predict a player's fair market value from performance, age and position, then "
                 "flag players priced below that estimate as undervalued.",
         "assume": "Real market values come from Transfermarkt (matched by name, ~98%). Performance explains roughly "
@@ -380,6 +403,8 @@ STAGES = {
         "extend": "Add League One market values to value the club's real targets.",
     },
     "7 · Shortlist": {
+        "tag": "gates + ranking", "method": "two affordability gates + on-profile filter, ranked by fit",
+        "source": "wage framework + wage estimates (stand-ins)", "kind": "standin",
         "what": "Filter to players the club can both afford (transfer fee and wage) and who meet the position's "
                 "profile, then rank the survivors. If none pass, show the closest near-misses.",
         "assume": "Wages are a modelled estimate (real salaries aren't public). The transfer budget and wage "
@@ -387,12 +412,16 @@ STAGES = {
         "extend": "Replace the modelled wages, budget and identity profile with the club's real figures.",
     },
     "8 · Dashboard": {
-        "what": "This app: pick a position, set a budget, and read a ranked, affordable, on-profile shortlist — "
-                "with player profiles and side-by-side comparisons.",
+        "tag": "Streamlit", "method": "Streamlit + Plotly, reading the model outputs live",
+        "source": "all model outputs", "kind": "none",
+        "what": "This app: pick a position, set a budget, and read a ranked shortlist of affordable players "
+                "who meet the club's requirements — with player profiles and side-by-side comparisons.",
         "assume": "Reads the model outputs live; moving a slider re-runs the shortlist instantly.",
         "extend": "Ships onto the club's server as a single Docker unit.",
     },
 }
+
+KIND_COLOUR = {"real": "green", "standin": "orange", "none": "gray"}
 
 
 def _node(stage_key: str) -> str:
@@ -401,18 +430,23 @@ def _node(stage_key: str) -> str:
 
 
 def _pipeline_dot(selected: str) -> str:
-    """Flow diagram with the selected stage highlighted in solid club red."""
-    nodes = [_node(k) for k in STAGES]
-    lines = ['digraph {', 'rankdir=LR; bgcolor="transparent";',
-             'node [shape=box, style="rounded,filled", color="#C8102E", penwidth=1.4, '
-             'fontname="Helvetica", fontsize=11, margin="0.22,0.13"];',
-             'edge [color="#C8102E", arrowsize=0.7];']
-    for n in nodes:
-        if n == selected:
-            lines.append(f'"{n}" [fillcolor="{RED}", fontcolor="white"];')
+    """Flow diagram: each stage box shows its name and method; the selected one is solid red."""
+    lines = ['digraph {', 'rankdir=LR; bgcolor="transparent"; nodesep=0.22; ranksep=0.5;',
+             'node [shape=box, style="rounded,filled", color="#C8102E", penwidth=1.3, '
+             'fontname="Helvetica", margin="0.2,0.13"];',
+             'edge [color="#C8102E", arrowsize=0.7, penwidth=1.1];']
+    for key, stage in STAGES.items():
+        node = _node(key)
+        if node == selected:
+            label = (f'<<b><font color="white" point-size="11">{key}</font></b>'
+                     f'<br/><font color="#ffd6dd" point-size="9">{stage["tag"]}</font>>')
+            fill = RED
         else:
-            lines.append(f'"{n}" [fillcolor="#FCE8EB", fontcolor="{DARK}"];')
-    lines.append(" -> ".join(f'"{n}"' for n in nodes) + ";")
+            label = (f'<<b><font point-size="11">{key}</font></b>'
+                     f'<br/><font color="#6b6b6b" point-size="9">{stage["tag"]}</font>>')
+            fill = "#FCE8EB"
+        lines.append(f'"{node}" [label={label}, fillcolor="{fill}"];')
+    lines.append(" -> ".join(f'"{_node(k)}"' for k in STAGES) + ";")
     lines.append("}")
     return "\n".join(lines)
 
@@ -446,8 +480,9 @@ digraph {
 
 def _methodology(tab) -> None:
     with tab:
-        st.markdown("**How a player becomes a recommendation** — from raw match data on the left to a ranked, "
-                    "affordable shortlist on the right. Select a stage to see the detail.")
+        st.markdown("**How a player becomes a recommendation.** Each box is a pipeline stage; the small text is the "
+                    "method it uses. Select a stage to see its data source, the assumption behind it, and how it "
+                    "extends with the club's data.")
 
         diagram = st.container()  # filled after we know the selection, so it sits above the buttons
         choice = st.segmented_control("Pipeline stage", list(STAGES.keys()),
@@ -458,9 +493,11 @@ def _methodology(tab) -> None:
         stage = STAGES[choice]
         with st.container(border=True):
             st.markdown(f"#### {_node(choice)}")
+            st.markdown(f":violet-background[**Method:** {stage['method']}] &nbsp; "
+                        f":{KIND_COLOUR[stage['kind']]}-background[**Data:** {stage['source']}]")
             st.markdown(f"**What it does** — {stage['what']}")
-            st.markdown(f"**Key assumption** — {stage['assume']}")
-            st.markdown(f"**With more data** — {stage['extend']}")
+            st.markdown(f"**Assumption** — {stage['assume']}")
+            st.markdown(f"**With paid / club data** — {stage['extend']}")
 
         st.divider()
         st.markdown("#### What's real today, and what the club's data unlocks")
