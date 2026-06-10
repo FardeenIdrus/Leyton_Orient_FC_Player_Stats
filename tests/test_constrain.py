@@ -29,7 +29,9 @@ def test_on_profile_threshold_and_no_floor_positions():
 
 
 def _candidate(pid, value, wage, ceiling, on_profile, fit):
+    # The gate reads the band around the central wage estimate (0.7x / 1.4x here).
     return {"player_id": pid, "market_value_eur": value, "estimated_weekly_wage_gbp": wage,
+            "wage_low_gbp": wage * 0.7, "wage_high_gbp": wage * 1.4,
             "wage_ceiling_gbp": ceiling, "on_profile": on_profile, "fit_score": fit}
 
 
@@ -56,3 +58,17 @@ def test_near_miss_fallback_when_nobody_qualifies():
 
     assert out["is_near_miss"].all()
     assert list(out["player_id"]) == [2, 1]   # ranked by fit, best first
+
+
+def test_wage_band_semantics():
+    cand = pd.DataFrame([
+        _candidate(1, 1_000_000, 3000, 5000, True, 80),   # high band 4200 <= 5000: clean pass
+        _candidate(2, 1_000_000, 4500, 5000, True, 85),   # band 3150-6300 straddles: marginal pass
+        _candidate(3, 1_000_000, 8000, 5000, True, 90),   # low band 5600 > 5000: fails the gate
+    ])
+    out = rank_position(cand, transfer_budget_eur=5_000_000)
+
+    assert set(out["player_id"]) == {1, 2}
+    marginal = out.set_index("player_id")["wage_marginal"]
+    assert not marginal[1]
+    assert marginal[2]

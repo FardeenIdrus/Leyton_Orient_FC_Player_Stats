@@ -187,3 +187,42 @@ docker compose exec db psql -U lofc -d lofc
 docker compose exec db psql -U lofc -d lofc -c "\dt"                       # list tables
 docker compose exec db psql -U lofc -d lofc -c "SELECT count(*) FROM player_season_metrics;"
 docker compose exec db psql -U lofc -d lofc -c "SELECT player_name, goals FROM player_season_metrics ORDER BY goals DESC LIMIT 5;"
+
+#Kill cloudflare
+pkill cloudflared
+
+
+# ----- Phase 10: Real data (paid StatsBomb + EFL Transfermarkt values) -----
+# Targets come from SB_COMPETITIONS in .env (the 8 EFL league-seasons). Containers
+# read .env at start, so re-up after changing it: docker compose up -d
+
+# Verify which competitions/seasons the paid licence grants (read-only)
+docker compose exec app python -c "from lofc.ingest import statsbomb; [print(c['competition_id'], c['competition_name'], c['season_name']) for c in statsbomb.get_competitions()]"
+
+# Show the configured targets as the app resolves them
+docker compose exec app python -c "from lofc.config import settings; [print(c.label) for c in settings.competitions]"
+
+# Pull everything configured (resumable; ~4,450 matches on first run, takes hours)
+docker compose exec app python -m lofc.ingest.run
+
+# Pull one league only for a staged rollout (4 = League One)
+docker compose exec app python -m lofc.ingest.run --competition 4
+
+# Scrape current EFL market values from Transfermarkt squad pages (~100 requests,
+# rate-limited, ~5 min; idempotent, --force to re-pull)
+docker compose exec app python -m lofc.ingest.transfermarkt_efl
+
+# Reconcile the modelled wage grid against published club wage bills (report only)
+docker compose exec app python -m lofc.model.wage_check
+
+# Load the club-provided SkillCorner tracking export (xlsx in data/reference/skillcorner/)
+# into Postgres: team-level = all 24 League One clubs, player-level = LOFC squad only.
+docker compose exec app python -m lofc.ingest.skillcorner
+
+# Metabase tile SQL (paste into a new Metabase question on the lofc database):
+# League One physical benchmark, LOFC highlighted by ordering
+#   SELECT team_name, distance_p90, hsr_distance_p90, sprint_count_p90, high_accel_count_p90
+#   FROM skillcorner_team_season ORDER BY distance_p90 DESC;
+# LOFC squad physical output
+#   SELECT player_name, matches_measured, distance_p90, hsr_distance_p90, sprint_count_p90, psv99_kmh
+#   FROM skillcorner_player_season ORDER BY distance_p90 DESC;

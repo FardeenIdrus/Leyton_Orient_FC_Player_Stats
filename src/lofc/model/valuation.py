@@ -1,13 +1,18 @@
 """Estimate each player's fair market value, then flag those priced below it.
 
-Pipeline:
-  1. Load Transfermarkt 2015/16 market values (the target) and player birth dates.
-  2. Match them to our players by name (Transfermarkt's league tag is unreliable, so we
-     match on name globally, not by league).
-  3. Train a Ridge regression to predict value from performance + age + minutes +
-     position + league. Value is log-scaled because it is heavily skewed.
-  4. Use cross-validation so every player's fair value comes from a model that did NOT
-     train on them. Undervaluation = fair value minus actual value (positive = bargain).
+Two market-value sources, one per data era, each era trained as its own model so
+price levels a decade apart never mix:
+  - Demo era (2015/16 trio): the dcaribou dataset, matched by name scoped to league
+    appearance records (Transfermarkt's league tag is unreliable).
+  - EFL era (paid feed): squad-page values scraped by lofc.ingest.transfermarkt_efl,
+    matched by birth date (from the paid lineups) plus name, league-scoped. Only the
+    current season is valued: the scrape is a snapshot, earlier seasons would pair
+    old output with today's prices.
+
+Both eras then follow the same path: train a Ridge regression to predict log market
+value from performance + age + minutes + position + league, cross-validated so every
+fair value comes from a model that did NOT train on that player. Undervaluation =
+fair value minus actual value (positive = bargain).
 
 Run with:  python -m lofc.model.valuation
 """
@@ -50,6 +55,18 @@ PLAUSIBLE_AGE = (16.0, 38.0)
 # to players who actually appeared in that league in 2015/16 (the valuation league tag
 # is unreliable, but appearance records are not).
 LEAGUE_CODE = {2: "GB1", 11: "ES1", 12: "IT1"}
+
+# --- EFL real-data era (paid feed + scraped Transfermarkt squad pages) ---------------
+# Scraped values are a current snapshot, so only the season just played is era-matched
+# and eligible for valuation. Earlier seasons keep scores and archetypes (trajectory)
+# but get no fair value: pricing 2024/25 output with 2026 values would be dishonest.
+EFL_LEAGUE_IDS = {3, 4, 5, 65}
+EFL_SEASON_ID = 318  # 2025/26
+EFL_REFERENCE_DATE = datetime.date(2026, 1, 1)  # season midpoint, for age
+EFL_MODEL_VERSION = "ridgecv-v2-efl"
+# With identical birth dates a weaker name agreement is safe; without a birth date we
+# require the same high bar as the demo path.
+DOB_NAME_CUTOFF = 0.55
 
 
 def _norm(name: str) -> str:
@@ -168,6 +185,128 @@ def match_players(metrics: pd.DataFrame, tm: pd.DataFrame,
     return pd.DataFrame(rows), unmatched
 
 
+def load_efl_values() -> pd.DataFrame:
+    """Scraped squad-page values for the EFL leagues, one row per player."""
+    efl = pd.read_csv(_tmdir() / "efl_values.csv")
+    efl = efl.dropna(subset=["market_value_eur"]).rename(columns={"market_value_eur": "value_eur"})
+    efl["nname"] = efl["player_name"].map(_norm)
+    efl["tokens"] = efl["nname"].str.split().map(set)
+    efl["birth_date"] = pd.to_datetime(efl["date_of_birth"], errors="coerce")
+    return efl.reset_index(drop=True)
+
+
+def load_efl_fallback() -> pd.DataFrame | None:
+    """Values for players the squad scrape misses: loanees from outside the four
+    leagues and January movers, present in the dcaribou players file.
+
+    Only rows whose value was maintained this season are kept; older entries are
+    last-known-at-coverage-time and would price players years out of date.
+    """
+    path = _tmdir() / "players.csv"
+    if not path.exists():
+        return None
+    fb = pd.read_csv(path, usecols=["name", "date_of_birth", "market_value_in_eur", "last_season"])
+    fb = fb[(fb["last_season"] >= 2025) & fb["market_value_in_eur"].notna()]
+    fb = fb.rename(columns={"market_value_in_eur": "value_eur", "name": "player_name"})
+    fb["nname"] = fb["player_name"].map(_norm)
+    fb["birth_date"] = pd.to_datetime(fb["date_of_birth"], errors="coerce")
+    fb = fb.dropna(subset=["birth_date"])
+    return fb.reset_index(drop=True)
+
+
+def _dob_name_match(nname: str, candidates: list[int], frame: pd.DataFrame) -> int | None:
+    """Best same-birth-date candidate whose name agrees enough, else None."""
+    best_score, best_i = 0.0, None
+    sorted_ours = " ".join(sorted(nname.split()))
+    for i in candidates:
+        score = difflib.SequenceMatcher(
+            None, sorted_ours, " ".join(sorted(frame.at[i, "nname"].split()))).ratio()
+        if score > best_score:
+            best_score, best_i = score, i
+    return best_i if best_i is not None and best_score >= DOB_NAME_CUTOFF else None
+
+
+def match_players_efl(metrics: pd.DataFrame, efl: pd.DataFrame,
+                      fallback: pd.DataFrame | None = None) -> tuple[pd.DataFrame, list[str]]:
+    """Attach a market value to each rankable EFL player of the valuation season.
+
+    Three stages: birth date + name within the league's squad scrape, then the
+    demo-era name matching within the same league, then birth date + name against
+    the fallback file (loanees from outside the four leagues, January movers).
+    """
+    eligible = metrics[
+        metrics["rankable"]
+        & metrics["competition_id"].isin(EFL_LEAGUE_IDS)
+        & (metrics["season_id"] == EFL_SEASON_ID)
+    ]
+
+    # (league, birth date) -> TM row indices, for the primary DOB join.
+    by_dob: dict[tuple[int, datetime.date], list[int]] = defaultdict(list)
+    for i, row in enumerate(efl.itertuples()):
+        if pd.notna(row.birth_date):
+            by_dob[(row.competition_id, row.birth_date.date())].append(i)
+    league_index = {}
+    for comp_id in efl["competition_id"].unique():
+        subset = efl[efl["competition_id"] == comp_id].reset_index()
+        league_index[comp_id] = (subset, *_build_index(subset))
+    fb_by_dob: dict[datetime.date, list[int]] = defaultdict(list)
+    if fallback is not None:
+        for i, row in enumerate(fallback.itertuples()):
+            fb_by_dob[row.birth_date.date()].append(i)
+
+    rows, unmatched = [], []
+    n_fallback = 0
+    for r in eligible.itertuples():
+        our_dob = pd.to_datetime(r.birth_date).date() if pd.notna(r.birth_date) else None
+        nname = _norm(r.player_name)
+        value_eur, tm_birth = None, None
+
+        if our_dob is not None:
+            i = _dob_name_match(nname, by_dob.get((r.competition_id, our_dob), []), efl)
+            if i is not None:
+                value_eur, tm_birth = float(efl.at[i, "value_eur"]), efl.at[i, "birth_date"]
+
+        if value_eur is None and r.competition_id in league_index:
+            subset, exact, token_index = league_index[r.competition_id]
+            sub_i = _match_one(r.player_name, subset, exact, token_index)
+            if sub_i is not None:
+                tm_dob = subset.at[sub_i, "birth_date"]
+                # A name match contradicting a known birth date is a different player.
+                if our_dob is not None and pd.notna(tm_dob) and tm_dob.date() != our_dob:
+                    sub_i = None
+            if sub_i is not None:
+                value_eur, tm_birth = float(subset.at[sub_i, "value_eur"]), subset.at[sub_i, "birth_date"]
+
+        if value_eur is None and our_dob is not None and fb_by_dob:
+            i = _dob_name_match(nname, fb_by_dob.get(our_dob, []), fallback)
+            if i is not None:
+                value_eur, tm_birth = float(fallback.at[i, "value_eur"]), fallback.at[i, "birth_date"]
+                n_fallback += 1
+
+        if value_eur is None:
+            unmatched.append(f"{r.player_name} ({r.competition_name})")
+            continue
+
+        best_birth = our_dob or (tm_birth.date() if pd.notna(tm_birth) else None)
+        age = ((EFL_REFERENCE_DATE - best_birth).days / 365.25) if best_birth else None
+        if age is not None and not (PLAUSIBLE_AGE[0] <= age <= PLAUSIBLE_AGE[1]):
+            unmatched.append(f"{r.player_name} (rejected: implausible age {age:.0f})")
+            continue
+        rows.append({
+            "player_id": r.player_id,
+            "competition_id": r.competition_id,
+            "season_id": r.season_id,
+            "position_group": r.position_group,
+            "minutes": r.minutes,
+            "market_value_eur": value_eur,
+            "age": round(age, 1) if age is not None else None,
+            "birth_date": best_birth,
+        })
+    if n_fallback:
+        print(f"  (fallback file matched {n_fallback} players the squad scrape missed)")
+    return pd.DataFrame(rows), unmatched
+
+
 def build_features(metrics: pd.DataFrame, matched: pd.DataFrame):
     """Feature matrix X and target y (log market value) for the matched players."""
     keys = ["player_id", "competition_id", "season_id"]
@@ -201,26 +340,59 @@ def value_players(features: pd.DataFrame, target: np.ndarray):
     return fair_value, {"r2_log": round(float(r2), 3), "mae_eur": mae, "median_ae_eur": median_ae}
 
 
-def main() -> None:
-    engine = get_engine()
-    metrics = pd.read_sql("SELECT * FROM player_season_metrics", engine)
-
-    tm = load_market_values()
-    league_players = load_league_players()
-    matched, unmatched = match_players(metrics, tm, league_players)
-    rankable_total = int(metrics["rankable"].sum())
-    print(f"matched {len(matched)}/{rankable_total} rankable players "
-          f"({100 * len(matched) / rankable_total:.1f}%); {len(unmatched)} unmatched")
-
+def _value_era(metrics: pd.DataFrame, matched: pd.DataFrame, model_version: str) -> pd.DataFrame:
+    """Train, cross-validate and report one era's valuation model."""
     features, target, data = build_features(metrics, matched)
     fair_value, report = value_players(features, target)
-    print(f"cross-validated R2 (log scale): {report['r2_log']}")
-    print(f"mean abs error: EUR {report['mae_eur']:,.0f} | median abs error: EUR {report['median_ae_eur']:,.0f}")
+    print(f"  [{model_version}] cross-validated R2 (log scale): {report['r2_log']}")
+    print(f"  [{model_version}] mean abs error: EUR {report['mae_eur']:,.0f} | "
+          f"median abs error: EUR {report['median_ae_eur']:,.0f}")
 
     data["fair_value_eur"] = fair_value.round(0)
     data["undervaluation_eur"] = (data["fair_value_eur"] - data["market_value_eur"]).round(0)
     data["undervaluation_pct"] = (data["undervaluation_eur"] / data["fair_value_eur"]).round(3)
-    data["model_version"] = MODEL_VERSION
+    data["model_version"] = model_version
+    return data
+
+
+def main() -> None:
+    engine = get_engine()
+    # Lineup birth dates live on players, not the metrics table; the EFL match needs them.
+    metrics = pd.read_sql(
+        "SELECT m.*, p.birth_date FROM player_season_metrics m "
+        "LEFT JOIN players p ON p.player_id = m.player_id", engine)
+
+    # Each era trains its own model: price levels a decade apart must never mix.
+    eras: list[pd.DataFrame] = []
+
+    demo_rows = metrics[metrics["competition_id"].isin(LEAGUE_CODE)]
+    if not demo_rows.empty and (_tmdir() / "players.csv").exists():
+        tm = load_market_values()
+        league_players = load_league_players()
+        matched, unmatched = match_players(demo_rows, tm, league_players)
+        rankable = int(demo_rows["rankable"].sum())
+        print(f"[demo 2015/16] matched {len(matched)}/{rankable} rankable players "
+              f"({100 * len(matched) / rankable:.1f}%); {len(unmatched)} unmatched")
+        if not matched.empty:
+            eras.append(_value_era(metrics, matched, MODEL_VERSION))
+
+    efl_rows = metrics[metrics["competition_id"].isin(EFL_LEAGUE_IDS)]
+    if not efl_rows.empty and (_tmdir() / "efl_values.csv").exists():
+        excluded = int((efl_rows["rankable"] & (efl_rows["season_id"] != EFL_SEASON_ID)).sum())
+        if excluded:
+            print(f"[EFL] {excluded} rankable rows from earlier seasons keep scores but get "
+                  "no valuation (scraped values are a current snapshot)")
+        matched, unmatched = match_players_efl(metrics, load_efl_values(), load_efl_fallback())
+        eligible = int((efl_rows["rankable"] & (efl_rows["season_id"] == EFL_SEASON_ID)).sum())
+        if eligible:
+            print(f"[EFL 2025/26] matched {len(matched)}/{eligible} rankable players "
+                  f"({100 * len(matched) / eligible:.1f}%); {len(unmatched)} unmatched")
+        if not matched.empty:
+            eras.append(_value_era(metrics, matched, EFL_MODEL_VERSION))
+
+    if not eras:
+        raise SystemExit("no valuation source available for the configured competitions")
+    data = pd.concat(eras, ignore_index=True)
 
     columns = ["player_id", "competition_id", "season_id", "position_group", "age",
                "market_value_eur", "fair_value_eur", "undervaluation_eur",

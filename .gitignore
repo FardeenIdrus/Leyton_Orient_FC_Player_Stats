@@ -11,6 +11,9 @@ data/processed/
 # Downloaded Transfermarkt data (external, large, re-downloadable)
 data/reference/transfermarkt/
 
+# SkillCorner tracking export (licensed commercial data provided by the club; never public)
+data/reference/skillcorner/
+
 # Python
 __pycache__/
 *.py[cod]

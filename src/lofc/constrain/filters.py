@@ -35,7 +35,7 @@ def age_band(age: float | None) -> str | None:
 
 
 def _tiers(scores: pd.Series) -> pd.Series:
-    """Split a position's performance scores into Top / Mid / Squad terciles."""
+    """Split performance scores into Top / Mid / Squad terciles within one group."""
     pct = scores.rank(pct=True)
     return pd.cut(pct, bins=[0, 1 / 3, 2 / 3, 1.0],
                   labels=["Squad", "Mid", "Top"], include_lowest=True).astype(str)
@@ -64,10 +64,18 @@ def compute_on_profile(percentiles: pd.DataFrame, floors: pd.DataFrame) -> set[i
 
 
 def apply_gates(candidates: pd.DataFrame, transfer_budget_eur: float) -> pd.DataFrame:
-    """Add the two affordability gates and an overall pass flag to every candidate."""
+    """Add the two affordability gates and an overall pass flag to every candidate.
+
+    The wage gate passes when the LOW end of the estimate band fits the ceiling, so
+    a borderline player survives screening; wage_marginal marks the ones whose band
+    straddles the ceiling (affordable on the low estimate, not the high) for human
+    judgement.
+    """
     cand = candidates.copy()
     cand["affordable_fee"] = cand["market_value_eur"] <= transfer_budget_eur
-    cand["affordable_wage"] = (cand["estimated_weekly_wage_gbp"] <= cand["wage_ceiling_gbp"]).fillna(False)
+    cand["affordable_wage"] = (cand["wage_low_gbp"] <= cand["wage_ceiling_gbp"]).fillna(False)
+    cand["wage_marginal"] = cand["affordable_wage"] & ~(
+        (cand["wage_high_gbp"] <= cand["wage_ceiling_gbp"]).fillna(False))
     cand["qualifies"] = cand["affordable_fee"] & cand["affordable_wage"] & cand["on_profile"]
     return cand
 
@@ -99,8 +107,9 @@ def build_candidates(engine, wage_ceiling_multiplier: float = 1.0) -> pd.DataFra
                        "fair_value_eur, undervaluation_pct, age FROM valuations", engine)
     names = pd.read_sql("SELECT player_id, competition_id, season_id, player_name, team_name, minutes "
                         "FROM player_season_metrics", engine)
-    wage_est = pd.read_sql("SELECT position_group, age_band, performance_tier, "
-                           "estimated_weekly_wage_gbp FROM wage_estimates", engine)
+    wage_est = pd.read_sql("SELECT competition_id, position_group, age_band, performance_tier, "
+                           "estimated_weekly_wage_gbp, wage_low_gbp, wage_high_gbp "
+                           "FROM wage_estimates", engine)
     ceilings = pd.read_sql("SELECT position_group, age_band, weekly_wage_ceiling_gbp "
                            "FROM wage_framework", engine)
     percentiles = pd.read_sql("SELECT player_id, position_group, metric, percentile "
@@ -112,9 +121,13 @@ def build_candidates(engine, wage_ceiling_multiplier: float = 1.0) -> pd.DataFra
     cand = scores.merge(vals, on=keys, how="inner").merge(names, on=keys, how="left")
 
     cand["age_band"] = cand["age"].map(age_band)
-    cand["performance_tier"] = cand.groupby("position_group")["performance_score"].transform(_tiers)
+    # Tier within league as well as position: a League One "Top" tercile must not be
+    # decided by Championship players sharing the pool.
+    cand["performance_tier"] = (cand.groupby(["competition_id", "position_group"])
+                                ["performance_score"].transform(_tiers))
 
-    cand = cand.merge(wage_est, on=["position_group", "age_band", "performance_tier"], how="left")
+    cand = cand.merge(wage_est, on=["competition_id", "position_group", "age_band",
+                                    "performance_tier"], how="left")
     cand = cand.merge(ceilings, on=["position_group", "age_band"], how="left")
     cand["wage_ceiling_gbp"] = cand["weekly_wage_ceiling_gbp"] * wage_ceiling_multiplier
 

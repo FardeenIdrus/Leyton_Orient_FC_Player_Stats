@@ -88,36 +88,83 @@ Two gates decide whether a player is signable, both adjustable from the dashboar
 
 - **Fee gate:** real market value within a transfer budget.
 - **Wage gate:** modelled weekly wage within the club's wage-framework ceiling for that
-  position and age band.
+  position and age band. The estimate is a band (x0.7 to x1.4 around the central figure)
+  rather than a point: a player passes if the LOW end fits the ceiling, and is flagged
+  **wage-marginal** when the band straddles it, so borderline cases go to human judgement
+  (a call to the agent) instead of being silently dropped.
 
 A player must pass both gates **and** the position's on-profile minimum thresholds. Survivors
 are ranked; if none qualify, the closest on-profile players are returned as near-misses so the
 result is never empty.
 
+The wage grid is league-aware (a League One wage differs from a Championship one) and each
+league's anchors cite their published sources. The grid is validated in aggregate by
+`python -m lofc.model.wage_check`, which sums modelled wages per squad and reconciles them
+against published payrolls (all eight league-seasons within tolerance; Leyton Orient's own
+modelled bill lands within ~10% of its published Capology figure). One anchor (Championship)
+was corrected after this reconciliation flagged it, which is the calibration loop working
+as designed.
+
 ---
 
-## What is real, and what is a labelled stand-in
+## 7. Physical data (SkillCorner tracking)
+
+The club provided a SkillCorner export for League One 2025/26: tracking-derived physical
+output (distances, high-speed running, sprints, accelerations, peak speed). Its scope
+defines exactly what it can and cannot do:
+
+- **Player-level data covers the Leyton Orient squad only** (21 players with season
+  averages, matched to our StatsBomb ids by birth date + name, 21/21 matched).
+- **Team-level data covers all 24 League One clubs**, as whole-team totals.
+
+So the platform uses it for two things, and refuses a third:
+
+1. **League benchmarking** (team level): where LOFC ranks among the 24 clubs on each
+   physical dimension — the objective picture of the team's physical identity.
+2. **A measured draft identity** (player level): what the current squad actually does
+   physically, presented as evidence for the Director of Football to confirm or
+   override — it describes how the team plays today, not how it should play. Once
+   confirmed, it informs which on-ball traits (which exist for every player in every
+   league) the Fit score weights.
+3. **It never scores recruitment targets.** No tracking data exists for non-LOFC
+   players, so any per-candidate "physical score" would be invented. Physical
+   assessment of targets stays with scouts, using the squad benchmarks as reference
+   points.
+
+---
+
+## What is real, and what is a labelled stand-in (Phase 10: real EFL data)
 
 | Input | Status | Notes |
 |---|---|---|
-| Player performance | **Real** | StatsBomb open data, 2015/16 PL / La Liga / Serie A |
-| Market values | **Real** | Transfermarkt, matched by name (~98%) |
-| Player ages | **Real** | from Transfermarkt birth dates |
+| Player performance | **Real** | StatsBomb paid feed: Championship, League One, League Two, National League, 2024/25 + 2025/26 (4,456 matches) |
+| Player ages | **Real** | birth dates from the paid-feed lineups (99.6% coverage) |
+| Market values | **Real** | Transfermarkt club squad pages (current snapshot), matched by birth date + name; a maintained-dataset fallback catches loanees from outside these leagues |
 | Wage framework (the club's ceiling) | **Stand-in** | anchored to the EFL 50%-of-turnover rule and LOFC's published turnover; position/age shape assumed |
-| Player wages | **Stand-in (modelled)** | from a position x age x performance-tier table; never derived from market value (a flat percentage would understate cheap players) |
+| Player wages | **Stand-in (modelled)** | league x position x age x performance-tier grid with uncertainty bands; sources cited per league; validated against published payrolls; never derived from market value |
 | Identity profile (what the club wants) | **Stand-in** | a constructed "hard-working, progressive, press-resistant" profile |
 
 Every stand-in is an editable data file and swaps for the club's real document with no code
-change. See `scaling.md` for the path to real, current-season data.
+change.
 
 ## Honest limitations
 
-- **Demo data is 2015/16 top-flight**, because Leyton Orient's division is not on the free
-  StatsBomb tier. The method is league-agnostic; on this data the affordability filter is
-  largely demonstrative (top-flight wages dwarf a League One ceiling), and it bites correctly
-  on real lower-league data.
-- **The wage framework is present-day** while the players are 2015/16, so we make no literal
-  "could sign X for Y" claims; the years align on real current-season data.
-- **On-ball events only.** Off-ball movement and positioning are not measured.
-- **Name matching** across short names and full legal names leaves rare mismatches, caught by
-  an implausible-age guard and logged; club-level disambiguation is the documented upgrade.
+- **Valuation covers 2025/26 only.** Scraped market values are a current snapshot, so only
+  the season just played is priced; pricing 2024/25 output with 2026 values would be wrong.
+  Earlier seasons keep scores and archetypes (trajectory) but no fair value.
+- **National League players are not valued.** Transfermarkt maintains values for only ~2.5%
+  of fifth-tier players, so the league appears in scores and archetypes but not in the
+  value/bargain rankings, and its rare valued players carry extra uncertainty.
+- **Value-match rate is ~85% in the valued leagues.** The unmatched are mostly January
+  movers and short-stay loanees; they keep scores and archetypes but no valuation. Matching
+  is by birth date + name with an implausible-age guard.
+- **Event collection has small gaps at the bottom of the pyramid:** 19 of 4,456 fixtures
+  (0.4%, almost all National League) have no event data on the feed, slightly undercounting
+  a few players' season totals. Spot-checks against published top-scorer tables are exact in
+  the Championship and League One, and within one goal elsewhere once playoff inclusion is
+  accounted for (our totals include playoffs).
+- **Candidate evaluation is on-ball only.** Event data does not see off-ball movement; the
+  SkillCorner tracking data fills that gap for our own squad and for team-level league
+  benchmarking, but not for recruitment targets (see section 7).
+- **Modelled wages are a screening prior.** Real asking wages come from agents; the grid
+  orders the queue and classifies affordable / marginal / out of reach.

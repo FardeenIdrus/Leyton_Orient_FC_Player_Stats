@@ -55,10 +55,23 @@ def load_players_and_metrics(engine: Engine) -> tuple[int, int]:
 
     # players: one row per player_id, name taken from their highest-minutes season.
     primary = df.sort_values("minutes", ascending=False).drop_duplicates("player_id")
-    players = [{"player_id": int(r.player_id), "player_name": r.player_name}
-               for r in primary.itertuples()]
+    # Paid-API lineups carry the date of birth; older parquet files do not have the column.
+    has_birth = "birth_date" in primary.columns
+    players = [
+        {
+            "player_id": int(r.player_id),
+            "player_name": r.player_name,
+            "birth_date": (pd.to_datetime(r.birth_date).date()
+                           if has_birth and pd.notna(r.birth_date) else None),
+        }
+        for r in primary.itertuples()
+    ]
     n_players = _upsert(engine, Player.__table__, players, ["player_id"])
 
+    # The parquet is the source of truth for metrics, so the table mirrors it exactly:
+    # clear first, or re-targeting the competitions would leave orphan league rows behind.
+    with engine.begin() as conn:
+        conn.execute(PlayerSeasonMetric.__table__.delete())
     metric_cols = [c.name for c in PlayerSeasonMetric.__table__.columns if c.name != "id"]
     n_metrics = _upsert(engine, PlayerSeasonMetric.__table__, _records(df[metric_cols]),
                         ["player_id", "competition_id", "season_id"])
@@ -92,7 +105,7 @@ def main() -> None:
     n_wage = load_reference_csv(engine, "wage_framework.csv", WageFramework, ["position_group", "age_band"])
     n_identity = load_reference_csv(engine, "identity_profiles.csv", IdentityProfile, ["position_group", "metric"])
     n_estimates = load_reference_csv(engine, "wage_estimates.csv", WageEstimate,
-                                     ["position_group", "age_band", "performance_tier"])
+                                     ["competition_id", "position_group", "age_band", "performance_tier"])
     print(f"wage_framework: upserted {n_wage}")
     print(f"identity_profiles: upserted {n_identity}")
     print(f"wage_estimates: upserted {n_estimates}")

@@ -12,11 +12,11 @@
 
 ## ▶ STATUS AT A GLANCE
 
-- **Current phase:** 🎉 **ALL PHASES COMPLETE (0–9).** Platform runs end to end via `python -m lofc.pipeline`; dashboard at http://localhost:8501.
+- **Current phase:** 🎉 **PHASE 10 COMPLETE (Stages A + B) — at final checkpoint.** Real paid-feed EFL data (8 league-seasons) + SkillCorner physical layer live. Next: club's real wage framework + identity profiles when provided (CSV drop-ins); prep for the Scott/Joe/Steve Tait demo. Dashboard at http://localhost:8501.
 - **Workflow rule:** I pause at the start of each phase, show the plan, and wait for
   your explicit go-ahead before building. After a phase passes its acceptance
   criteria, we checkpoint here before the next phase starts.
-- **Last updated:** 2026-06-06 (all phases complete)
+- **Last updated:** 2026-06-09 — phases 0–9 done; **dashboard v2 + Metabase added**; **the interview advanced to the COO stage and real data (paid StatsBomb credentials + Skills Corner 2026) is now in hand.** See "▶ CURRENT FOCUS" below.
 
 | Phase | Name | Status |
 |---|---|---|
@@ -30,6 +30,123 @@
 | 7 | Constrain & Rank | ✅ Complete (verified) |
 | 8 | Dashboard | ✅ Complete (verified) |
 | 9 | Package & Document | ✅ Complete (verified) |
+| 10 | Real data + enrichment | ✅ Complete (Stage A: 8 EFL league-seasons live · Stage B: SkillCorner physical layer) |
+
+---
+
+## ▶ CURRENT FOCUS (post-interview) — updated 2026-06-09
+
+Phases 0–9 are complete. Everything below happened after that and is the live state.
+
+### Interview progress
+- The platform was built as an interview deliverable. **CEO interview with David Gandler (Zoom) is done; the demo landed well; the process has advanced to a meeting with the COO, Steve Tait** (Maddy is connecting us). Strong signal it may convert to a paid role.
+- **2026-06-09: David has provided real resources** — **paid StatsBomb API credentials** and **Skills Corner 2026 tracking data** — to refine the model before the Steve Tait meeting. (Credentials go in `.env` only, never in a tracked file.)
+
+### Dashboard v2 (built on top of Phase 8 `dashboard/app.py`, all verified headless, live at :8501)
+- Click a shortlist row → that player's full profile opens **inline** below the table. Shared `_render_profile_body` powers both the inline view and the Player profile tab, so they never drift.
+- **Player-type filter** + "group by type" toggle above the shortlist (per-position archetypes).
+- New **"Player types" tab**: cluster scatter; axes chosen as two *different* trait families (e.g. shot threat vs driving forward, not xG vs goals) via `METRIC_FAMILY` in `_cluster_axes`; zoom/pan on; a player-search box to ring a dot.
+- **Wage budget is now a £/week** synced slider + number (`synced_wage_budget`), converted to the internal multiplier via the position's prime-age ceiling (≈£150k makes top-flight players signable for the demo).
+- League names as on-brand **pills** in the KPI strip; age to 1 dp; **"Quality"** label unified (was "Performance"); goals/assists tiles + npxG/xA caption on the profile; **Full stats** expander (season total, per-90, percentile); strengths/watch-outs line; signable rows tinted green/amber.
+- **Metabase** connected on the same Postgres DB (port 3000); built a bargain map + goals-by-team on a "Recruitment overview" dashboard. This is the wider-BI growth path the brief wants.
+
+### Interview demo (locked, lives in chat — do NOT create a script file)
+Walkthrough as a recruiter would use it: **Centre Forward · transfer €15m · wage ≈£150k · min minutes 1500 · signable on · player type = "High driving forward & pressing, low shot threat"** → 31 strikers → 5 creative forwards → **Lucas Pérez (Deportivo)** at #1 (Quality 79, +38% undervalued, vindicated by his ~€19m Arsenal move months later). Recruiter framing, no colons, "I"/"Leyton Orient" voice, plain language.
+
+### Phase 10 — Real data + enrichment (IN PROGRESS — Stage A approved & building, 2026-06-09)
+
+**Audience note:** the demo is now to the **Director of Football (Scott), Head of Recruitment
+Analysis (Joe) and COO (Steve Tait)** — validation rigour and honest caveats outrank polish.
+Wage framework + identity profiles stay modelled until the club provides real ones (after
+the meeting). Checkpoints: after A1 (targets agreed ✅), after A7, after B5.
+
+**Stage A — Real StatsBomb data (8 EFL league-seasons)**
+- [x] **A1 Licence discovery** — paid licence verified live: full EFL pyramid 2018/19→2025/26
+  (Championship, League One, League Two; National League from 20/21) + scouting leagues
+  (Ligue 2, Scot. Premiership, Eliteserien, Allsvenskan, Irish PD) + PL2 + Euro 2020.
+  **League One 2025/26 is complete** (557 matches incl. playoffs, season ended 24 May 2026).
+  **Targets approved: League One + League Two + National League + Championship × 2025/26 + 2024/25.**
+  Continental leagues deferred (calendar-season mismatch).
+- [x] **A2 Configurable competitions** — `SB_COMPETITIONS` env var (`cid:sid:label,...`) overrides
+  the demo trio (default unchanged); parsing fails loudly; tests env-isolated (container env
+  no longer breaks them). The 8 targets live in `.env`. NOTE: compose injects `.env` at container
+  start → `docker compose up -d` after editing it.
+- [x] **A3 Ingest** — all 8 league-seasons landed: 4,456 matches, 24 GB. Paid-feed payload
+  validated against the aggregator field-by-field before the full pull. **Paid lineups carry
+  `birth_date`** (open data did not) → carried through aggregate → `players` table. Two
+  paid-feed quirks found and fixed: lineup clocks carry milliseconds (parser updated), and
+  transient API hiccups can return an empty events list (ingester now refuses to persist
+  empties so a re-run retries; aggregator skips them loudly). 19 fixtures (0.4%, almost all
+  National League) are genuinely uncollected on the feed — documented in methodology.
+- [x] **A4 Aggregate + spot-check** — 5,994 player-season rows, 4,568 rankable.
+  **League One exact:** Ballard (LOFC) 23 = the real golden boot; Wareham 19, Tolaj 18,
+  Leonard 16 exact; Wootton +1 = his playoff goal (we include playoffs). **Championship
+  exact:** Vipotnik 23, McBurnie 18, Wright 17, Clarke 16. League Two 3/4 exact (Drinan 21
+  vs 22 published, one-goal records variance). National League variances fully explained by
+  the 14 missing fixtures + playoff inclusion. Scores pass the football-sense check
+  (Ballard top-5 CF both ways; Lincoln's forwards high; Wing/Norwood lead DMs).
+- [x] **A5 EFL market values** — dcaribou dataset confirmed to have **zero EFL coverage** (as
+  decision #5 predicted), so built `ingest/transfermarkt_efl.py`: scrapes TM club-squad pages
+  (4 leagues, ~100 requests, rate-limited 2.5s, idempotent). **Done: 2,620 players, 96 clubs.**
+  Coverage: Championship 97% valued, League One 91%, League Two 90%, **National League 2.5%**
+  → CNAT stays in scores/archetypes but drops out of valuation (labelled). Valuation rewritten
+  dual-source: demo era (name match, league-scoped) + EFL era (**DOB+name match**, current-snapshot
+  values, **2025/26 rows only** — 24/25 keeps scores/archetypes for trajectory, no valuation:
+  current prices must not price last season's output). Eras train as separate models. A
+  maintained-dataset fallback (rows with values still updated this season) catches loanees
+  from outside the four leagues. **Full-data result: 1,525 valued; ~85% match in the valued
+  leagues; CV R² 0.748 (log) — the league feature carries real signal across 4 price tiers.**
+- [x] **A5b Wage model re-anchor** — `wage_estimates` now **league-aware** (competition_id ×
+  position × age band × tier) with **low/high bands** (×0.7/×1.4); league anchors sourced
+  (League One £4.1k/wk avg — Capology n=640; League Two ~£2k; National League ~£1–1.5k;
+  sources in `reference_data.py`). Gate semantics: pass on the low band, `wage_marginal`
+  flags band-straddles-ceiling for human judgement. Tiers computed **within league** as well
+  as position. Alembic migration applied. `model/wage_check.py` reconciles modelled squad
+  bills vs published payrolls. **Validation: Championship anchors flagged +57% → re-anchored
+  down 30% (the calibration loop working); all 8 league-seasons now within tolerance
+  (−2%…+31%); LOFC's own modelled bill +9% vs its published Capology figure.**
+- [x] **A6 Full pipeline on real data** — players 3,636 / metrics 5,994 / percentiles 118,815 /
+  scores+archetypes 4,568 / valuations 1,525 / shortlists 429 qualifying. **The wage gate
+  bites:** the CF shortlist at LOFC's real ceiling spans the pyramid — #1 Andy Dallas
+  (Southend, NL, €100k, +90% undervalued), #2 Kabia (Grimsby, +51%), Leonard/Fink/Taylor
+  (League One) — genuinely affordable, on-profile, undervalued. Derived tables are now
+  clear-then-insert so re-targeting leagues leaves no orphan rows; 1,542 stale demo player
+  rows swept.
+- [x] **A7 Verify + dashboard** — 44 tests green; image rebuilt with the new deps
+  (beautifulsoup4, lxml, openpyxl) + requirements.lock regenerated; headless AppTest on the
+  full 8-league DB: **zero exceptions** in the fresh container. Dashboard fixes shipped:
+  multi-season-safe loaders (latest-season pinning), minutes slider (step 90→10, data-driven
+  max, 450 floor + caption), season-aware KPI/footer (no more hard-coded "2015/16").
+  Methodology doc rewritten for the real-data era (valuation scope, NL exclusion, fixture
+  gaps, wage validation). **CHECKPOINT: user reviews real shortlists before Stage B.**
+
+**Stage B — SkillCorner ✅ COMPLETE (2026-06-10): squad-only physical data → identity + benchmarks, NOT candidate scores**
+File: `data/reference/skillcorner/SkillCorner-2026-04-27.xlsx` — League One 2025/26, 4 sheets;
+player-level = LOFC squad only; team-level = all 24 clubs.
+- [x] **B1 Ingest** — `ingest/skillcorner.py` + Alembic migration: `skillcorner_team_season`
+  (24 clubs) + `skillcorner_player_season` (21 LOFC players, **21/21 matched** to StatsBomb
+  ids by DOB+name). Curated per-90 metric set + peak speed. Clear-then-insert; wired into
+  the pipeline as a conditional step (runs when an export exists). 'null' strings handled;
+  dates as ISO through the JSON round-trip.
+- [x] **B2 Measured physical identity** — "Physical" dashboard tab shows the measured squad
+  profile (per-player table: who drives running/sprint output) and a league-rank summary
+  per dimension, framed explicitly as **a draft for the DoF to confirm** (describes how the
+  team currently plays). The caption states plainly that candidates are never physically
+  scored (no tracking data exists for them); once confirmed, the identity informs which
+  on-ball traits the Fit score weights.
+- [x] **B3 League One physical benchmarking** — metric selector + 24-club bar chart, LOFC
+  highlighted in club red, rank + league-median caption (e.g. Orient: below-mid on total
+  distance, mid-pack on sprints/high accelerations). Metabase: tables queryable on the
+  same DB; tile SQL added to `cli_commands.txt`.
+- [x] **B4 Honest scoping note** — methodology section 7: what SkillCorner is used for
+  (benchmarking, draft identity) and what it refuses (candidate physical scores).
+- [x] **B5 Verified** — 47 tests green (3 new SkillCorner tests: parsing, 'null' handling,
+  DOB+name matching); headless AppTest zero exceptions with the new tab. Bonus fix: player
+  pickers (Profile/Compare) now use "Name — Club" labels with an explicit row map, so
+  genuine namesakes (two Cameron Humphreys) can't be conflated.
+
+Then: swap in the club's **real wage framework + identity profiles** when provided (drop-in
+CSVs, no logic change) and prep the **Steve Tait (COO)** meeting.
 
 ---
 

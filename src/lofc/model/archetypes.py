@@ -139,6 +139,10 @@ def main() -> None:
     metrics = pd.read_sql("SELECT * FROM player_season_metrics", engine)
 
     archetypes = cluster_all(metrics)
+    # Fully derived: clear first so re-targeting the competitions never leaves
+    # orphan league rows behind.
+    with engine.begin() as conn:
+        conn.execute(Archetype.__table__.delete())
     n = _upsert(engine, Archetype.__table__, _records(archetypes),
                 ["player_id", "competition_id", "season_id"])
     print(f"\narchetypes: upserted {n}")

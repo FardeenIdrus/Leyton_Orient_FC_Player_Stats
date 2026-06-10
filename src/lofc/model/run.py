@@ -20,12 +20,16 @@ from lofc.store.models import PlayerPercentile, PlayerScore
 def _spot_check(scores: pd.DataFrame, names: pd.DataFrame) -> None:
     """Print the top players in a few groups so the result can be eyeballed."""
     named = scores.merge(names, on=["player_id", "competition_id", "season_id"], how="left")
-    pl = named[named["competition_id"] == 2]  # Premier League
+    # Eyeball the first configured league present in the data, whichever era that is.
+    comp_id = int(named["competition_id"].min())
+    league = named[named["competition_id"] == comp_id]
+    label = names[names["competition_id"] == comp_id]["competition_name"].iloc[0] \
+        if "competition_name" in names.columns else f"competition {comp_id}"
 
     def top(position, by):
         cols = ["player_name", "team_name", "performance_score", "fit_score"]
-        rows = pl[pl["position_group"] == position].sort_values(by, ascending=False).head(5)
-        print(f"\nTop 5 {position} in the Premier League by {by}:")
+        rows = league[league["position_group"] == position].sort_values(by, ascending=False).head(5)
+        print(f"\nTop 5 {position} in the {label} by {by}:")
         print(rows[cols].to_string(index=False))
 
     top("Centre Forward", "performance_score")
@@ -42,6 +46,11 @@ def main() -> None:
     percentiles = to_long(wide)
     scores = compute_scores(wide, identity)
 
+    # Fully derived from the metrics table: clear first so re-targeting the
+    # competitions never leaves orphan league rows behind.
+    with engine.begin() as conn:
+        conn.execute(PlayerPercentile.__table__.delete())
+        conn.execute(PlayerScore.__table__.delete())
     n_pct = _upsert(engine, PlayerPercentile.__table__, _records(percentiles),
                     ["player_id", "competition_id", "season_id", "metric"])
     n_scores = _upsert(engine, PlayerScore.__table__, _records(scores),
@@ -50,7 +59,8 @@ def main() -> None:
     print(f"player_percentiles: upserted {n_pct}")
     print(f"player_scores: upserted {n_scores}")
 
-    names = metrics[["player_id", "competition_id", "season_id", "player_name", "team_name"]]
+    names = metrics[["player_id", "competition_id", "season_id", "player_name",
+                     "team_name", "competition_name"]]
     _spot_check(scores, names)
 
 

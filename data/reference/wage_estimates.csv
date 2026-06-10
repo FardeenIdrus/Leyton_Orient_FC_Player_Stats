@@ -1,121 +1,841 @@
-position_group,age_band,performance_tier,estimated_weekly_wage_gbp,source
-Centre Forward,U21,Top,58500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Forward,U21,Mid,24500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Forward,U21,Squad,9500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Forward,21-24,Top,97500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Forward,21-24,Mid,41000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Forward,21-24,Squad,15500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Forward,25-29,Top,130000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Forward,25-29,Mid,54500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Forward,25-29,Squad,21000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Forward,30-32,Top,117000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Forward,30-32,Mid,49000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Forward,30-32,Squad,18500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Forward,33+,Top,84500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Forward,33+,Mid,35500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Forward,33+,Squad,13500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Winger,U21,Top,49500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Winger,U21,Mid,21000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Winger,U21,Squad,8000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Winger,21-24,Top,82500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Winger,21-24,Mid,34500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Winger,21-24,Squad,13000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Winger,25-29,Top,110000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Winger,25-29,Mid,46000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Winger,25-29,Squad,17500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Winger,30-32,Top,99000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Winger,30-32,Mid,41500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Winger,30-32,Squad,16000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Winger,33+,Top,71500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Winger,33+,Mid,30000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Winger,33+,Squad,11500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Attacking Mid,U21,Top,47000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Attacking Mid,U21,Mid,20000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Attacking Mid,U21,Squad,7500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Attacking Mid,21-24,Top,79000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Attacking Mid,21-24,Mid,33000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Attacking Mid,21-24,Squad,12500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Attacking Mid,25-29,Top,105000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Attacking Mid,25-29,Mid,44000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Attacking Mid,25-29,Squad,17000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Attacking Mid,30-32,Top,94500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Attacking Mid,30-32,Mid,39500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Attacking Mid,30-32,Squad,15000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Attacking Mid,33+,Top,68000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Attacking Mid,33+,Mid,28500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Attacking Mid,33+,Squad,11000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Central Mid,U21,Top,40500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Central Mid,U21,Mid,17000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Central Mid,U21,Squad,6500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Central Mid,21-24,Top,67500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Central Mid,21-24,Mid,28500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Central Mid,21-24,Squad,11000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Central Mid,25-29,Top,90000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Central Mid,25-29,Mid,38000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Central Mid,25-29,Squad,14500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Central Mid,30-32,Top,81000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Central Mid,30-32,Mid,34000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Central Mid,30-32,Squad,13000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Central Mid,33+,Top,58500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Central Mid,33+,Mid,24500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Central Mid,33+,Squad,9500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Defensive Mid,U21,Top,36000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Defensive Mid,U21,Mid,15000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Defensive Mid,U21,Squad,6000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Defensive Mid,21-24,Top,60000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Defensive Mid,21-24,Mid,25000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Defensive Mid,21-24,Squad,9500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Defensive Mid,25-29,Top,80000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Defensive Mid,25-29,Mid,33500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Defensive Mid,25-29,Squad,13000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Defensive Mid,30-32,Top,72000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Defensive Mid,30-32,Mid,30000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Defensive Mid,30-32,Squad,11500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Defensive Mid,33+,Top,52000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Defensive Mid,33+,Mid,22000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Defensive Mid,33+,Squad,8500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Back,U21,Top,34000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Back,U21,Mid,14000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Back,U21,Squad,5500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Back,21-24,Top,56000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Back,21-24,Mid,23500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Back,21-24,Squad,9000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Back,25-29,Top,75000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Back,25-29,Mid,31500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Back,25-29,Squad,12000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Back,30-32,Top,67500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Back,30-32,Mid,28500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Back,30-32,Squad,11000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Back,33+,Top,49000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Back,33+,Mid,20500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Centre Back,33+,Squad,8000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Full Back,U21,Top,29000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Full Back,U21,Mid,12500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Full Back,U21,Squad,4500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Full Back,21-24,Top,49000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Full Back,21-24,Mid,20500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Full Back,21-24,Squad,8000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Full Back,25-29,Top,65000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Full Back,25-29,Mid,27500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Full Back,25-29,Squad,10500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Full Back,30-32,Top,58500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Full Back,30-32,Mid,24500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Full Back,30-32,Squad,9500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Full Back,33+,Top,42000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Full Back,33+,Mid,17500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Full Back,33+,Squad,7000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Goalkeeper,U21,Top,27000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Goalkeeper,U21,Mid,11500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Goalkeeper,U21,Squad,4500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Goalkeeper,21-24,Top,45000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Goalkeeper,21-24,Mid,19000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Goalkeeper,21-24,Squad,7000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Goalkeeper,25-29,Top,60000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Goalkeeper,25-29,Mid,25000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Goalkeeper,25-29,Squad,9500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Goalkeeper,30-32,Top,54000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Goalkeeper,30-32,Mid,22500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Goalkeeper,30-32,Squad,8500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Goalkeeper,33+,Top,39000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Goalkeeper,33+,Mid,16500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
-Goalkeeper,33+,Squad,6000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+competition_id,position_group,age_band,performance_tier,estimated_weekly_wage_gbp,wage_low_gbp,wage_high_gbp,source
+2,Centre Forward,U21,Top,51500,36000,72000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Forward,U21,Mid,21500,15000,30000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Forward,U21,Squad,8100,5650,11500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Forward,21-24,Top,85500,60000,119500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Forward,21-24,Mid,36000,25000,50500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Forward,21-24,Squad,13500,9450,19000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Forward,25-29,Top,114000,80000,159500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Forward,25-29,Mid,48000,33500,67000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Forward,25-29,Squad,18000,12500,25000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Forward,30-32,Top,102500,72000,143500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Forward,30-32,Mid,43000,30000,60500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Forward,30-32,Squad,16000,11500,22500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Forward,33+,Top,74000,52000,103500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Forward,33+,Mid,31000,22000,43500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Forward,33+,Squad,11500,8200,16500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Winger,U21,Top,47500,33000,66500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Winger,U21,Mid,20000,14000,28000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Winger,U21,Squad,7500,5250,10500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Winger,21-24,Top,79000,55500,110500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Winger,21-24,Mid,33500,23500,46500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Winger,21-24,Squad,12500,8750,17500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Winger,25-29,Top,105500,74000,147500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Winger,25-29,Mid,44500,31000,62000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Winger,25-29,Squad,16500,11500,23500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Winger,30-32,Top,95000,66500,133000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Winger,30-32,Mid,40000,28000,56000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Winger,30-32,Squad,15000,10500,21000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Winger,33+,Top,68500,48000,96000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Winger,33+,Mid,29000,20000,40500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Winger,33+,Squad,11000,7600,15000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Attacking Mid,U21,Top,46000,32500,64500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Attacking Mid,U21,Mid,19500,13500,27000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Attacking Mid,U21,Squad,7300,5100,10000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Attacking Mid,21-24,Top,77000,54000,107500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Attacking Mid,21-24,Mid,32500,22500,45500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Attacking Mid,21-24,Squad,12000,8500,17000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Attacking Mid,25-29,Top,102500,72000,143500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Attacking Mid,25-29,Mid,43000,30000,60500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Attacking Mid,25-29,Squad,16000,11500,22500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Attacking Mid,30-32,Top,92500,64500,129500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Attacking Mid,30-32,Mid,39000,27000,54500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Attacking Mid,30-32,Squad,14500,10000,20500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Attacking Mid,33+,Top,66500,46500,93500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Attacking Mid,33+,Mid,28000,19500,39500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Attacking Mid,33+,Squad,10500,7350,14500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Central Mid,U21,Top,43000,30000,60000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Central Mid,U21,Mid,18000,12500,25000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Central Mid,U21,Squad,6750,4700,9450,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Central Mid,21-24,Top,71000,50000,100000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Central Mid,21-24,Mid,30000,21000,42000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Central Mid,21-24,Squad,11000,7850,15500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Central Mid,25-29,Top,95000,66500,133000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Central Mid,25-29,Mid,40000,28000,56000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Central Mid,25-29,Squad,15000,10500,21000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Central Mid,30-32,Top,85500,60000,119500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Central Mid,30-32,Mid,36000,25000,50500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Central Mid,30-32,Squad,13500,9450,19000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Central Mid,33+,Top,62000,43000,86500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Central Mid,33+,Mid,26000,18000,36500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Central Mid,33+,Squad,9750,6800,13500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Defensive Mid,U21,Top,40500,28500,57000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Defensive Mid,U21,Mid,17000,12000,24000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Defensive Mid,U21,Squad,6400,4500,9000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Defensive Mid,21-24,Top,67500,47500,95000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Defensive Mid,21-24,Mid,28500,20000,40000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Defensive Mid,21-24,Squad,10500,7500,15000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Defensive Mid,25-29,Top,90000,63000,126500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Defensive Mid,25-29,Mid,38000,26500,53000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Defensive Mid,25-29,Squad,14000,10000,20000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Defensive Mid,30-32,Top,81000,57000,113500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Defensive Mid,30-32,Mid,34000,24000,48000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Defensive Mid,30-32,Squad,13000,9000,18000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Defensive Mid,33+,Top,58500,41000,82000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Defensive Mid,33+,Mid,24500,17500,34500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Defensive Mid,33+,Squad,9250,6500,13000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Back,U21,Top,39500,27500,55000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Back,U21,Mid,16500,11500,23000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Back,U21,Squad,6200,4350,8700,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Back,21-24,Top,65500,46000,92000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Back,21-24,Mid,27500,19500,38500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Back,21-24,Squad,10500,7250,14500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Back,25-29,Top,87500,61000,122500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Back,25-29,Mid,37000,26000,51500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Back,25-29,Squad,14000,9650,19500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Back,30-32,Top,78500,55000,110000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Back,30-32,Mid,33000,23000,46500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Back,30-32,Squad,12500,8700,17500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Back,33+,Top,57000,40000,79500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Back,33+,Mid,24000,16500,33500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Centre Back,33+,Squad,8950,6300,12500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Full Back,U21,Top,36500,25500,51000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Full Back,U21,Mid,15500,10500,21500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Full Back,U21,Squad,5750,4000,8050,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Full Back,21-24,Top,60500,42500,85000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Full Back,21-24,Mid,25500,18000,35500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Full Back,21-24,Squad,9550,6700,13500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Full Back,25-29,Top,81000,56500,113000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Full Back,25-29,Mid,34000,24000,47500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Full Back,25-29,Squad,13000,8900,18000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Full Back,30-32,Top,72500,51000,101500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Full Back,30-32,Mid,30500,21500,43000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Full Back,30-32,Squad,11500,8050,16000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Full Back,33+,Top,52500,36500,73500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Full Back,33+,Mid,22000,15500,31000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Full Back,33+,Squad,8300,5800,11500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Goalkeeper,U21,Top,35000,24500,49000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Goalkeeper,U21,Mid,15000,10500,20500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Goalkeeper,U21,Squad,5550,3850,7750,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Goalkeeper,21-24,Top,58500,41000,82000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Goalkeeper,21-24,Mid,24500,17000,34500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Goalkeeper,21-24,Squad,9200,6450,13000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Goalkeeper,25-29,Top,78000,54500,109000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Goalkeeper,25-29,Mid,33000,23000,46000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Goalkeeper,25-29,Squad,12500,8600,17000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Goalkeeper,30-32,Top,70000,49000,98000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Goalkeeper,30-32,Mid,29500,20500,41500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Goalkeeper,30-32,Squad,11000,7750,15500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Goalkeeper,33+,Top,50500,35500,71000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Goalkeeper,33+,Mid,21500,15000,30000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+2,Goalkeeper,33+,Squad,8000,5600,11000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Forward,U21,Top,48500,34000,68000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Forward,U21,Mid,20500,14500,28500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Forward,U21,Squad,7550,5300,10500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Forward,21-24,Top,81000,56500,113500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Forward,21-24,Mid,34000,24000,48000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Forward,21-24,Squad,12500,8800,17500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Forward,25-29,Top,108000,75500,151000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Forward,25-29,Mid,45500,32000,64000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Forward,25-29,Squad,17000,12000,23500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Forward,30-32,Top,97000,68000,136000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Forward,30-32,Mid,41000,28500,57500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Forward,30-32,Squad,15000,10500,21000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Forward,33+,Top,70000,49000,98500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Forward,33+,Mid,29500,20500,41500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Forward,33+,Squad,11000,7650,15500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Winger,U21,Top,45000,31500,63000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Winger,U21,Mid,19000,13500,26500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Winger,U21,Squad,7000,4900,9800,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Winger,21-24,Top,75000,52500,105000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Winger,21-24,Mid,31500,22000,44500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Winger,21-24,Squad,11500,8150,16500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Winger,25-29,Top,100000,70000,140000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Winger,25-29,Mid,42000,29500,59000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Winger,25-29,Squad,15500,11000,22000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Winger,30-32,Top,90000,63000,126000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Winger,30-32,Mid,38000,26500,53000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Winger,30-32,Squad,14000,9800,19500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Winger,33+,Top,65000,45500,91000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Winger,33+,Mid,27500,19000,38500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Winger,33+,Squad,10000,7050,14000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Attacking Mid,U21,Top,43500,30500,61000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Attacking Mid,U21,Mid,18500,13000,26000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Attacking Mid,U21,Squad,6800,4750,9550,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Attacking Mid,21-24,Top,73000,51000,102000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Attacking Mid,21-24,Mid,31000,21500,43000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Attacking Mid,21-24,Squad,11500,7950,16000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Attacking Mid,25-29,Top,97000,68000,136000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Attacking Mid,25-29,Mid,41000,28500,57500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Attacking Mid,25-29,Squad,15000,10500,21000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Attacking Mid,30-32,Top,87500,61000,122500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Attacking Mid,30-32,Mid,37000,26000,51500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Attacking Mid,30-32,Squad,13500,9550,19000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Attacking Mid,33+,Top,63000,44000,88500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Attacking Mid,33+,Mid,26500,18500,37500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Attacking Mid,33+,Squad,9850,6900,14000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Central Mid,U21,Top,40500,28500,56500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Central Mid,U21,Mid,17000,12000,24000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Central Mid,U21,Squad,6300,4400,8800,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Central Mid,21-24,Top,67500,47000,94500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Central Mid,21-24,Mid,28500,20000,40000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Central Mid,21-24,Squad,10500,7350,14500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Central Mid,25-29,Top,90000,63000,126000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Central Mid,25-29,Mid,38000,26500,53000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Central Mid,25-29,Squad,14000,9800,19500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Central Mid,30-32,Top,81000,56500,113500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Central Mid,30-32,Mid,34000,24000,48000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Central Mid,30-32,Squad,12500,8800,17500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Central Mid,33+,Top,58500,41000,82000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Central Mid,33+,Mid,24500,17500,34500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Central Mid,33+,Squad,9100,6350,12500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Defensive Mid,U21,Top,38500,27000,54000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Defensive Mid,U21,Mid,16000,11500,22500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Defensive Mid,U21,Squad,6000,4200,8400,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Defensive Mid,21-24,Top,64000,45000,90000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Defensive Mid,21-24,Mid,27000,19000,38000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Defensive Mid,21-24,Squad,10000,7000,14000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Defensive Mid,25-29,Top,85500,60000,119500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Defensive Mid,25-29,Mid,36000,25500,50500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Defensive Mid,25-29,Squad,13500,9300,18500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Defensive Mid,30-32,Top,77000,54000,107500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Defensive Mid,30-32,Mid,32500,22500,45500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Defensive Mid,30-32,Squad,12000,8400,17000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Defensive Mid,33+,Top,55500,39000,78000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Defensive Mid,33+,Mid,23500,16500,33000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Defensive Mid,33+,Squad,8650,6050,12000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Back,U21,Top,37500,26000,52000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Back,U21,Mid,15500,11000,22000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Back,U21,Squad,5800,4050,8100,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Back,21-24,Top,62000,43500,87000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Back,21-24,Mid,26000,18500,36500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Back,21-24,Squad,9650,6750,13500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Back,25-29,Top,83000,58000,116000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Back,25-29,Mid,35000,24500,49000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Back,25-29,Squad,13000,9000,18000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Back,30-32,Top,74500,52000,104500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Back,30-32,Mid,31500,22000,44000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Back,30-32,Squad,11500,8100,16000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Back,33+,Top,54000,37500,75500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Back,33+,Mid,22500,16000,32000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Centre Back,33+,Squad,8350,5850,11500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Full Back,U21,Top,34500,24000,48000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Full Back,U21,Mid,14500,10000,20500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Full Back,U21,Squad,5350,3750,7500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Full Back,21-24,Top,57500,40000,80500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Full Back,21-24,Mid,24000,17000,34000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Full Back,21-24,Squad,8900,6250,12500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Full Back,25-29,Top,76500,53500,107000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Full Back,25-29,Mid,32500,22500,45000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Full Back,25-29,Squad,12000,8350,16500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Full Back,30-32,Top,69000,48000,96500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Full Back,30-32,Mid,29000,20500,40500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Full Back,30-32,Squad,10500,7500,15000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Full Back,33+,Top,49500,35000,69500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Full Back,33+,Mid,21000,14500,29500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Full Back,33+,Squad,7750,5400,11000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Goalkeeper,U21,Top,33000,23000,46500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Goalkeeper,U21,Mid,14000,9800,19500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Goalkeeper,U21,Squad,5150,3600,7250,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Goalkeeper,21-24,Top,55500,38500,77500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Goalkeeper,21-24,Mid,23500,16500,32500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Goalkeeper,21-24,Squad,8600,6050,12000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Goalkeeper,25-29,Top,74000,51500,103500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Goalkeeper,25-29,Mid,31000,22000,43500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Goalkeeper,25-29,Squad,11500,8050,16000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Goalkeeper,30-32,Top,66500,46500,93000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Goalkeeper,30-32,Mid,28000,19500,39500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Goalkeeper,30-32,Squad,10500,7250,14500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Goalkeeper,33+,Top,48000,33500,67000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Goalkeeper,33+,Mid,20500,14000,28500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+11,Goalkeeper,33+,Squad,7450,5200,10500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Forward,U21,Top,46000,32000,64500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Forward,U21,Mid,19500,13500,27000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Forward,U21,Squad,7300,5100,10000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Forward,21-24,Top,76500,53500,107000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Forward,21-24,Mid,32500,22500,45500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Forward,21-24,Squad,12000,8500,17000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Forward,25-29,Top,102000,71500,143000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Forward,25-29,Mid,43000,30000,60500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Forward,25-29,Squad,16000,11500,22500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Forward,30-32,Top,92000,64500,128500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Forward,30-32,Mid,39000,27000,54500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Forward,30-32,Squad,14500,10000,20500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Forward,33+,Top,66500,46500,93000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Forward,33+,Mid,28000,19500,39500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Forward,33+,Squad,10500,7350,14500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Winger,U21,Top,42500,29500,59500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Winger,U21,Mid,18000,12500,25000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Winger,U21,Squad,6750,4700,9450,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Winger,21-24,Top,71000,49500,99000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Winger,21-24,Mid,30000,21000,42000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Winger,21-24,Squad,11000,7850,15500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Winger,25-29,Top,94500,66000,132000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Winger,25-29,Mid,40000,28000,56000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Winger,25-29,Squad,15000,10500,21000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Winger,30-32,Top,85000,59500,119000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Winger,30-32,Mid,36000,25000,50500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Winger,30-32,Squad,13500,9450,19000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Winger,33+,Top,61500,43000,86000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Winger,33+,Mid,26000,18000,36500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Winger,33+,Squad,9750,6800,13500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Attacking Mid,U21,Top,41500,29000,58000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Attacking Mid,U21,Mid,17500,12000,24500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Attacking Mid,U21,Squad,6550,4600,9200,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Attacking Mid,21-24,Top,69000,48000,96500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Attacking Mid,21-24,Mid,29000,20500,41000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Attacking Mid,21-24,Squad,11000,7650,15500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Attacking Mid,25-29,Top,92000,64500,128500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Attacking Mid,25-29,Mid,39000,27000,54500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Attacking Mid,25-29,Squad,14500,10000,20500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Attacking Mid,30-32,Top,82500,58000,115500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Attacking Mid,30-32,Mid,35000,24500,49000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Attacking Mid,30-32,Squad,13000,9200,18500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Attacking Mid,33+,Top,59500,42000,83500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Attacking Mid,33+,Mid,25500,17500,35500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Attacking Mid,33+,Squad,9500,6650,13500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Central Mid,U21,Top,38000,27000,53500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Central Mid,U21,Mid,16000,11500,22500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Central Mid,U21,Squad,6100,4250,8500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Central Mid,21-24,Top,64000,44500,89000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Central Mid,21-24,Mid,27000,19000,38000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Central Mid,21-24,Squad,10000,7100,14000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Central Mid,25-29,Top,85000,59500,119000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Central Mid,25-29,Mid,36000,25000,50500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Central Mid,25-29,Squad,13500,9450,19000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Central Mid,30-32,Top,76500,53500,107000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Central Mid,30-32,Mid,32500,22500,45500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Central Mid,30-32,Squad,12000,8500,17000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Central Mid,33+,Top,55000,38500,77500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Central Mid,33+,Mid,23500,16500,33000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Central Mid,33+,Squad,8800,6150,12500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Defensive Mid,U21,Top,36500,25500,51000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Defensive Mid,U21,Mid,15500,11000,21500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Defensive Mid,U21,Squad,5750,4050,8100,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Defensive Mid,21-24,Top,60500,42500,85000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Defensive Mid,21-24,Mid,25500,18000,36000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Defensive Mid,21-24,Squad,9600,6750,13500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Defensive Mid,25-29,Top,81000,56500,113000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Defensive Mid,25-29,Mid,34000,24000,48000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Defensive Mid,25-29,Squad,13000,9000,18000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Defensive Mid,30-32,Top,72500,51000,101500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Defensive Mid,30-32,Mid,31000,21500,43000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Defensive Mid,30-32,Squad,11500,8100,16000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Defensive Mid,33+,Top,52500,36500,73500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Defensive Mid,33+,Mid,22000,15500,31000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Defensive Mid,33+,Squad,8350,5850,11500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Back,U21,Top,35000,24500,49500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Back,U21,Mid,15000,10500,21000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Back,U21,Squad,5600,3900,7800,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Back,21-24,Top,58500,41000,82000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Back,21-24,Mid,25000,17500,35000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Back,21-24,Squad,9300,6500,13000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Back,25-29,Top,78000,54500,109500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Back,25-29,Mid,33000,23000,46500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Back,25-29,Squad,12500,8700,17500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Back,30-32,Top,70500,49500,98500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Back,30-32,Mid,30000,21000,41500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Back,30-32,Squad,11000,7800,15500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Back,33+,Top,51000,35500,71000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Back,33+,Mid,21500,15000,30000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Centre Back,33+,Squad,8050,5650,11500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Full Back,U21,Top,32500,23000,45500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Full Back,U21,Mid,14000,9650,19500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Full Back,U21,Squad,5150,3600,7250,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Full Back,21-24,Top,54000,38000,76000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Full Back,21-24,Mid,23000,16000,32000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Full Back,21-24,Squad,8600,6000,12000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Full Back,25-29,Top,72000,50500,101000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Full Back,25-29,Mid,30500,21500,43000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Full Back,25-29,Squad,11500,8050,16000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Full Back,30-32,Top,65000,45500,91000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Full Back,30-32,Mid,27500,19500,38500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Full Back,30-32,Squad,10500,7250,14500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Full Back,33+,Top,47000,33000,65500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Full Back,33+,Mid,20000,14000,28000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Full Back,33+,Squad,7450,5200,10500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Goalkeeper,U21,Top,31500,22000,44000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Goalkeeper,U21,Mid,13500,9300,18500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Goalkeeper,U21,Squad,5000,3500,6950,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Goalkeeper,21-24,Top,52500,36500,73000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Goalkeeper,21-24,Mid,22000,15500,31000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Goalkeeper,21-24,Squad,8300,5800,11500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Goalkeeper,25-29,Top,69500,49000,97500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Goalkeeper,25-29,Mid,29500,20500,41500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Goalkeeper,25-29,Squad,11000,7750,15500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Goalkeeper,30-32,Top,62500,44000,88000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Goalkeeper,30-32,Mid,26500,18500,37000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Goalkeeper,30-32,Squad,9950,6950,14000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Goalkeeper,33+,Top,45500,31500,63500,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Goalkeeper,33+,Mid,19000,13500,27000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+12,Goalkeeper,33+,Squad,7200,5050,10000,"modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+3,Centre Forward,U21,Top,17500,12000,24000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Forward,U21,Mid,5400,3800,7550,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Forward,U21,Squad,1900,1300,2650,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Forward,21-24,Top,29000,20000,40500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Forward,21-24,Mid,9000,6300,12500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Forward,21-24,Squad,3150,2200,4400,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Forward,25-29,Top,38500,27000,54000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Forward,25-29,Mid,12000,8400,17000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Forward,25-29,Squad,4200,2950,5900,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Forward,30-32,Top,34500,24000,48500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Forward,30-32,Mid,11000,7550,15000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Forward,30-32,Squad,3800,2650,5300,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Forward,33+,Top,25000,17500,35000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Forward,33+,Mid,7800,5450,11000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Forward,33+,Squad,2750,1900,3800,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Winger,U21,Top,16000,11000,22500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Winger,U21,Mid,5000,3500,7000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Winger,U21,Squad,1750,1200,2450,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Winger,21-24,Top,26500,18500,37500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Winger,21-24,Mid,8350,5850,11500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Winger,21-24,Squad,2900,2050,4100,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Winger,25-29,Top,35500,25000,49500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Winger,25-29,Mid,11000,7750,15500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Winger,25-29,Squad,3900,2700,5450,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Winger,30-32,Top,32000,22500,45000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Winger,30-32,Mid,10000,7000,14000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Winger,30-32,Squad,3500,2450,4900,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Winger,33+,Top,23000,16000,32500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Winger,33+,Mid,7200,5050,10000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Winger,33+,Squad,2550,1750,3550,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Attacking Mid,U21,Top,15500,11000,22000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Attacking Mid,U21,Mid,4850,3400,6800,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Attacking Mid,U21,Squad,1700,1200,2400,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Attacking Mid,21-24,Top,26000,18000,36500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Attacking Mid,21-24,Mid,8100,5650,11500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Attacking Mid,21-24,Squad,2850,2000,3950,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Attacking Mid,25-29,Top,34500,24000,48500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Attacking Mid,25-29,Mid,11000,7550,15000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Attacking Mid,25-29,Squad,3800,2650,5300,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Attacking Mid,30-32,Top,31000,22000,43500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Attacking Mid,30-32,Mid,9700,6800,13500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Attacking Mid,30-32,Squad,3400,2400,4750,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Attacking Mid,33+,Top,22500,15500,31500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Attacking Mid,33+,Mid,7000,4900,9850,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Attacking Mid,33+,Squad,2450,1700,3450,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Central Mid,U21,Top,14500,10000,20000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Central Mid,U21,Mid,4500,3150,6300,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Central Mid,U21,Squad,1600,1100,2200,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Central Mid,21-24,Top,24000,17000,33500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Central Mid,21-24,Mid,7500,5250,10500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Central Mid,21-24,Squad,2600,1850,3650,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Central Mid,25-29,Top,32000,22500,45000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Central Mid,25-29,Mid,10000,7000,14000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Central Mid,25-29,Squad,3500,2450,4900,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Central Mid,30-32,Top,29000,20000,40500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Central Mid,30-32,Mid,9000,6300,12500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Central Mid,30-32,Squad,3150,2200,4400,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Central Mid,33+,Top,21000,14500,29000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Central Mid,33+,Mid,6500,4550,9100,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Central Mid,33+,Squad,2300,1600,3200,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Defensive Mid,U21,Top,13500,9600,19000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Defensive Mid,U21,Mid,4300,3000,6000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Defensive Mid,U21,Squad,1500,1050,2100,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Defensive Mid,21-24,Top,23000,16000,32000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Defensive Mid,21-24,Mid,7100,5000,10000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Defensive Mid,21-24,Squad,2500,1750,3500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Defensive Mid,25-29,Top,30500,21500,42500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Defensive Mid,25-29,Mid,9500,6650,13500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Defensive Mid,25-29,Squad,3300,2350,4650,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Defensive Mid,30-32,Top,27500,19000,38500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Defensive Mid,30-32,Mid,8550,6000,12000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Defensive Mid,30-32,Squad,3000,2100,4200,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Defensive Mid,33+,Top,20000,14000,27500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Defensive Mid,33+,Mid,6200,4300,8650,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Defensive Mid,33+,Squad,2150,1500,3050,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Back,U21,Top,13000,9250,18500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Back,U21,Mid,4150,2900,5800,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Back,U21,Squad,1450,1000,2050,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Back,21-24,Top,22000,15500,31000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Back,21-24,Mid,6900,4850,9650,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Back,21-24,Squad,2400,1700,3400,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Back,25-29,Top,29500,20500,41000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Back,25-29,Mid,9200,6450,13000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Back,25-29,Squad,3200,2250,4500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Back,30-32,Top,26500,18500,37000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Back,30-32,Mid,8300,5800,11500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Back,30-32,Squad,2900,2050,4050,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Back,33+,Top,19000,13500,27000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Back,33+,Mid,6000,4200,8350,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Centre Back,33+,Squad,2100,1450,2950,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Full Back,U21,Top,12000,8550,17000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Full Back,U21,Mid,3800,2700,5350,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Full Back,U21,Squad,1350,950,1850,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Full Back,21-24,Top,20500,14500,28500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Full Back,21-24,Mid,6400,4450,8900,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Full Back,21-24,Squad,2250,1550,3100,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Full Back,25-29,Top,27000,19000,38000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Full Back,25-29,Mid,8500,5950,12000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Full Back,25-29,Squad,3000,2100,4150,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Full Back,30-32,Top,24500,17000,34500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Full Back,30-32,Mid,7650,5350,10500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Full Back,30-32,Squad,2700,1850,3750,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Full Back,33+,Top,17500,12500,25000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Full Back,33+,Mid,5500,3850,7750,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Full Back,33+,Squad,1950,1350,2700,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Goalkeeper,U21,Top,12000,8250,16500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Goalkeeper,U21,Mid,3700,2600,5150,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Goalkeeper,U21,Squad,1300,900,1800,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Goalkeeper,21-24,Top,19500,14000,27500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Goalkeeper,21-24,Mid,6150,4300,8600,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Goalkeeper,21-24,Squad,2150,1500,3000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Goalkeeper,25-29,Top,26000,18500,36500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Goalkeeper,25-29,Mid,8200,5750,11500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Goalkeeper,25-29,Squad,2850,2000,4000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Goalkeeper,30-32,Top,23500,16500,33000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Goalkeeper,30-32,Mid,7400,5150,10500,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Goalkeeper,30-32,Squad,2600,1800,3600,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Goalkeeper,33+,Top,17000,12000,24000,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Goalkeeper,33+,Mid,5350,3750,7450,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+3,Goalkeeper,33+,Squad,1850,1300,2600,"modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"
+4,Centre Forward,U21,Top,6500,4550,9050,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Forward,U21,Mid,2950,2100,4150,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Forward,U21,Squad,1300,900,1800,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Forward,21-24,Top,11000,7550,15000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Forward,21-24,Mid,4950,3450,6950,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Forward,21-24,Squad,2150,1500,3000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Forward,25-29,Top,14500,10000,20000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Forward,25-29,Mid,6600,4600,9250,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Forward,25-29,Squad,2900,2000,4050,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Forward,30-32,Top,13000,9050,18000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Forward,30-32,Mid,5950,4150,8300,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Forward,30-32,Squad,2600,1800,3650,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Forward,33+,Top,9350,6550,13000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Forward,33+,Mid,4300,3000,6000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Forward,33+,Squad,1850,1300,2600,modelled (Capology/888sport 2025/26 League One reporting)
+4,Winger,U21,Top,6000,4200,8400,modelled (Capology/888sport 2025/26 League One reporting)
+4,Winger,U21,Mid,2750,1900,3850,modelled (Capology/888sport 2025/26 League One reporting)
+4,Winger,U21,Squad,1200,850,1700,modelled (Capology/888sport 2025/26 League One reporting)
+4,Winger,21-24,Top,10000,7000,14000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Winger,21-24,Mid,4600,3200,6400,modelled (Capology/888sport 2025/26 League One reporting)
+4,Winger,21-24,Squad,2000,1400,2800,modelled (Capology/888sport 2025/26 League One reporting)
+4,Winger,25-29,Top,13500,9300,18500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Winger,25-29,Mid,6100,4250,8550,modelled (Capology/888sport 2025/26 League One reporting)
+4,Winger,25-29,Squad,2650,1850,3750,modelled (Capology/888sport 2025/26 League One reporting)
+4,Winger,30-32,Top,12000,8400,17000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Winger,30-32,Mid,5500,3850,7700,modelled (Capology/888sport 2025/26 League One reporting)
+4,Winger,30-32,Squad,2400,1700,3350,modelled (Capology/888sport 2025/26 League One reporting)
+4,Winger,33+,Top,8650,6050,12000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Winger,33+,Mid,3950,2800,5550,modelled (Capology/888sport 2025/26 League One reporting)
+4,Winger,33+,Squad,1750,1200,2400,modelled (Capology/888sport 2025/26 League One reporting)
+4,Attacking Mid,U21,Top,5850,4100,8150,modelled (Capology/888sport 2025/26 League One reporting)
+4,Attacking Mid,U21,Mid,2650,1850,3750,modelled (Capology/888sport 2025/26 League One reporting)
+4,Attacking Mid,U21,Squad,1150,800,1650,modelled (Capology/888sport 2025/26 League One reporting)
+4,Attacking Mid,21-24,Top,9700,6800,13500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Attacking Mid,21-24,Mid,4450,3100,6250,modelled (Capology/888sport 2025/26 League One reporting)
+4,Attacking Mid,21-24,Squad,1950,1350,2700,modelled (Capology/888sport 2025/26 League One reporting)
+4,Attacking Mid,25-29,Top,13000,9050,18000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Attacking Mid,25-29,Mid,5950,4150,8300,modelled (Capology/888sport 2025/26 League One reporting)
+4,Attacking Mid,25-29,Squad,2600,1800,3650,modelled (Capology/888sport 2025/26 League One reporting)
+4,Attacking Mid,30-32,Top,11500,8150,16500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Attacking Mid,30-32,Mid,5350,3750,7500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Attacking Mid,30-32,Squad,2350,1650,3250,modelled (Capology/888sport 2025/26 League One reporting)
+4,Attacking Mid,33+,Top,8400,5900,12000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Attacking Mid,33+,Mid,3850,2700,5400,modelled (Capology/888sport 2025/26 League One reporting)
+4,Attacking Mid,33+,Squad,1700,1200,2350,modelled (Capology/888sport 2025/26 League One reporting)
+4,Central Mid,U21,Top,5400,3800,7550,modelled (Capology/888sport 2025/26 League One reporting)
+4,Central Mid,U21,Mid,2500,1750,3450,modelled (Capology/888sport 2025/26 League One reporting)
+4,Central Mid,U21,Squad,1100,750,1500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Central Mid,21-24,Top,9000,6300,12500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Central Mid,21-24,Mid,4100,2900,5800,modelled (Capology/888sport 2025/26 League One reporting)
+4,Central Mid,21-24,Squad,1800,1250,2500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Central Mid,25-29,Top,12000,8400,17000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Central Mid,25-29,Mid,5500,3850,7700,modelled (Capology/888sport 2025/26 League One reporting)
+4,Central Mid,25-29,Squad,2400,1700,3350,modelled (Capology/888sport 2025/26 League One reporting)
+4,Central Mid,30-32,Top,11000,7550,15000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Central Mid,30-32,Mid,4950,3450,6950,modelled (Capology/888sport 2025/26 League One reporting)
+4,Central Mid,30-32,Squad,2150,1500,3000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Central Mid,33+,Top,7800,5450,11000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Central Mid,33+,Mid,3600,2500,5000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Central Mid,33+,Squad,1550,1100,2200,modelled (Capology/888sport 2025/26 League One reporting)
+4,Defensive Mid,U21,Top,5150,3600,7200,modelled (Capology/888sport 2025/26 League One reporting)
+4,Defensive Mid,U21,Mid,2350,1650,3300,modelled (Capology/888sport 2025/26 League One reporting)
+4,Defensive Mid,U21,Squad,1050,700,1450,modelled (Capology/888sport 2025/26 League One reporting)
+4,Defensive Mid,21-24,Top,8550,6000,12000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Defensive Mid,21-24,Mid,3900,2750,5500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Defensive Mid,21-24,Squad,1700,1200,2400,modelled (Capology/888sport 2025/26 League One reporting)
+4,Defensive Mid,25-29,Top,11500,8000,16000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Defensive Mid,25-29,Mid,5200,3650,7300,modelled (Capology/888sport 2025/26 League One reporting)
+4,Defensive Mid,25-29,Squad,2300,1600,3200,modelled (Capology/888sport 2025/26 League One reporting)
+4,Defensive Mid,30-32,Top,10500,7200,14500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Defensive Mid,30-32,Mid,4700,3300,6600,modelled (Capology/888sport 2025/26 League One reporting)
+4,Defensive Mid,30-32,Squad,2050,1450,2850,modelled (Capology/888sport 2025/26 League One reporting)
+4,Defensive Mid,33+,Top,7400,5200,10500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Defensive Mid,33+,Mid,3400,2400,4750,modelled (Capology/888sport 2025/26 League One reporting)
+4,Defensive Mid,33+,Squad,1500,1050,2050,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Back,U21,Top,4950,3500,6950,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Back,U21,Mid,2300,1600,3200,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Back,U21,Squad,1000,700,1400,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Back,21-24,Top,8300,5800,11500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Back,21-24,Mid,3800,2650,5300,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Back,21-24,Squad,1650,1150,2300,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Back,25-29,Top,11000,7750,15500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Back,25-29,Mid,5050,3550,7100,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Back,25-29,Squad,2200,1550,3100,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Back,30-32,Top,9950,6950,14000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Back,30-32,Mid,4550,3200,6400,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Back,30-32,Squad,2000,1400,2800,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Back,33+,Top,7200,5000,10000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Back,33+,Mid,3300,2300,4600,modelled (Capology/888sport 2025/26 League One reporting)
+4,Centre Back,33+,Squad,1450,1000,2000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Full Back,U21,Top,4600,3200,6450,modelled (Capology/888sport 2025/26 League One reporting)
+4,Full Back,U21,Mid,2100,1450,2950,modelled (Capology/888sport 2025/26 League One reporting)
+4,Full Back,U21,Squad,900,650,1300,modelled (Capology/888sport 2025/26 League One reporting)
+4,Full Back,21-24,Top,7650,5350,10500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Full Back,21-24,Mid,3500,2450,4900,modelled (Capology/888sport 2025/26 League One reporting)
+4,Full Back,21-24,Squad,1550,1050,2150,modelled (Capology/888sport 2025/26 League One reporting)
+4,Full Back,25-29,Top,10000,7150,14500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Full Back,25-29,Mid,4700,3250,6550,modelled (Capology/888sport 2025/26 League One reporting)
+4,Full Back,25-29,Squad,2050,1450,2850,modelled (Capology/888sport 2025/26 League One reporting)
+4,Full Back,30-32,Top,9200,6450,13000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Full Back,30-32,Mid,4200,2950,5900,modelled (Capology/888sport 2025/26 League One reporting)
+4,Full Back,30-32,Squad,1850,1300,2550,modelled (Capology/888sport 2025/26 League One reporting)
+4,Full Back,33+,Top,6650,4650,9300,modelled (Capology/888sport 2025/26 League One reporting)
+4,Full Back,33+,Mid,3050,2150,4250,modelled (Capology/888sport 2025/26 League One reporting)
+4,Full Back,33+,Squad,1350,950,1850,modelled (Capology/888sport 2025/26 League One reporting)
+4,Goalkeeper,U21,Top,4450,3100,6200,modelled (Capology/888sport 2025/26 League One reporting)
+4,Goalkeeper,U21,Mid,2050,1400,2850,modelled (Capology/888sport 2025/26 League One reporting)
+4,Goalkeeper,U21,Squad,900,600,1250,modelled (Capology/888sport 2025/26 League One reporting)
+4,Goalkeeper,21-24,Top,7400,5150,10500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Goalkeeper,21-24,Mid,3400,2350,4750,modelled (Capology/888sport 2025/26 League One reporting)
+4,Goalkeeper,21-24,Squad,1500,1050,2050,modelled (Capology/888sport 2025/26 League One reporting)
+4,Goalkeeper,25-29,Top,9850,6900,14000,modelled (Capology/888sport 2025/26 League One reporting)
+4,Goalkeeper,25-29,Mid,4500,3150,6300,modelled (Capology/888sport 2025/26 League One reporting)
+4,Goalkeeper,25-29,Squad,1950,1400,2750,modelled (Capology/888sport 2025/26 League One reporting)
+4,Goalkeeper,30-32,Top,8850,6200,12500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Goalkeeper,30-32,Mid,4050,2850,5700,modelled (Capology/888sport 2025/26 League One reporting)
+4,Goalkeeper,30-32,Squad,1750,1250,2500,modelled (Capology/888sport 2025/26 League One reporting)
+4,Goalkeeper,33+,Top,6400,4500,8950,modelled (Capology/888sport 2025/26 League One reporting)
+4,Goalkeeper,33+,Mid,2950,2050,4100,modelled (Capology/888sport 2025/26 League One reporting)
+4,Goalkeeper,33+,Squad,1300,900,1800,modelled (Capology/888sport 2025/26 League One reporting)
+5,Centre Forward,U21,Top,2700,1900,3800,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Forward,U21,Mid,1450,1000,2050,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Forward,U21,Squad,650,450,900,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Forward,21-24,Top,4500,3150,6300,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Forward,21-24,Mid,2450,1700,3400,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Forward,21-24,Squad,1100,750,1500,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Forward,25-29,Top,6000,4200,8400,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Forward,25-29,Mid,3250,2250,4550,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Forward,25-29,Squad,1450,1000,2000,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Forward,30-32,Top,5400,3800,7550,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Forward,30-32,Mid,2900,2050,4100,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Forward,30-32,Squad,1300,900,1800,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Forward,33+,Top,3900,2750,5450,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Forward,33+,Mid,2100,1450,2950,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Forward,33+,Squad,950,650,1300,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Winger,U21,Top,2500,1750,3500,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Winger,U21,Mid,1350,950,1900,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Winger,U21,Squad,600,400,850,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Winger,21-24,Top,4150,2900,5850,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Winger,21-24,Mid,2250,1550,3150,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Winger,21-24,Squad,1000,700,1400,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Winger,25-29,Top,5550,3900,7750,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Winger,25-29,Mid,3000,2100,4200,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Winger,25-29,Squad,1350,950,1850,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Winger,30-32,Top,5000,3500,7000,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Winger,30-32,Mid,2700,1900,3800,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Winger,30-32,Squad,1200,850,1700,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Winger,33+,Top,3600,2550,5050,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Winger,33+,Mid,1950,1350,2750,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Winger,33+,Squad,850,600,1200,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Attacking Mid,U21,Top,2450,1700,3400,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Attacking Mid,U21,Mid,1300,900,1850,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Attacking Mid,U21,Squad,600,400,800,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Attacking Mid,21-24,Top,4050,2850,5650,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Attacking Mid,21-24,Mid,2200,1550,3050,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Attacking Mid,21-24,Squad,950,700,1350,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Attacking Mid,25-29,Top,5400,3800,7550,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Attacking Mid,25-29,Mid,2900,2050,4100,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Attacking Mid,25-29,Squad,1300,900,1800,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Attacking Mid,30-32,Top,4850,3400,6800,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Attacking Mid,30-32,Mid,2600,1850,3650,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Attacking Mid,30-32,Squad,1150,800,1650,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Attacking Mid,33+,Top,3500,2450,4900,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Attacking Mid,33+,Mid,1900,1350,2650,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Attacking Mid,33+,Squad,850,600,1200,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Central Mid,U21,Top,2250,1600,3150,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Central Mid,U21,Mid,1200,850,1700,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Central Mid,U21,Squad,550,400,750,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Central Mid,21-24,Top,3750,2600,5250,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Central Mid,21-24,Mid,2000,1400,2850,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Central Mid,21-24,Squad,900,650,1250,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Central Mid,25-29,Top,5000,3500,7000,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Central Mid,25-29,Mid,2700,1900,3800,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Central Mid,25-29,Squad,1200,850,1700,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Central Mid,30-32,Top,4500,3150,6300,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Central Mid,30-32,Mid,2450,1700,3400,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Central Mid,30-32,Squad,1100,750,1500,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Central Mid,33+,Top,3250,2300,4550,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Central Mid,33+,Mid,1750,1250,2450,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Central Mid,33+,Squad,800,550,1100,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Defensive Mid,U21,Top,2150,1500,3000,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Defensive Mid,U21,Mid,1150,800,1600,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Defensive Mid,U21,Squad,500,350,700,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Defensive Mid,21-24,Top,3550,2500,5000,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Defensive Mid,21-24,Mid,1900,1350,2700,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Defensive Mid,21-24,Squad,850,600,1200,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Defensive Mid,25-29,Top,4750,3300,6650,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Defensive Mid,25-29,Mid,2550,1800,3600,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Defensive Mid,25-29,Squad,1150,800,1600,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Defensive Mid,30-32,Top,4300,3000,6000,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Defensive Mid,30-32,Mid,2300,1600,3250,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Defensive Mid,30-32,Squad,1050,700,1450,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Defensive Mid,33+,Top,3100,2150,4300,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Defensive Mid,33+,Mid,1650,1150,2350,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Defensive Mid,33+,Squad,750,500,1050,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Back,U21,Top,2050,1450,2900,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Back,U21,Mid,1100,800,1550,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Back,U21,Squad,500,350,700,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Back,21-24,Top,3450,2400,4850,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Back,21-24,Mid,1850,1300,2600,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Back,21-24,Squad,850,600,1150,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Back,25-29,Top,4600,3200,6450,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Back,25-29,Mid,2500,1750,3500,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Back,25-29,Squad,1100,750,1550,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Back,30-32,Top,4150,2900,5800,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Back,30-32,Mid,2250,1550,3150,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Back,30-32,Squad,1000,700,1400,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Back,33+,Top,3000,2100,4200,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Back,33+,Mid,1600,1150,2250,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Centre Back,33+,Squad,700,500,1000,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Full Back,U21,Top,1900,1350,2700,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Full Back,U21,Mid,1050,700,1450,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Full Back,U21,Squad,450,300,650,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Full Back,21-24,Top,3200,2250,4450,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Full Back,21-24,Mid,1700,1200,2400,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Full Back,21-24,Squad,750,550,1050,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Full Back,25-29,Top,4250,3000,5950,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Full Back,25-29,Mid,2300,1600,3200,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Full Back,25-29,Squad,1000,700,1450,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Full Back,30-32,Top,3800,2700,5350,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Full Back,30-32,Mid,2050,1450,2900,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Full Back,30-32,Squad,900,650,1300,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Full Back,33+,Top,2750,1950,3850,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Full Back,33+,Mid,1500,1050,2100,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Full Back,33+,Squad,650,450,950,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Goalkeeper,U21,Top,1850,1300,2600,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Goalkeeper,U21,Mid,1000,700,1400,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Goalkeeper,U21,Squad,450,300,600,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Goalkeeper,21-24,Top,3100,2150,4300,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Goalkeeper,21-24,Mid,1650,1150,2300,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Goalkeeper,21-24,Squad,750,500,1050,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Goalkeeper,25-29,Top,4100,2850,5750,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Goalkeeper,25-29,Mid,2200,1550,3100,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Goalkeeper,25-29,Squad,1000,700,1400,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Goalkeeper,30-32,Top,3700,2600,5150,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Goalkeeper,30-32,Mid,2000,1400,2800,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Goalkeeper,30-32,Squad,900,600,1250,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Goalkeeper,33+,Top,2650,1850,3750,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Goalkeeper,33+,Mid,1450,1000,2000,modelled (888sport/FootyStats 2025/26 League Two reporting)
+5,Goalkeeper,33+,Squad,650,450,900,modelled (888sport/FootyStats 2025/26 League Two reporting)
+65,Centre Forward,U21,Top,1900,1300,2650,modelled (William Hill 2025/26 National League reporting)
+65,Centre Forward,U21,Mid,900,650,1300,modelled (William Hill 2025/26 National League reporting)
+65,Centre Forward,U21,Squad,350,250,500,modelled (William Hill 2025/26 National League reporting)
+65,Centre Forward,21-24,Top,3150,2200,4400,modelled (William Hill 2025/26 National League reporting)
+65,Centre Forward,21-24,Mid,1550,1050,2150,modelled (William Hill 2025/26 National League reporting)
+65,Centre Forward,21-24,Squad,600,400,800,modelled (William Hill 2025/26 National League reporting)
+65,Centre Forward,25-29,Top,4200,2950,5900,modelled (William Hill 2025/26 National League reporting)
+65,Centre Forward,25-29,Mid,2050,1450,2850,modelled (William Hill 2025/26 National League reporting)
+65,Centre Forward,25-29,Squad,800,550,1100,modelled (William Hill 2025/26 National League reporting)
+65,Centre Forward,30-32,Top,3800,2650,5300,modelled (William Hill 2025/26 National League reporting)
+65,Centre Forward,30-32,Mid,1850,1300,2550,modelled (William Hill 2025/26 National League reporting)
+65,Centre Forward,30-32,Squad,700,500,1000,modelled (William Hill 2025/26 National League reporting)
+65,Centre Forward,33+,Top,2750,1900,3800,modelled (William Hill 2025/26 National League reporting)
+65,Centre Forward,33+,Mid,1350,950,1850,modelled (William Hill 2025/26 National League reporting)
+65,Centre Forward,33+,Squad,500,350,700,modelled (William Hill 2025/26 National League reporting)
+65,Winger,U21,Top,1750,1200,2450,modelled (William Hill 2025/26 National League reporting)
+65,Winger,U21,Mid,850,600,1200,modelled (William Hill 2025/26 National League reporting)
+65,Winger,U21,Squad,300,250,450,modelled (William Hill 2025/26 National League reporting)
+65,Winger,21-24,Top,2900,2050,4100,modelled (William Hill 2025/26 National League reporting)
+65,Winger,21-24,Mid,1400,1000,2000,modelled (William Hill 2025/26 National League reporting)
+65,Winger,21-24,Squad,550,400,750,modelled (William Hill 2025/26 National League reporting)
+65,Winger,25-29,Top,3900,2700,5450,modelled (William Hill 2025/26 National League reporting)
+65,Winger,25-29,Mid,1900,1300,2650,modelled (William Hill 2025/26 National League reporting)
+65,Winger,25-29,Squad,700,500,1000,modelled (William Hill 2025/26 National League reporting)
+65,Winger,30-32,Top,3500,2450,4900,modelled (William Hill 2025/26 National League reporting)
+65,Winger,30-32,Mid,1700,1200,2400,modelled (William Hill 2025/26 National League reporting)
+65,Winger,30-32,Squad,650,450,900,modelled (William Hill 2025/26 National League reporting)
+65,Winger,33+,Top,2550,1750,3550,modelled (William Hill 2025/26 National League reporting)
+65,Winger,33+,Mid,1250,850,1700,modelled (William Hill 2025/26 National League reporting)
+65,Winger,33+,Squad,450,350,650,modelled (William Hill 2025/26 National League reporting)
+65,Attacking Mid,U21,Top,1700,1200,2400,modelled (William Hill 2025/26 National League reporting)
+65,Attacking Mid,U21,Mid,850,600,1150,modelled (William Hill 2025/26 National League reporting)
+65,Attacking Mid,U21,Squad,300,200,450,modelled (William Hill 2025/26 National League reporting)
+65,Attacking Mid,21-24,Top,2850,2000,3950,modelled (William Hill 2025/26 National League reporting)
+65,Attacking Mid,21-24,Mid,1400,950,1950,modelled (William Hill 2025/26 National League reporting)
+65,Attacking Mid,21-24,Squad,550,350,750,modelled (William Hill 2025/26 National League reporting)
+65,Attacking Mid,25-29,Top,3800,2650,5300,modelled (William Hill 2025/26 National League reporting)
+65,Attacking Mid,25-29,Mid,1850,1300,2550,modelled (William Hill 2025/26 National League reporting)
+65,Attacking Mid,25-29,Squad,700,500,1000,modelled (William Hill 2025/26 National League reporting)
+65,Attacking Mid,30-32,Top,3400,2400,4750,modelled (William Hill 2025/26 National League reporting)
+65,Attacking Mid,30-32,Mid,1650,1150,2300,modelled (William Hill 2025/26 National League reporting)
+65,Attacking Mid,30-32,Squad,650,450,900,modelled (William Hill 2025/26 National League reporting)
+65,Attacking Mid,33+,Top,2450,1700,3450,modelled (William Hill 2025/26 National League reporting)
+65,Attacking Mid,33+,Mid,1200,850,1650,modelled (William Hill 2025/26 National League reporting)
+65,Attacking Mid,33+,Squad,450,300,650,modelled (William Hill 2025/26 National League reporting)
+65,Central Mid,U21,Top,1600,1100,2200,modelled (William Hill 2025/26 National League reporting)
+65,Central Mid,U21,Mid,750,550,1050,modelled (William Hill 2025/26 National League reporting)
+65,Central Mid,U21,Squad,300,200,400,modelled (William Hill 2025/26 National League reporting)
+65,Central Mid,21-24,Top,2600,1850,3650,modelled (William Hill 2025/26 National League reporting)
+65,Central Mid,21-24,Mid,1300,900,1800,modelled (William Hill 2025/26 National League reporting)
+65,Central Mid,21-24,Squad,500,350,700,modelled (William Hill 2025/26 National League reporting)
+65,Central Mid,25-29,Top,3500,2450,4900,modelled (William Hill 2025/26 National League reporting)
+65,Central Mid,25-29,Mid,1700,1200,2400,modelled (William Hill 2025/26 National League reporting)
+65,Central Mid,25-29,Squad,650,450,900,modelled (William Hill 2025/26 National League reporting)
+65,Central Mid,30-32,Top,3150,2200,4400,modelled (William Hill 2025/26 National League reporting)
+65,Central Mid,30-32,Mid,1550,1050,2150,modelled (William Hill 2025/26 National League reporting)
+65,Central Mid,30-32,Squad,600,400,800,modelled (William Hill 2025/26 National League reporting)
+65,Central Mid,33+,Top,2300,1600,3200,modelled (William Hill 2025/26 National League reporting)
+65,Central Mid,33+,Mid,1100,750,1550,modelled (William Hill 2025/26 National League reporting)
+65,Central Mid,33+,Squad,400,300,600,modelled (William Hill 2025/26 National League reporting)
+65,Defensive Mid,U21,Top,1500,1050,2100,modelled (William Hill 2025/26 National League reporting)
+65,Defensive Mid,U21,Mid,750,500,1000,modelled (William Hill 2025/26 National League reporting)
+65,Defensive Mid,U21,Squad,300,200,400,modelled (William Hill 2025/26 National League reporting)
+65,Defensive Mid,21-24,Top,2500,1750,3500,modelled (William Hill 2025/26 National League reporting)
+65,Defensive Mid,21-24,Mid,1200,850,1700,modelled (William Hill 2025/26 National League reporting)
+65,Defensive Mid,21-24,Squad,450,300,650,modelled (William Hill 2025/26 National League reporting)
+65,Defensive Mid,25-29,Top,3300,2350,4650,modelled (William Hill 2025/26 National League reporting)
+65,Defensive Mid,25-29,Mid,1600,1150,2250,modelled (William Hill 2025/26 National League reporting)
+65,Defensive Mid,25-29,Squad,600,450,850,modelled (William Hill 2025/26 National League reporting)
+65,Defensive Mid,30-32,Top,3000,2100,4200,modelled (William Hill 2025/26 National League reporting)
+65,Defensive Mid,30-32,Mid,1450,1000,2050,modelled (William Hill 2025/26 National League reporting)
+65,Defensive Mid,30-32,Squad,550,400,800,modelled (William Hill 2025/26 National League reporting)
+65,Defensive Mid,33+,Top,2150,1500,3050,modelled (William Hill 2025/26 National League reporting)
+65,Defensive Mid,33+,Mid,1050,750,1450,modelled (William Hill 2025/26 National League reporting)
+65,Defensive Mid,33+,Squad,400,300,550,modelled (William Hill 2025/26 National League reporting)
+65,Centre Back,U21,Top,1450,1000,2050,modelled (William Hill 2025/26 National League reporting)
+65,Centre Back,U21,Mid,700,500,1000,modelled (William Hill 2025/26 National League reporting)
+65,Centre Back,U21,Squad,250,200,400,modelled (William Hill 2025/26 National League reporting)
+65,Centre Back,21-24,Top,2400,1700,3400,modelled (William Hill 2025/26 National League reporting)
+65,Centre Back,21-24,Mid,1150,800,1650,modelled (William Hill 2025/26 National League reporting)
+65,Centre Back,21-24,Squad,450,300,650,modelled (William Hill 2025/26 National League reporting)
+65,Centre Back,25-29,Top,3200,2250,4500,modelled (William Hill 2025/26 National League reporting)
+65,Centre Back,25-29,Mid,1550,1100,2200,modelled (William Hill 2025/26 National League reporting)
+65,Centre Back,25-29,Squad,600,400,850,modelled (William Hill 2025/26 National League reporting)
+65,Centre Back,30-32,Top,2900,2050,4050,modelled (William Hill 2025/26 National League reporting)
+65,Centre Back,30-32,Mid,1400,1000,1950,modelled (William Hill 2025/26 National League reporting)
+65,Centre Back,30-32,Squad,550,400,750,modelled (William Hill 2025/26 National League reporting)
+65,Centre Back,33+,Top,2100,1450,2950,modelled (William Hill 2025/26 National League reporting)
+65,Centre Back,33+,Mid,1000,700,1400,modelled (William Hill 2025/26 National League reporting)
+65,Centre Back,33+,Squad,400,250,550,modelled (William Hill 2025/26 National League reporting)
+65,Full Back,U21,Top,1350,950,1850,modelled (William Hill 2025/26 National League reporting)
+65,Full Back,U21,Mid,650,450,900,modelled (William Hill 2025/26 National League reporting)
+65,Full Back,U21,Squad,250,150,350,modelled (William Hill 2025/26 National League reporting)
+65,Full Back,21-24,Top,2250,1550,3100,modelled (William Hill 2025/26 National League reporting)
+65,Full Back,21-24,Mid,1100,750,1500,modelled (William Hill 2025/26 National League reporting)
+65,Full Back,21-24,Squad,400,300,600,modelled (William Hill 2025/26 National League reporting)
+65,Full Back,25-29,Top,3000,2100,4150,modelled (William Hill 2025/26 National League reporting)
+65,Full Back,25-29,Mid,1450,1000,2000,modelled (William Hill 2025/26 National League reporting)
+65,Full Back,25-29,Squad,550,400,750,modelled (William Hill 2025/26 National League reporting)
+65,Full Back,30-32,Top,2700,1850,3750,modelled (William Hill 2025/26 National League reporting)
+65,Full Back,30-32,Mid,1300,900,1800,modelled (William Hill 2025/26 National League reporting)
+65,Full Back,30-32,Squad,500,350,700,modelled (William Hill 2025/26 National League reporting)
+65,Full Back,33+,Top,1950,1350,2700,modelled (William Hill 2025/26 National League reporting)
+65,Full Back,33+,Mid,950,650,1300,modelled (William Hill 2025/26 National League reporting)
+65,Full Back,33+,Squad,350,250,500,modelled (William Hill 2025/26 National League reporting)
+65,Goalkeeper,U21,Top,1300,900,1800,modelled (William Hill 2025/26 National League reporting)
+65,Goalkeeper,U21,Mid,650,450,900,modelled (William Hill 2025/26 National League reporting)
+65,Goalkeeper,U21,Squad,250,150,350,modelled (William Hill 2025/26 National League reporting)
+65,Goalkeeper,21-24,Top,2150,1500,3000,modelled (William Hill 2025/26 National League reporting)
+65,Goalkeeper,21-24,Mid,1050,750,1450,modelled (William Hill 2025/26 National League reporting)
+65,Goalkeeper,21-24,Squad,400,300,550,modelled (William Hill 2025/26 National League reporting)
+65,Goalkeeper,25-29,Top,2850,2000,4000,modelled (William Hill 2025/26 National League reporting)
+65,Goalkeeper,25-29,Mid,1400,1000,1950,modelled (William Hill 2025/26 National League reporting)
+65,Goalkeeper,25-29,Squad,550,350,750,modelled (William Hill 2025/26 National League reporting)
+65,Goalkeeper,30-32,Top,2600,1800,3600,modelled (William Hill 2025/26 National League reporting)
+65,Goalkeeper,30-32,Mid,1250,900,1750,modelled (William Hill 2025/26 National League reporting)
+65,Goalkeeper,30-32,Squad,500,350,650,modelled (William Hill 2025/26 National League reporting)
+65,Goalkeeper,33+,Top,1850,1300,2600,modelled (William Hill 2025/26 National League reporting)
+65,Goalkeeper,33+,Mid,900,650,1250,modelled (William Hill 2025/26 National League reporting)
+65,Goalkeeper,33+,Squad,350,250,500,modelled (William Hill 2025/26 National League reporting)

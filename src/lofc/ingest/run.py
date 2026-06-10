@@ -40,7 +40,13 @@ def pull_competition(comp: Competition, limit: int | None = None, force: bool = 
         if landing.exists(ev_path) and landing.exists(lu_path) and not force:
             skipped += 1
         else:
-            landing.write_json(ev_path, statsbomb.get_events(mid), force=force)
+            events = statsbomb.get_events(mid)
+            # A transient API hiccup can return an empty list; saving it would make
+            # the gap permanent (idempotent skip). Leave it missing so a re-run retries.
+            if not events:
+                print(f"  [{comp.label}] WARNING: match {mid} returned no events, will retry next run")
+                continue
+            landing.write_json(ev_path, events, force=force)
             landing.write_json(lu_path, statsbomb.get_lineups(mid), force=force)
             pulled += 1
 

@@ -98,36 +98,85 @@ IDENTITY_PROFILES: dict[str, list[tuple[str, float, float | None]]] = {
 
 
 # --- Modelled player wage estimates (for the Phase 7 wage gate) ----------------------
-# A player's estimated weekly wage = base (their position, as a top-tier prime player)
-# x performance-tier multiplier x age multiplier. Anchored to Capology / SalarySport
-# orders of magnitude for the demo leagues (top-flight wages, present-day). This is a
-# MODELLED stand-in, never derived from market value, and is replaced wholesale when real
-# club wage data arrives. Performance tier = terciles of performance score within position.
+# A player's estimated weekly wage = league tier anchor (top / mid / squad, prime age)
+# x position shape x age multiplier, with a low/high band expressing uncertainty.
+# Anchored per league to published wage reporting; every league cites its sources.
+# This is a MODELLED stand-in, never derived from market value, and is replaced
+# wholesale when real wage data arrives (the gate is a screening prior: actual asking
+# wages come from agents). Performance tier = terciles of performance score within
+# position and league.
 PERFORMANCE_TIERS = ["Top", "Mid", "Squad"]
 
-WAGE_BASE_TOP_PRIME = {  # weekly GBP for a top-tier player in their prime (25-29)
-    "Centre Forward": 130000, "Winger": 110000, "Attacking Mid": 105000,
-    "Central Mid": 90000, "Defensive Mid": 80000, "Centre Back": 75000,
-    "Full Back": 65000, "Goalkeeper": 60000,
+# Per-league weekly GBP anchors for a PRIME-AGE (25-29) player at each tier.
+# "Mid" is the reported league average scaled to its prime-age equivalent (the
+# all-age average sits ~25% below a prime-age one under our age curve).
+WAGE_LEAGUE_ANCHORS: dict[int, dict] = {
+    # Demo trio: top-flight 2024 levels (Capology/SalarySport orders of magnitude).
+    2:  {"label": "Premier League (demo)", "Top": 95000, "Mid": 40000, "Squad": 15000,
+         "source": "modelled (Capology/SalarySport anchored, top-flight 2024 levels)"},
+    11: {"label": "La Liga (demo)", "Top": 90000, "Mid": 38000, "Squad": 14000,
+         "source": "modelled (Capology/SalarySport anchored, top-flight 2024 levels)"},
+    12: {"label": "Serie A (demo)", "Top": 85000, "Mid": 36000, "Squad": 13500,
+         "source": "modelled (Capology/SalarySport anchored, top-flight 2024 levels)"},
+    # EFL targets: anchored to 2025/26 reporting.
+    # Championship: average ~GBP 10.5-11k/wk (William Hill / Capology 2025/26); the
+    # lowest squads average ~GBP 4k; top earners reach GBP 40-90k (the extreme tail).
+    # Re-anchored down 30% after the wage_check reconciliation flagged +57% vs
+    # payroll totals: the published average reflects recorded regulars more than
+    # squad-wide pay at this tier, so the prime-age uplift over-corrected.
+    3:  {"label": "Championship", "Top": 32000, "Mid": 10000, "Squad": 3500,
+         "source": "modelled (Capology/William Hill 2025/26 Championship reporting, reconciled)"},
+    # League One: average GBP 4.1k/wk over 640 recorded salaries (Capology via
+    # 888sport, 2025/26); the top-50 earners all clear GBP 8.4k/wk.
+    4:  {"label": "League One", "Top": 12000, "Mid": 5500, "Squad": 2400,
+         "source": "modelled (Capology/888sport 2025/26 League One reporting)"},
+    # League Two: average ~GBP 2k/wk; the top-100 earners average ~GBP 3.3k/wk
+    # (888sport/FootyStats 2025/26).
+    5:  {"label": "League Two", "Top": 5000, "Mid": 2700, "Squad": 1200,
+         "source": "modelled (888sport/FootyStats 2025/26 League Two reporting)"},
+    # National League: mostly professional; averages ~GBP 1-1.5k/wk with the
+    # better-paid full-time squads higher (William Hill 2025/26).
+    65: {"label": "National League", "Top": 3500, "Mid": 1700, "Squad": 650,
+         "source": "modelled (William Hill 2025/26 National League reporting)"},
 }
-TIER_MULTIPLIER = {"Top": 1.0, "Mid": 0.42, "Squad": 0.16}
+
+# Positional differentials, mean ~1.0. The top-flight spread (attackers paid ~2x
+# keepers) is compressed for this grid: lower leagues show flatter pay by position.
+# The shape itself is an assumption: no public positional wage data exists below
+# the top flight.
+WAGE_POSITION_SHAPE = {
+    "Centre Forward": 1.20, "Winger": 1.11, "Attacking Mid": 1.08, "Central Mid": 1.00,
+    "Defensive Mid": 0.95, "Centre Back": 0.92, "Full Back": 0.85, "Goalkeeper": 0.82,
+}
 WAGE_AGE_MULTIPLIER = {"U21": 0.45, "21-24": 0.75, "25-29": 1.0, "30-32": 0.90, "33+": 0.65}
-WAGE_SOURCE = "modelled (Capology/SalarySport anchored, top-flight 2024 levels)"
+# Uncertainty band around the central estimate. Asymmetric: real asks overshoot the
+# model (signing-on fees, agent demands) more often than they undershoot.
+WAGE_BAND = (0.70, 1.40)
+
+
+def _round_wage(value: float) -> int:
+    """Round to a sensible quote: GBP 50 steps below 10k/wk, 500 above."""
+    step = 50 if value < 10_000 else 500
+    return int(round(value / step) * step)
 
 
 def build_wage_estimates() -> pd.DataFrame:
     rows = []
-    for position, base in WAGE_BASE_TOP_PRIME.items():
-        for band in AGE_BANDS:
-            for tier in PERFORMANCE_TIERS:
-                wage = base * TIER_MULTIPLIER[tier] * WAGE_AGE_MULTIPLIER[band]
-                rows.append({
-                    "position_group": position,
-                    "age_band": band,
-                    "performance_tier": tier,
-                    "estimated_weekly_wage_gbp": int(round(wage / 500.0) * 500),
-                    "source": WAGE_SOURCE,
-                })
+    for comp_id, anchors in WAGE_LEAGUE_ANCHORS.items():
+        for position, shape in WAGE_POSITION_SHAPE.items():
+            for band in AGE_BANDS:
+                for tier in PERFORMANCE_TIERS:
+                    wage = anchors[tier] * shape * WAGE_AGE_MULTIPLIER[band]
+                    rows.append({
+                        "competition_id": comp_id,
+                        "position_group": position,
+                        "age_band": band,
+                        "performance_tier": tier,
+                        "estimated_weekly_wage_gbp": _round_wage(wage),
+                        "wage_low_gbp": _round_wage(wage * WAGE_BAND[0]),
+                        "wage_high_gbp": _round_wage(wage * WAGE_BAND[1]),
+                        "source": anchors["source"],
+                    })
     return pd.DataFrame(rows)
 
 

@@ -17,9 +17,10 @@ from lofc.store.models import Shortlist
 
 COLUMNS = [
     "player_id", "competition_id", "season_id", "position_group", "rank",
-    "affordable_fee", "affordable_wage", "on_profile", "is_near_miss",
+    "affordable_fee", "affordable_wage", "wage_marginal", "on_profile", "is_near_miss",
     "performance_score", "fit_score", "undervaluation_pct", "market_value_eur",
-    "estimated_weekly_wage_gbp", "wage_ceiling_gbp", "transfer_budget_eur",
+    "estimated_weekly_wage_gbp", "wage_low_gbp", "wage_high_gbp",
+    "wage_ceiling_gbp", "transfer_budget_eur",
 ]
 
 
@@ -28,7 +29,7 @@ def main() -> None:
     shortlists = generate(engine, DEFAULT_TRANSFER_BUDGET_EUR)
 
     # Integer wage columns must not carry floats into the integer DB columns.
-    for col in ["estimated_weekly_wage_gbp", "wage_ceiling_gbp"]:
+    for col in ["estimated_weekly_wage_gbp", "wage_low_gbp", "wage_high_gbp", "wage_ceiling_gbp"]:
         shortlists[col] = shortlists[col].round().astype("Int64")
 
     with engine.begin() as conn:

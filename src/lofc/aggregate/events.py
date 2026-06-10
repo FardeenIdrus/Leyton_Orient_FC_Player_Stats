@@ -37,8 +37,12 @@ BOX_X, BOX_Y_MIN, BOX_Y_MAX = 102.0, 18.0, 62.0
 
 
 def parse_clock(value: str) -> float:
-    """Convert a 'MM:SS' or 'HH:MM:SS' lineup time to seconds."""
-    parts = [int(p) for p in value.split(":")]
+    """Convert a lineup time to seconds.
+
+    Open data uses 'MM:SS' / 'HH:MM:SS'; the paid API appends milliseconds
+    ('HH:MM:SS.mmm'), so the seconds part parses as a float.
+    """
+    parts = [float(p) for p in value.split(":")]
     if len(parts) == 2:
         return parts[0] * 60 + parts[1]
     return parts[0] * 3600 + parts[1] * 60 + parts[2]
@@ -102,6 +106,8 @@ def player_minutes(lineups: dict, bounds, offsets) -> dict:
                 continue  # unused substitute
             out[p["player_id"]] = {
                 "player_name": p.get("player_nickname") or p["player_name"],
+                # Paid-API lineups carry the date of birth; open data does not.
+                "birth_date": p.get("birth_date"),
                 "team_id": team["team_id"],
                 "team_name": team["team_name"],
                 "seconds": total,

@@ -84,7 +84,11 @@ def load_candidates(wage_ceiling_multiplier: float) -> pd.DataFrame:
 
 @st.cache_data(ttl=600)
 def load_percentiles() -> pd.DataFrame:
-    return pd.read_sql("SELECT player_id, metric, percentile FROM player_percentiles", get_engine())
+    # Latest season only: profile views are keyed by player_id, so a second season
+    # would duplicate every metric row. Earlier seasons stay in the DB for trajectory.
+    return pd.read_sql(
+        "SELECT player_id, metric, percentile FROM player_percentiles "
+        "WHERE season_id = (SELECT MAX(season_id) FROM player_percentiles)", get_engine())
 
 
 @st.cache_data(ttl=600)
@@ -93,13 +97,57 @@ def load_metric_values() -> pd.DataFrame:
     engine = get_engine()
     available = pd.read_sql("SELECT * FROM player_season_metrics LIMIT 0", engine).columns
     cols = [c for c in LABELS if c in available]
-    return pd.read_sql(f"SELECT player_id, {', '.join(cols)} FROM player_season_metrics", engine)
+    return pd.read_sql(
+        f"SELECT player_id, {', '.join(cols)} FROM player_season_metrics "
+        "WHERE season_id = (SELECT MAX(season_id) FROM player_season_metrics)", engine)
 
 
 @st.cache_data(ttl=600)
 def load_wage_framework() -> pd.DataFrame:
     return pd.read_sql("SELECT position_group, age_band, weekly_wage_ceiling_gbp FROM wage_framework",
                        get_engine())
+
+
+# SkillCorner physical metrics shown on the Physical tab, with recruiter-friendly names.
+SC_METRIC_LABELS = {
+    "distance_p90": "Total distance (m per 90)",
+    "running_distance_p90": "Running distance (m per 90)",
+    "hsr_distance_p90": "High-speed running distance (m per 90)",
+    "sprint_distance_p90": "Sprint distance (m per 90)",
+    "sprint_count_p90": "Sprints (per 90)",
+    "hi_count_p90": "High-intensity runs (per 90)",
+    "high_accel_count_p90": "High accelerations (per 90)",
+    "high_decel_count_p90": "High decelerations (per 90)",
+    "cod_count_p90": "Changes of direction (per 90)",
+    "psv99_kmh": "Peak speed, PSV-99 (km/h)",
+}
+
+
+@st.cache_data(ttl=600)
+def load_sc_teams() -> pd.DataFrame:
+    """Team-level SkillCorner physical output: all 24 League One clubs."""
+    try:
+        teams = pd.read_sql("SELECT * FROM skillcorner_team_season", get_engine())
+    except Exception:
+        return pd.DataFrame()
+    teams["display_name"] = teams["team_name"].str.replace(r"\s+FC$", "", regex=True)
+    return teams
+
+
+@st.cache_data(ttl=600)
+def load_sc_players() -> pd.DataFrame:
+    """Player-level SkillCorner physical output: LOFC's own squad, with positions."""
+    engine = get_engine()
+    try:
+        players = pd.read_sql("SELECT * FROM skillcorner_player_season", engine)
+    except Exception:
+        return pd.DataFrame()
+    if players.empty:
+        return players
+    positions = pd.read_sql(
+        "SELECT player_id, position_group FROM player_season_metrics "
+        "WHERE season_id = (SELECT MAX(season_id) FROM player_season_metrics)", engine)
+    return players.merge(positions, on="player_id", how="left")
 
 
 @st.cache_data(ttl=600)
@@ -109,6 +157,26 @@ def headline() -> tuple[int, int]:
     players = pd.read_sql("SELECT COUNT(*) AS c FROM player_season_metrics", engine)["c"][0]
     leagues = pd.read_sql("SELECT COUNT(DISTINCT competition_id) AS c FROM player_season_metrics", engine)["c"][0]
     return int(players), int(leagues)
+
+
+@st.cache_data(ttl=600)
+def season_label() -> str:
+    """The season shown in the KPI strip: the latest one in the data (e.g. '2025/26')."""
+    name = pd.read_sql(
+        "SELECT season_name FROM player_season_metrics "
+        "WHERE season_id = (SELECT MAX(season_id) FROM player_season_metrics) LIMIT 1",
+        get_engine())["season_name"]
+    return str(name[0]).replace("/20", "/") if len(name) else "—"
+
+
+@st.cache_data(ttl=600)
+def max_minutes() -> int:
+    """Data-driven top of the minutes slider (a season's real maximum, not a guess)."""
+    value = pd.read_sql(
+        "SELECT MAX(minutes) AS m FROM player_season_metrics "
+        "WHERE season_id = (SELECT MAX(season_id) FROM player_season_metrics)",
+        get_engine())["m"][0]
+    return int(value) if pd.notna(value) else 3500
 
 
 @st.cache_data(ttl=600)
@@ -380,7 +448,8 @@ def main() -> None:
     if not applied.empty:
         st.sidebar.caption(f"≈ £{int(applied.min()):,}–£{int(applied.max()):,}/week across age bands for a "
                            f"{position} (the typed value is the prime-age cap; younger players scale down; modelled).")
-    min_minutes = st.sidebar.slider("Minimum minutes", 450, 3500, 450, step=90)
+    min_minutes = st.sidebar.slider("Minimum minutes", 450, max(max_minutes(), 900), 450, step=10)
+    st.sidebar.caption("450 = the minimum sample to be ranked; per-90 numbers below that are noise.")
 
     candidates = load_candidates(wage_multiplier)
     percentiles = load_percentiles()
@@ -392,16 +461,17 @@ def main() -> None:
     metrics = list(ROLE_METRICS[POSITION_ROLE[position]])
 
     _kpi_strip(pool)
-    shortlist_tab, profile_tab, compare_tab, types_tab, method_tab = st.tabs(
-        ["Shortlist", "Player profile", "Compare", "Player types", "Methodology"])
+    shortlist_tab, profile_tab, compare_tab, types_tab, physical_tab, method_tab = st.tabs(
+        ["Shortlist", "Player profile", "Compare", "Player types", "Physical", "Methodology"])
     _shortlist(shortlist_tab, pool, position, percentiles, metrics, metric_values)
     _profile(profile_tab, pool, percentiles, metrics, metric_values)
     _compare(compare_tab, pool, percentiles, metrics)
     _player_types(types_tab, pool, percentiles, metrics, position)
+    _physical(physical_tab)
     _methodology(method_tab)
 
-    st.caption("Demonstrated on StatsBomb open data (2015/16). Player market values are real (Transfermarkt); "
-               "wages and the club identity profile are clearly-labelled modelled stand-ins, swappable for the "
+    st.caption(f"StatsBomb event data, {season_label()} season. Player market values are real (Transfermarkt); "
+               "wages and the club identity profile are clearly-labelled modelled estimates, swappable for the "
                "club's real data with no code change.")
 
 
@@ -412,7 +482,7 @@ def _kpi_strip(pool: pd.DataFrame) -> None:
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Players analysed", f"{players:,}", border=True)
     c2.metric("Leagues", len(leagues), border=True)
-    c3.metric("Season", "2015/16", border=True)
+    c3.metric("Season", season_label(), border=True)
     c4.metric("Match this filter", matching, border=True)
     # League names as on-brand pills, centred under the strip (nicer than grey caption text).
     pills = " ".join(
@@ -570,6 +640,20 @@ def _shortlist(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame
             st.caption("⬆️ Click a player in the table to open their full profile here.")
 
 
+def _player_options(pool: pd.DataFrame) -> tuple[list[str], dict[str, int]]:
+    """Selectbox labels 'Name — Club' and a label -> pool-index map.
+
+    The club in the label disambiguates genuine namesakes (two different players
+    with the same name), which a bare-name lookup would silently conflate.
+    """
+    labels, by_label = [], {}
+    for idx, r in pool.iterrows():
+        label = f"{r['player_name']} — {r['team_name']}"
+        labels.append(label)
+        by_label[label] = idx
+    return labels, by_label
+
+
 def _profile(tab, pool: pd.DataFrame, percentiles: pd.DataFrame, metrics: list[str],
              metric_values: pd.DataFrame) -> None:
     with tab:
@@ -577,11 +661,12 @@ def _profile(tab, pool: pd.DataFrame, percentiles: pd.DataFrame, metrics: list[s
             st.warning("No players for these filters.")
             return
         st.caption("Detailed profile for any player in the current shortlist.")
-        names = pool["player_name"].tolist()
+        labels, by_label = _player_options(pool)
         selected = st.session_state.get("shortlist_selected_player")
-        default_index = names.index(selected) if selected in names else 0
-        name = st.selectbox("Player", names, index=default_index, key="profile_player")
-        row = pool[pool["player_name"] == name].iloc[0]
+        default_index = next((i for i, lb in enumerate(labels)
+                              if selected and lb.startswith(f"{selected} — ")), 0)
+        label = st.selectbox("Player", labels, index=default_index, key="profile_player")
+        row = pool.loc[by_label[label]]
         _render_profile_body(row, percentiles, metrics, metric_values, key_prefix="profile")
 
 
@@ -592,11 +677,11 @@ def _compare(tab, pool: pd.DataFrame, percentiles: pd.DataFrame, metrics: list[s
             return
         st.caption("Compare players head-to-head on the same percentile axes. The further out, the better.")
 
-        names = pool["player_name"].tolist()
+        labels, by_label = _player_options(pool)
         c1, c2, c3 = st.columns(3)
-        a = c1.selectbox("Player A", names, index=0, key="cmp_a")
-        b = c2.selectbox("Player B", names, index=1, key="cmp_b")
-        c = c3.selectbox("Player C (optional)", [NONE_OPTION] + names, index=0, key="cmp_c")
+        a = c1.selectbox("Player A", labels, index=0, key="cmp_a")
+        b = c2.selectbox("Player B", labels, index=1, key="cmp_b")
+        c = c3.selectbox("Player C (optional)", [NONE_OPTION] + labels, index=0, key="cmp_c")
 
         chosen = [p for p in [a, b, (c if c != NONE_OPTION else None)] if p]
         chosen = list(dict.fromkeys(chosen))  # de-duplicate, keep order
@@ -605,10 +690,10 @@ def _compare(tab, pool: pd.DataFrame, percentiles: pd.DataFrame, metrics: list[s
             return
 
         traces, rows = [], []
-        for player_name in chosen:
-            r = pool[pool["player_name"] == player_name].iloc[0]
-            traces.append((player_name, percentile_vector(percentiles, int(r["player_id"]), metrics)))
-            rows.append({"Player": player_name, "Club": r["team_name"], "Age": round(r["age"], 1),
+        for label in chosen:
+            r = pool.loc[by_label[label]]
+            traces.append((r["player_name"], percentile_vector(percentiles, int(r["player_id"]), metrics)))
+            rows.append({"Player": r["player_name"], "Club": r["team_name"], "Age": round(r["age"], 1),
                          "Fit": round(r["fit_score"]), "Performance": round(r["performance_score"]),
                          "Market (€m)": round(r["market_value_eur"] / 1e6, 1)})
 
@@ -667,6 +752,82 @@ def _player_types(tab, pool: pd.DataFrame, percentiles: pd.DataFrame, metrics: l
                    "that separate the groups most; the dotted lines mark the 50th percentile (average). The ringed "
                    "dot is the player selected on the Shortlist or Profile tab. Scroll or use the toolbar to zoom; "
                    "double-click to reset.")
+
+
+# --- physical (SkillCorner) -----------------------------------------------------------
+def _sc_league_bar(teams: pd.DataFrame, metric: str) -> go.Figure:
+    """All 24 clubs on one physical metric, Leyton Orient highlighted."""
+    data = teams.dropna(subset=[metric]).sort_values(metric)
+    is_lofc = data["team_name"].str.contains("Leyton", na=False)
+    fig = go.Figure(go.Bar(
+        x=data[metric], y=data["display_name"], orientation="h",
+        marker_color=[RED if flag else "#d4d4d4" for flag in is_lofc],
+    ))
+    fig.update_layout(height=560, margin=dict(l=10, r=10, t=10, b=10),
+                      xaxis_title=SC_METRIC_LABELS[metric], yaxis_title=None,
+                      plot_bgcolor="white", showlegend=False)
+    return fig
+
+
+def _physical(tab) -> None:
+    with tab:
+        teams = load_sc_teams()
+        players = load_sc_players()
+        if teams.empty:
+            st.info("SkillCorner tracking data is not loaded. Drop the club export in "
+                    "data/reference/skillcorner/ and run: python -m lofc.ingest.skillcorner")
+            return
+
+        season = teams["season_label"].iloc[0]
+        st.markdown(f"**Physical output from SkillCorner tracking data, League One {season}.** "
+                    "Off-ball running and intensity, which on-ball event data cannot see.")
+        st.caption("Scope, stated plainly: player-level tracking covers the Leyton Orient squad only; "
+                   "other clubs appear as team totals. So this page measures our own physical identity and "
+                   "where the team sits in the league. It never scores recruitment targets, because no "
+                   "tracking data exists for them.")
+
+        st.markdown("##### Where Leyton Orient sit in the league")
+        label_by_col = {v: k for k, v in SC_METRIC_LABELS.items()}
+        choice = st.selectbox("Physical metric", list(SC_METRIC_LABELS.values()), key="sc_metric")
+        metric = label_by_col[choice]
+        ranks = teams[metric].rank(ascending=False, method="min")
+        lofc_mask = teams["team_name"].str.contains("Leyton", na=False)
+        if lofc_mask.any() and pd.notna(teams.loc[lofc_mask, metric].iloc[0]):
+            rank = int(ranks[lofc_mask].iloc[0])
+            value = teams.loc[lofc_mask, metric].iloc[0]
+            median = teams[metric].median()
+            st.caption(f"Leyton Orient: {value:,.1f} — rank {rank} of {len(teams)} "
+                       f"(league median {median:,.1f}).")
+        st.plotly_chart(_sc_league_bar(teams, metric), width="stretch", key="sc_league_bar")
+
+        st.markdown("##### The measured identity of the current squad")
+        summary_rows = []
+        for col, label in SC_METRIC_LABELS.items():
+            if teams[col].notna().sum() == 0 or not lofc_mask.any():
+                continue
+            rank = int(teams[col].rank(ascending=False, method="min")[lofc_mask].iloc[0])
+            summary_rows.append({"Metric": label,
+                                 "Leyton Orient": round(float(teams.loc[lofc_mask, col].iloc[0]), 1),
+                                 "League median": round(float(teams[col].median()), 1),
+                                 "Rank of 24": rank})
+        st.dataframe(pd.DataFrame(summary_rows), hide_index=True, width="stretch")
+        st.caption("This describes how the team currently plays, not how it should: a draft physical identity "
+                   "for the Director of Football to confirm or override. Once confirmed, it informs which "
+                   "on-ball traits (e.g. pressing volume) the Fit score weights for every candidate — the "
+                   "traits themselves come from event data that exists for all players.")
+
+        if not players.empty:
+            st.markdown("##### Player level: the Leyton Orient squad")
+            cols = {"player_name": "Player", "position_group": "Position",
+                    "matches_measured": "Matches tracked", "distance_p90": "Distance/90 (m)",
+                    "hsr_distance_p90": "High-speed dist/90 (m)", "sprint_count_p90": "Sprints/90",
+                    "high_accel_count_p90": "High accels/90", "psv99_kmh": "Peak speed (km/h)"}
+            view = (players[list(cols)].rename(columns=cols)
+                    .sort_values("Distance/90 (m)", ascending=False).round(1))
+            st.dataframe(view, hide_index=True, width="stretch", height=420)
+            st.caption("Players with enough tracked minutes for season averages. Use this to see who drives "
+                       "the team's running and sprint output, and as physical benchmarks when scouts assess "
+                       "a target for the same role in person.")
 
 
 # --- methodology ----------------------------------------------------------------------

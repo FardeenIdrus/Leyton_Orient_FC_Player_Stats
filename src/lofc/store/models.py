@@ -266,24 +266,29 @@ class Valuation(Base):
 
 
 class WageEstimate(Base):
-    """Modelled weekly wage by position group, age band and performance tier.
+    """Modelled weekly wage by league, position group, age band and performance tier.
 
-    A constructed stand-in (source flagged), anchored to Capology/SalarySport orders of
-    magnitude. Never derived from market value. Replaced wholesale when real wage data
-    arrives. Drives the Phase 7 wage affordability gate.
+    A constructed stand-in (source flagged), anchored per league to published wage
+    reporting (Capology / SalarySport averages, club accounts). Never derived from
+    market value. Replaced wholesale when real wage data arrives. Drives the Phase 7
+    wage gate; the low/high band expresses estimate uncertainty so borderline players
+    are flagged for human judgement rather than silently dropped.
     """
 
     __tablename__ = "wage_estimates"
     __table_args__ = (
-        UniqueConstraint("position_group", "age_band", "performance_tier",
-                         name="uq_wage_estimate_position_age_tier"),
+        UniqueConstraint("competition_id", "position_group", "age_band", "performance_tier",
+                         name="uq_wage_estimate_league_position_age_tier"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    competition_id: Mapped[int] = mapped_column(Integer, index=True)
     position_group: Mapped[str] = mapped_column(String, index=True)
     age_band: Mapped[str] = mapped_column(String)
     performance_tier: Mapped[str] = mapped_column(String)
     estimated_weekly_wage_gbp: Mapped[int] = mapped_column(Integer)
+    wage_low_gbp: Mapped[int] = mapped_column(Integer)
+    wage_high_gbp: Mapped[int] = mapped_column(Integer)
     source: Mapped[str] = mapped_column(String)
 
 
@@ -318,6 +323,105 @@ class Shortlist(Base):
     undervaluation_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     market_value_eur: Mapped[float | None] = mapped_column(Float, nullable=True)
     estimated_weekly_wage_gbp: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    wage_low_gbp: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    wage_high_gbp: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # True when the ceiling falls inside the estimate band: affordable on the low
+    # estimate, not on the high one, so worth a human judgement call.
+    wage_marginal: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     wage_ceiling_gbp: Mapped[int | None] = mapped_column(Integer, nullable=True)
     transfer_budget_eur: Mapped[float] = mapped_column(Float)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+# The curated SkillCorner physical metrics, shared by the team and player tables.
+# Per-90 rates plus peak speed; the raw per-match columns stay in the source file.
+SKILLCORNER_METRICS = [
+    "distance_p90", "m_per_min_p90", "running_distance_p90",
+    "hsr_distance_p90", "hsr_count_p90", "sprint_distance_p90", "sprint_count_p90",
+    "hi_distance_p90", "hi_count_p90", "psv99_kmh", "top5_psv99_kmh",
+    "medium_accel_count_p90", "high_accel_count_p90",
+    "medium_decel_count_p90", "high_decel_count_p90",
+    "explosive_accel_to_hsr_p90", "explosive_accel_to_sprint_p90", "cod_count_p90",
+]
+
+
+class SkillCornerTeamSeason(Base):
+    """Team-level physical output per season: all 24 League One clubs.
+
+    From the club-provided SkillCorner export (tracking data). This is the only
+    granularity available for non-LOFC teams, so it powers league benchmarking,
+    never per-candidate physical scores.
+    """
+
+    __tablename__ = "skillcorner_team_season"
+    __table_args__ = (
+        UniqueConstraint("sc_team_id", "season_label", name="uq_sc_team_season"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sc_team_id: Mapped[int] = mapped_column(Integer, index=True)
+    team_name: Mapped[str] = mapped_column(String, index=True)
+    season_label: Mapped[str] = mapped_column(String)
+    matches_measured: Mapped[int] = mapped_column(Integer)
+    avg_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
+    distance_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    m_per_min_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    running_distance_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hsr_distance_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hsr_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sprint_distance_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sprint_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hi_distance_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hi_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    psv99_kmh: Mapped[float | None] = mapped_column(Float, nullable=True)
+    top5_psv99_kmh: Mapped[float | None] = mapped_column(Float, nullable=True)
+    medium_accel_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    high_accel_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    medium_decel_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    high_decel_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    explosive_accel_to_hsr_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    explosive_accel_to_sprint_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cod_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class SkillCornerPlayerSeason(Base):
+    """Player-level physical output per season: LOFC's own squad only.
+
+    Matched to our players table by birth date + name where possible, so physical
+    data joins onto scores and profiles for our squad. Other clubs' players have
+    no tracking data in this export.
+    """
+
+    __tablename__ = "skillcorner_player_season"
+    __table_args__ = (
+        UniqueConstraint("sc_player_id", "season_label", name="uq_sc_player_season"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    sc_player_id: Mapped[int] = mapped_column(Integer, index=True)
+    player_name: Mapped[str] = mapped_column(String, index=True)
+    birth_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    # Our StatsBomb player_id when the DOB+name match succeeds; null otherwise.
+    player_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("players.player_id"),
+                                                  nullable=True, index=True)
+    season_label: Mapped[str] = mapped_column(String)
+    matches_measured: Mapped[int] = mapped_column(Integer)
+    avg_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
+    distance_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    m_per_min_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    running_distance_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hsr_distance_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hsr_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sprint_distance_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sprint_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hi_distance_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hi_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    psv99_kmh: Mapped[float | None] = mapped_column(Float, nullable=True)
+    top5_psv99_kmh: Mapped[float | None] = mapped_column(Float, nullable=True)
+    medium_accel_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    high_accel_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    medium_decel_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    high_decel_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    explosive_accel_to_hsr_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    explosive_accel_to_sprint_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cod_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)

@@ -37,6 +37,7 @@ TOTAL_COLUMNS = ["goals", "np_goals", "assists", "shots", "xg", "np_xg", "xa"]
 def _new_accumulator(name: str) -> dict:
     return {
         "player_name": name,
+        "birth_date": None,
         "seconds": 0.0,
         "matches": 0,
         "position_seconds": defaultdict(float),
@@ -72,10 +73,16 @@ def aggregate_competition(comp: Competition, log=print) -> pd.DataFrame:
         mid = match["match_id"]
         events = landing.read_json(landing.events_path(cid, sid, mid))
         lineups = landing.read_json(landing.lineups_path(cid, sid, mid))
+        # Real feeds occasionally serve an empty payload for one fixture; one bad
+        # match must not kill a 4,000-match run. Skip it loudly and move on.
+        if not events:
+            log(f"  [{comp.label}] WARNING: match {mid} has no events, skipping")
+            continue
         data = extract_match(events, lineups)
 
         for pid, info in data["players"].items():
             a = acc.setdefault(pid, _new_accumulator(info["player_name"]))
+            a["birth_date"] = a["birth_date"] or info.get("birth_date")
             a["seconds"] += info["seconds"]
             a["matches"] += 1
             a["team_seconds"][info["team_name"]] += info["seconds"]
@@ -113,6 +120,7 @@ def _build_table(acc, cid, comp_name, sid, season_name) -> pd.DataFrame:
             "season_name": season_name,
             "player_id": pid,
             "player_name": a["player_name"],
+            "birth_date": a["birth_date"],
             "team_name": team,
             "position_group": POSITION_GROUPS.get(dominant_position, "Unknown"),
             "dominant_position_id": dominant_position,
