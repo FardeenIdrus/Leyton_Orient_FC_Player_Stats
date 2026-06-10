@@ -1,6 +1,11 @@
 """Parser tests for the EFL Transfermarkt scrape. Pure functions, no network."""
 
-from lofc.ingest.transfermarkt_efl import parse_birth_date, parse_value
+from lofc.ingest.transfermarkt_efl import (
+    parse_birth_date,
+    parse_foot,
+    parse_height_cm,
+    parse_value,
+)
 
 
 def test_parse_value_units():
@@ -9,6 +14,21 @@ def test_parse_value_units():
     assert parse_value("€32.00m") == 32_000_000
     assert parse_value("-") is None
     assert parse_value("") is None
+
+
+def test_parse_height_formats():
+    assert parse_height_cm("1,91m") == 191
+    assert parse_height_cm("1.85 m") == 185
+    assert parse_height_cm("-") is None
+    assert parse_height_cm("") is None
+
+
+def test_parse_foot_values():
+    assert parse_foot("right") == "right"
+    assert parse_foot(" Left ") == "left"
+    assert parse_foot("both") == "both"
+    assert parse_foot("-") is None
+    assert parse_foot("") is None
 
 
 def test_parse_birth_date_formats():

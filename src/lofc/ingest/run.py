@@ -23,7 +23,9 @@ def pull_competition(comp: Competition, limit: int | None = None, force: bool = 
     cid, sid = comp.competition_id, comp.season_id
 
     matches = statsbomb.get_matches(cid, sid)
-    landing.write_json(landing.matches_path(cid, sid), matches, force=force)
+    # Always refresh the match list: in a live season new fixtures appear in it each
+    # week, and the aggregation reads this file to know which matches exist.
+    landing.write_json(landing.matches_path(cid, sid), matches, force=True)
 
     matches = sorted(matches, key=lambda m: m["match_id"])
     if limit:

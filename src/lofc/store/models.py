@@ -45,7 +45,7 @@ class Base(DeclarativeBase):
 
 
 class Player(Base):
-    """One row per player (identity). Age/nationality fill in from Transfermarkt later."""
+    """One row per player (identity). Bio facts fill in from line-ups + Transfermarkt."""
 
     __tablename__ = "players"
 
@@ -53,6 +53,10 @@ class Player(Base):
     player_name: Mapped[str] = mapped_column(String)
     nationality: Mapped[str | None] = mapped_column(String, nullable=True)
     birth_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    # From the Transfermarkt squad pages, attached during the valuation match.
+    foot: Mapped[str | None] = mapped_column(String, nullable=True)
+    contract_until: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    height_cm: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class PlayerSeasonMetric(Base):

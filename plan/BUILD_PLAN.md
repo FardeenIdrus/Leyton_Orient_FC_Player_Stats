@@ -145,6 +145,60 @@ player-level = LOFC squad only; team-level = all 24 clubs.
   pickers (Profile/Compare) now use "Name — Club" labels with an explicit row map, so
   genuine namesakes (two Cameron Humphreys) can't be conflated.
 
+**Post-checkpoint polish (2026-06-10, user-approved batch):**
+- [x] Methodology tab rebuilt for the COO audience: live funnel (last stage reacts to the
+  sidebar settings, labelled "(all positions)"), 7 plain-language step cards with live DB
+  numbers + per-step charts (kept: matches-per-league, minutes-histogram-with-450-line,
+  Quality-vs-Fit example, market-vs-fair bargains; dropped: three charts that rendered
+  poorly), detailed step-by-step "For the analyst" footnotes. Dashboard container now
+  mounts `./data` read-only (the match count read zero in that container before).
+- [x] Minutes filter: synced slider + typed box (450 floor, data-driven max, clamped).
+- [x] **Max-age filter** + help text (the veteran-bargain skew: TM floor-values older
+  players regardless of output).
+- [x] **Cross-league caveat** on Compare when chosen players are from different leagues
+  (percentiles are within-league; valuation is what accounts for league level).
+- [x] **Playing styles widened where the data tolerates it**: k now = largest within 0.02
+  silhouette of best → CF and AM split into 3 football-sensible styles (goalscorers /
+  driving forwards / shooters-low-pressing; shot-threat AMs / creators / pressers), other
+  positions honestly stay at 2. Conflation test rewritten to assert the real invariant
+  (opposite styles never share a cluster).
+- [x] **Season-by-season trajectory** on player profiles (the visible payoff of the 24/25
+  ingest): minutes/goals/assists/npxG/xA per season with league-change caveat. Example:
+  Ballard 24/25 = 6 goals across Cambridge + Sunderland → 25/26 = 23-goal golden boot.
+- [x] Player pickers disambiguate namesakes ("Name — Club"); 47 tests green throughout.
+- [x] **User-found bug batch (2026-06-10 evening):** profile tiles + trajectory now
+  position-aware (GK: save % / saves; defenders: tackles / interceptions; attackers:
+  goals / assists / npxG / xA). Fixed the centre-back profile crash at the root: every
+  profile lookup (percentiles, full stats, strengths, radar, types scatter) is now keyed
+  by **player + league**, because mid-season movers between tracked leagues legitimately
+  hold two same-season rows (e.g. Kacurri: Grimsby L2 + Morecambe NL 25/26 — correct
+  data, not a bug; now shown as two disambiguated entries). Found and fixed a
+  pre-existing display bug: save%/pass% stored 0–1 but formatted as if 0–100 ("1%" in
+  Full stats). Verification sweep: all 8 positions + filter extremes (age 18, budget 0,
+  minutes 4,900) render exception-free in fresh AppTest instances; 8 SQL sanity checks
+  (dup rows, null ages, negative fair values, inverted wage bands, out-of-range scores/
+  percentiles, unlabelled archetypes, unmatched SkillCorner) all return zero.
+
+**Recruiter-workflow batch ✅ COMPLETE (2026-06-10):**
+- [x] **Contract expiry + preferred foot + height**: scraper moved to TM's detailed squad
+  pages (kader/plus/1, same 96 requests + rate limit). Re-scraped: 2,619 players —
+  contract dates for 82%, foot 93%, height 94%; **840 players out of contract by summer
+  2026** (the free-transfer market). New `players` columns (foot, contract_until,
+  height_cm) via migration; bio rides the valuation match and backfills 1,525 players;
+  valuation itself unchanged (R² 0.748). Sidebar: "Out of contract by summer 2026"
+  checkbox + "Preferred foot" selector (Left/Right includes two-footed). Table gains a
+  **Contract** column (mm/yyyy). Profile header now shows foot · height · contract.
+  Demo gift discovered: **Andy Dallas (shortlist #1) is out of contract June 2026.**
+- [x] **League column** on the shortlist + **league filter** in the sidebar (multiselect,
+  defaults to all four). Both feed the live methodology funnel too.
+- [x] **CSV export**: download button saves exactly the on-screen shortlist (filters,
+  ranking, columns) for Excel/Sheets — lists travel to scouts.
+- [x] **NL fair-value caption** on National League profiles with a valuation (verified
+  on Dallas). 49 tests green; headless sweep of all new controls exception-free.
+- Discussed, awaiting a decision: similar-player search; availability % (matches
+  played ÷ team matches); "does he improve us" benchmark vs LOFC's own players.
+  (Height filter: the data is now in `players.height_cm`, the filter itself unbuilt.)
+
 Then: swap in the club's **real wage framework + identity profiles** when provided (drop-in
 CSVs, no logic change) and prep the **Steve Tait (COO)** meeting.
 

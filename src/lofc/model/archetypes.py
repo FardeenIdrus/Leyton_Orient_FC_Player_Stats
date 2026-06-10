@@ -28,6 +28,10 @@ from lofc.store.load import _records, _upsert, get_engine
 from lofc.store.models import Archetype
 
 K_RANGE = range(2, 7)
+# Silhouette differences this small are noise, not a verdict: prefer the richest
+# split (largest k) whose score sits within this tolerance of the best. In practice
+# this widens the attacking positions to three styles and leaves the rest at two.
+K_TOLERANCE = 0.02
 PCA_VARIANCE = 0.90
 RANDOM_STATE = 42  # fixed so cluster assignments are identical across runs
 
@@ -93,17 +97,20 @@ def cluster_position(percentiles: pd.DataFrame, position: str) -> pd.DataFrame:
     scaled = StandardScaler().fit_transform(features)
     components = PCA(n_components=PCA_VARIANCE, random_state=RANDOM_STATE).fit_transform(scaled)
 
-    # Choose k by the best silhouette score (k must be < number of players).
+    # Score every k, then choose the largest k within K_TOLERANCE of the best
+    # silhouette (k must stay below the number of players): near-tied scores
+    # should not force the coarsest split.
     max_k = min(max(K_RANGE), len(percentiles) - 1)
-    best = None
+    fits = {}
     silhouettes = {}
     for k in range(2, max_k + 1):
         model = KMeans(n_clusters=k, random_state=RANDOM_STATE, n_init=10)
         labels = model.fit_predict(components)
-        score = silhouette_score(components, labels)
-        silhouettes[k] = round(float(score), 3)
-        if best is None or score > best["score"]:
-            best = {"k": k, "score": score, "model": model, "labels": labels}
+        silhouettes[k] = round(float(silhouette_score(components, labels)), 3)
+        fits[k] = {"model": model, "labels": labels}
+    top_score = max(silhouettes.values())
+    chosen_k = max(k for k, score in silhouettes.items() if score >= top_score - K_TOLERANCE)
+    best = {"k": chosen_k, **fits[chosen_k]}
 
     labels = best["labels"]
     centroids = best["model"].cluster_centers_

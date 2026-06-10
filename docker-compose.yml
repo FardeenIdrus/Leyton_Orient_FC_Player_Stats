@@ -68,6 +68,8 @@ services:
       - ./src:/app/src
       - ./assets:/app/assets
       - ./.streamlit:/app/.streamlit
+      # Read-only: the methodology page counts landed matches on disk.
+      - ./data:/app/data:ro
     ports:
       - "8501:8501"
     command: ["streamlit", "run", "src/lofc/dashboard/app.py",

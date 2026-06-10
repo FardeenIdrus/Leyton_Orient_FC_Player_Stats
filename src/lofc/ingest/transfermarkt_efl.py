@@ -75,6 +75,18 @@ def parse_value(text: str) -> float | None:
     return number * (1_000_000 if unit == "m" else 1_000 if unit == "k" else 1)
 
 
+def parse_height_cm(text: str) -> int | None:
+    """'1,91m' -> 191, '1.85 m' -> 185, '-' -> None."""
+    match = re.search(r"(\d)[,.](\d{2})\s*m", text)
+    return int(match.group(1) + match.group(2)) if match else None
+
+
+def parse_foot(text: str) -> str | None:
+    """Transfermarkt foot cell: 'left' / 'right' / 'both', anything else -> None."""
+    text = text.strip().lower()
+    return text if text in ("left", "right", "both") else None
+
+
 def parse_birth_date(text: str) -> str | None:
     """'17/05/2003 (23)' or 'May 17, 2003 (23)' -> '2003-05-17'.
 
@@ -98,13 +110,15 @@ def club_pages(league_slug: str, league_code: str) -> list[tuple[str, str]]:
         href = a["href"].split("?")[0]
         name = a.get_text(strip=True)
         if name and href not in clubs:
-            # Force the season onto the club URL so we get that season's squad.
-            clubs[href] = (name, f"{BASE}{href.split('/saison_id')[0]}/saison_id/{TM_SEASON}")
+            # The detailed squad view (kader, plus=1) carries height, foot and the
+            # contract date on top of the basic page's name/DOB/value.
+            base = href.split("/saison_id")[0].replace("/startseite/", "/kader/")
+            clubs[href] = (name, f"{BASE}{base}/saison_id/{TM_SEASON}/plus/1")
     return list(clubs.values())
 
 
 def squad_rows(club_name: str, squad_url: str, league_code: str, competition_id: int) -> list[dict]:
-    """One row per player on a club's squad page."""
+    """One row per player on a club's detailed squad page (kader, plus view)."""
     soup = BeautifulSoup(_fetch(squad_url), "lxml")
     table = soup.select_one("table.items")
     if table is None:
@@ -116,12 +130,16 @@ def squad_rows(club_name: str, squad_url: str, league_code: str, competition_id:
             continue
         player_id_match = re.search(r"/spieler/(\d+)", link["href"])
         cells = tr.find_all("td", recursive=False)
-        # Layout: number | player block (name + position) | birth date | nat | value.
+        # Detailed layout: # | player block | birth date | nat | height | foot |
+        # joined | signed from | contract until | market value.
         position = None
         inline = tr.select_one("table.inline-table tr + tr td")
         if inline is not None:
             position = inline.get_text(strip=True)
-        birth_text = cells[2].get_text(" ", strip=True) if len(cells) > 2 else ""
+
+        def cell(i: int) -> str:
+            return cells[i].get_text(" ", strip=True) if len(cells) > i else ""
+
         value_cell = tr.select_one("td.rechts.hauptlink")
         rows.append({
             "league_code": league_code,
@@ -129,8 +147,11 @@ def squad_rows(club_name: str, squad_url: str, league_code: str, competition_id:
             "club_name": club_name,
             "tm_player_id": player_id_match.group(1) if player_id_match else None,
             "player_name": link.get_text(strip=True),
-            "date_of_birth": parse_birth_date(birth_text),
+            "date_of_birth": parse_birth_date(cell(2)),
             "position": position,
+            "height_cm": parse_height_cm(cell(4)),
+            "foot": parse_foot(cell(5)),
+            "contract_until": parse_birth_date(cell(8)),  # same date formats as DOB
             "market_value_eur": parse_value(value_cell.get_text(strip=True)) if value_cell else None,
         })
     return rows
