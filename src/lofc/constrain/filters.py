@@ -41,25 +41,34 @@ def _tiers(scores: pd.Series) -> pd.Series:
                   labels=["Squad", "Mid", "Top"], include_lowest=True).astype(str)
 
 
-def compute_on_profile(percentiles: pd.DataFrame, floors: pd.DataFrame) -> set[int]:
-    """Player ids that clear every minimum-threshold metric for their position.
+ROW_KEYS = ["player_id", "competition_id", "season_id"]
 
-    A position with no floors has no requirement, so all its players are on-profile.
+
+def compute_on_profile(percentiles: pd.DataFrame, floors: pd.DataFrame) -> set[tuple]:
+    """(player, league, season) rows that clear every minimum floor for their position.
+
+    Each season-row is judged alone, on its own percentiles: a player with rows in
+    two seasons (or two leagues after a mid-season move) gets an independent verdict
+    per row. Pooling rows per player would punish a second passing season (the pass
+    count stops matching the floor count). A position with no floors auto-passes.
     """
-    player_position = percentiles[["player_id", "position_group"]].drop_duplicates()
+    rows = percentiles[ROW_KEYS + ["position_group"]].drop_duplicates()
     if floors.empty:
-        return set(player_position["player_id"])
+        return {(r.player_id, r.competition_id, r.season_id) for r in rows.itertuples()}
 
     needed = floors.groupby("position_group").size().to_dict()
     merged = percentiles.merge(floors, on=["position_group", "metric"], how="inner")
     merged["meets"] = merged["percentile"] >= merged["min_percentile"]
-    met_count = merged.groupby("player_id")["meets"].sum()
+    # Within one row-key each floor metric appears once, so "all floors pass" is
+    # exactly "passes == floors for the position".
+    met_count = merged.groupby(ROW_KEYS)["meets"].sum()
 
     on_profile = set()
-    for row in player_position.itertuples():
-        required = needed.get(row.position_group, 0)
-        if required == 0 or met_count.get(row.player_id, 0) == required:
-            on_profile.add(row.player_id)
+    for r in rows.itertuples():
+        key = (r.player_id, r.competition_id, r.season_id)
+        required = needed.get(r.position_group, 0)
+        if required == 0 or met_count.get(key, 0) == required:
+            on_profile.add(key)
     return on_profile
 
 
@@ -112,8 +121,8 @@ def build_candidates(engine, wage_ceiling_multiplier: float = 1.0) -> pd.DataFra
                            "FROM wage_estimates", engine)
     ceilings = pd.read_sql("SELECT position_group, age_band, weekly_wage_ceiling_gbp "
                            "FROM wage_framework", engine)
-    percentiles = pd.read_sql("SELECT player_id, position_group, metric, percentile "
-                              "FROM player_percentiles", engine)
+    percentiles = pd.read_sql("SELECT player_id, competition_id, season_id, position_group, "
+                              "metric, percentile FROM player_percentiles", engine)
     floors = pd.read_sql("SELECT position_group, metric, min_percentile FROM identity_profiles "
                          "WHERE min_percentile IS NOT NULL", engine)
 
@@ -131,8 +140,11 @@ def build_candidates(engine, wage_ceiling_multiplier: float = 1.0) -> pd.DataFra
     cand = cand.merge(ceilings, on=["position_group", "age_band"], how="left")
     cand["wage_ceiling_gbp"] = cand["weekly_wage_ceiling_gbp"] * wage_ceiling_multiplier
 
-    on_profile_ids = compute_on_profile(percentiles, floors)
-    cand["on_profile"] = cand["player_id"].isin(on_profile_ids)
+    on_profile_keys = compute_on_profile(percentiles, floors)
+    cand["on_profile"] = [
+        (r.player_id, r.competition_id, r.season_id) in on_profile_keys
+        for r in cand[ROW_KEYS].itertuples()
+    ]
     return cand
 
 

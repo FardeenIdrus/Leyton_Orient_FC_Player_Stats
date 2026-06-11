@@ -195,9 +195,55 @@ player-level = LOFC squad only; team-level = all 24 clubs.
   ranking, columns) for Excel/Sheets — lists travel to scouts.
 - [x] **NL fair-value caption** on National League profiles with a valuation (verified
   on Dallas). 49 tests green; headless sweep of all new controls exception-free.
-- Discussed, awaiting a decision: similar-player search; availability % (matches
-  played ÷ team matches); "does he improve us" benchmark vs LOFC's own players.
-  (Height filter: the data is now in `players.height_cm`, the filter itself unbuilt.)
+- [x] **Watchlist (2026-06-10): the workflow layer.** New `watchlist` table (USER data —
+  keyed by player+league+season, FK to players, status + free-text note, timestamps;
+  migration `e3f9ffc5dff5`). `store/watchlist.py`: Core-only persistence (sqlite-testable),
+  idempotent add, LEFT-JOIN load so watched players survive pipeline rebuilds with blanks.
+  Profile button (☆ Add / ★ On watchlist + Remove) on both render sites, keys carry
+  render-site + row identity. New **Watchlist tab** (after Compare): read-only table,
+  **click a row → a popup dialog** (st.dialog) with the full note in a multi-line box,
+  status dropdown (Watching / Scout sent / Contact agent / Dropped), Save / Remove /
+  Close (redesigned after user UX feedback: data_editor cells truncated notes to one
+  visible word). Every dialog exit bumps the table key to clear the selection so the
+  dialog can't reopen. CSV export with full notes; ignores sidebar filters by design. Single-user by design for now; multi-user = user_id column + auth,
+  post-meeting roadmap. cli_commands gains a watchlist peek + watchlist-safe orphan sweep.
+  **Verified:** 57 tests green (7 new sqlite tests incl. left-join survival + mid-season
+  mover); headless smoke clean; live Postgres round-trip (add → status/note → remove);
+  sentinel survived a clear-then-insert pipeline step.
+- [x] **Transfermarkt profile links (2026-06-10):** `players.tm_player_id` column
+  (migration `8298a17dd305`), backfilled via the valuation match from the squad-page
+  scrape + the fallback dataset's own ids — **1,523 players linked**. "View on
+  Transfermarkt ↗" on player profiles; LinkColumn ("Open profile ↗") on the Watchlist
+  tab. Links are id-based (DOB-matched), so namesakes cannot cross-wire.
+- [x] **Full pipeline certification run (2026-06-10):** `python -m lofc.pipeline` end to
+  end after all Phase-10 changes — 11 steps, exit 0. Ingest fully idempotent (0 pulled,
+  4,456 skipped); 19 known uncollected fixtures skipped loudly; 5,994 metrics / 4,568
+  scored / 1,525 valued (R² 0.748) / 357 qualifying shortlist rows; SkillCorner 24 clubs
+  + 21/21 players; bio backfill incl. TM ids. **A real user watchlist entry (added via
+  the UI) survived the full rebuild** — the user-data guarantee proven in the wild.
+- [x] **Watchlist dialog bug (user-found, 2026-06-11, fixed):** every tab re-runs on
+  every interaction, so a persisted watchlist row selection re-opened the entry dialog
+  on any click anywhere (shortlist, compare, types). Fixed: the dialog opens only when
+  the selection CHANGES (session marker, reset on deselect); verified with a populated
+  watchlist + cross-tab interaction smoke.
+- [x] **🧊 CODE FREEZE (2026-06-11) — final QA sweep passed.** All 8 positions render
+  exception-free with no malformed tiles; filter extremes clean (age 18, minutes 4,900,
+  budget €0, stacked contract+foot+league); **10 SQL invariants all zero** (incl. every
+  shortlisted player has a TM link; no qualifying row off-profile); **57 tests green**.
+  No code changes until after the demo. Remaining: user manual click-through on the
+  frozen build → demo rehearsal (in chat, no script files).
+- Discussed, awaiting a decision (post-meeting roadmap): similar-player search;
+  availability % (matches played ÷ team matches); "does he improve us" benchmark vs
+  LOFC's own players. (Height filter: data in `players.height_cm`, filter unbuilt.)
+- [x] **User-found gate bug (2026-06-10, fixed):** the on-profile check pooled a
+  player's floor passes across ALL his season rows and demanded the count exactly
+  equal the position's floor count — so a second passing season flipped a player
+  off-profile (Tolaj: npxG 95 + 63, both ≥ 55 → count 2 ≠ 1 → wrongly amber), and
+  conversely a last-season pass could mask a failing current season (wrongly green).
+  Fixed: each (player, league, season) row is judged alone on its own percentiles
+  (`compute_on_profile` re-keyed; regression test added). Stored qualifying count
+  corrected 429 → 357 (the bug had corrupted both directions). Amber legend reworded:
+  "fails at least one check", not "near-miss". 50 tests green.
 
 Then: swap in the club's **real wage framework + identity profiles** when provided (drop-in
 CSVs, no logic change) and prep the **Steve Tait (COO)** meeting.

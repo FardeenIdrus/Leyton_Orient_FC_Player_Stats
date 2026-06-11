@@ -196,7 +196,7 @@ def load_efl_values() -> pd.DataFrame:
     efl["nname"] = efl["player_name"].map(_norm)
     efl["tokens"] = efl["nname"].str.split().map(set)
     efl["birth_date"] = pd.to_datetime(efl["date_of_birth"], errors="coerce")
-    for column in ("foot", "contract_until", "height_cm"):
+    for column in ("foot", "contract_until", "height_cm", "tm_player_id"):
         if column not in efl.columns:  # older CSV from before the detailed scrape
             efl[column] = None
     return efl.reset_index(drop=True)
@@ -212,9 +212,12 @@ def load_efl_fallback() -> pd.DataFrame | None:
     path = _tmdir() / "players.csv"
     if not path.exists():
         return None
-    fb = pd.read_csv(path, usecols=["name", "date_of_birth", "market_value_in_eur", "last_season"])
+    fb = pd.read_csv(path, usecols=["player_id", "name", "date_of_birth",
+                                    "market_value_in_eur", "last_season"])
     fb = fb[(fb["last_season"] >= 2025) & fb["market_value_in_eur"].notna()]
-    fb = fb.rename(columns={"market_value_in_eur": "value_eur", "name": "player_name"})
+    # The dataset's player_id IS the Transfermarkt id, so fallback matches get links too.
+    fb = fb.rename(columns={"market_value_in_eur": "value_eur", "name": "player_name",
+                            "player_id": "tm_player_id"})
     fb["nname"] = fb["player_name"].map(_norm)
     fb["birth_date"] = pd.to_datetime(fb["date_of_birth"], errors="coerce")
     fb = fb.dropna(subset=["birth_date"])
@@ -262,14 +265,17 @@ def match_players_efl(metrics: pd.DataFrame, efl: pd.DataFrame,
             fb_by_dob[row.birth_date.date()].append(i)
 
     def _bio(frame: pd.DataFrame, i: int) -> dict:
-        """Foot / contract / height where the source carries them (squad pages only)."""
-        if "foot" not in frame.columns:
-            return {"foot": None, "contract_until": None, "height_cm": None}
-        height = frame.at[i, "height_cm"]
-        return {"foot": frame.at[i, "foot"] if pd.notna(frame.at[i, "foot"]) else None,
-                "contract_until": (frame.at[i, "contract_until"]
-                                   if pd.notna(frame.at[i, "contract_until"]) else None),
-                "height_cm": int(height) if pd.notna(height) else None}
+        """Foot / contract / height / TM id, taking whichever columns the source has
+        (squad pages carry all four; the fallback dataset only the TM id)."""
+        def column(name, cast=None):
+            if name not in frame.columns:
+                return None
+            value = frame.at[i, name]
+            if pd.isna(value):
+                return None
+            return cast(value) if cast else value
+        return {"foot": column("foot"), "contract_until": column("contract_until"),
+                "height_cm": column("height_cm", int), "tm_player_id": column("tm_player_id", int)}
 
     rows, unmatched = [], []
     n_fallback = 0
@@ -427,8 +433,8 @@ def main() -> None:
     print(f"valuations: wrote {n}")
 
     # Backfill bio facts learned during the match (birth date, and from the squad
-    # pages: foot, contract end, height) into the players table.
-    for column in ("foot", "contract_until", "height_cm"):
+    # pages: foot, contract end, height, Transfermarkt id) into the players table.
+    for column in ("foot", "contract_until", "height_cm", "tm_player_id"):
         if column not in data.columns:  # demo era only: no squad-page bio
             data[column] = None
     bio = data.dropna(subset=["birth_date"])
@@ -436,15 +442,17 @@ def main() -> None:
         stmt = (update(Player.__table__)
                 .where(Player.__table__.c.player_id == bindparam("pid"))
                 .values(birth_date=bindparam("bd"), foot=bindparam("ft"),
-                        contract_until=bindparam("cu"), height_cm=bindparam("hc")))
+                        contract_until=bindparam("cu"), height_cm=bindparam("hc"),
+                        tm_player_id=bindparam("tm")))
         with engine.begin() as conn:
             conn.execute(stmt, [
                 {"pid": int(r.player_id), "bd": r.birth_date,
                  "ft": r.foot if pd.notna(r.foot) else None,
                  "cu": r.contract_until if pd.notna(r.contract_until) else None,
-                 "hc": int(r.height_cm) if pd.notna(r.height_cm) else None}
+                 "hc": int(r.height_cm) if pd.notna(r.height_cm) else None,
+                 "tm": int(r.tm_player_id) if pd.notna(r.tm_player_id) else None}
                 for r in bio.itertuples()])
-        print(f"backfilled bio (birth date, foot, contract, height) for {len(bio)} players")
+        print(f"backfilled bio (birth date, foot, contract, height, TM id) for {len(bio)} players")
 
     _spot_check(data)
 

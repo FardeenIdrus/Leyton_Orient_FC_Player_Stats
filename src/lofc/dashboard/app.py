@@ -21,6 +21,7 @@ from sqlalchemy import create_engine
 from lofc.config import settings
 from lofc.constrain.filters import apply_gates, build_candidates
 from lofc.model.score import POSITION_ROLE, ROLE_METRICS
+from lofc.store import watchlist
 
 RED = "#C8102E"
 DARK = "#1A1A1A"
@@ -80,7 +81,8 @@ def load_candidates(wage_ceiling_multiplier: float) -> pd.DataFrame:
     totals = pd.read_sql("SELECT player_id, competition_id, season_id, goals, assists, "
                          "np_xg_p90, xa_p90 FROM player_season_metrics", engine)
     # Bio facts from the squad-page scrape (attached to players during valuation).
-    bio = pd.read_sql("SELECT player_id, foot, contract_until, height_cm FROM players", engine)
+    bio = pd.read_sql("SELECT player_id, foot, contract_until, height_cm, tm_player_id "
+                      "FROM players", engine)
     out = (candidates.merge(archetypes, on=keys, how="left")
            .merge(totals, on=keys, how="left")
            .merge(bio, on="player_id", how="left"))
@@ -574,11 +576,12 @@ def main() -> None:
     metrics = list(ROLE_METRICS[POSITION_ROLE[position]])
 
     _kpi_strip(pool)
-    shortlist_tab, profile_tab, compare_tab, types_tab, physical_tab, method_tab = st.tabs(
-        ["Shortlist", "Player profile", "Compare", "Player types", "Physical", "Methodology"])
+    shortlist_tab, profile_tab, compare_tab, watchlist_tab, types_tab, physical_tab, method_tab = st.tabs(
+        ["Shortlist", "Player profile", "Compare", "Watchlist", "Player types", "Physical", "Methodology"])
     _shortlist(shortlist_tab, pool, position, percentiles, metrics, metric_values)
     _profile(profile_tab, pool, percentiles, metrics, metric_values)
     _compare(compare_tab, pool, percentiles, metrics)
+    _watchlist(watchlist_tab)
     _player_types(types_tab, pool, percentiles, metrics, position)
     _physical(physical_tab)
     _methodology(method_tab, candidates, budget_eur, min_minutes)
@@ -623,6 +626,24 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
         bio_bits.append(f"contract to {row['contract_until']:%b %Y}")
     bio_bits.append(f"playing style: {row.get('cluster_label', 'n/a')}")
     st.caption(" · ".join(b for b in bio_bits if b))
+
+    # Watch toggle. Key carries the render site AND the row identity, so the two
+    # render sites never collide and a click can't land on a different player
+    # after the selection changes.
+    pid, cid, sid = int(row["player_id"]), int(row["competition_id"]), int(row["season_id"])
+    wkey = f"{key_prefix}_watch_{pid}_{cid}_{sid}"
+    if watchlist.is_watched(get_engine(), pid, cid, sid):
+        wc1, wc2 = st.columns([1, 5])
+        wc1.markdown("**★ On watchlist**")
+        if wc2.button("Remove from watchlist", key=f"{wkey}_rm"):
+            watchlist.remove(get_engine(), pid, cid, sid)
+            st.rerun()
+    elif st.button("☆ Add to watchlist", key=f"{wkey}_add"):
+        watchlist.add(get_engine(), pid, cid, sid)
+        st.rerun()
+    if pd.notna(row.get("tm_player_id")):
+        st.markdown(f"[View on Transfermarkt ↗](https://www.transfermarkt.com/-/profil/spieler/"
+                    f"{int(row['tm_player_id'])})")
 
     # Season output as tiles, chosen for the player's role: goals mean nothing on a
     # goalkeeper's card, save percentage means nothing on a striker's.
@@ -749,7 +770,8 @@ def _shortlist(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame
             colour = "#E9F7EE" if r["qualifies"] else "#FFF6EA"
             return [f"background-color: {colour}"] * len(r)
 
-        st.caption("🟢 in budget and meets requirements · 🟠 near-miss. **Click any row** to open that player's profile below.")
+        st.caption("🟢 passes all three checks · 🟠 fails at least one — the ✓ columns show which. "
+                   "**Click any row** to open that player's profile below.")
         selection = st.dataframe(
             table.style.apply(_tint, axis=1),
             column_order=display_cols, hide_index=True, width="stretch", height=560,
@@ -876,6 +898,120 @@ def _compare(tab, pool: pd.DataFrame, percentiles: pd.DataFrame, metrics: list[s
                        "ranked against each player's own league, so an 80 in a lower league does not "
                        "equal an 80 in a higher one. Use the radar for style, not as a like-for-like "
                        "quality comparison; the valuation model is what accounts for league level.")
+
+
+@st.dialog("Watchlist entry")
+def _watchlist_entry_dialog(pid: int, cid: int, sid: int, player_name: str,
+                            club: str, note: str, status: str) -> None:
+    """Read and edit one watched player: full note, status, save or remove.
+
+    Every exit path bumps the table key (clearing the row selection) before
+    rerunning, so the dialog does not immediately reopen.
+    """
+    st.markdown(f"**{player_name}** · {club}")
+    new_note = st.text_area("Scout note", value=note, height=160, key="wl_dialog_note",
+                            placeholder="What to verify, who watched him, verdicts...")
+    new_status = st.selectbox("Status", watchlist.WATCHLIST_STATUSES,
+                              index=watchlist.WATCHLIST_STATUSES.index(status)
+                              if status in watchlist.WATCHLIST_STATUSES else 0,
+                              key="wl_dialog_status")
+
+    def _close():
+        st.session_state["watchlist_table_ver"] = st.session_state.get("watchlist_table_ver", 0) + 1
+        st.rerun()
+
+    save_col, remove_col, close_col = st.columns(3)
+    if save_col.button("Save", type="primary", key="wl_dialog_save"):
+        watchlist.set_note(get_engine(), pid, cid, sid, new_note.strip() or None)
+        watchlist.set_status(get_engine(), pid, cid, sid, new_status)
+        _close()
+    if remove_col.button("Remove from watchlist", key="wl_dialog_remove"):
+        watchlist.remove(get_engine(), pid, cid, sid)
+        _close()
+    if close_col.button("Close", key="wl_dialog_close"):
+        _close()
+
+
+def _watchlist(tab) -> None:
+    """The tracking list: every watched player; click a row to read/edit its note.
+
+    Reads its own fresh query (never the filtered pool, never cached): watched
+    players must show regardless of the sidebar filters, and edits must be
+    visible immediately after saving.
+    """
+    with tab:
+        df = watchlist.load(get_engine())
+        if df.empty:
+            st.info("No players on the watchlist yet. Open any player's profile and click "
+                    "“☆ Add to watchlist” — tracked players, statuses and scout notes live here.")
+            return
+
+        st.markdown("**Players the club is tracking.** Click a row to read the full note, "
+                    "edit it, change the status, or remove the player.")
+        name_by_id = {c.competition_id: c.label.rsplit(" ", 1)[0] for c in settings.competitions}
+        frame = pd.DataFrame({
+            "Player": df["player_name"], "Club": df["team_name"],
+            "League": df["competition_id"].map(name_by_id).fillna(df["competition_name"]),
+            "Position": df["position_group"],
+            "Age": df["age"].round(1),
+            "Quality": df["performance_score"], "Style fit": df["fit_score"],
+            "Market value": (df["market_value_eur"] / 1e6).round(1),
+            "Contract": pd.to_datetime(df["contract_until"], errors="coerce")
+                        .dt.strftime("%m/%Y").fillna("—"),
+            "Status": df["status"], "Note": df["note"].fillna(""),
+            "Added": pd.to_datetime(df["created_at"]).dt.strftime("%d %b %Y"),
+            "Transfermarkt": df["tm_player_id"].map(
+                lambda t: f"https://www.transfermarkt.com/-/profil/spieler/{int(t)}"
+                if pd.notna(t) else None),
+        })
+
+        # The key version bumps on every dialog exit, which clears the selection so
+        # the dialog does not reopen on the next rerun.
+        version = st.session_state.get("watchlist_table_ver", 0)
+        selection = st.dataframe(
+            frame, hide_index=True, width="stretch",
+            on_select="rerun", selection_mode="single-row",
+            key=f"watchlist_table_{version}",
+            column_config={
+                "Age": st.column_config.NumberColumn("Age", format="%.1f"),
+                "Quality": st.column_config.ProgressColumn("Quality", min_value=0, max_value=100, format="%d"),
+                "Style fit": st.column_config.ProgressColumn("Style fit", min_value=0, max_value=100, format="%d"),
+                "Market value": st.column_config.NumberColumn("Market value", format="€%.1fm"),
+                "Note": st.column_config.TextColumn(
+                    "Note", help="Preview — click the row to read or edit the full note."),
+                "Transfermarkt": st.column_config.LinkColumn(
+                    "Transfermarkt", display_text="Open profile ↗",
+                    help="The player's Transfermarkt page, where scouts verify the basics."),
+            },
+        )
+
+        # Open the dialog only when the selection CHANGES, never merely because a
+        # selection exists: every tab re-runs on every interaction anywhere in the
+        # app, and a persisted selection would otherwise re-open the dialog on each
+        # click in the shortlist, compare or types tabs.
+        rows = list(selection.selection.rows) if selection and selection.selection else []
+        if rows and rows[0] < len(df):
+            picked = df.iloc[rows[0]]
+            triple = (int(picked["player_id"]), int(picked["competition_id"]),
+                      int(picked["season_id"]), version)
+            if st.session_state.get("wl_dialog_handled") != triple:
+                st.session_state["wl_dialog_handled"] = triple
+                _watchlist_entry_dialog(
+                    triple[0], triple[1], triple[2],
+                    str(picked["player_name"]), str(picked["team_name"] or ""),
+                    str(picked["note"] or ""), str(picked["status"]))
+        else:
+            # No selection: clear the marker so re-selecting the same row reopens.
+            st.session_state["wl_dialog_handled"] = None
+
+        st.caption("The watchlist is saved in the club database: it survives data refreshes and "
+                   "restarts, and ignores the sidebar filters on purpose. A blank Quality or value "
+                   "means that player sits outside the current data (e.g. not priced in his league).")
+        st.download_button(
+            "⬇ Download watchlist (CSV)",
+            data=frame.to_csv(index=False).encode("utf-8"),
+            file_name="lofc_watchlist.csv", mime="text/csv",
+            help="The tracking list with statuses and full notes, for Excel or Sheets.")
 
 
 def _player_types(tab, pool: pd.DataFrame, percentiles: pd.DataFrame, metrics: list[str], position: str) -> None:

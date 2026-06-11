@@ -219,6 +219,13 @@ docker compose exec app python -m lofc.model.wage_check
 # into Postgres: team-level = all 24 League One clubs, player-level = LOFC squad only.
 docker compose exec app python -m lofc.ingest.skillcorner
 
+# Peek at the recruiter watchlist (user data: survives every pipeline re-run)
+docker compose exec db psql -U lofc -d lofc -c "SELECT w.status, w.note, p.player_name FROM watchlist w JOIN players p USING (player_id);"
+
+# Sweep players with no metrics rows, keeping anyone on the watchlist (the watchlist
+# foreign key blocks deleting watched players, by design)
+docker compose exec db psql -U lofc -d lofc -c "DELETE FROM players WHERE player_id NOT IN (SELECT player_id FROM player_season_metrics) AND player_id NOT IN (SELECT player_id FROM watchlist);"
+
 # Metabase tile SQL (paste into a new Metabase question on the lofc database):
 # League One physical benchmark, LOFC highlighted by ordering
 #   SELECT team_name, distance_p90, hsr_distance_p90, sprint_count_p90, high_accel_count_p90

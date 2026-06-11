@@ -57,6 +57,8 @@ class Player(Base):
     foot: Mapped[str | None] = mapped_column(String, nullable=True)
     contract_until: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     height_cm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Transfermarkt's own player id, for deep links to the player's TM profile.
+    tm_player_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
 class PlayerSeasonMetric(Base):
@@ -335,6 +337,31 @@ class Shortlist(Base):
     wage_ceiling_gbp: Mapped[int | None] = mapped_column(Integer, nullable=True)
     transfer_budget_eur: Mapped[float] = mapped_column(Float)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class WatchlistEntry(Base):
+    """A player the recruiter is tracking, with a status and a free-text note.
+
+    USER DATA: never written or cleared by the pipeline. Keyed by the same
+    (player, league, season) triple as every player row, so watching a specific
+    season-row is unambiguous even for mid-season movers.
+    """
+
+    __tablename__ = "watchlist"
+    __table_args__ = (
+        UniqueConstraint("player_id", "competition_id", "season_id",
+                         name="uq_watchlist_player_competition_season"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("players.player_id"), index=True)
+    competition_id: Mapped[int] = mapped_column(Integer, index=True)
+    season_id: Mapped[int] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, server_default="Watching")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                          onupdate=func.now())
 
 
 # The curated SkillCorner physical metrics, shared by the team and player tables.

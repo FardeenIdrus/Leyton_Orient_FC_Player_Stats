@@ -14,18 +14,42 @@ def test_age_band_boundaries():
     assert age_band(None) is None
 
 
+def _pct(player_id, percentile, competition_id=4, season_id=318,
+         position="Centre Forward", metric="np_xg_p90"):
+    return {"player_id": player_id, "competition_id": competition_id, "season_id": season_id,
+            "position_group": position, "metric": metric, "percentile": percentile}
+
+
 def test_on_profile_threshold_and_no_floor_positions():
     percentiles = pd.DataFrame([
-        {"player_id": 1, "position_group": "Centre Forward", "metric": "np_xg_p90", "percentile": 60},
-        {"player_id": 2, "position_group": "Centre Forward", "metric": "np_xg_p90", "percentile": 40},
-        {"player_id": 3, "position_group": "Central Mid", "metric": "passes_p90", "percentile": 10},
+        _pct(1, 60),
+        _pct(2, 40),
+        _pct(3, 10, position="Central Mid", metric="passes_p90"),
     ])
     floors = pd.DataFrame([{"position_group": "Centre Forward", "metric": "np_xg_p90", "min_percentile": 55}])
     on = compute_on_profile(percentiles, floors)
 
-    assert 1 in on          # 60 >= 55 floor
-    assert 2 not in on      # 40 < 55 floor
-    assert 3 in on          # Central Mid has no floor -> auto pass
+    assert (1, 4, 318) in on          # 60 >= 55 floor
+    assert (2, 4, 318) not in on      # 40 < 55 floor
+    assert (3, 4, 318) in on          # Central Mid has no floor -> auto pass
+
+
+def test_on_profile_judges_each_season_row_alone():
+    # Regression: a second season that ALSO passes must not flip a player off-profile
+    # (the old player-level pass count stopped matching the floor count), and a
+    # mid-season mover's rows get independent verdicts.
+    percentiles = pd.DataFrame([
+        _pct(1, 95, season_id=318),                      # this season: passes
+        _pct(1, 63, competition_id=5, season_id=317),    # last season: also passes
+        _pct(2, 80, competition_id=4, season_id=318),    # mover: passes in League One...
+        _pct(2, 30, competition_id=65, season_id=318),   # ...fails in the National League
+    ])
+    floors = pd.DataFrame([{"position_group": "Centre Forward", "metric": "np_xg_p90", "min_percentile": 55}])
+    on = compute_on_profile(percentiles, floors)
+
+    assert (1, 4, 318) in on and (1, 5, 317) in on
+    assert (2, 4, 318) in on
+    assert (2, 65, 318) not in on
 
 
 def _candidate(pid, value, wage, ceiling, on_profile, fit):
