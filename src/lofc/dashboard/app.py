@@ -158,6 +158,9 @@ def load_sc_players() -> pd.DataFrame:
     positions = pd.read_sql(
         "SELECT player_id, position_group FROM player_season_metrics "
         "WHERE season_id = (SELECT MAX(season_id) FROM player_season_metrics)", engine)
+    # A mid-season mover has one latest-season row per club, so dedupe to one
+    # position per player or the join fans the 21-row squad table out with copies.
+    positions = positions.drop_duplicates("player_id")
     return players.merge(positions, on="player_id", how="left")
 
 

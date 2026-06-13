@@ -29,6 +29,7 @@ DEFAULT_COMPETITIONS: list[Competition] = [
     Competition(competition_id=2, season_id=27, label="Premier League 2015/16"),
     Competition(competition_id=11, season_id=27, label="La Liga 2015/16"),
     Competition(competition_id=12, season_id=27, label="Serie A 2015/16"),
+    
 ]
 
 
