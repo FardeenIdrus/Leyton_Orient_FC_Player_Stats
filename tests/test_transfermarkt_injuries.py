@@ -94,3 +94,87 @@ def test_unknown_phrasing_falls_back_to_other():
 
 def test_categorisation_is_case_insensitive():
     assert categorise_injury("HAMSTRING INJURY") == "hamstring"
+
+
+import csv
+
+from lofc.ingest import transfermarkt_injuries as tmi
+
+ONE_INJURY_HTML = """
+<table class="items">
+<tr><th>Season</th><th>Injury</th><th>from</th><th>until</th><th>Days</th><th>Games missed</th></tr>
+<tr><td>25/26</td><td>Hamstring injury</td><td>18/08/2025</td><td>26/08/2025</td><td>9 days</td><td>2</td></tr>
+</table>
+"""
+
+
+def _redirect_paths(monkeypatch, tmp_path):
+    """Point the module's three file paths at a temporary directory."""
+    monkeypatch.setattr(tmi, "output_path", lambda: tmp_path / "injuries.csv")
+    monkeypatch.setattr(tmi, "partial_path", lambda: tmp_path / "injuries.csv.partial")
+    monkeypatch.setattr(tmi, "progress_path", lambda: tmp_path / "injuries.progress")
+
+
+def test_injury_url_uses_the_id_not_the_slug():
+    # Transfermarkt resolves the player from the id and ignores the name slug.
+    assert tmi.injury_url(88755).endswith("/verletzungen/spieler/88755")
+
+
+def test_scrape_writes_rows_with_id_and_category(monkeypatch, tmp_path):
+    _redirect_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(tmi, "fetch", lambda url: ONE_INJURY_HTML)
+
+    assert tmi.scrape([111]) == 1
+
+    rows = list(csv.DictReader(open(tmp_path / "injuries.csv")))
+    assert len(rows) == 1
+    assert rows[0]["tm_player_id"] == "111"
+    assert rows[0]["injury_category"] == "hamstring"
+    assert rows[0]["games_missed"] == "2"
+
+
+def test_player_with_no_injuries_is_recorded_as_done(monkeypatch, tmp_path):
+    _redirect_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(tmi, "fetch", lambda url: "<table class='items'></table>")
+
+    tmi.scrape([222])
+
+    # No CSV rows, but the id must still be marked complete or a resume refetches him.
+    assert 222 in tmi.load_progress()
+
+
+def test_failed_player_is_skipped_and_not_marked_done(monkeypatch, tmp_path):
+    _redirect_paths(monkeypatch, tmp_path)
+
+    def flaky(url):
+        if "999" in url:
+            raise OSError("page failed")
+        return ONE_INJURY_HTML
+
+    monkeypatch.setattr(tmi, "fetch", flaky)
+
+    tmi.scrape([111, 999])
+
+    progress = tmi.load_progress()
+    assert 111 in progress
+    assert 999 not in progress   # so a resume retries him
+
+
+def test_resume_skips_completed_ids_and_writes_one_header(monkeypatch, tmp_path):
+    _redirect_paths(monkeypatch, tmp_path)
+
+    calls = []
+
+    def counting_fetch(url):
+        calls.append(url)
+        return ONE_INJURY_HTML
+
+    monkeypatch.setattr(tmi, "fetch", counting_fetch)
+
+    tmi.scrape([111])          # first run
+    tmi.scrape([111, 222])     # resume: 111 already done
+
+    assert len(calls) == 2     # 111 once, 222 once -- not three fetches
+
+    text = (tmp_path / "injuries.csv").read_text()
+    assert text.count("tm_player_id") == 1   # header written exactly once
