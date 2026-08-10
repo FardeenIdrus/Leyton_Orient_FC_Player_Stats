@@ -42,6 +42,20 @@ def test_window_labels_covers_the_season_and_the_one_before():
     assert window_labels(319) == ("25/26", "26/27")
 
 
+def test_window_labels_raises_for_an_unmapped_season_id():
+    # 320 (2027/28) has not been added to _SEASON_LABELS yet -- silently dropping it
+    # would zero out the injury count and read the player as 100% available.
+    with pytest.raises(ValueError, match="320"):
+        window_labels(320)
+
+
+def test_window_labels_raises_for_a_fully_unmapped_season_id():
+    # 316 predates the mapping entirely, so the window would otherwise be empty --
+    # the most dangerous case, since an empty window silently matches no injuries.
+    with pytest.raises(ValueError):
+        window_labels(316)
+
+
 def test_games_missed_only_counts_the_window():
     injuries = pd.DataFrame({
         "season_label": ["23/24", "24/25", "25/26"],
@@ -54,3 +68,11 @@ def test_games_missed_only_counts_the_window():
 def test_games_missed_with_no_injuries():
     empty = pd.DataFrame(columns=["season_label", "games_missed"])
     assert games_missed_in_window(empty, 318) == 0
+
+
+def test_games_missed_treats_nan_as_zero():
+    injuries = pd.DataFrame({
+        "season_label": ["24/25", "25/26"],
+        "games_missed": [float("nan"), 6],
+    })
+    assert games_missed_in_window(injuries, 318) == 6
