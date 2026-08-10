@@ -20,14 +20,13 @@ from __future__ import annotations
 import argparse
 import csv
 import re
-import time
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 
 from bs4 import BeautifulSoup
 
 from lofc.config import settings
+from lofc.ingest.transfermarkt_common import fetch as _fetch
 
 BASE = "https://www.transfermarkt.com"
 # TM league code -> (URL slug, our StatsBomb competition_id).
@@ -39,29 +38,6 @@ LEAGUES = {
 }
 # TM labels seasons by their starting year: 2025 = the 2025/26 season.
 TM_SEASON = 2025
-REQUEST_DELAY_S = 2.5
-USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-
-_last_request = 0.0
-
-
-def _fetch(url: str, retries: int = 3) -> str:
-    """Polite GET: rate-limited, browser user agent, exponential backoff."""
-    global _last_request
-    wait = REQUEST_DELAY_S - (time.monotonic() - _last_request)
-    if wait > 0:
-        time.sleep(wait)
-    for attempt in range(retries):
-        try:
-            request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-            with urllib.request.urlopen(request, timeout=60) as response:
-                _last_request = time.monotonic()
-                return response.read().decode("utf-8", "ignore")
-        except Exception:
-            if attempt == retries - 1:
-                raise
-            time.sleep(5 * (attempt + 1))
-    raise RuntimeError("unreachable")
 
 
 def parse_value(text: str) -> float | None:
