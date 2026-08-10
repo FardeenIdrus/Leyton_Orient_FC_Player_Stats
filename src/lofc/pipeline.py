@@ -77,6 +77,8 @@ def build_steps() -> list[tuple[str, list[str]]]:
         ("Score: percentiles + performance/fit", [sys.executable, "-m", "lofc.model.run"]),
         ("Cluster playing-style archetypes", [sys.executable, "-m", "lofc.model.archetypes"]),
         ("Valuation: fair value + undervaluation", [sys.executable, "-m", "lofc.model.valuation"]),
+        ("Identity: link players to Transfermarkt (independent of market value)",
+         [sys.executable, "-m", "lofc.model.identity"]),
         # The club 1-5 composite (the live ranking). Must run AFTER valuation and the wage
         # reference data, because the Financial/Resale dimensions read them; and BEFORE the
         # shortlist, which now ranks on the stored objective composite.
