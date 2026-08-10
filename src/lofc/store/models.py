@@ -422,6 +422,33 @@ class WatchlistEntry(Base):
                                                           onupdate=func.now())
 
 
+class PlayerInjury(Base):
+    """One injury spell. Scraped from Transfermarkt, or entered by hand where
+    Transfermarkt has no coverage (Scottish/PL2).
+
+    ONE SCHEMA, TWO PROVENANCES: `source` records where the row came from, and the
+    availability rule deliberately never inspects it -- a hand-entered Scottish
+    player and a scraped League One player are computed identically and are directly
+    comparable. Only the display differs.
+    """
+
+    __tablename__ = "player_injuries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("players.player_id"),
+                                           index=True)
+    tm_player_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    season_label: Mapped[str] = mapped_column(String)          # "25/26"
+    injury_type_raw: Mapped[str] = mapped_column(String)       # Transfermarkt's own wording
+    injury_category: Mapped[str] = mapped_column(String, index=True)
+    date_from: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    date_until: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    days_out: Mapped[int] = mapped_column(Integer, server_default="0")
+    games_missed: Mapped[int] = mapped_column(Integer, server_default="0")
+    source: Mapped[str] = mapped_column(String, server_default="transfermarkt")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 # The curated SkillCorner physical metrics, shared by the team and player tables.
 # Per-90 rates plus peak speed; the raw per-match columns stay in the source file.
 SKILLCORNER_METRICS = [

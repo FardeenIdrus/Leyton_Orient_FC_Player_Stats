@@ -40,3 +40,13 @@ def test_all_eight_positions_have_a_profile():
     wage = ref.build_wage_framework()
     assert set(identity["position_group"]) == set(wage["position_group"])
     assert len(set(identity["position_group"])) == 8
+
+
+def test_player_injuries_table_shape():
+    from lofc.store.models import PlayerInjury
+
+    columns = {c.name for c in PlayerInjury.__table__.columns}
+    assert {"player_id", "tm_player_id", "season_label", "injury_category",
+            "days_out", "games_missed", "source"} <= columns
+    # Provenance defaults to the scraper; manual rows override it (plan 2).
+    assert PlayerInjury.__table__.c.source.server_default.arg == "transfermarkt"
