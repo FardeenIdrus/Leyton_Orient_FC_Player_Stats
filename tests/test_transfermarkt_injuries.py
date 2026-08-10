@@ -68,3 +68,29 @@ def test_parse_injury_rows_handles_ongoing_injury():
 def test_parse_injury_rows_returns_empty_for_a_player_with_no_injuries():
     # A clean player's page has no data rows. This is a valid result, not an error.
     assert parse_injury_rows("<table class='items'></table>") == []
+
+
+from lofc.ingest.transfermarkt_injuries import categorise_injury
+
+
+def test_categorise_the_club_named_injuries():
+    assert categorise_injury("Hamstring injury") == "hamstring"
+    assert categorise_injury("Calf strain") == "calf"
+    assert categorise_injury("Adductor pain") == "groin"
+    assert categorise_injury("Cruciate ligament rupture") == "knee_ligament"
+    assert categorise_injury("muscular problems") == "muscular"
+
+
+def test_specific_joint_beats_the_generic_ligament_rule():
+    # "Ankle ligament tear" must be ankle, not knee_ligament -- order matters.
+    assert categorise_injury("Ankle ligament tear") == "ankle"
+
+
+def test_unknown_phrasing_falls_back_to_other():
+    assert categorise_injury("Rest") == "other"
+    assert categorise_injury("Unknown injury") == "other"
+    assert categorise_injury("") == "other"
+
+
+def test_categorisation_is_case_insensitive():
+    assert categorise_injury("HAMSTRING INJURY") == "hamstring"

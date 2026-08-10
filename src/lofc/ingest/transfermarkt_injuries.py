@@ -65,3 +65,29 @@ def parse_injury_rows(html: str) -> list[dict]:
             "games_missed": parse_games_missed(games),
         })
     return rows
+
+
+# The categories the club names in its Medical & Durability requirements. Order matters:
+# a specific joint is checked before the generic ligament/muscle rules, so that
+# "ankle ligament tear" is an ankle injury and not a knee one.
+INJURY_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "hamstring": ("hamstring",),
+    "calf": ("calf",),
+    "groin": ("groin", "adductor", "pubitis"),
+    "ankle": ("ankle",),
+    "hip": ("hip",),
+    "knee_ligament": ("cruciate", "acl", "knee", "meniscus", "ligament"),
+    "muscular": ("muscular", "muscle", "thigh", "quadriceps"),
+}
+
+
+def categorise_injury(raw: str) -> str:
+    """Normalise Transfermarkt's free text. Unmapped phrasing returns 'other'.
+
+    Callers should log 'other' results so new phrasings surface rather than vanish.
+    """
+    text = (raw or "").lower()
+    for category, needles in INJURY_CATEGORIES.items():
+        if any(needle in text for needle in needles):
+            return category
+    return "other"
