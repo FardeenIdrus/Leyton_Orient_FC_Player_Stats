@@ -57,10 +57,19 @@ def window_labels(season_id: int, seasons: int = AVAILABILITY_SEASONS) -> tuple[
 
 def games_missed_in_window(injuries: pd.DataFrame, season_id: int,
                            seasons: int = AVAILABILITY_SEASONS) -> int:
-    """Total games missed through injury inside the window. No injuries -> 0."""
+    """Total games missed through injury inside the window. No injuries -> 0.
+
+    window_labels() is called before the empty-frame check (not after) so that an
+    unmapped season id always raises, whether or not the player happens to have any
+    injury rows. Checking emptiness first would make the maintenance error
+    non-deterministic: it would raise for injured players and silently return 0 --
+    a correct-looking number for the wrong reason -- for uninjured ones, so a
+    forgotten _SEASON_LABELS update would look like an intermittent bug instead of
+    a missing dict entry.
+    """
+    labels = window_labels(season_id, seasons)
     if injuries.empty:
         return 0
-    labels = window_labels(season_id, seasons)
     inside = injuries[injuries["season_label"].isin(labels)]
     return int(inside["games_missed"].fillna(0).sum())
 

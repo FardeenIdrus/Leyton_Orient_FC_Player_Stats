@@ -76,3 +76,18 @@ def test_games_missed_treats_nan_as_zero():
         "games_missed": [float("nan"), 6],
     })
     assert games_missed_in_window(injuries, 318) == 6
+
+
+def test_games_missed_with_no_injuries_still_validates_the_season():
+    # An empty frame must not bypass validation: whether an unmapped season id
+    # raises has to be deterministic, not dependent on whether this particular
+    # player happens to have any injury rows.
+    empty = pd.DataFrame(columns=["season_label", "games_missed"])
+    with pytest.raises(ValueError):
+        games_missed_in_window(empty, 320)
+
+
+def test_games_missed_with_no_injuries_and_a_mapped_season_still_returns_zero():
+    # The mapped-season behaviour must be unchanged by the validation reordering.
+    empty = pd.DataFrame(columns=["season_label", "games_missed"])
+    assert games_missed_in_window(empty, 318) == 0
