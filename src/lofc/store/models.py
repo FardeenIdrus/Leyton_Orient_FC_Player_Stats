@@ -215,6 +215,57 @@ class PlayerScore(Base):
     fit_rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+class PlayerScorecard(Base):
+    """The club's 1-5 recruitment composite per player (model/scorecard.py), persisted.
+
+    This is the LIVE ranking model (the old player_scores Quality/Fit is retired), stored so
+    the offline shortlist pipeline and the BI layer read the same numbers the dashboard shows.
+
+    Scored WITHIN season + league + position group. One row per player-season PER ARCHETYPE:
+    'All Metrics' (the default, full-profile) for everyone, plus a row per club archetype for
+    the positions that have them (Full Back, Winger) so the lens is queryable in BI.
+
+    TWO composites, deliberately kept as separate columns:
+      * objective_composite -- Performance + Physical only, 100% real Impect + SkillCorner
+        data. THIS is the ranking (the shortlist sorts on it).
+      * full_composite -- adds the MODELLED Financial Fit + Resale Potential, which rest on the
+        modelled wage grid and the valuation regression (a screening prior, NOT decision-grade).
+        Anything reading this column directly must treat it as part-modelled.
+
+    veto / below_min_composite mirror the club's "< 2.0 on a dimension" and "< 3.0 composite"
+    rules. They are ADVISORY FLAGS ONLY and never exclude a player from the ranking.
+    """
+
+    __tablename__ = "player_scorecards"
+    __table_args__ = (
+        UniqueConstraint("player_id", "competition_id", "season_id", "archetype",
+                         name="uq_scorecard_player_competition_season_archetype"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("players.player_id"), index=True)
+    competition_id: Mapped[int] = mapped_column(Integer, index=True)
+    season_id: Mapped[int] = mapped_column(Integer, index=True)
+    position_group: Mapped[str] = mapped_column(String, index=True)
+    # 'All Metrics' = the full-profile default; otherwise a club archetype (Full Back / Winger).
+    archetype: Mapped[str] = mapped_column(String, index=True)
+
+    # The 1-5 dimension bands. Financial/Resale are MODELLED and are NULL for players with no
+    # market value (Scottish/PL2) -- they simply drop out and the composite renormalises.
+    performance_band: Mapped[float | None] = mapped_column(Float, nullable=True)
+    physical_band: Mapped[float | None] = mapped_column(Float, nullable=True)
+    financial_band: Mapped[float | None] = mapped_column(Float, nullable=True)
+    resale_band: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    objective_composite: Mapped[float | None] = mapped_column(Float, nullable=True)
+    objective_weight_covered: Mapped[float | None] = mapped_column(Float, nullable=True)
+    full_composite: Mapped[float | None] = mapped_column(Float, nullable=True)
+    full_weight_covered: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    veto: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    below_min_composite: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+
 class Archetype(Base):
     """A player's playing-style cluster within their position. Phase 5 output.
 
@@ -324,7 +375,14 @@ class Shortlist(Base):
     on_profile: Mapped[bool] = mapped_column(Boolean)
     is_near_miss: Mapped[bool] = mapped_column(Boolean, index=True)
 
+    # THE RANKING KEY: the club's objective 1-5 composite (Performance + Physical, real data),
+    # copied from player_scorecards. full_composite adds the MODELLED money dimensions and is
+    # carried for reference only -- it never orders the shortlist.
+    objective_composite: Mapped[float | None] = mapped_column(Float, nullable=True)
+    full_composite: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     performance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # RETIRED: the old invented Style-fit. Kept for historical comparison; ranks nothing.
     fit_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     undervaluation_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     market_value_eur: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -456,3 +514,42 @@ class SkillCornerPlayerSeason(Base):
     explosive_accel_to_hsr_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
     explosive_accel_to_sprint_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
     cod_count_p90: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+# ---------------------------------------------------------------------------
+# Phase 11: the combined provider-neutral metric table.
+# One row per player x league x season carrying ALL registry metrics, each filled
+# from its single designated source (Impect / StatsBomb advanced / StatsBomb
+# computed / SkillCorner). Columns are GENERATED from the metric registry so the
+# schema can never drift from the definitions: adding a metric to the registry
+# and autogenerating a migration is the whole change. The live tables above stay
+# untouched; scoring is re-pointed at this table in a later, explicit step.
+# ---------------------------------------------------------------------------
+from lofc.model.metric_registry import REGISTRY as _METRIC_REGISTRY  # noqa: E402
+
+
+class PlayerMetricNeutral(Base):
+    """Combined 87-metric row per player-league-season (Phase 11 neutral layer)."""
+
+    __tablename__ = "player_metrics_neutral"
+    __table_args__ = (
+        UniqueConstraint("player_id", "competition_id", "season_id",
+                         name="uq_neutral_player_comp_season"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    competition_id: Mapped[int] = mapped_column(Integer, index=True)
+    season_id: Mapped[int] = mapped_column(Integer, index=True)
+    player_name: Mapped[str] = mapped_column(String)
+    team_name: Mapped[str] = mapped_column(String)
+    position_group: Mapped[str] = mapped_column(String)
+    minutes: Mapped[float] = mapped_column(Float)
+    rankable: Mapped[bool] = mapped_column(Boolean)
+
+
+# Attach one nullable Float column per registry metric (nullable because a source
+# can be absent for a season, e.g. no physical data before 2025/26).
+for _spec in _METRIC_REGISTRY:
+    setattr(PlayerMetricNeutral, _spec.name, mapped_column(Float, nullable=True))
+del _spec

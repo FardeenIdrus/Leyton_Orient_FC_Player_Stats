@@ -129,8 +129,21 @@ docker compose exec app python -m lofc.model.valuation
 docker compose exec db psql -U lofc -d lofc -c "SELECT m.player_name, m.team_name, v.position_group, v.age, v.market_value_eur, v.fair_value_eur, v.undervaluation_pct FROM valuations v JOIN player_season_metrics m USING(player_id,competition_id,season_id) WHERE m.minutes>1500 ORDER BY v.undervaluation_pct DESC LIMIT 10;"
 
 
+# ----- Club scorecard: persist the 1-5 recruitment composite -----
+# The live ranking model, written to player_scorecards so the offline shortlist and the BI
+# layer read the same numbers as the dashboard. Runs AFTER valuation (Financial/Resale need
+# it) and BEFORE the shortlist. Clear-then-insert, idempotent. Fast: no data fetch.
+
+# Build/refresh the composite for every player-season (+ the Full Back / Winger archetypes)
+docker compose exec app python -m lofc.model.scorecard_run
+
+# See the top of a position on the club composite, with names
+docker compose exec db psql -U lofc -d lofc -c "SELECT n.player_name, n.team_name, sc.objective_composite, sc.performance_band, sc.physical_band FROM player_scorecards sc JOIN player_metrics_neutral n USING(player_id,competition_id,season_id) WHERE sc.archetype='All Metrics' AND sc.season_id=318 AND sc.position_group='Centre Forward' ORDER BY sc.objective_composite DESC NULLS LAST LIMIT 10;"
+
+
 # ----- Phase 7: Constrain & Rank -----
-# Filters to affordable (fee + modelled wage) + on-profile players, ranks the shortlist.
+# Applies the affordability gates (fee + modelled wage) and ranks on the club's objective
+# 1-5 composite (Performance + Physical). The retired Style-fit no longer ranks anything.
 
 # Generate the default shortlists for every position and write them to Postgres
 docker compose exec app python -m lofc.constrain.run
@@ -233,3 +246,63 @@ docker compose exec db psql -U lofc -d lofc -c "DELETE FROM players WHERE player
 # LOFC squad physical output
 #   SELECT player_name, matches_measured, distance_p90, hsr_distance_p90, sprint_count_p90, psv99_kmh
 #   FROM skillcorner_player_season ORDER BY distance_p90 DESC;
+# ===== Phase 11: Impect (second provider, intended future primary) =====
+# Credentials in .env: IMPECT_USERNAME / IMPECT_PASSWORD (re-up after editing .env).
+
+# Pull player-season data for all configured Impect iterations (14 by default:
+# the 4 EFL leagues + Scottish Premiership/Championship + PL2, 2024/25 + 2025/26).
+# Idempotent: existing iteration files are skipped; --force re-pulls; --iteration N
+# pulls one only. Lands parquet under data/raw/impect/ (gitignored, licensed data).
+# IN-SEASON: the live season (config.LIVE_SEASON_ID) is ALWAYS re-pulled, because Impect
+# returns season-to-date aggregates -- a landed file goes stale after every matchweek.
+# Finished seasons stay skip-if-exists. A season with no matches yet is skipped, not an error.
+docker compose exec app python -m lofc.ingest.impect
+
+# ----- WEEKLY IN-SEASON REFRESH (run after each round of fixtures) -----
+# Both providers always re-pull the live season (config.LIVE_SEASON_ID); finished seasons and
+# not-yet-started leagues are skipped. 1. events  2. physical  3. metric table  4. models.
+docker compose exec app python -m lofc.ingest.impect
+docker compose exec app python -m lofc.ingest.skillcorner_api
+docker compose exec app python -m lofc.model.build_neutral --write
+docker compose exec app python -m lofc.pipeline
+
+# Validation gate (read-only, no DB writes): match Impect players to ours (TM id,
+# then birth date + name) and compare per-player goal totals + xG against the
+# StatsBomb data we already validated. Must look healthy for the EFL before any
+# downstream build on Impect.
+docker compose exec app python -m lofc.model.impect_check
+
+# ===== SkillCorner platform (physical data for ALL players in covered leagues) =====
+# Replaces the squad-only xlsx as the physical source. Credentials in .env:
+# SKILLCORNER_USERNAME / SKILLCORNER_PASSWORD (re-up after editing .env).
+
+# Pull season physical data for all covered editions (7 by default: the 4 EFL
+# leagues + PL2 + Scottish Premiership + Irish Premier, 2025/26). One row per player,
+# season-aggregated. Idempotent; --force re-pulls; --edition N pulls one.
+# Lands parquet under data/raw/skillcorner/ (gitignored, licensed data).
+docker compose exec app python -m lofc.ingest.skillcorner_api
+
+# Coverage report (read-only): how many SkillCorner players tie to a player in our DB.
+# High rate for the EFL editions = physical data now available for those candidates.
+docker compose exec app python -m lofc.model.skillcorner_check
+
+# ===== StatsBomb Season Player Stats (only the metrics Impect lacks) =====
+# Pulls ready-made per-90 advanced metrics (PAdj tackles/interceptions + pressures,
+# aggressive actions, pressures in opp half, xG buildup, pressured-pass %, box-cross %)
+# for the 8 EFL league-seasons. player_id = our player_id, so no matching. Idempotent.
+# Lands parquet under data/raw/statsbomb_season/ (gitignored, licensed data).
+docker compose exec app python -m lofc.ingest.statsbomb_season
+
+# ===== Unified metric registry + neutral-layer merge (Phase 11 Steps 1) =====
+# Print the full 87-metric inventory: every metric, its single source, and the exact
+# derivation (registry invariants are asserted on import).
+docker compose exec app python -m lofc.model.metric_registry
+
+# Read-only merge report: combines Impect + StatsBomb (advanced + computed) + SkillCorner
+# into one wide table per player for every configured league season, and prints per-source
+# coverage. Writes nothing to the database.
+docker compose exec app python -m lofc.model.build_neutral
+
+# Load the combined 87-metric table into the database (player_metrics_neutral,
+# clear-then-insert per league season; also pipeline step 15). Without --write = report only.
+docker compose exec app python -m lofc.model.build_neutral --write
