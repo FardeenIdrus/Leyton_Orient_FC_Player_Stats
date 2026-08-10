@@ -95,7 +95,6 @@ def categorise_injury(raw: str) -> str:
 
 import argparse
 import csv
-import shutil
 from pathlib import Path
 
 from lofc.config import settings
@@ -144,16 +143,51 @@ def player_ids() -> list[int]:
     return sorted(ids)
 
 
-def scrape(ids: list[int]) -> int:
-    """Fetch each player's injury page, appending as we go. Returns rows written.
+CONSECUTIVE_FAILURE_LIMIT = 20
 
-    Resumable: ids already in the progress file are skipped, and a player whose page
-    fails is logged but NOT marked done, so a later run retries him.
+
+class ScrapeResult(int):
+    """The row count `scrape()` returns. A resumability driver needs to report a
+    failure count too, but the existing call sites (and tests) compare the return
+    value directly against an int of rows written -- so this subclasses int rather
+    than becoming a tuple/dataclass, keeping `scrape(...) == written` true while
+    still carrying `.failed` for callers (namely `main()`) that want it.
+    """
+
+    failed: int = 0
+
+    def __new__(cls, written: int, failed: int = 0):
+        obj = super().__new__(cls, written)
+        obj.failed = failed
+        return obj
+
+
+def scrape(ids: list[int], force: bool = False) -> int:
+    """Fetch each player's injury page, appending as we go. Returns rows written
+    (as a `ScrapeResult`, whose `.failed` attribute carries the failure count).
+
+    Resumable across a genuine interruption: a run that dies mid-way (killed,
+    crashed, `KeyboardInterrupt` -- which is deliberately NOT caught below) leaves
+    `partial` and `progress` on disk exactly as they stood, and the next call with
+    the same id list skips everything already marked done and retries the rest.
+
+    A run that reaches the end of its id list, by contrast, is complete: `partial`
+    is published atomically to `out` and both working files are removed. Calling
+    `scrape()` again after that is a fresh refresh, not a resume -- every id,
+    including ones already recorded from the previous run, is refetched. That is
+    intentional: `force=True` relies on exactly this to start genuinely clean.
     """
     partial, progress, out = partial_path(), progress_path(), output_path()
     partial.parent.mkdir(parents=True, exist_ok=True)
+
+    if force:
+        partial.unlink(missing_ok=True)
+        progress.unlink(missing_ok=True)
+
     done = load_progress()
     written = 0
+    failed = 0
+    consecutive_failures = 0
 
     with open(partial, "a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=FIELDNAMES)
@@ -164,10 +198,21 @@ def scrape(ids: list[int]) -> int:
                 continue
             try:
                 html = fetch(injury_url(tm_id))
+                rows = parse_injury_rows(html)
             except Exception as exc:               # one bad page must not end the run
+                failed += 1
+                consecutive_failures += 1
                 print(f"  [skip] {tm_id}: {exc}", flush=True)
+                if consecutive_failures >= CONSECUTIVE_FAILURE_LIMIT:
+                    raise RuntimeError(
+                        f"aborting after {consecutive_failures} consecutive page "
+                        f"failures (most recently id {tm_id}); Transfermarkt may be "
+                        "blocking requests. Progress so far is saved -- rerun to "
+                        "resume."
+                    ) from exc
                 continue
-            for row in parse_injury_rows(html):
+            consecutive_failures = 0
+            for row in rows:
                 row["tm_player_id"] = tm_id
                 row["injury_category"] = categorise_injury(row["injury_type_raw"])
                 if row["injury_category"] == "other":
@@ -180,13 +225,15 @@ def scrape(ids: list[int]) -> int:
             if index % 50 == 0:
                 print(f"  {index}/{len(ids)} players", flush=True)
 
-    # Publish: copy (not move) the accumulated partial file to the public output
-    # path. partial and progress both persist so a later scrape() call -- whether
-    # a resume after interruption or a fresh invocation over the same id list --
-    # can append further rows and correctly skip ids already marked done. Deleting
-    # either here would defeat resumability, which is the entire point of this file.
-    shutil.copy2(partial, out)
-    return written
+    # Atomic publish: an interrupted run never leaves a half-written injuries.csv,
+    # and `replace()` is a same-filesystem rename, so `out` is either the previous
+    # good file or the new complete one -- never a partial mix of both. Both working
+    # files are consumed here: the next invocation with these same ids is therefore
+    # a refresh (refetch everything), not a resume. Resuming only makes sense for a
+    # run that never reached this line.
+    partial.replace(out)
+    progress.unlink(missing_ok=True)
+    return ScrapeResult(written, failed)
 
 
 def main() -> None:
@@ -204,11 +251,11 @@ def main() -> None:
         return
 
     ids = player_ids()
-    if args.limit:
+    if args.limit is not None:
         ids = ids[:args.limit]
     print(f"{len(ids)} players to fetch (~{len(ids) * 2.5 / 3600:.1f} hours)")
-    written = scrape(ids)
-    print(f"\nWrote {written} injury rows to {out}")
+    written = scrape(ids, force=args.force)
+    print(f"\nWrote {written} injury rows to {out} ({written.failed} failed)")
 
 
 if __name__ == "__main__":

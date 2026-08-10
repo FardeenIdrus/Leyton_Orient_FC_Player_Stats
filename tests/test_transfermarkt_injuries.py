@@ -98,6 +98,8 @@ def test_categorisation_is_case_insensitive():
 
 import csv
 
+import pytest
+
 from lofc.ingest import transfermarkt_injuries as tmi
 
 ONE_INJURY_HTML = """
@@ -126,38 +128,86 @@ def test_scrape_writes_rows_with_id_and_category(monkeypatch, tmp_path):
 
     assert tmi.scrape([111]) == 1
 
-    rows = list(csv.DictReader(open(tmp_path / "injuries.csv")))
+    with open(tmp_path / "injuries.csv", newline="") as handle:
+        rows = list(csv.DictReader(handle))
     assert len(rows) == 1
     assert rows[0]["tm_player_id"] == "111"
     assert rows[0]["injury_category"] == "hamstring"
     assert rows[0]["games_missed"] == "2"
 
 
+class _SimulatedCrash(BaseException):
+    """Stands in for a real process interruption (killed, crashed, OOM). Like
+    `KeyboardInterrupt` -- which it deliberately subclasses `BaseException` rather
+    than `Exception` to resemble -- it must NOT be swallowed by scrape()'s
+    `except Exception`, so it propagates out of scrape() before publish is reached.
+    """
+
+
 def test_player_with_no_injuries_is_recorded_as_done(monkeypatch, tmp_path):
     _redirect_paths(monkeypatch, tmp_path)
-    monkeypatch.setattr(tmi, "fetch", lambda url: "<table class='items'></table>")
 
-    tmi.scrape([222])
+    def fetch_then_crash(url):
+        if "222" in url:
+            return "<table class='items'></table>"   # no injuries for this player
+        raise _SimulatedCrash("process killed")         # crash before reaching 333
 
-    # No CSV rows, but the id must still be marked complete or a resume refetches him.
+    monkeypatch.setattr(tmi, "fetch", fetch_then_crash)
+
+    with pytest.raises(_SimulatedCrash):
+        tmi.scrape([222, 333])
+
+    # 222 was fully processed (zero rows) before the crash on 333. He must still be
+    # marked complete in the surviving, unpublished progress file, or a resume would
+    # refetch him even though he genuinely has nothing to report.
     assert 222 in tmi.load_progress()
+    # And the crash means the run never reached publish.
+    assert not tmp_path.joinpath("injuries.csv").exists()
 
 
 def test_failed_player_is_skipped_and_not_marked_done(monkeypatch, tmp_path):
     _redirect_paths(monkeypatch, tmp_path)
 
-    def flaky(url):
+    calls = []
+
+    def flaky_then_crash(url):
+        calls.append(url)
         if "999" in url:
-            raise OSError("page failed")
+            raise OSError("page failed")             # caught inside scrape(), logged
+        if "333" in url:
+            raise _SimulatedCrash("process killed")     # ends the run before publish
         return ONE_INJURY_HTML
 
-    monkeypatch.setattr(tmi, "fetch", flaky)
+    monkeypatch.setattr(tmi, "fetch", flaky_then_crash)
 
-    tmi.scrape([111, 999])
+    with pytest.raises(_SimulatedCrash):
+        tmi.scrape([111, 999, 333])
 
+    # Mid-run state, inspected before any cleanup happens: 111 succeeded and is
+    # marked done. 999's page was genuinely attempted and failed, so he must NOT be
+    # marked done -- distinct from 333, who the crash means was never attempted at
+    # all (both are absent from progress, but for different reasons).
     progress = tmi.load_progress()
     assert 111 in progress
-    assert 999 not in progress   # so a resume retries him
+    assert 999 not in progress
+    assert 333 not in progress
+    # All three were attempted -- 999's failure didn't stop the run, only the crash
+    # on 333 did -- but only 111 succeeded and got marked done.
+    assert calls == [tmi.injury_url(111), tmi.injury_url(999), tmi.injury_url(333)]
+
+    # Resume: same id list, nothing crashes this time. 111 is skipped (already
+    # done); 999 -- whose earlier attempt was never marked complete -- is retried,
+    # and 333 (never reached before) is fetched for the first time.
+    calls.clear()
+
+    def healthy(url):
+        calls.append(url)
+        return ONE_INJURY_HTML
+
+    monkeypatch.setattr(tmi, "fetch", healthy)
+    tmi.scrape([111, 999, 333])
+
+    assert calls == [tmi.injury_url(999), tmi.injury_url(333)]  # not 111
 
 
 def test_resume_skips_completed_ids_and_writes_one_header(monkeypatch, tmp_path):
@@ -165,16 +215,43 @@ def test_resume_skips_completed_ids_and_writes_one_header(monkeypatch, tmp_path)
 
     calls = []
 
-    def counting_fetch(url):
+    def crash_on_222(url):
+        calls.append(url)
+        if "222" in url:
+            raise _SimulatedCrash("process killed")
+        return ONE_INJURY_HTML
+
+    monkeypatch.setattr(tmi, "fetch", crash_on_222)
+
+    with pytest.raises(_SimulatedCrash):
+        tmi.scrape([111, 222, 333])
+
+    # The crash landed before publish: no injuries.csv yet (atomic publish -- an
+    # interrupted run never leaves a half-written one), but the partial working
+    # file already holds 111's row and the progress file already marks him done.
+    assert not tmp_path.joinpath("injuries.csv").exists()
+    assert tmp_path.joinpath("injuries.csv.partial").exists()
+    assert 111 in tmi.load_progress()
+
+    # Resume with a healthy fetch: 111 is skipped, 222 and 333 are (re)fetched.
+    calls.clear()
+
+    def healthy(url):
         calls.append(url)
         return ONE_INJURY_HTML
 
-    monkeypatch.setattr(tmi, "fetch", counting_fetch)
+    monkeypatch.setattr(tmi, "fetch", healthy)
+    tmi.scrape([111, 222, 333])
 
-    tmi.scrape([111])          # first run
-    tmi.scrape([111, 222])     # resume: 111 already done
+    assert calls == [tmi.injury_url(222), tmi.injury_url(333)]
 
-    assert len(calls) == 2     # 111 once, 222 once -- not three fetches
+    with open(tmp_path / "injuries.csv", newline="") as handle:
+        text = handle.read()
+        handle.seek(0)
+        rows = list(csv.DictReader(handle))
+    assert text.count("tm_player_id") == 1                        # header once
+    assert {r["tm_player_id"] for r in rows} == {"111", "222", "333"}
 
-    text = (tmp_path / "injuries.csv").read_text()
-    assert text.count("tm_player_id") == 1   # header written exactly once
+    # Publish is atomic and consumes the working file: nothing is left to be
+    # reopened (and duplicated into) by a later, unrelated run.
+    assert not tmp_path.joinpath("injuries.csv.partial").exists()
