@@ -89,7 +89,39 @@ def match_identity(ours: pd.DataFrame, squad: pd.DataFrame) -> pd.DataFrame:
             "contract_until": cell("contract_until"),
             "height_cm": cell("height_cm", int),
         })
-    return pd.DataFrame(rows, columns=IDENTITY_COLUMNS)
+    return drop_ambiguous_matches(pd.DataFrame(rows, columns=IDENTITY_COLUMNS))
+
+
+def drop_ambiguous_matches(matched: pd.DataFrame) -> pd.DataFrame:
+    """Drop every match whose Transfermarkt id more than one of our players claims.
+
+    Two of our players can resolve to the same squad row (a namesake born on the same
+    day, a duplicated player record, a squad row for a player we hold twice). That was
+    cosmetic while tm_player_id was only a profile link. `store/injuries.py` now joins
+    the injury history on it, so a shared id copies one player's ENTIRE injury record
+    onto the other, and the availability figure -- a medical judgement -- follows.
+
+    Nothing in the data says which of the two is the real player, so neither is
+    written: a missing identity is recoverable, a wrong medical record is not. The
+    number of rows dropped is printed and left on `.attrs["dropped_ambiguous"]`.
+    """
+    matched.attrs["dropped_ambiguous"] = 0
+    if matched.empty:
+        return matched
+
+    claimants = matched.groupby("tm_player_id")["player_id"].nunique()
+    ambiguous = sorted(int(i) for i in claimants[claimants > 1].index)
+    if not ambiguous:
+        return matched
+
+    kept = matched.loc[~matched["tm_player_id"].isin(ambiguous)].reset_index(drop=True)
+    dropped = len(matched) - len(kept)
+    print(f"identity: dropped {dropped} ambiguous match(es) across "
+          f"{len(ambiguous)} Transfermarkt id(s) {ambiguous} -- more than one of our "
+          "players resolved to the same squad row, and guessing which is correct would "
+          "misattribute an injury history")
+    kept.attrs["dropped_ambiguous"] = dropped
+    return kept
 
 
 def bio_update_stmt():
@@ -124,8 +156,9 @@ def main() -> None:
         engine)
 
     matched = match_identity(ours, load_efl_identity(path))
+    dropped = matched.attrs.get("dropped_ambiguous", 0)
     if matched.empty:
-        print("no identity matches")
+        print(f"no identity matches ({dropped} dropped as ambiguous)")
         return
 
     with engine.begin() as conn:
@@ -135,7 +168,8 @@ def main() -> None:
              "cu": r.contract_until if pd.notna(r.contract_until) else None,
              "hc": int(r.height_cm) if pd.notna(r.height_cm) else None}
             for r in matched.itertuples()])
-    print(f"identity: linked {len(matched)} players to Transfermarkt")
+    print(f"identity: linked {len(matched)} players to Transfermarkt "
+          f"({dropped} dropped as ambiguous)")
 
 
 if __name__ == "__main__":

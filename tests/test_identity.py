@@ -80,3 +80,57 @@ def test_match_identity_skips_players_with_no_birth_date(tmp_path):
          "birth_date": None, "competition_id": 65},
     ])
     assert match_identity(ours, squad).empty
+
+
+# --------------------------------------------------------------------------
+# F2 -- one Transfermarkt row must not be claimed by two of our players.
+#
+# This was cosmetic while tm_player_id was only a profile link. store/injuries.py
+# now inner-joins the injury history on it, so a duplicate copies one player's whole
+# injury record onto a second player and the availability figure -- a medical
+# judgement -- follows it. There is no way to tell which of the two is right, so
+# neither is written.
+# --------------------------------------------------------------------------
+
+def test_two_players_resolving_to_one_squad_row_are_both_dropped(tmp_path, capsys):
+    squad = load_efl_identity(_csv(tmp_path))
+    ours = pd.DataFrame([
+        {"player_id": 900, "player_name": "Nicke Kabamba",
+         "birth_date": "1993-05-05", "competition_id": 65},
+        {"player_id": 901, "player_name": "Nicke Kabamba",
+         "birth_date": "1993-05-05", "competition_id": 65},
+    ])
+    matched = match_identity(ours, squad)
+    assert matched.empty
+    assert list(matched.columns) == ["player_id", "tm_player_id", "birth_date", "foot",
+                                     "contract_until", "height_cm"]
+    printed = capsys.readouterr().out
+    assert "222" in printed                      # the ambiguous Transfermarkt id
+    assert matched.attrs["dropped_ambiguous"] == 2
+
+
+def test_an_ambiguous_id_does_not_take_the_unambiguous_ones_with_it(tmp_path):
+    squad = load_efl_identity(_csv(tmp_path))
+    ours = pd.DataFrame([
+        {"player_id": 900, "player_name": "Nicke Kabamba",
+         "birth_date": "1993-05-05", "competition_id": 65},
+        {"player_id": 901, "player_name": "Nicke Kabamba",
+         "birth_date": "1993-05-05", "competition_id": 65},
+        {"player_id": 902, "player_name": "Sam Morsy",
+         "birth_date": "1991-09-10", "competition_id": 3},
+    ])
+    matched = match_identity(ours, squad)
+    assert list(matched["player_id"]) == [902]
+    assert int(matched.loc[0, "tm_player_id"]) == 111
+    assert matched.attrs["dropped_ambiguous"] == 2
+
+
+def test_a_clean_match_reports_nothing_dropped(tmp_path):
+    squad = load_efl_identity(_csv(tmp_path))
+    ours = pd.DataFrame([
+        {"player_id": 900, "player_name": "Nicke Kabamba",
+         "birth_date": "1993-05-05", "competition_id": 65},
+    ])
+    matched = match_identity(ours, squad)
+    assert len(matched) == 1
+    assert matched.attrs["dropped_ambiguous"] == 0
