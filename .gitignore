@@ -20,9 +20,11 @@ data/raw/impect/
 # Club-provided reference files (CONFIDENTIAL recruitment framework + provider specs;
 # internal use only, never public). The tracked docs are architecture/methodology/scaling.
 docs/LOFC - Position Archetype.docx
-docs/Data - Positional Metrics.xlsx
 docs/API SB Helper.pdf
 docs/impect_column_list.txt
+# Covers both "Data - Positional Metrics.xlsx" and the Impect-prefixed copy of it:
+# the exact-name rule missed the latter, leaving a confidential file committable.
+docs/*Positional Metrics.xlsx
 
 # Python
 __pycache__/
