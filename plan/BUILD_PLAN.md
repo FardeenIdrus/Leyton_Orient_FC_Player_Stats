@@ -121,17 +121,20 @@ only to seed player identity — stable IDs, birth dates, league names — durin
   (*Any* · *summer 2027* · *summer 2028* · *already expired*) plus **Contract** and **Months left**
   columns in the Players table. A forward horizon means "still under contract today, expiring by
   the cutoff", so lapsed deals never pad the list; players with no known expiry are excluded **and
-  counted on screen** (contract data is Transfermarkt-only, so ~60–67% of the top three EFL tiers
-  but only 2–5% of Scottish/PL2/National League). **There is deliberately no "January" option**:
-  1,377 of our 1,381 expiry dates are in June and none in January, so the January question is
-  answered by *Months left ≤ 6* on a summer horizon. Current data: **542** rows expiring summer
-  2027, 822 by 2028, 447 already expired (counts as of the pre-refresh 10 Jun 2026 snapshot; not
-  recomputed against the 11 Aug data below, so treat them as indicative pending a re-check).
-  **B1 is now done (11 Aug 2026):** `transfermarkt_efl --force` re-ran the squad scrape — **4,014
-  players, 2,526 with a market value** — moving the contract/market-value snapshot shown in the UI
-  from **10 Jun 2026 to 11 Aug 2026**. Valuation was rebuilt and the identity linker
-  (`model/identity.py`) ran over the refreshed data, linking **2,855** players.
-- **234 tests pass.** The dashboard renders clean.
+  counted on screen**. **This filter is currently near-empty — see the B1 incident below.** The
+  previously-shown counts (542 expiring summer 2027, 822 by 2028, 447 already expired) were
+  measured against the pre-incident 10 Jun 2026 snapshot of 1,381 contract dates and no longer
+  reflect the database, so they are removed here rather than left to mislead; they will be
+  recomputed once the recovery scrape lands. **There is deliberately no "January" option**: of
+  those pre-incident dates, 1,377 of 1,381 were in June and none in January, so the January
+  question was answered by *Months left ≤ 6* on a summer horizon — unaffected by the incident.
+  **B1 — Transfermarkt contract/market-value refresh: NOT done.** The 11 Aug 2026 scrape did not
+  refresh contract/foot/height data — it **destroyed** it, via a parsing bug now fixed but not yet
+  recovered. The database today holds **20** contract dates, **23** feet and **24** heights,
+  against 5,626 players. Market values were unaffected (**2,526** present — that field is located
+  by CSS selector, not by column position). Full incident record and recovery procedure in the
+  Pending work register below.
+- **279 tests pass.** The dashboard renders clean.
 
 Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
 `docs/DATA_ARCHITECTURE.md`.
@@ -144,9 +147,42 @@ Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
 
 | # | Item | Blocked by | What to do when unblocked |
 |---|---|---|---|
-| B1 | ✅ **Refresh contract/market-value data (DONE 11 Aug 2026)** | — | `transfermarkt_efl --force` re-ran: **4,014 players, 2,526 with a market value**; the contract/market-value snapshot moved from **10 Jun 2026 to 11 Aug 2026**. Valuation was rebuilt and the identity linker (`model/identity.py`) ran, linking **2,855** players. Ran together with the injury scrape below (same live job, both hit Transfermarkt). |
+| B1 | ❌ **NOT done — the 11 Aug 2026 refresh destroyed contract/foot/height data instead of refreshing it** | recovery scrape retry (interrupted by a Transfermarkt HTTP 503) | Code defects are fixed and reviewed; the data itself is not yet restored. Full incident record and recovery procedure directly below. |
 | B2 | **Midfield archetypes** (DM / Box-to-Box / AM) | needs the club's per-archetype metric lists | encode into `ARCHETYPE_DROPS`; deliberately not fabricated |
 | B3 | **Real financial models** | needs the club's real wage framework CSV | drop-in replaces the modelled wage grid; makes the money layer decision-grade |
+
+**B1 incident — contract/foot/height data destroyed, 11 Aug 2026 (code fixed, data not yet recovered):**
+
+- **Cause:** the 11 Aug scrape ran `transfermarkt_efl --force` against a **stale hard-coded
+  season** (`TM_SEASON = 2025`). That season had already ended, so Transfermarkt served the squad
+  page as *history* — a page layout that replaces the `Contract` column with `Current club` and
+  shifts every later column one position right. The parser read fields by **fixed cell position**
+  rather than by column header, so it silently produced **blanks** for `contract_until`, `foot`
+  and `height_cm` on all 4,014 rows scraped — and still printed a success line, because nothing
+  checked fill rate at the time. `identity.py` and `valuation.py` then wrote those blanks straight
+  over the database (there was no COALESCE protection on those writers at the time).
+- **Effect:** **1,381 contract expiry dates were destroyed**, along with `foot` and `height_cm`.
+  The database currently holds **20** contract dates, **23** feet and **24** heights, against
+  5,626 players. Market values were unaffected (**2,526** present), because that field is located
+  by CSS selector rather than by cell position.
+- **Backup:** a full database backup was taken before any repair —
+  `data/backups/lofc-20260811-103912.sql.gz`.
+- **Code status: fixed and reviewed.** The scraped season is now derived from today's date
+  instead of hard-coded; the squad-page parser reads columns by header name instead of position;
+  a fill-rate/volume guard aborts a degraded pull before it touches the CSV; and every writer to
+  `players` (`identity.py`, `valuation.py`, `store/load.py`) now uses COALESCE so a blank incoming
+  value can never overwrite a value already on file.
+- **Data status: NOT yet restored.** The recovery scrape was interrupted by a Transfermarkt HTTP
+  503 and is being retried.
+- **Recovery procedure, three commands in order:**
+  1. `transfermarkt_efl --force --allow-degraded`
+  2. `valuation`
+  3. `identity`
+
+  `--allow-degraded` is required only while the corrupt 4,014-row CSV remains the comparison
+  baseline for the volume guard: current-season squads are legitimately smaller (roughly
+  **2,431** players), so a healthy pull would otherwise be flagged as a false "collapsed row
+  count" and aborted. Once a clean CSV exists, later runs no longer need the flag.
 
 **Injury scrape capability — landed and complete (11 Aug 2026):**
 
@@ -220,9 +256,10 @@ matching on birth date + name, league-scoped. **National League `tm_player_id` c
 from 60 of 769 players to 567 of 769** (8% → ~74%) on that fix alone; combined with the
 refreshed scrape above, National League now stands at **711 / 769 (92%)**. The three EFL
 divisions above it improved too, not fallen (they were already matched via market value, and now
-also pick up players the value-filtered path missed). This is what made the injury scrape (and
-B1's contract refresh) usable for the National League — previously only 8% of that league could
-be joined at all.
+also pick up players the value-filtered path missed). This is what made the injury scrape usable for the National League —
+previously only 8% of that league could be joined at all. (The same `tm_player_id` link would
+also carry B1's contract/foot/height data once B1's recovery scrape lands — see the B1 incident
+above; that data is currently lost, not merely stale.)
 
 **In-season operating model (2026/27 — LIVE from August 2026):**
 
@@ -256,7 +293,7 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
 | # | Item | Why |
 |---|---|---|
 | R1 | **Full pipeline re-run** (`python -m lofc.pipeline`) | a clean end-to-end recompute; now covers the new scorecard stage. NB it *fetches nothing* — every ingest step skips existing files, so it is a recompute, not a refresh |
-| R2 | ✅ **Refactor `dashboard/app.py` (DONE 2026-08-10)** | 2,560 lines → **191**, split into 15 focused modules (`theme` · `labels` · `charts` · `seasons` · `loaders` · `controls` + `tabs/` one per tab), dependencies strictly one-way so there are no import cycles. **337 lines of dead code deleted** (`_club_scorecard`, `_scorecard_player_detail`, `_profile`, `_render_score_composition`, `percentile_vector`, `_dimension_metric_labels`) plus the retired Style-fit helpers `score_composition`/`load_fit_profiles` and their 3 tests. Done in verified phases against a captured behaviour snapshot: **the final output is byte-for-byte identical to before the refactor**; 191 tests passed at the time (234 now, after later branches added tests) |
+| R2 | ✅ **Refactor `dashboard/app.py` (DONE 2026-08-10)** | 2,560 lines → **191**, split into 15 focused modules (`theme` · `labels` · `charts` · `seasons` · `loaders` · `controls` + `tabs/` one per tab), dependencies strictly one-way so there are no import cycles. **337 lines of dead code deleted** (`_club_scorecard`, `_scorecard_player_detail`, `_profile`, `_render_score_composition`, `percentile_vector`, `_dimension_metric_labels`) plus the retired Style-fit helpers `score_composition`/`load_fit_profiles` and their 3 tests. Done in verified phases against a captured behaviour snapshot: **the final output is byte-for-byte identical to before the refactor**; 191 tests passed at the time (279 now, after later branches added tests) |
 | R3 | **Scout-entry fields** for Psychological + Medical (roadmap #4) | completes the club's 7-dimension framework — the biggest remaining gap vs the club document |
 | R4 | **Full StatsBomb retirement** (roadmap #6) | seed identity from Impect, delete the ingest + ~21 GB raw events + 22 dead all-NULL columns |
 | R5 | **Playing-style clusters: season split + move onto Impect** (roadmap #8) | the last season-mixing and last StatsBomb read; style label only, never touches the composite |

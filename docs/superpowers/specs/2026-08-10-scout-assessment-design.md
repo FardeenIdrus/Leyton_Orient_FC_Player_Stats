@@ -211,7 +211,51 @@ The player detail shows overridden bands as such.
 
 ---
 
-## 6. `assessed_composite`
+## 6. Transparency: what the page must tell the user
+
+**This is a hard requirement, not a nice-to-have.** Every assumption, caveat and coverage limit
+behind the scores in this design must be shown to the user, on the page — not left in this
+document for someone to have read in advance. The wording must be short: a recruiter reads this
+between meetings, so a wall of text fails the requirement as surely as saying nothing.
+
+The page must disclose at least the following, each as a short, plain-English line — no jargon,
+no statistics vocabulary:
+
+1. **Most players score the maximum on Medical.** 77% of players (2,201 of 2,870 measured) had
+   no injuries in the two-season window and would score the top band of 5.0. The dimension is
+   designed to flag the injury-prone, not to separate healthy players from each other.
+2. **Where injury data comes from and who it misses.** Transfermarkt, English leagues only.
+   Coverage: Championship 98%, League One 95%, League Two 96%, National League 92%; Premier
+   League 2 16%, Scottish Premiership 7%, Scottish Championship 3%. Outside the English leagues,
+   a scout must enter it by hand or the player has no medical score.
+3. **What "availability" counts.** Matches missed through injury, over the last two seasons,
+   against a 92-match window. A fit player who simply was not picked is **not** penalised — he
+   counts as fully available.
+4. **What it deliberately does not use.** Minutes played was rejected as a measure: 73% of
+   players would fall below the club's 60% bar on minutes alone, which reflects squad rotation
+   rather than fitness.
+5. **What the injury categories do and do not affect.** Illness, knocks and unspecified entries
+   land in "other". Category never changes the availability figure, which counts matches missed
+   regardless. Categories matter only for the club's specific screening criteria.
+6. **Where the 1–5 scale comes from.** 60% availability scores 3.0 because that is the club's own
+   stated minimum standard; 100% scores 5.0. Nothing in the scale is invented.
+7. **A known blind spot.** A player who joined part-way through the window is measured against
+   the full 92 matches, which understates his availability. Only affects players who were also
+   injured; the manual override exists for it.
+8. **Psychological is entirely human judgement.** There is no data behind it — it is the scout's
+   assessment against the club's own criteria for that position.
+9. **Nothing here excludes a player.** Every flag is advisory, consistent with the rest of the
+   platform.
+10. **Every figure shows its provenance and its date** — scraped versus hand-entered, who entered
+    it, and when.
+
+**Implementation note.** These belong on the page itself, not buried in a separate document: a
+compact "What this covers / what it doesn't" panel, plus short inline captions next to the
+figures they qualify. Detailed UI layout is for the implementation plan, not this spec.
+
+---
+
+## 7. `assessed_composite`
 
 Not a new formula. The existing `_composite()` in `model/scorecard.py` called with a longer
 dimension list — weighted average over the dimensions present, divided by the weight present.
@@ -242,7 +286,7 @@ absent from the assessed view rather than ranked badly within it (Decision 9).
 
 ---
 
-## 7. Users and roles
+## 8. Users and roles
 
 Authentication is required because an unattributed scout rating has little value and a medical
 override must be traceable to a person.
@@ -268,7 +312,7 @@ without changing the scoring path.
 
 ---
 
-## 8. Data model
+## 9. Data model
 
 One Alembic migration.
 
@@ -312,7 +356,7 @@ Same fields the scrape produces, entered in a form somebody will realistically c
 
 ---
 
-## 9. Modules
+## 10. Modules
 
 | Module | Purpose | Depends on |
 |---|---|---|
@@ -332,7 +376,7 @@ is why the change to `scorecard.py` is small and surgical rather than structural
 
 ---
 
-## 10. Dashboard
+## 11. Dashboard
 
 - **Login gate** in front of the whole app; the current user and role are shown in the sidebar.
 - **New "Assessment" tab** — search a player, see their computed medical facts and injury
@@ -345,7 +389,7 @@ is why the change to `scorecard.py` is small and surgical rather than structural
 
 ---
 
-## 11. Testing
+## 12. Testing
 
 All parser tests run against **saved HTML fixtures. No network access in the test suite.**
 
@@ -367,7 +411,7 @@ The existing 191 tests must remain green.
 
 ---
 
-## 12. Error handling
+## 13. Error handling
 
 | Situation | Behaviour |
 |---|---|
@@ -382,7 +426,7 @@ The existing 191 tests must remain green.
 
 ---
 
-## 13. What does not change
+## 14. What does not change
 
 `objective_composite`, `full_composite`, the default Players ranking, the `shortlists` table
 ordering, and all 191 existing tests. `assessed_composite` is opt-in and NULL until a human
@@ -390,7 +434,7 @@ has completed both dimensions for that player.
 
 ---
 
-## 14. Follow-ons (registered, not in scope)
+## 15. Follow-ons (registered, not in scope)
 
 - **R3b** — scout document upload. Uploads are an **evidence trail, never a scoring input**,
   which is what makes deferring them safe. Medical documents are special-category personal
@@ -401,3 +445,13 @@ has completed both dimensions for that player.
 - Scrape the appearance page for squad counts, if mid-season transfers turn out to distort
   real assessments in practice (§4, Known limitation).
 - Sign-off workflow, if the club wants an authoritative assessment rather than latest-per-role.
+
+---
+
+## 16. Open questions
+
+- **Is a Medical dimension that awards 77% of players an identical maximum, while carrying 13.6%
+  of the outfield composite weight, the intended behaviour?** Recorded as an open design question
+  in `plan/BUILD_PLAN.md`'s pending work register (R3) — not yet decided. **Must be settled before
+  the band formula in §5 is built**: building it now would silently encode an answer nobody has
+  actually chosen.
