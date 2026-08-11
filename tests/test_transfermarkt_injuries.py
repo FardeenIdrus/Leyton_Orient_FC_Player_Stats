@@ -111,10 +111,16 @@ ONE_INJURY_HTML = """
 
 
 def _redirect_paths(monkeypatch, tmp_path):
-    """Point the module's three file paths at a temporary directory."""
+    """Point the module's file paths at a temporary directory.
+
+    The sample paths are derived from `output_path()`, so redirecting that one
+    redirects the smoke-test trio too. The backup directory is redirected as well:
+    a test must never write into the real data/backups.
+    """
     monkeypatch.setattr(tmi, "output_path", lambda: tmp_path / "injuries.csv")
     monkeypatch.setattr(tmi, "partial_path", lambda: tmp_path / "injuries.csv.partial")
     monkeypatch.setattr(tmi, "progress_path", lambda: tmp_path / "injuries.progress")
+    monkeypatch.setattr(tmi, "backup_dir", lambda: tmp_path / "backups")
 
 
 def test_injury_url_uses_the_id_not_the_slug():
@@ -255,3 +261,131 @@ def test_resume_skips_completed_ids_and_writes_one_header(monkeypatch, tmp_path)
     # Publish is atomic and consumes the working file: nothing is left to be
     # reopened (and duplicated into) by a later, unrelated run.
     assert not tmp_path.joinpath("injuries.csv.partial").exists()
+
+
+# --------------------------------------------------------------------------
+# F3 -- player_ids(): the id list that drives the whole scrape.
+# --------------------------------------------------------------------------
+
+def _efl_values(tmp_path, rows: str):
+    """Write an efl_values.csv into tmp_path and point the module's dir at it."""
+    (tmp_path / "efl_values.csv").write_text("tm_player_id,player_name\n" + rows)
+    return tmp_path
+
+
+def test_player_ids_reads_distinct_sorted_ids(monkeypatch, tmp_path):
+    _efl_values(tmp_path, "333,C\n111,A\n111,A again\n222,B\n")
+    monkeypatch.setattr(tmi, "_tm_dir", lambda: tmp_path)
+    assert tmi.player_ids() == [111, 222, 333]
+
+
+def test_player_ids_skips_blank_transfermarkt_ids(monkeypatch, tmp_path):
+    # A squad row with no TM id is an identity we do not have; it is not an error.
+    _efl_values(tmp_path, "111,A\n,No Id\n  ,Whitespace Id\n222,B\n")
+    monkeypatch.setattr(tmi, "_tm_dir", lambda: tmp_path)
+    assert tmi.player_ids() == [111, 222]
+
+
+def test_player_ids_raises_loudly_on_a_non_numeric_id(monkeypatch, tmp_path):
+    # Silently dropping junk would shrink the id list, and a short id list is
+    # precisely what publishes a truncated injuries.csv. Fail instead.
+    _efl_values(tmp_path, "111,A\nnot-an-id,B\n")
+    monkeypatch.setattr(tmi, "_tm_dir", lambda: tmp_path)
+    with pytest.raises(ValueError) as excinfo:
+        tmi.player_ids()
+    assert "not-an-id" in str(excinfo.value)
+
+
+# --------------------------------------------------------------------------
+# F1 -- a limited (smoke-test) run must never be able to publish over the full
+# CSV, and a full publish always backs up what it replaces.
+# --------------------------------------------------------------------------
+
+FULL_CSV = ("tm_player_id,season_label,injury_type_raw,injury_category,date_from,"
+            "date_until,days_out,games_missed\n"
+            + "1,25/26,Hamstring injury,hamstring,2025-08-18,2025-08-26,9,2\n" * 3930)
+
+
+def _main_setup(monkeypatch, tmp_path, ids=(111, 222, 333)):
+    """Redirect every path, stub the network and the id list."""
+    _redirect_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(tmi, "player_ids", lambda: list(ids))
+    monkeypatch.setattr(tmi, "fetch", lambda url: ONE_INJURY_HTML)
+    return tmp_path / "injuries.csv"
+
+
+def test_limit_with_force_cannot_touch_the_full_csv(monkeypatch, tmp_path, capsys):
+    # THE INCIDENT: `--limit 5 --force` ended its truncated id list, which the module
+    # treated as a complete run, and published a handful of rows over 3,930.
+    out = _main_setup(monkeypatch, tmp_path)
+    out.write_text(FULL_CSV)
+
+    tmi.main(["--limit", "2", "--force"])
+
+    assert out.read_text() == FULL_CSV                      # untouched
+    sample = tmp_path / "injuries.sample.csv"
+    assert sample.exists()
+    with open(sample, newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert {r["tm_player_id"] for r in rows} == {"111", "222"}
+    printed = capsys.readouterr().out
+    assert "injuries.sample.csv" in printed
+
+
+def test_a_limited_run_uses_its_own_progress_file(monkeypatch, tmp_path):
+    # A smoke test must not leave progress markers that a later full run would
+    # honour, or the full run would skip those players and publish without them.
+    out = _main_setup(monkeypatch, tmp_path)
+    out.write_text(FULL_CSV)
+
+    tmi.main(["--limit", "2", "--force"])
+
+    assert not tmp_path.joinpath("injuries.progress").exists()
+    assert not tmp_path.joinpath("injuries.csv.partial").exists()
+
+
+def test_limit_rejects_a_non_positive_value(monkeypatch, tmp_path):
+    _main_setup(monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        tmi.main(["--limit", "0", "--force"])
+
+
+def test_a_full_run_backs_up_the_csv_it_replaces(monkeypatch, tmp_path):
+    out = _main_setup(monkeypatch, tmp_path)
+    out.write_text(FULL_CSV)
+
+    tmi.main(["--force"])
+
+    saved = list((tmp_path / "backups").glob("injuries-*.csv"))
+    assert len(saved) == 1
+    assert saved[0].read_text() == FULL_CSV                 # the previous file, intact
+    with open(out, newline="") as handle:
+        assert {r["tm_player_id"] for r in csv.DictReader(handle)} == {"111", "222", "333"}
+
+
+def test_backup_is_a_no_op_when_there_is_nothing_to_replace(monkeypatch, tmp_path):
+    _redirect_paths(monkeypatch, tmp_path)
+    assert tmi.backup_existing_csv(tmp_path / "injuries.csv") is None
+    assert not (tmp_path / "backups").exists()
+
+
+def test_main_skips_when_the_csv_is_present_and_force_is_absent(monkeypatch, tmp_path, capsys):
+    out = _main_setup(monkeypatch, tmp_path)
+    out.write_text(FULL_CSV)
+
+    monkeypatch.setattr(tmi, "fetch", lambda url: (_ for _ in ()).throw(
+        AssertionError("must not fetch when skipping")))
+    tmi.main([])
+
+    assert out.read_text() == FULL_CSV
+    assert "already present" in capsys.readouterr().out
+
+
+def test_main_writes_the_csv_on_a_first_ever_run(monkeypatch, tmp_path):
+    out = _main_setup(monkeypatch, tmp_path)
+
+    tmi.main([])
+
+    with open(out, newline="") as handle:
+        assert len(list(csv.DictReader(handle))) == 3
+    assert list((tmp_path / "backups").glob("*.csv")) == []  # nothing to back up
