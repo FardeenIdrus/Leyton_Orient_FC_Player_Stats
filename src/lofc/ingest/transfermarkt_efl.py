@@ -54,6 +54,10 @@ REQUIRED_HEADERS = ("Player", "Date of birth/Age", "Height", "Foot", "Contract",
 # Bio fields whose fill rate is checked before the CSV is written, and the floor.
 GUARDED_FIELDS = ("contract_until", "height_cm", "foot")
 MIN_FILL_RATE = 0.20
+# A pull must also be big enough: every configured league has to return at least one
+# club, and the row count has to stay within this fraction of the CSV being replaced.
+# Squads churn between runs, so the floor is loose enough not to cry wolf.
+MIN_ROW_RATIO = 0.70
 
 
 def current_tm_season(today: date | None = None) -> int:
@@ -124,15 +128,41 @@ def _normalise_header(text: str) -> str:
     return " ".join(text.split()).lower()
 
 
-def header_index(table) -> dict[str, int]:
-    """Normalised column header -> its position in the row.
+def _colspan(cell) -> int:
+    """A cell's column span. Anything unparseable counts as 1, as browsers do."""
+    try:
+        return max(int(str(cell.get("colspan", 1)).strip()), 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def header_index(table) -> tuple[dict[str, int], int]:
+    """(normalised column header -> its position in the row, number of columns).
 
     Reading by name is what makes a Transfermarkt layout change fail LOUDLY. The
     11 Aug 2026 incident happened because the fields were read at fixed indices: an
     extra column shifted every later one and the parser quietly returned blanks.
+
+    Names only help if header cell N really is body cell N, so the width is returned
+    for the body rows to be checked against, and a header that does not span exactly
+    one column per cell -- or that has more than one row -- is rejected outright.
+    Either would shift every later index and put us straight back in the incident.
     """
-    head = table.select_one("thead tr")
-    cells = head.find_all(["th", "td"], recursive=False) if head is not None else []
+    heads = table.select("thead tr")
+    if len(heads) != 1:
+        raise ValueError(
+            f"Transfermarkt squad table has {len(heads)} header rows, expected exactly 1. "
+            "This parser maps header cells to body cells one for one, which a multi-row "
+            "header breaks. The page layout has changed -- fix the parser.")
+    cells = heads[0].find_all(["th", "td"], recursive=False)
+
+    spans = sum(_colspan(cell) for cell in cells)
+    if spans != len(cells):
+        raise ValueError(
+            f"Transfermarkt squad header spans {spans} columns across {len(cells)} cells "
+            "(a colspan is present), so header positions no longer match body positions. "
+            "The page layout has changed -- fix the parser.")
+
     columns: dict[str, int] = {}
     for i, cell in enumerate(cells):
         name = _normalise_header(cell.get_text(" ", strip=True))
@@ -147,7 +177,7 @@ def header_index(table) -> dict[str, int]:
             f"{', '.join(missing)}. Headers found: {found or '(no header row)'}. "
             "The page layout or the season is wrong -- fix the parser or the "
             "--season argument; do NOT fall back to reading columns by position.")
-    return columns
+    return columns, len(cells)
 
 
 def parse_squad(html: str, club_name: str, league_code: str, competition_id: int) -> list[dict]:
@@ -156,23 +186,32 @@ def parse_squad(html: str, club_name: str, league_code: str, competition_id: int
     table = soup.select_one("table.items")
     if table is None:
         return []
-    columns = header_index(table)
+    columns, width = header_index(table)
 
     rows = []
     for tr in table.select("tbody > tr.odd, tbody > tr.even"):
+        # Summary rows (total market value) carry no player link and a different cell
+        # count by design, so they are dropped before the width check, not by it.
         link = tr.select_one("td.hauptlink a[href*='/profil/spieler/']")
         if link is None:
             continue
         player_id_match = re.search(r"/spieler/(\d+)", link["href"])
         cells = tr.find_all("td", recursive=False)
+        name = link.get_text(strip=True)
+        if len(cells) != width:
+            # Never fall back to a blank here: a short row silently mis-reads every
+            # later column, and at one row in ten it would never trip the fill floor.
+            raise ValueError(
+                f"Transfermarkt squad row for {name} at {club_name} has {len(cells)} "
+                f"cells but the header has {width}. The page layout has changed -- "
+                "fix the parser; do NOT read the missing cells as blank.")
         position = None
         inline = tr.select_one("table.inline-table tr + tr td")
         if inline is not None:
             position = inline.get_text(strip=True)
 
         def cell(header: str) -> str:
-            i = columns[_normalise_header(header)]
-            return cells[i].get_text(" ", strip=True) if len(cells) > i else ""
+            return cells[columns[_normalise_header(header)]].get_text(" ", strip=True)
 
         # Market value stays on its CSS selector: it was the one field the incident
         # did NOT lose, precisely because it was never found by position.
@@ -182,7 +221,7 @@ def parse_squad(html: str, club_name: str, league_code: str, competition_id: int
             "competition_id": competition_id,
             "club_name": club_name,
             "tm_player_id": player_id_match.group(1) if player_id_match else None,
-            "player_name": link.get_text(strip=True),
+            "player_name": name,
             "date_of_birth": parse_birth_date(cell("Date of birth/Age")),
             "position": position,
             "height_cm": parse_height_cm(cell("Height")),
@@ -212,6 +251,39 @@ def degraded_fields(rows: list[dict],
     return [(field, rate) for field, rate in fill_rates(rows).items() if rate < minimum]
 
 
+def existing_row_count(out: Path) -> int:
+    """Data rows in the CSV we are about to replace. 0 when there is none."""
+    if not out.exists():
+        return 0
+    with open(out, newline="") as f:
+        return max(sum(1 for _ in csv.reader(f)) - 1, 0)
+
+
+def volume_problems(rows: list[dict], clubs_per_league: dict[str, int],
+                    previous_rows: int,
+                    minimum_ratio: float = MIN_ROW_RATIO) -> list[str]:
+    """Complaints about how MUCH was scraped, as opposed to how complete each row is.
+
+    A fill rate is a ratio over the rows that survived, so it is blind to rows that
+    never arrived: `club_pages` returns [] whenever its selector matches nothing, and
+    the league page is the one request in the flow with no header guard. Three leagues
+    at 95% fill would sail through the fill check while a whole division went missing,
+    and valuation.main() deletes every valuation before rewriting -- so the dropped
+    league would lose all of its valuations.
+    """
+    problems = []
+    empty = sorted(code for code, count in clubs_per_league.items() if count == 0)
+    if empty:
+        problems.append(
+            f"no clubs found for league(s) {', '.join(empty)} -- the league page layout "
+            "or the season is wrong, or the request was blocked")
+    if previous_rows and len(rows) < previous_rows * minimum_ratio:
+        problems.append(
+            f"only {len(rows)} rows scraped against {previous_rows} in the existing CSV "
+            f"({len(rows) / previous_rows:.0%}, minimum {minimum_ratio:.0%})")
+    return problems
+
+
 def output_path() -> Path:
     return Path(settings.reference_data_dir) / "transfermarkt" / "efl_values.csv"
 
@@ -238,7 +310,8 @@ def main(argv: list[str] | None = None) -> None:
                         help="Transfermarkt season id (its starting year); "
                              "defaults to the current season")
     parser.add_argument("--allow-degraded", action="store_true",
-                        help="write the CSV even if a bio field is largely empty "
+                        help="write the CSV even if a bio field is largely empty, a "
+                             "league returned no clubs, or the row count has collapsed "
                              "(only when a human has decided a partial pull is fine)")
     args = parser.parse_args(argv)
 
@@ -252,9 +325,12 @@ def main(argv: list[str] | None = None) -> None:
         return
     out.parent.mkdir(parents=True, exist_ok=True)
 
+    previous_rows = existing_row_count(out)
     all_rows: list[dict] = []
+    clubs_per_league: dict[str, int] = {}
     for league_code, (slug, competition_id) in LEAGUES.items():
         clubs = club_pages(slug, league_code, season)
+        clubs_per_league[league_code] = len(clubs)
         print(f"[{league_code}] {len(clubs)} clubs")
         for i, (club_name, squad_url) in enumerate(clubs, start=1):
             rows = squad_rows(club_name, squad_url, league_code, competition_id)
@@ -265,13 +341,16 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(f"No players scraped at all: refusing to touch {out}. "
                          "Check the season and that Transfermarkt is reachable.")
 
-    # A pull that has lost a field must never be published over a good one.
-    degraded = degraded_fields(all_rows)
-    if degraded:
-        for field, rate in degraded:
-            print(f"{'WARNING' if args.allow_degraded else 'ERROR'}: {field} is filled on "
-                  f"only {rate:.1%} of {len(all_rows)} rows "
-                  f"(minimum {MIN_FILL_RATE:.0%})")
+    # A pull that has lost a field, or a division, must never be published over a good
+    # one. Completeness per row and volume across rows are different failures: neither
+    # check sees the other's.
+    problems = [f"{field} is filled on only {rate:.1%} of {len(all_rows)} rows "
+                f"(minimum {MIN_FILL_RATE:.0%})"
+                for field, rate in degraded_fields(all_rows)]
+    problems += volume_problems(all_rows, clubs_per_league, previous_rows)
+    if problems:
+        for problem in problems:
+            print(f"{'WARNING' if args.allow_degraded else 'ERROR'}: {problem}")
         if not args.allow_degraded:
             raise SystemExit(
                 f"Refusing to overwrite {out}: the pull above is degraded and the existing "
