@@ -180,16 +180,51 @@ All of the position's criteria must be scored or the assessment stays a draft.
 
 ### Medical
 
-Anchored on the club's own stated bar, exactly as the existing percentile→band formula is
-anchored on their median/70th thresholds:
-
 ```
-band = 3 + 5 × (availability − 0.60)          clamped to [1, 5]
+band = 3 + 5 × (availability − 0.60)          clamped to [1, 3.0]
 ```
 
-60% availability — the club's stated minimum — yields **3.0**, their stated minimum composite.
-100% yields 5.0. The band falls to 1.0 at 20% availability, consistent with their veto
-language. One club-given anchor, one endpoint, nothing invented.
+Meeting the club's stated 60% availability bar yields **3.0**, their stated minimum standard.
+Below it the band falls, reaching 1.0 at 20% availability, consistent with their veto
+language. **The band is capped at 3.0: absence of injury data is neutral, never favourable.**
+Rising above 3.0 requires positive evidence — a scout's recorded override — never data alone.
+
+#### Decision 11 — the ceiling is 3.0, not 5.0 (agreed 2026-08-11, **flagged for revisit**)
+
+The original rule ran the scale to 5.0 at 100% availability. Measured against real data that
+proved to be wrong, for a reason that only appeared once the injury data existed:
+
+| League | Share scoring the top band under the 5.0 rule |
+|---|---|
+| Championship | 47% |
+| League One | 79% |
+| League Two | 89% |
+| **National League** | **93%** |
+
+National League players are not twice as durable as Championship players. This is
+**Transfermarkt's injury reporting thinning down the pyramid**, and because Performance and
+Physical are scored *within league* while Medical was scored on an absolute scale, the
+reporting gap did not cancel out. The dimension **rewarded obscurity** — and Leyton Orient
+recruit *down* the pyramid, so the bias ran in exactly the wrong direction.
+
+Capping at 3.0 removes it: the between-league gap collapses from **46 points to 4** (Championship
+95% at the top band, National League 99%). The same **77 players** are marked down; **nobody is
+marked up**.
+
+The justification is that serious injuries are reported in every league while minor ones are
+reported only in well-covered ones — so the data is trustworthy at the extreme and unreliable
+in the middle. This rule uses it where it is reliable and declines to guess where it is not.
+It also restores the platform's stated principle, already in `model/medical.py`: *a guessed
+value is worse than an honest gap.*
+
+**Known cost, accepted:** above the 60% bar there is now **no discrimination** — a player who
+missed 20 matches scores the same 3.0 as one who missed none.
+
+**Revisit when** any of these change: Transfermarkt injury coverage improves in the lower
+leagues; the club supplies its own medical records; or scouts have entered enough manual
+assessments to score durability positively rather than only penalise its absence. At that
+point the ceiling could be raised again, or Medical moved to a within-league percentile like
+every other dimension. **This decision is provisional and expected to be revisited.**
 
 **Screening criteria act as caps.** Any failed `screening` criterion caps the band at **2.0**
 and raises an explicit `medical_screening_failed` flag, mirroring the club's deviation
@@ -221,8 +256,11 @@ between meetings, so a wall of text fails the requirement as surely as saying no
 The page must disclose at least the following, each as a short, plain-English line — no jargon,
 no statistics vocabulary:
 
-1. **Most players score the maximum on Medical.** 77% of players (2,201 of 2,870 measured) had
-   no injuries in the two-season window and would score the top band of 5.0. The dimension is
+1. **Almost every player scores the same on Medical, and that is deliberate.** Under Decision 11
+   the band is capped at 3.0, so a player with no injury record is *neutral*, not rewarded —
+   because in the lower leagues an empty injury record usually means nobody recorded it, not
+   that the player was never hurt. Only the **77 players** with a heavy injury history are
+   marked down. The dimension is
    designed to flag the injury-prone, not to separate healthy players from each other.
 2. **Where injury data comes from and who it misses.** Transfermarkt, English leagues only.
    Coverage: Championship 98%, League One 95%, League Two 96%, National League 92%; Premier
@@ -267,22 +305,24 @@ dimension list — weighted average over the dimensions present, divided by the 
 | `assessed_composite` | + Psychological + Medical | **100%** | Opt-in, assessed players only |
 
 Worked example, a League One winger with Performance 4.0, Physical 3.5, Financial 3.0,
-Resale 4.0, Psychological 3.8, Medical 3.9:
+Resale 4.0, Psychological 3.8, and Medical **3.0** (the Decision 11 neutral band — no injury
+history):
 
 | Composite | Weighted sum | ÷ weight present | Result | Measured |
 |---|---|---|---|---|
 | objective | 2.4091 | 0.6364 | **3.79** | 64% |
 | full | 2.8636 | 0.7727 | **3.71** | 77% |
-| assessed | 3.7409 | 1.0000 | **3.74** | 100% |
+| assessed | 3.6182 | 1.0000 | **3.62** | 100% |
 
 A player with no market value (Scottish/PL2) has Financial and Resale absent, so the same
-assessment yields **3.81 at 86% measured**. Renormalisation handles it and the Measured %
+assessment yields **3.66 at 86% measured**. Renormalisation handles it and the Measured %
 column keeps the difference visible — the mechanism already used for missing physical data.
 
 **Why this is safe:** the default ranking never includes the scout dimensions, so shipping
-this moves nothing. Medical carries a ±0.30 swing on `full_composite`, and in League One a
-±0.30 band spans 238 of 573 players — which is precisely why an unassessed player must be
-absent from the assessed view rather than ranked badly within it (Decision 9).
+this moves nothing. Under Decision 11 the Medical band spans 1.0–3.0, so its effect on this
+player's composite runs from 3.35 to 3.62 — a **0.27 band** swing, and it only ever pulls a
+player *down* from the neutral 3.0. An unassessed player is still absent from the assessed
+view rather than ranked badly within it (Decision 9).
 
 ---
 
@@ -450,8 +490,17 @@ has completed both dimensions for that player.
 
 ## 16. Open questions
 
-- **Is a Medical dimension that awards 77% of players an identical maximum, while carrying 13.6%
-  of the outfield composite weight, the intended behaviour?** Recorded as an open design question
-  in `plan/BUILD_PLAN.md`'s pending work register (R3) — not yet decided. **Must be settled before
-  the band formula in §5 is built**: building it now would silently encode an answer nobody has
-  actually chosen.
+- ~~**Is a Medical dimension that awards 77% of players an identical maximum the intended
+  behaviour?**~~ **DECIDED 2026-08-11 — see Decision 11 in §5.** The band is capped at 3.0:
+  absence of injury data is neutral, never favourable. **Flagged as provisional and expected to
+  be revisited** when injury coverage improves, the club supplies its own medical records, or
+  enough manual assessments exist to score durability positively.
+
+- **Open — no seniority in the latest-per-role rule (§8).** A junior scout's assessment supersedes
+  a senior's purely by being newer. A Head of Recruitment sign-off step would fix it, and can be
+  added later without changing how scoring works, but it adds an approval workflow.
+
+- **Open — "never injured" and "never checked" are still indistinguishable.** A player with no
+  injury rows scores as though he has a clean record. Decision 11 reduces the harm (neutral
+  rather than top marks) but does not remove it. Tracked as **R8** in `plan/BUILD_PLAN.md`, and
+  it **must be closed before the Medical dimension is wired into the scorecard.**
