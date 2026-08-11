@@ -55,3 +55,6 @@ data/reference/impect_definitions.csv
 
 # Local database and CSV backups. Contain licensed provider data - never publish.
 data/backups/
+
+# Club-to-Impect metric mapping (confidential club metric names + licensed Impect KPI codes)
+data/reference/impect_metric_map.csv
