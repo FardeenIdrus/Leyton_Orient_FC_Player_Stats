@@ -222,8 +222,17 @@ docker compose exec app python -m lofc.ingest.run
 docker compose exec app python -m lofc.ingest.run --competition 4
 
 # Scrape current EFL market values from Transfermarkt squad pages (~100 requests,
-# rate-limited, ~5 min; idempotent, --force to re-pull)
+# rate-limited, ~5 min; idempotent, --force to re-pull). The season is derived from
+# today's date and printed at the start of the run. If contract/height/foot come back
+# filled on under 20% of rows the run ABORTS without touching the CSV; on success the
+# previous CSV is copied to data/backups/efl_values-<timestamp>.csv.
 docker compose exec app python -m lofc.ingest.transfermarkt_efl
+
+# Pin a specific Transfermarkt season (its starting year: 2026 = the 2026/27 season),
+# or accept a pull that has lost a bio field. --allow-degraded is a deliberate override:
+# it is what a bad scrape needs in order to overwrite good data, so use it knowingly.
+docker compose exec app python -m lofc.ingest.transfermarkt_efl --force --season 2026
+docker compose exec app python -m lofc.ingest.transfermarkt_efl --force --allow-degraded
 
 # Reconcile the modelled wage grid against published club wage bills (report only)
 docker compose exec app python -m lofc.model.wage_check
