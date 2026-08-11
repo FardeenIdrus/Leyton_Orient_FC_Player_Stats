@@ -21,7 +21,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
-from sqlalchemy import bindparam, create_engine, update
+from sqlalchemy import bindparam, create_engine, func, update
 
 from lofc.config import settings
 from lofc.model.valuation import (
@@ -92,6 +92,23 @@ def match_identity(ours: pd.DataFrame, squad: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=IDENTITY_COLUMNS)
 
 
+def bio_update_stmt():
+    """UPDATE players SET <bio> for one player, COALESCE-guarded.
+
+    Every column is `COALESCE(:incoming, column)`, so a scrape that returns a blank
+    LEAVES the stored value alone. Writing the blanks unconditionally is what turned
+    one bad scrape into the loss of 1,381 contract dates on 11 Aug 2026. Which rows
+    are updated is unchanged -- only what happens to a column with no new value.
+    """
+    table = Player.__table__
+    return (update(table)
+            .where(table.c.player_id == bindparam("pid"))
+            .values(tm_player_id=func.coalesce(bindparam("tm"), table.c.tm_player_id),
+                    foot=func.coalesce(bindparam("ft"), table.c.foot),
+                    contract_until=func.coalesce(bindparam("cu"), table.c.contract_until),
+                    height_cm=func.coalesce(bindparam("hc"), table.c.height_cm)))
+
+
 def main() -> None:
     path = _tmdir() / "efl_values.csv"
     if not path.exists():
@@ -111,12 +128,8 @@ def main() -> None:
         print("no identity matches")
         return
 
-    stmt = (update(Player.__table__)
-            .where(Player.__table__.c.player_id == bindparam("pid"))
-            .values(tm_player_id=bindparam("tm"), foot=bindparam("ft"),
-                    contract_until=bindparam("cu"), height_cm=bindparam("hc")))
     with engine.begin() as conn:
-        conn.execute(stmt, [
+        conn.execute(bio_update_stmt(), [
             {"pid": int(r.player_id), "tm": int(r.tm_player_id),
              "ft": r.foot if pd.notna(r.foot) else None,
              "cu": r.contract_until if pd.notna(r.contract_until) else None,

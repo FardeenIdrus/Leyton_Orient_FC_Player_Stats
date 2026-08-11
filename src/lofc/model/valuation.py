@@ -32,7 +32,7 @@ from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import KFold, cross_val_predict, cross_val_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from sqlalchemy import bindparam, delete, update
+from sqlalchemy import bindparam, delete, func, update
 
 from lofc.config import settings
 from lofc.model.normalise import DISPLAY_METRICS, compute_percentiles_wide
@@ -382,6 +382,24 @@ def _value_era(metrics: pd.DataFrame, matched: pd.DataFrame, model_version: str)
     return data
 
 
+def bio_update_stmt():
+    """UPDATE players SET <bio> for one player, COALESCE-guarded.
+
+    Every column is `COALESCE(:incoming, column)`, so a match that carries no value
+    for a field LEAVES the stored one alone. Writing the blanks unconditionally is
+    what turned one bad scrape into the loss of 1,381 contract dates on 11 Aug 2026.
+    Which rows are updated is unchanged -- only what happens to an empty column.
+    """
+    table = Player.__table__
+    return (update(table)
+            .where(table.c.player_id == bindparam("pid"))
+            .values(birth_date=func.coalesce(bindparam("bd"), table.c.birth_date),
+                    foot=func.coalesce(bindparam("ft"), table.c.foot),
+                    contract_until=func.coalesce(bindparam("cu"), table.c.contract_until),
+                    height_cm=func.coalesce(bindparam("hc"), table.c.height_cm),
+                    tm_player_id=func.coalesce(bindparam("tm"), table.c.tm_player_id)))
+
+
 def main() -> None:
     engine = get_engine()
     # Lineup birth dates live on players, not the metrics table; the EFL match needs them.
@@ -439,13 +457,8 @@ def main() -> None:
             data[column] = None
     bio = data.dropna(subset=["birth_date"])
     if not bio.empty:
-        stmt = (update(Player.__table__)
-                .where(Player.__table__.c.player_id == bindparam("pid"))
-                .values(birth_date=bindparam("bd"), foot=bindparam("ft"),
-                        contract_until=bindparam("cu"), height_cm=bindparam("hc"),
-                        tm_player_id=bindparam("tm")))
         with engine.begin() as conn:
-            conn.execute(stmt, [
+            conn.execute(bio_update_stmt(), [
                 {"pid": int(r.player_id), "bd": r.birth_date,
                  "ft": r.foot if pd.notna(r.foot) else None,
                  "cu": r.contract_until if pd.notna(r.contract_until) else None,
