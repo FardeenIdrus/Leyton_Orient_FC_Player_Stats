@@ -52,6 +52,15 @@ def test_player_injuries_table_shape():
     assert PlayerInjury.__table__.c.source.server_default.arg == "transfermarkt"
 
 
+def _full_row(table, partial: dict) -> dict:
+    """Fill every other NOT NULL column with 0 so the fixture survives the schema."""
+    row = dict(partial)
+    for column in table.columns:
+        if column.name not in row and not column.nullable and column.name != "id":
+            row[column.name] = 0
+    return row
+
+
 def test_upsert_only_updates_the_columns_it_was_given():
     """A partial upsert must not null the columns it does not carry.
 
@@ -70,9 +79,73 @@ def test_upsert_only_updates_the_columns_it_was_given():
     sql = str(_upsert_stmt(Player.__table__, rows, ["player_id"])
               .compile(dialect=postgresql.dialect()))
     assert "player_name = excluded.player_name" in sql
-    assert "birth_date = excluded.birth_date" in sql
     for untouched in ("foot", "contract_until", "height_cm", "tm_player_id", "nationality"):
         assert f"{untouched} = excluded.{untouched}" not in sql
+
+
+def test_players_upsert_never_nulls_a_stored_birth_date():
+    """birth_date IS supplied by the loader -- as None for players whose parquet row
+    has no date of birth -- so dropping unsupplied columns is not enough to protect it.
+
+    A nulled birth date is self-reinforcing: identity.match_identity skips any player
+    without one, so that player can never regain a tm_player_id, foot, height or
+    contract date. It is the incident's mechanism, one column over.
+    """
+    from sqlalchemy.dialects import postgresql
+
+    from lofc.store.load import PLAYER_PRESERVE_COLUMNS, _upsert_stmt
+    from lofc.store.models import Player
+
+    rows = [{"player_id": 1, "player_name": "X", "birth_date": None}]
+    sql = str(_upsert_stmt(Player.__table__, rows, ["player_id"],
+                           preserve_when_null=PLAYER_PRESERVE_COLUMNS)
+              .compile(dialect=postgresql.dialect()))
+    assert "birth_date = coalesce(excluded.birth_date, players.birth_date)" in sql
+    # player_name is NOT NULL, so it is not preserved and still overwrites.
+    assert "player_name = excluded.player_name" in sql
+
+
+def test_the_players_loader_asks_for_that_protection(monkeypatch):
+    """The guard is worthless if load_players_and_metrics does not pass it."""
+    import pandas as pd
+    from sqlalchemy import create_engine
+
+    from lofc.store import load as store_load
+    from lofc.store.models import Base, PlayerSeasonMetric
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    # The loader slices df by the full metric column list, so the frame needs all of them.
+    row = {c.name: 0 for c in PlayerSeasonMetric.__table__.columns if c.name != "id"}
+    row.update({"player_id": 1, "player_name": "X", "minutes": 90.0, "birth_date": None})
+    frame = pd.DataFrame([row])
+
+    calls = []
+
+    def fake_upsert(engine, table, rows, conflict_cols, preserve_when_null=()):
+        calls.append((table.name, list(preserve_when_null)))
+        return len(rows)
+
+    monkeypatch.setattr(pd, "read_parquet", lambda *a, **k: frame)
+    monkeypatch.setattr(store_load, "_upsert", fake_upsert)
+    store_load.load_players_and_metrics(engine)
+
+    players_call = next(c for c in calls if c[0] == "players")
+    assert "birth_date" in players_call[1]
+
+
+def test_preserving_is_opt_in_so_other_callers_are_unchanged():
+    from sqlalchemy.dialects import postgresql
+
+    from lofc.store.load import _upsert_stmt
+    from lofc.store.models import Player
+
+    rows = [{"player_id": 1, "player_name": "X", "birth_date": None}]
+    sql = str(_upsert_stmt(Player.__table__, rows, ["player_id"])
+              .compile(dialect=postgresql.dialect()))
+    assert "birth_date = excluded.birth_date" in sql
+    assert "coalesce" not in sql
 
 
 def test_upsert_still_updates_every_column_of_a_full_row():
