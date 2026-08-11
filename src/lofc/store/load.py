@@ -36,16 +36,30 @@ def _records(df: pd.DataFrame) -> list[dict]:
     return json.loads(df.to_json(orient="records"))
 
 
+def _upsert_stmt(table, rows: list[dict], conflict_cols: list[str]):
+    """INSERT ... ON CONFLICT DO UPDATE, touching ONLY the columns `rows` carries.
+
+    `excluded.<column>` for a column absent from the INSERT is that column's DEFAULT --
+    NULL. Updating every column therefore nulls out whatever the caller does not supply:
+    `load_players_and_metrics` passes only player_id/player_name/birth_date, so it used
+    to wipe the Transfermarkt bio (foot, contract_until, height_cm, tm_player_id) off
+    every player on each run. Callers that pass full rows are unaffected.
+    """
+    stmt = pg_insert(table)
+    supplied = [c.name for c in table.columns if c.name in rows[0]]
+    update = {name: stmt.excluded[name] for name in supplied
+              if name not in conflict_cols and not table.columns[name].primary_key}
+    if not update:  # nothing to set: an empty ON CONFLICT DO UPDATE is invalid SQL
+        return stmt.on_conflict_do_nothing(index_elements=conflict_cols)
+    return stmt.on_conflict_do_update(index_elements=conflict_cols, set_=update)
+
+
 def _upsert(engine: Engine, table, rows: list[dict], conflict_cols: list[str]) -> int:
-    """Insert rows, updating the non-key columns on conflict. Returns row count."""
+    """Insert rows, updating the supplied non-key columns on conflict. Returns row count."""
     if not rows:
         return 0
     with engine.begin() as conn:
-        stmt = pg_insert(table)
-        update = {c.name: stmt.excluded[c.name] for c in table.columns
-                  if c.name not in conflict_cols and not c.primary_key}
-        stmt = stmt.on_conflict_do_update(index_elements=conflict_cols, set_=update)
-        conn.execute(stmt, rows)
+        conn.execute(_upsert_stmt(table, rows, conflict_cols), rows)
     return len(rows)
 
 

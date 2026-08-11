@@ -50,3 +50,51 @@ def test_player_injuries_table_shape():
             "days_out", "games_missed", "source"} <= columns
     # Provenance defaults to the scraper; manual rows override it (plan 2).
     assert PlayerInjury.__table__.c.source.server_default.arg == "transfermarkt"
+
+
+def test_upsert_only_updates_the_columns_it_was_given():
+    """A partial upsert must not null the columns it does not carry.
+
+    `excluded.<column>` for a column absent from the INSERT is that column's DEFAULT,
+    i.e. NULL. `load_players_and_metrics` supplies only player_id/player_name/birth_date,
+    so updating every column wiped the Transfermarkt bio (foot, contract_until,
+    height_cm, tm_player_id) off every player on each run -- the same class of silent
+    loss as the 11 Aug 2026 scrape incident.
+    """
+    from sqlalchemy.dialects import postgresql
+
+    from lofc.store.load import _upsert_stmt
+    from lofc.store.models import Player
+
+    rows = [{"player_id": 1, "player_name": "X", "birth_date": "1998-05-14"}]
+    sql = str(_upsert_stmt(Player.__table__, rows, ["player_id"])
+              .compile(dialect=postgresql.dialect()))
+    assert "player_name = excluded.player_name" in sql
+    assert "birth_date = excluded.birth_date" in sql
+    for untouched in ("foot", "contract_until", "height_cm", "tm_player_id", "nationality"):
+        assert f"{untouched} = excluded.{untouched}" not in sql
+
+
+def test_upsert_still_updates_every_column_of_a_full_row():
+    from sqlalchemy.dialects import postgresql
+
+    from lofc.store.load import _upsert_stmt
+    from lofc.store.models import Player
+
+    rows = [{c.name: None for c in Player.__table__.columns}]
+    sql = str(_upsert_stmt(Player.__table__, rows, ["player_id"])
+              .compile(dialect=postgresql.dialect()))
+    for column in ("foot", "contract_until", "height_cm", "tm_player_id", "nationality"):
+        assert f"{column} = excluded.{column}" in sql
+
+
+def test_upsert_of_key_columns_only_does_nothing_on_conflict():
+    # No non-key column to set: ON CONFLICT DO UPDATE with an empty SET is invalid SQL.
+    from sqlalchemy.dialects import postgresql
+
+    from lofc.store.load import _upsert_stmt
+    from lofc.store.models import Player
+
+    sql = str(_upsert_stmt(Player.__table__, [{"player_id": 1}], ["player_id"])
+              .compile(dialect=postgresql.dialect()))
+    assert "DO NOTHING" in sql
