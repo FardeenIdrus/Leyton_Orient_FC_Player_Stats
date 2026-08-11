@@ -9,7 +9,7 @@
 >   read only when you need the *why* behind something).
 > - **Technical deep-dives** are in `docs/` (see the Documentation map below).
 >
-> _Last updated: 2026-08-10._
+> _Last updated: 2026-08-11._
 
 ---
 
@@ -43,7 +43,7 @@ model), not a reporting dashboard. It runs end to end via `docker compose up` +
 
 ---
 
-## Current state (2026-08-10)
+## Current state (2026-08-11)
 
 > **2026-08-03 — audit + fixes.** A full metric audit (club-document fidelity, API pull, computation)
 > confirmed the framework is faithful to the club files and the composite maths is correct. It found
@@ -125,8 +125,12 @@ only to seed player identity — stable IDs, birth dates, league names — durin
   but only 2–5% of Scottish/PL2/National League). **There is deliberately no "January" option**:
   1,377 of our 1,381 expiry dates are in June and none in January, so the January question is
   answered by *Months left ≤ 6* on a summer horizon. Current data: **542** rows expiring summer
-  2027, 822 by 2028, 447 already expired. **Contract data is a 10 Jun 2026 snapshot** (shown in the
-  UI) — Transfermarkt was down on 2026-08-04, so the refresh is pending (register item **B1**).
+  2027, 822 by 2028, 447 already expired (counts as of the pre-refresh 10 Jun 2026 snapshot; not
+  recomputed against the 11 Aug data below, so treat them as indicative pending a re-check).
+  **B1 is now done (11 Aug 2026):** `transfermarkt_efl --force` re-ran the squad scrape — **4,014
+  players, 2,526 with a market value** — moving the contract/market-value snapshot shown in the UI
+  from **10 Jun 2026 to 11 Aug 2026**. Valuation was rebuilt and the identity linker
+  (`model/identity.py`) ran over the refreshed data, linking **2,855** players.
 - **234 tests pass.** The dashboard renders clean.
 
 Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
@@ -140,35 +144,85 @@ Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
 
 | # | Item | Blocked by | What to do when unblocked |
 |---|---|---|---|
-| B1 | **Refresh contract/market-value data — code path ready, not yet run** | Not actually blocked any more — Transfermarkt's 2026-08-04 outage was transient. The deferral now is deliberate: the refresh is a ~2,700-request, ~2-hour live scrape and is being run as a separate, separately-approved job, together with the injury scrape below (both hit Transfermarkt). It is purely a matter of running it. | `python -m lofc.ingest.transfermarkt_efl --force` then `python -m lofc.model.valuation`. The contract filter and money layer then update with no code change. **The live contract data is still the 10 Jun 2026 snapshot until this runs.** |
+| B1 | ✅ **Refresh contract/market-value data (DONE 11 Aug 2026)** | — | `transfermarkt_efl --force` re-ran: **4,014 players, 2,526 with a market value**; the contract/market-value snapshot moved from **10 Jun 2026 to 11 Aug 2026**. Valuation was rebuilt and the identity linker (`model/identity.py`) ran, linking **2,855** players. Ran together with the injury scrape below (same live job, both hit Transfermarkt). |
 | B2 | **Midfield archetypes** (DM / Box-to-Box / AM) | needs the club's per-archetype metric lists | encode into `ARCHETYPE_DROPS`; deliberately not fabricated |
 | B3 | **Real financial models** | needs the club's real wage framework CSV | drop-in replaces the modelled wage grid; makes the money layer decision-grade |
 
-**Injury scrape capability — landed, scrape in progress:**
+**Injury scrape capability — landed and complete (11 Aug 2026):**
 
 The Transfermarkt injury-history scraper, categoriser, `player_injuries` table, CSV→Postgres
 loader (`lofc.store.injuries`) and the Medical-dimension `availability()` calculation are all
 built, tested and wired into the pipeline (runs immediately after the Identity step, since the
-loader joins on `players.tm_player_id`). **The real scrape was started together with B1's
-contract refresh as the same live-scrape job and was still running — not yet complete — as of
-this writing**; do not read this document as a record of loaded injury data until it finishes
-and the loader is re-run. `player_injuries` therefore holds no production data today (a small
-leftover 5-player smoke-test CSV from earlier development was loaded once, pre-dating this
-scrape run, and will be silently replaced — the loader always clears `source = 'transfermarkt'`
-rows before inserting). Coverage, once the real scrape completes and is loaded: **EFL only**
-(Championship, League One, League Two, National League — the four leagues with a
-scheduled-games constant), and only players carrying a `tm_player_id`. Full detail:
-`docs/DATA_ARCHITECTURE.md` §5.
+loader joins on `players.tm_player_id`). **The real scrape has finished and is loaded:**
+
+- **Scrape (final run, against the refreshed player list):** 3,930 injury rows written to
+  `data/reference/transfermarkt/injuries.csv`, **0 failed**, 3,507 player pages fetched.
+- **Loaded into Postgres:** **3,766 rows for 1,176 players** (the gap to 3,930 is rows whose
+  Transfermarkt id matches no player we hold metrics for — dropped, not guessed). All rows
+  carry `source = 'transfermarkt'` (the loader always clears existing `source = 'transfermarkt'`
+  rows before inserting, so the earlier 5-player smoke-test load has been replaced).
+- **Coverage stays EFL only** (Championship, League One, League Two, National League — the four
+  leagues with a `SCHEDULED_GAMES` constant), and only players carrying a `tm_player_id`.
+- **`tm_player_id` coverage, 2025/26 season** (this is what makes a Medical figure computable):
+
+  | League | Coverage | % |
+  |---|---|---|
+  | Championship | 730 / 748 | 98% |
+  | League Two | 714 / 745 | 96% |
+  | League One | 715 / 749 | 95% |
+  | National League | 711 / 769 | 92% |
+  | Premier League 2 | 182 / 1,141 | 16% |
+  | Scottish Premiership | 28 / 385 | 7% |
+  | Scottish Championship | 8 / 284 | 3% |
+
+  The last three rows are not usable for injuries today (no `SCHEDULED_GAMES` constant either —
+  see R6); they are recorded here because the same `tm_player_id` link also feeds B1's contract
+  data.
+- **Completeness check:** of 2,701 linked EFL players in 2025/26, **2,701 had their injury page
+  fetched — zero were never fetched.** An unfetched player would otherwise silently read as 100%
+  available; there is now no such ambiguity for the EFL.
+- **Injury category distribution** (3,766 rows), with average matches missed / average days out:
+
+  | Category | Rows | Avg matches missed | Avg days out |
+  |---|---|---|---|
+  | other | 1,534 | 7.0 | 53 |
+  | knee_ligament | 634 | 17.4 | 135 |
+  | hamstring | 494 | 10.2 | 69 |
+  | ankle | 371 | 9.6 | 70 |
+  | muscular | 303 | 6.8 | 45 |
+  | groin | 195 | 7.0 | 52 |
+  | calf | 162 | 7.6 | 51 |
+  | hip | 73 | 9.3 | 64 |
+
+  The clinical ordering is a sanity signal — knee-ligament injuries cost by far the most time,
+  as expected if parsing is correct. The `other` bucket is dominated by phrasings genuinely
+  outside the club's named categories ("unknown injury" 301, "Knock" 153, "Ill" 85, "Corona
+  virus" 68, "Foot injury" 66, "Shoulder injury" 61) — honestly uncategorised, not mis-parsed;
+  category does **not** affect availability, which counts matches missed regardless of category.
+- **Availability, validated end to end on real data:** computed for **2,870** player-season rows
+  across the four EFL leagues; **77 fall below the club's stated 60% bar**; the most affected are
+  recognisable long-term-injured players (e.g. Charlie Wyke, 128 matches missed, availability
+  0.0).
+- **Open design question, not yet answered:** under the design spec's band formula
+  `band = 3 + 5 × (availability − 0.60)`, **2,201 of 2,870 (77%)** would score the maximum
+  Medical band of 5.0, because they had no injuries in the two-season window. Medical carries
+  13.6% of the outfield composite weight. Whether a *risk* dimension that awards three-quarters
+  of players an identical maximum is the intended behaviour is an open question for the
+  scout-assessment plan (R3) — recorded here, not decided. **Medical is not wired into scoring
+  yet**; this branch delivers the injury data and the availability calculation only.
+
+Full detail: `docs/DATA_ARCHITECTURE.md` §5.
 
 **Task 0 identity fix (landed 2026-08-10):** `load_efl_values()` was discarding a player's
 Transfermarkt id, birth date, foot and contract date whenever he had no market value on file.
 A separate identity matcher (`model/identity.py`) now runs over the full scrape instead,
 matching on birth date + name, league-scoped. **National League `tm_player_id` coverage rose
-from 60 of 769 players to 567 of 769** (8% → ~74%); the three EFL divisions above it improved
-too, not fallen (they were already matched via market value, and now also pick up players the
-value-filtered path missed). This is what makes the injury scrape (and B1's contract refresh)
-usable for the National League once run — previously only 8% of that league could be joined at
-all.
+from 60 of 769 players to 567 of 769** (8% → ~74%) on that fix alone; combined with the
+refreshed scrape above, National League now stands at **711 / 769 (92%)**. The three EFL
+divisions above it improved too, not fallen (they were already matched via market value, and now
+also pick up players the value-filtered path missed). This is what made the injury scrape (and
+B1's contract refresh) usable for the National League — previously only 8% of that league could
+be joined at all.
 
 **In-season operating model (2026/27 — LIVE from August 2026):**
 
@@ -206,7 +260,7 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
 | R3 | **Scout-entry fields** for Psychological + Medical (roadmap #4) | completes the club's 7-dimension framework — the biggest remaining gap vs the club document |
 | R4 | **Full StatsBomb retirement** (roadmap #6) | seed identity from Impect, delete the ingest + ~21 GB raw events + 22 dead all-NULL columns |
 | R5 | **Playing-style clusters: season split + move onto Impect** (roadmap #8) | the last season-mixing and last StatsBomb read; style label only, never touches the composite |
-| R6 | **Extend the Transfermarkt squad scrape to Scottish Premiership, Scottish Championship and Premier League 2** | those three leagues carry **almost no Transfermarkt coverage today** — no `tm_player_id` for most players, so no market value, no contract-expiry data, and no injury history either (the injury loader only ever sees players with a `tm_player_id`). Needs a squad-page scrape built for those competitions (`transfermarkt_efl`-equivalent); not started |
+| R6 | **Extend the Transfermarkt squad scrape to Scottish Premiership, Scottish Championship and Premier League 2** | those three leagues carry **low Transfermarkt coverage today** — 2025/26 `tm_player_id` coverage is **Premier League 2 182/1,141 (16%), Scottish Premiership 28/385 (7%), Scottish Championship 8/284 (3%)** — so almost no market value, contract-expiry data, or injury history (the injury loader only ever sees players with a `tm_player_id`, and none of the three has a `SCHEDULED_GAMES` constant for availability either way). Needs a squad-page scrape built for those competitions (`transfermarkt_efl`-equivalent); not started |
 
 **Small leftovers (cheap, opportunistic):**
 

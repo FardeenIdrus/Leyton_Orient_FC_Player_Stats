@@ -276,12 +276,10 @@ event-data proxy for sweeper-keeper behaviour.
 
 ## 5. Medical dimension: injury history and availability
 
-**Status: the code path is built and wired into the pipeline. The real scrape was started
-and was still in progress — not yet complete — at the time of writing**, so this section
-does not describe loaded production data; treat any injury figures elsewhere in the docs as
-provisional until the scrape finishes and the loader is re-run. `player_injuries` holds no
-production data today (see the note at the end of this section on incidental smoke-test
-rows).
+**Status: the code path is built, wired into the pipeline, and the real scrape has completed
+and been loaded (11 Aug 2026).** `player_injuries` holds production data for the EFL today.
+**This section covers the injury data and the availability calculation only — Medical is not
+yet wired into the composite score** (that is a later plan item, R3 in `plan/BUILD_PLAN.md`).
 
 **Source: one Transfermarkt page per player** — `/verletzungen/spieler/<id>`, the injury
 history page, a stable six-column table (`Season | Injury | from | until | Days | Games
@@ -321,13 +319,53 @@ scraped at all today and have no scheduled-games constant, so `availability()` r
 `None` for them rather than a guessed figure. Within the EFL, `tm_player_id` coverage rose
 sharply after a Task 0 fix that stopped discarding a player's Transfermarkt identity when he
 had no market value on file (see `plan/BUILD_PLAN.md`'s Pending work register for the exact
-before/after numbers).
+before/after numbers), and further after the 11 Aug 2026 scrape refresh. **2025/26
+`tm_player_id` coverage:** Championship 730/748 (98%), League Two 714/745 (96%), League One
+715/749 (95%), National League 711/769 (92%); the non-EFL leagues remain low (Premier League 2
+16%, Scottish Premiership 7%, Scottish Championship 3%) and are out of scope for this dimension
+until R6 (`plan/BUILD_PLAN.md`) extends the squad scrape.
 
-**Current data state:** the real scrape (`lofc.ingest.transfermarkt_injuries`) had not
-completed as of this writing, so `injuries.csv` is not yet a finished, full-coverage file
-and `player_injuries` holds no production data. (Earlier in development, `python -m
-lofc.store.injuries` was run once against a small leftover 5-player smoke-test CSV — see
-`plan/BUILD_PLAN.md`'s Pending work register for the caveat. Those rows carry
-`source = 'transfermarkt'`, exactly like a real load, and will be silently replaced the next
-time the loader runs against a genuine, complete scrape, since the loader always clears
-`source = 'transfermarkt'` rows before inserting.)
+**Current data state (11 Aug 2026, final run):** the real scrape
+(`lofc.ingest.transfermarkt_injuries`) has completed against the refreshed player list —
+**3,930 injury rows written to `data/reference/transfermarkt/injuries.csv`, 0 failed, 3,507
+player pages fetched.** Loaded into Postgres: **3,766 rows for 1,176 players** (the gap to
+3,930 is rows whose Transfermarkt id matches no player we hold metrics for — dropped, not
+guessed). All rows carry `source = 'transfermarkt'`; the loader always clears existing
+`source = 'transfermarkt'` rows before inserting, so the earlier 5-player smoke-test load has
+been replaced.
+
+**Completeness check:** of 2,701 linked EFL players in 2025/26, **2,701 had their injury page
+fetched — zero were never fetched.** This matters because an unfetched player would otherwise
+silently read as 100% available; there is now no such ambiguity for the EFL.
+
+**Injury category distribution** (3,766 rows), average matches missed / average days out:
+
+| Category | Rows | Avg matches missed | Avg days out |
+|---|---|---|---|
+| other | 1,534 | 7.0 | 53 |
+| knee_ligament | 634 | 17.4 | 135 |
+| hamstring | 494 | 10.2 | 69 |
+| ankle | 371 | 9.6 | 70 |
+| muscular | 303 | 6.8 | 45 |
+| groin | 195 | 7.0 | 52 |
+| calf | 162 | 7.6 | 51 |
+| hip | 73 | 9.3 | 64 |
+
+The clinical ordering is a sanity signal: knee-ligament injuries cost by far the most time,
+which is what you would expect if the parsing is correct. The `other` bucket is dominated by
+phrasings genuinely outside the club's named categories — "unknown injury" (301), "Knock"
+(153), "Ill" (85), "Corona virus" (68), "Foot injury" (66), "Shoulder injury" (61) — honestly
+uncategorised rather than mis-parsed. Category does **not** affect availability, which counts
+matches missed regardless of category.
+
+**Availability, validated end to end on real data:** computed for **2,870** player-season rows
+across the four EFL leagues; **77 fall below the club's stated 60% bar**; the most affected are
+recognisable long-term-injured players (e.g. Charlie Wyke, 128 matches missed, availability
+0.0).
+
+**Open design question (not yet decided):** under the design spec's band formula
+`band = 3 + 5 × (availability − 0.60)`, **2,201 of 2,870 (77%)** would score the maximum
+Medical band of 5.0, because they had no injuries recorded in the two-season window. Medical
+carries 13.6% of the outfield composite weight. Whether a *risk* dimension that awards
+three-quarters of players an identical maximum is the intended behaviour is an open question
+for the scout-assessment plan — recorded in `plan/BUILD_PLAN.md`, not answered here.
