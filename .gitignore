@@ -14,6 +14,16 @@ data/reference/transfermarkt/
 # SkillCorner tracking export (licensed commercial data provided by the club; never public)
 data/reference/skillcorner/
 
+# Impect API pulls (licensed commercial event data; re-pullable from the API)
+data/raw/impect/
+
+# Club-provided reference files (CONFIDENTIAL recruitment framework + provider specs;
+# internal use only, never public). The tracked docs are architecture/methodology/scaling.
+docs/LOFC - Position Archetype.docx
+docs/Data - Positional Metrics.xlsx
+docs/API SB Helper.pdf
+docs/impect_column_list.txt
+
 # Python
 __pycache__/
 *.py[cod]
@@ -30,3 +40,16 @@ data/coverage_html/
 
 # OS / editor
 .DS_Store
+
+# Step-3 analysis scripts + notes (derived; the note CSV carries licensed Impect names)
+analysis/
+
+# Curated Impect player-name override list (real player names + Impect internal
+# ids derived from the licensed feed; never public, re-derivable — see analysis/step3/)
+data/reference/impect_player_overrides.csv
+
+# Impect's official KPI glossary (licensed IP — displayable in our tool, not republishable)
+data/reference/impect_definitions.csv
+
+# Local database and CSV backups. Contain licensed provider data - never publish.
+data/backups/
