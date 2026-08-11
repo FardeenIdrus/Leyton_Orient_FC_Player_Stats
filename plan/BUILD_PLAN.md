@@ -32,7 +32,7 @@ model), not a reporting dashboard. It runs end to end via `docker compose up` +
 | `plan/LOFC_Recruitment_Platform_Build_Plan.md` | The original client brief (frozen, never edited) | You want the original scope/requirements |
 | `README.md` | Human front door: what it is, how to run it, repo layout | You're a new team member getting started |
 | `docs/architecture.md` | System map: the pipeline stages, which file does what, data flow, dashboard tabs | You want to understand or change the code |
-| `docs/DATA_ARCHITECTURE.md` | The 91-metric layer: the four data sources, per-metric provenance, the club→Impect mapping | You're working with metrics / data sources |
+| `docs/DATA_ARCHITECTURE.md` | The 91-metric layer: the four data sources, per-metric provenance, the club→Impect mapping; §5 the Medical-dimension injury source and availability formula | You're working with metrics / data sources |
 | `docs/methodology.md` | The scoring method: percentiles, the club 1–5 composite, the design decisions | You want to understand how players are scored |
 | `docs/scaling.md` | Scaling considerations | You're planning growth / more leagues |
 | `DEPLOY.md` | Deployment and operations | You're deploying or running in production |
@@ -127,7 +127,7 @@ only to seed player identity — stable IDs, birth dates, league names — durin
   answered by *Months left ≤ 6* on a summer horizon. Current data: **542** rows expiring summer
   2027, 822 by 2028, 447 already expired. **Contract data is a 10 Jun 2026 snapshot** (shown in the
   UI) — Transfermarkt was down on 2026-08-04, so the refresh is pending (register item **B1**).
-- **191 tests pass.** The dashboard renders clean.
+- **234 tests pass.** The dashboard renders clean.
 
 Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
 `docs/DATA_ARCHITECTURE.md`.
@@ -140,9 +140,35 @@ Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
 
 | # | Item | Blocked by | What to do when unblocked |
 |---|---|---|---|
-| B1 | **Refresh contract/market-value data** | **Transfermarkt was DOWN on 2026-08-04** (HTTP 503 on the first request; our atomic write left the 10 Jun file intact, nothing lost) | `python -m lofc.ingest.transfermarkt_efl --force` then `python -m lofc.model.valuation`. The contract filter and money layer then update with no code change. **The live contract data is a 10 Jun 2026 snapshot until this runs.** |
+| B1 | **Refresh contract/market-value data — code path ready, not yet run** | Not actually blocked any more — Transfermarkt's 2026-08-04 outage was transient. The deferral now is deliberate: the refresh is a ~2,700-request, ~2-hour live scrape and is being run as a separate, separately-approved job, together with the injury scrape below (both hit Transfermarkt). It is purely a matter of running it. | `python -m lofc.ingest.transfermarkt_efl --force` then `python -m lofc.model.valuation`. The contract filter and money layer then update with no code change. **The live contract data is still the 10 Jun 2026 snapshot until this runs.** |
 | B2 | **Midfield archetypes** (DM / Box-to-Box / AM) | needs the club's per-archetype metric lists | encode into `ARCHETYPE_DROPS`; deliberately not fabricated |
 | B3 | **Real financial models** | needs the club's real wage framework CSV | drop-in replaces the modelled wage grid; makes the money layer decision-grade |
+
+**Injury scrape capability — landed, scrape in progress:**
+
+The Transfermarkt injury-history scraper, categoriser, `player_injuries` table, CSV→Postgres
+loader (`lofc.store.injuries`) and the Medical-dimension `availability()` calculation are all
+built, tested and wired into the pipeline (runs immediately after the Identity step, since the
+loader joins on `players.tm_player_id`). **The real scrape was started together with B1's
+contract refresh as the same live-scrape job and was still running — not yet complete — as of
+this writing**; do not read this document as a record of loaded injury data until it finishes
+and the loader is re-run. `player_injuries` therefore holds no production data today (a small
+leftover 5-player smoke-test CSV from earlier development was loaded once, pre-dating this
+scrape run, and will be silently replaced — the loader always clears `source = 'transfermarkt'`
+rows before inserting). Coverage, once the real scrape completes and is loaded: **EFL only**
+(Championship, League One, League Two, National League — the four leagues with a
+scheduled-games constant), and only players carrying a `tm_player_id`. Full detail:
+`docs/DATA_ARCHITECTURE.md` §5.
+
+**Task 0 identity fix (landed 2026-08-10):** `load_efl_values()` was discarding a player's
+Transfermarkt id, birth date, foot and contract date whenever he had no market value on file.
+A separate identity matcher (`model/identity.py`) now runs over the full scrape instead,
+matching on birth date + name, league-scoped. **National League `tm_player_id` coverage rose
+from 60 of 769 players to 567 of 769** (8% → ~74%); the three EFL divisions above it improved
+too, not fallen (they were already matched via market value, and now also pick up players the
+value-filtered path missed). This is what makes the injury scrape (and B1's contract refresh)
+usable for the National League once run — previously only 8% of that league could be joined at
+all.
 
 **In-season operating model (2026/27 — LIVE from August 2026):**
 
@@ -176,10 +202,11 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
 | # | Item | Why |
 |---|---|---|
 | R1 | **Full pipeline re-run** (`python -m lofc.pipeline`) | a clean end-to-end recompute; now covers the new scorecard stage. NB it *fetches nothing* — every ingest step skips existing files, so it is a recompute, not a refresh |
-| R2 | ✅ **Refactor `dashboard/app.py` (DONE 2026-08-10)** | 2,560 lines → **191**, split into 15 focused modules (`theme` · `labels` · `charts` · `seasons` · `loaders` · `controls` + `tabs/` one per tab), dependencies strictly one-way so there are no import cycles. **337 lines of dead code deleted** (`_club_scorecard`, `_scorecard_player_detail`, `_profile`, `_render_score_composition`, `percentile_vector`, `_dimension_metric_labels`) plus the retired Style-fit helpers `score_composition`/`load_fit_profiles` and their 3 tests. Done in verified phases against a captured behaviour snapshot: **the final output is byte-for-byte identical to before the refactor**; 191 tests pass |
+| R2 | ✅ **Refactor `dashboard/app.py` (DONE 2026-08-10)** | 2,560 lines → **191**, split into 15 focused modules (`theme` · `labels` · `charts` · `seasons` · `loaders` · `controls` + `tabs/` one per tab), dependencies strictly one-way so there are no import cycles. **337 lines of dead code deleted** (`_club_scorecard`, `_scorecard_player_detail`, `_profile`, `_render_score_composition`, `percentile_vector`, `_dimension_metric_labels`) plus the retired Style-fit helpers `score_composition`/`load_fit_profiles` and their 3 tests. Done in verified phases against a captured behaviour snapshot: **the final output is byte-for-byte identical to before the refactor**; 191 tests passed at the time (234 now, after later branches added tests) |
 | R3 | **Scout-entry fields** for Psychological + Medical (roadmap #4) | completes the club's 7-dimension framework — the biggest remaining gap vs the club document |
 | R4 | **Full StatsBomb retirement** (roadmap #6) | seed identity from Impect, delete the ingest + ~21 GB raw events + 22 dead all-NULL columns |
 | R5 | **Playing-style clusters: season split + move onto Impect** (roadmap #8) | the last season-mixing and last StatsBomb read; style label only, never touches the composite |
+| R6 | **Extend the Transfermarkt squad scrape to Scottish Premiership, Scottish Championship and Premier League 2** | those three leagues carry **almost no Transfermarkt coverage today** — no `tm_player_id` for most players, so no market value, no contract-expiry data, and no injury history either (the injury loader only ever sees players with a `tm_player_id`). Needs a squad-page scrape built for those competitions (`transfermarkt_efl`-equivalent); not started |
 
 **Small leftovers (cheap, opportunistic):**
 

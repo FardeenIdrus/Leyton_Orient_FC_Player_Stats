@@ -306,3 +306,9 @@ docker compose exec app python -m lofc.model.build_neutral
 # Load the combined 87-metric table into the database (player_metrics_neutral,
 # clear-then-insert per league season; also pipeline step 15). Without --write = report only.
 docker compose exec app python -m lofc.model.build_neutral --write
+
+# ===== Injury history (Medical dimension input) =====
+# Pull Transfermarkt injury histories for EFL players (~1.8 hours, resumable).
+docker compose exec app python -m lofc.ingest.transfermarkt_injuries --force
+# Load the scraped injury history into Postgres (fast; also runs inside the pipeline).
+docker compose exec app python -m lofc.store.injuries

@@ -1,7 +1,7 @@
 """Run the whole pipeline end to end, in order, to populate a fresh database.
 
   schema -> ingest -> aggregate -> reference data -> load -> score -> archetypes
-        -> Transfermarkt download -> valuation -> shortlists
+        -> Transfermarkt download -> valuation -> identity -> injuries -> shortlists
 
 Every step is idempotent, so re-running is safe. After it finishes, the dashboard at
 http://localhost:8501 is fully populated.
@@ -79,6 +79,13 @@ def build_steps() -> list[tuple[str, list[str]]]:
         ("Valuation: fair value + undervaluation", [sys.executable, "-m", "lofc.model.valuation"]),
         ("Identity: link players to Transfermarkt (independent of market value)",
          [sys.executable, "-m", "lofc.model.identity"]),
+        # Loads the scraped Transfermarkt injury history (Medical dimension input). Must run
+        # AFTER Identity: the loader joins on players.tm_player_id, which Identity populates.
+        # Prints a clean message and returns without writing anything if injuries.csv has
+        # never been scraped, so the pipeline stays runnable on a machine that has never run
+        # lofc.ingest.transfermarkt_injuries.
+        ("Injuries: load the Transfermarkt injury history (skipped if not scraped)",
+         [sys.executable, "-m", "lofc.store.injuries"]),
         # The club 1-5 composite (the live ranking). Must run AFTER valuation and the wage
         # reference data, because the Financial/Resale dimensions read them; and BEFORE the
         # shortlist, which now ranks on the stored objective composite.

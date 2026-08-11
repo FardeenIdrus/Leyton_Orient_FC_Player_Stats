@@ -271,3 +271,63 @@ Note on the GK sweeper metric: Impect has no tracking-based "distance from goal"
 does scope defensive touches by pitch position, so *defensive touches outside the own box*
 (`DEFENSIVE_TOUCHES` minus `DEFENSIVE_TOUCHES_IN_PITCH_POSITION_OWN_BOX`) is a genuine
 event-data proxy for sweeper-keeper behaviour.
+
+---
+
+## 5. Medical dimension: injury history and availability
+
+**Status: the code path is built and wired into the pipeline. The real scrape was started
+and was still in progress — not yet complete — at the time of writing**, so this section
+does not describe loaded production data; treat any injury figures elsewhere in the docs as
+provisional until the scrape finishes and the loader is re-run. `player_injuries` holds no
+production data today (see the note at the end of this section on incidental smoke-test
+rows).
+
+**Source: one Transfermarkt page per player** — `/verletzungen/spieler/<id>`, the injury
+history page, a stable six-column table (`Season | Injury | from | until | Days | Games
+missed`). `src/lofc/ingest/transfermarkt_injuries.py` parses it; `src/lofc/store/injuries.py`
+loads the result into the `player_injuries` table, joining on `players.tm_player_id`
+(populated by the Identity step — see below).
+
+**Deliberately one page, not two.** The Transfermarkt appearance page (`/leistungsdaten/`)
+was evaluated as an alternative/supplement and rejected: its columns shift between
+competition types (cup vs league vs continental rows do not line up), and its header row is
+a sort link rather than plain labels — parsing squad-level appearance counts off it would be
+brittle in a way the injury-history page is not. `games_missed` from the injury page is all
+the availability formula needs.
+
+**Availability formula** (`src/lofc/model/medical.py`):
+
+```
+availability = 1 - (games missed through injury / scheduled games)
+```
+
+Only games missed **through injury** count against a player — being fit but unselected
+(squad rotation, tactical benching) is not a penalty. The window is the **prior two
+seasons, 92 scheduled games** (46 games/season × 2, for the Championship, League One,
+League Two and National League). The club's stated minimum standard is 60% availability
+over that window.
+
+**Why not derive availability from minutes played** (the obvious proxy, and rejected):
+**73% of rankable 2025/26 players fall below a 60% bar on minutes / (46 × 90)**. That bar
+mostly measures squad rotation and positional competition, not fitness — a fit player who
+started half his club's games would fail it. Injury-history-based availability answers the
+actual medical question; minutes played does not.
+
+**Coverage limit:** EFL only (Championship, League One, League Two, National League — the
+four leagues with a `SCHEDULED_GAMES` constant), and only players carrying a
+`tm_player_id`. The Scottish Premiership, Scottish Championship and Premier League 2 are not
+scraped at all today and have no scheduled-games constant, so `availability()` returns
+`None` for them rather than a guessed figure. Within the EFL, `tm_player_id` coverage rose
+sharply after a Task 0 fix that stopped discarding a player's Transfermarkt identity when he
+had no market value on file (see `plan/BUILD_PLAN.md`'s Pending work register for the exact
+before/after numbers).
+
+**Current data state:** the real scrape (`lofc.ingest.transfermarkt_injuries`) had not
+completed as of this writing, so `injuries.csv` is not yet a finished, full-coverage file
+and `player_injuries` holds no production data. (Earlier in development, `python -m
+lofc.store.injuries` was run once against a small leftover 5-player smoke-test CSV — see
+`plan/BUILD_PLAN.md`'s Pending work register for the caveat. Those rows carry
+`source = 'transfermarkt'`, exactly like a real load, and will be silently replaced the next
+time the loader runs against a genuine, complete scrape, since the loader always clears
+`source = 'transfermarkt'` rows before inserting.)
