@@ -121,19 +121,21 @@ only to seed player identity — stable IDs, birth dates, league names — durin
   (*Any* · *summer 2027* · *summer 2028* · *already expired*) plus **Contract** and **Months left**
   columns in the Players table. A forward horizon means "still under contract today, expiring by
   the cutoff", so lapsed deals never pad the list; players with no known expiry are excluded **and
-  counted on screen**. **This filter is currently near-empty — see the B1 incident below.** The
-  previously-shown counts (542 expiring summer 2027, 822 by 2028, 447 already expired) were
-  measured against the pre-incident 10 Jun 2026 snapshot of 1,381 contract dates and no longer
-  reflect the database, so they are removed here rather than left to mislead; they will be
-  recomputed once the recovery scrape lands. **There is deliberately no "January" option**: of
+  counted on screen**. **The filter works again following the B1 recovery** (see below): **702**
+  players expiring by summer 2027, **1,110** by summer 2028, **35** already expired. The contract
+  snapshot date is now **11 Aug 2026** (it was a 10 Jun 2026 snapshot before the incident). These
+  figures reflect **2026/27 squads**, so a player who featured in 2025/26 but has since left the
+  four English leagues will have no contract date — that is correct for recruitment (you want live
+  contract positions), and it is why the numbers do not match the pre-incident 542 expiring summer
+  2027, 822 by 2028, 447 already expired exactly. **There is deliberately no "January" option**: of
   those pre-incident dates, 1,377 of 1,381 were in June and none in January, so the January
   question was answered by *Months left ≤ 6* on a summer horizon — unaffected by the incident.
-  **B1 — Transfermarkt contract/market-value refresh: NOT done.** The 11 Aug 2026 scrape did not
-  refresh contract/foot/height data — it **destroyed** it, via a parsing bug now fixed but not yet
-  recovered. The database today holds **20** contract dates, **23** feet and **24** heights,
-  against 5,626 players. Market values were unaffected (**2,526** present — that field is located
-  by CSS selector, not by column position). Full incident record and recovery procedure in the
-  Pending work register below.
+  **B1 — Transfermarkt contract/market-value refresh: ✅ DONE (11 Aug 2026).** The 11 Aug 2026
+  scrape initially destroyed contract/foot/height data via a parsing bug; the bug was fixed and a
+  recovery scrape ran successfully the same day. The database now holds **1,363** contract dates,
+  **1,606** feet and **1,635** heights, against 5,626 players. Market values were unaffected
+  throughout (**2,526** present — that field is located by CSS selector, not by column position).
+  Full incident record and recovery outcome in the Pending work register below.
 - **301 tests pass.** The dashboard renders clean.
 
 Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
@@ -147,11 +149,11 @@ Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
 
 | # | Item | Blocked by | What to do when unblocked |
 |---|---|---|---|
-| B1 | ❌ **NOT done — the 11 Aug 2026 refresh destroyed contract/foot/height data instead of refreshing it** | recovery scrape retry (interrupted by a Transfermarkt HTTP 503) | Code defects are fixed and reviewed; the data itself is not yet restored. Full incident record and recovery procedure directly below. |
+| B1 | ✅ **DONE (11 Aug 2026)** — recovery scrape completed; contract/foot/height data restored | — (resolved) | Database now holds 1,363 contract dates, 1,606 feet, 1,635 heights (was 20 / 23 / 24 immediately after the incident). Full incident record and recovery outcome directly below. |
 | B2 | **Midfield archetypes** (DM / Box-to-Box / AM) | needs the club's per-archetype metric lists | encode into `ARCHETYPE_DROPS`; deliberately not fabricated |
 | B3 | **Real financial models** | needs the club's real wage framework CSV | drop-in replaces the modelled wage grid; makes the money layer decision-grade |
 
-**B1 incident — contract/foot/height data destroyed, 11 Aug 2026 (code fixed, data not yet recovered):**
+**B1 incident — contract/foot/height data destroyed, 11 Aug 2026 — RESOLVED, recovered the same day:**
 
 - **Cause:** the 11 Aug scrape ran `transfermarkt_efl --force` against a **stale hard-coded
   season** (`TM_SEASON = 2025`). That season had already ended, so Transfermarkt served the squad
@@ -161,10 +163,10 @@ Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
   and `height_cm` on all 4,014 rows scraped — and still printed a success line, because nothing
   checked fill rate at the time. `identity.py` and `valuation.py` then wrote those blanks straight
   over the database (there was no COALESCE protection on those writers at the time).
-- **Effect:** **1,381 contract expiry dates were destroyed**, along with `foot` and `height_cm`.
-  The database currently holds **20** contract dates, **23** feet and **24** heights, against
-  5,626 players. Market values were unaffected (**2,526** present), because that field is located
-  by CSS selector rather than by cell position.
+- **Effect:** **1,381 contract expiry dates were destroyed**, along with `foot` and `height_cm`,
+  dropping the database to **20** contract dates, **23** feet and **24** heights against 5,626
+  players. Market values were unaffected (**2,526** present), because that field is located by
+  CSS selector rather than by cell position.
 - **Backup:** a full database backup was taken before any repair —
   `data/backups/lofc-20260811-103912.sql.gz`.
 - **Code status: fixed and reviewed.** The scraped season is now derived from today's date
@@ -172,17 +174,23 @@ Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
   a fill-rate/volume guard aborts a degraded pull before it touches the CSV; and every writer to
   `players` (`identity.py`, `valuation.py`, `store/load.py`) now uses COALESCE so a blank incoming
   value can never overwrite a value already on file.
-- **Data status: NOT yet restored.** The recovery scrape was interrupted by a Transfermarkt HTTP
-  503 and is being retried.
-- **Recovery procedure, three commands in order:**
+- **Data status: ✅ RESTORED.** The recovery scrape ran successfully on 2026-08-11 using the fixed
+  code. It pulled **2,437** players with **1,882** contract dates, **2,187** feet and **2,199**
+  heights. `valuation` matched **1,380** players; `identity` linked **1,346**. The database now
+  holds **1,363** contract dates, **1,606** feet and **1,635** heights, against 5,626 players — up
+  from the incident's 20 / 23 / 24. These figures reflect **2026/27 squads**: a player who featured
+  in 2025/26 but has since left the four English leagues will have no contract date, which is why
+  the recovered totals do not match the pre-incident 542 / 822 / 447 contract-band figures exactly
+  — correct behaviour for recruitment (you want live contract positions), not a shortfall.
+- **Recovery procedure, three commands in order (as run):**
   1. `transfermarkt_efl --force --allow-degraded`
   2. `valuation`
   3. `identity`
 
-  `--allow-degraded` is required only while the corrupt 4,014-row CSV remains the comparison
-  baseline for the volume guard: current-season squads are legitimately smaller (roughly
-  **2,431** players), so a healthy pull would otherwise be flagged as a false "collapsed row
-  count" and aborted. Once a clean CSV exists, later runs no longer need the flag.
+  `--allow-degraded` was required because the volume guard compared the recovery run's **2,437**
+  current-squad rows against the corrupt 4,014-row file, which was still its comparison baseline.
+  That corrupt baseline is now replaced by the clean recovery CSV, so the flag should not be needed
+  on future runs.
 
 **Injury scrape capability — landed and complete (11 Aug 2026):**
 
@@ -257,9 +265,8 @@ from 60 of 769 players to 567 of 769** (8% → ~74%) on that fix alone; combined
 refreshed scrape above, National League now stands at **711 / 769 (92%)**. The three EFL
 divisions above it improved too, not fallen (they were already matched via market value, and now
 also pick up players the value-filtered path missed). This is what made the injury scrape usable for the National League —
-previously only 8% of that league could be joined at all. (The same `tm_player_id` link would
-also carry B1's contract/foot/height data once B1's recovery scrape lands — see the B1 incident
-above; that data is currently lost, not merely stale.)
+previously only 8% of that league could be joined at all. (The same `tm_player_id` link also
+carries B1's contract/foot/height data — see the B1 incident above, now recovered.)
 
 **In-season operating model (2026/27 — LIVE from August 2026):**
 
@@ -298,6 +305,8 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
 | R4 | **Full StatsBomb retirement** (roadmap #6) | seed identity from Impect, delete the ingest + ~21 GB raw events + 22 dead all-NULL columns |
 | R5 | **Playing-style clusters: season split + move onto Impect** (roadmap #8) | the last season-mixing and last StatsBomb read; style label only, never touches the composite |
 | R6 | **Extend the Transfermarkt squad scrape to Scottish Premiership, Scottish Championship and Premier League 2** | those three leagues carry **low Transfermarkt coverage today** — 2025/26 `tm_player_id` coverage is **Premier League 2 182/1,141 (16%), Scottish Premiership 28/385 (7%), Scottish Championship 8/284 (3%)** — so almost no market value, contract-expiry data, or injury history (the injury loader only ever sees players with a `tm_player_id`, and none of the three has a `SCHEDULED_GAMES` constant for availability either way). Needs a squad-page scrape built for those competitions (`transfermarkt_efl`-equivalent); not started |
+| R7 | **Four duplicate Transfermarkt ids stored in `players` need a manual decision** | ids `118779`, `390687`, `948958`, `967296` are each claimed by two different players. They are **neutralised** (the identity linker now drops ambiguous matches and the injury loader filters them out), but **not repaired** — and because the bio columns are COALESCE-protected, no future re-run will ever clear them on its own. A manual `UPDATE` is required. At least three of the four pairs look plainly wrong rather than genuinely ambiguous. Repairing these also resolves R8 |
+| R8 | **Gate on the scout-assessment plan (R3): the eight players behind R7's duplicate ids compute to 100% availability rather than "unscored"** | a player with no injury rows is indistinguishable from a player who was never fetched. `model/medical.py` has no consumer yet, so nothing is scored wrongly today — but this must be resolved before the Medical dimension is wired into the scorecard, or the platform will reward the players it knows least about. Repairing R7's four duplicates addresses both items at once |
 
 **Small leftovers (cheap, opportunistic):**
 
