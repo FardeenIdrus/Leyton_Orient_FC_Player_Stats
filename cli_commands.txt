@@ -318,6 +318,13 @@ docker compose exec app python -m lofc.model.build_neutral --write
 
 # ===== Injury history (Medical dimension input) =====
 # Pull Transfermarkt injury histories for EFL players (~1.8 hours, resumable).
+# The file it replaces is copied to data/backups/ first.
 docker compose exec app python -m lofc.ingest.transfermarkt_injuries --force
+# Smoke test (a few players, ~15 seconds). --limit writes to injuries.sample.csv with
+# its own partial/progress files: it can NEVER publish over the full injuries.csv.
+docker compose exec app python -m lofc.ingest.transfermarkt_injuries --limit 5 --force
 # Load the scraped injury history into Postgres (fast; also runs inside the pipeline).
+# The load deletes every stored transfermarkt row first, so it ABORTS (touching nothing)
+# when it carries under 70% of the rows already stored -- add --allow-shrink only when a
+# human has checked that the smaller history is genuinely correct.
 docker compose exec app python -m lofc.store.injuries

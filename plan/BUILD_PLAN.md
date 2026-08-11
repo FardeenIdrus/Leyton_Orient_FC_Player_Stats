@@ -59,7 +59,7 @@ model), not a reporting dashboard. It runs end to end via `docker compose up` +
 > covers Scottish/PL2 (fixed "league 903" → "Premier League 2"). **Season split verified end-to-end** — every
 > scoring path filters/groups by `season_id`, a both-season player holds two independent rows (unique
 > `(player, competition, season)` triples), percentile peer groups are same-season only, and selecting a
-> season yields scorecards from that season alone. 152 tests pass. *Known, non-scoring:* the playing-style **clusters** pool both seasons
+> season yields scorecards from that season alone. 301 tests pass. *Known, non-scoring:* the playing-style **clusters** pool both seasons
 > (and still read the StatsBomb-era table) — a style label only, it does not touch the composite (roadmap).
 >
 > **2026-08-03 (b) — more fixes.** (1) **Age** is now derived from `players.birth_date` at the season
@@ -134,7 +134,7 @@ only to seed player identity — stable IDs, birth dates, league names — durin
   against 5,626 players. Market values were unaffected (**2,526** present — that field is located
   by CSS selector, not by column position). Full incident record and recovery procedure in the
   Pending work register below.
-- **279 tests pass.** The dashboard renders clean.
+- **301 tests pass.** The dashboard renders clean.
 
 Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
 `docs/DATA_ARCHITECTURE.md`.
@@ -293,7 +293,7 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
 | # | Item | Why |
 |---|---|---|
 | R1 | **Full pipeline re-run** (`python -m lofc.pipeline`) | a clean end-to-end recompute; now covers the new scorecard stage. NB it *fetches nothing* — every ingest step skips existing files, so it is a recompute, not a refresh |
-| R2 | ✅ **Refactor `dashboard/app.py` (DONE 2026-08-10)** | 2,560 lines → **191**, split into 15 focused modules (`theme` · `labels` · `charts` · `seasons` · `loaders` · `controls` + `tabs/` one per tab), dependencies strictly one-way so there are no import cycles. **337 lines of dead code deleted** (`_club_scorecard`, `_scorecard_player_detail`, `_profile`, `_render_score_composition`, `percentile_vector`, `_dimension_metric_labels`) plus the retired Style-fit helpers `score_composition`/`load_fit_profiles` and their 3 tests. Done in verified phases against a captured behaviour snapshot: **the final output is byte-for-byte identical to before the refactor**; 191 tests passed at the time (279 now, after later branches added tests) |
+| R2 | ✅ **Refactor `dashboard/app.py` (DONE 2026-08-10)** | 2,560 lines → **191**, split into 15 focused modules (`theme` · `labels` · `charts` · `seasons` · `loaders` · `controls` + `tabs/` one per tab), dependencies strictly one-way so there are no import cycles. **337 lines of dead code deleted** (`_club_scorecard`, `_scorecard_player_detail`, `_profile`, `_render_score_composition`, `percentile_vector`, `_dimension_metric_labels`) plus the retired Style-fit helpers `score_composition`/`load_fit_profiles` and their 3 tests. Done in verified phases against a captured behaviour snapshot: **the final output is byte-for-byte identical to before the refactor**; 191 tests passed at the time (301 now, after later branches added tests) |
 | R3 | **Scout-entry fields** for Psychological + Medical (roadmap #4) | completes the club's 7-dimension framework — the biggest remaining gap vs the club document |
 | R4 | **Full StatsBomb retirement** (roadmap #6) | seed identity from Impect, delete the ingest + ~21 GB raw events + 22 dead all-NULL columns |
 | R5 | **Playing-style clusters: season split + move onto Impect** (roadmap #8) | the last season-mixing and last StatsBomb read; style label only, never touches the composite |
