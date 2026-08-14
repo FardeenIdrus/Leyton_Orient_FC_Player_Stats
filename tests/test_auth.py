@@ -1,7 +1,9 @@
 """Password hashing and role permissions. No database, no network."""
 
+import datetime as dt
 import hashlib
 
+from lofc.dashboard import auth
 from lofc.dashboard.auth import ROLES, can, hash_password, verify_password
 
 
@@ -84,3 +86,71 @@ def test_a_hash_made_under_older_parameters_still_verifies():
 
     assert verify_password("legacy password", legacy_stored)
     assert not verify_password("wrong password", legacy_stored)
+
+
+def test_password_problems_rejects_short_password():
+    problems = auth.password_problems("short")
+    assert problems
+    assert any("12" in p for p in problems)
+
+
+def test_password_problems_rejects_empty():
+    assert auth.password_problems("")
+
+
+def test_password_problems_accepts_a_long_passphrase():
+    assert auth.password_problems("correct horse battery staple") == []
+
+
+def test_password_problems_does_not_require_symbols_or_digits():
+    """Length is the rule. Composition rules push people towards Passw0rd! and a sticky note;
+    a long passphrase is stronger and easier to remember. Documented so nobody 'improves' it."""
+    assert auth.password_problems("a" * 12) == []
+
+
+def test_lockout_state_unlocked_when_never_failed():
+    locked, remaining = auth.lockout_state(0, None, dt.datetime(2026, 8, 14, 12, 0))
+    assert locked is False
+    assert remaining == 0
+
+
+def test_lockout_state_locked_while_locked_until_is_in_the_future():
+    now = dt.datetime(2026, 8, 14, 12, 0)
+    locked, remaining = auth.lockout_state(5, now + dt.timedelta(minutes=10), now)
+    assert locked is True
+    assert remaining == 600
+
+
+def test_lockout_state_unlocked_once_locked_until_has_passed():
+    now = dt.datetime(2026, 8, 14, 12, 0)
+    locked, remaining = auth.lockout_state(5, now - dt.timedelta(seconds=1), now)
+    assert locked is False
+    assert remaining == 0
+
+
+def test_next_failure_state_counts_up_without_locking_below_the_limit():
+    count, until = auth.next_failure_state(3, dt.datetime(2026, 8, 14, 12, 0))
+    assert count == 4
+    assert until is None
+
+
+def test_next_failure_state_locks_on_reaching_the_limit():
+    now = dt.datetime(2026, 8, 14, 12, 0)
+    count, until = auth.next_failure_state(auth.MAX_FAILED_LOGINS - 1, now)
+    assert count == auth.MAX_FAILED_LOGINS
+    assert until == now + dt.timedelta(minutes=auth.LOCKOUT_MINUTES)
+
+
+def test_session_expired_is_true_when_never_logged_in():
+    assert auth.session_expired(None, dt.datetime(2026, 8, 14, 12, 0)) is True
+
+
+def test_session_expired_is_false_inside_the_window():
+    now = dt.datetime(2026, 8, 14, 12, 0)
+    assert auth.session_expired(now - dt.timedelta(minutes=5), now) is False
+
+
+def test_session_expired_is_true_past_the_window():
+    now = dt.datetime(2026, 8, 14, 12, 0)
+    stale = now - dt.timedelta(minutes=auth.SESSION_TTL_MINUTES + 1)
+    assert auth.session_expired(stale, now) is True

@@ -447,6 +447,13 @@ class User(Base):
     role: Mapped[str] = mapped_column(String)          # scout | medical | head_of_recruitment | admin
     password_hash: Mapped[str] = mapped_column(String)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    # Login throttling state (dashboard/auth.py). Stored on the row rather than in process
+    # memory so a lockout survives a Streamlit restart.
+    failed_logins: Mapped[int] = mapped_column(Integer, server_default="0")
+    locked_until: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    # True after an admin sets a password on the user's behalf; the login page then forces a
+    # change before anything else is shown, so an admin-chosen password is never a standing one.
+    must_change_password: Mapped[bool] = mapped_column(Boolean, server_default="false")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
 
 

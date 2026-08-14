@@ -13,6 +13,7 @@ under parameters other than today's, so it can be re-hashed and re-saved on that
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import hmac
 import secrets
@@ -107,3 +108,69 @@ def needs_rehash(stored: str) -> bool:
 def can(role: str, action: str) -> bool:
     """Whether `role` may perform `action`. Unknown roles and actions are denied."""
     return action in _PERMISSIONS.get(role, frozenset())
+
+
+# Length is deliberately the ONLY rule. Composition requirements (a digit, a symbol, mixed
+# case) measurably push users towards predictable mutations -- Passw0rd! -- and towards
+# writing the result down, while a long passphrase is both stronger and easier to recall.
+# NIST SP 800-63B says the same. Do not "strengthen" this by adding character classes.
+PASSWORD_MIN_LENGTH = 12
+
+
+def password_problems(password: str) -> list[str]:
+    """Every reason `password` is unacceptable. An empty list means it is acceptable.
+
+    Returns a list rather than a bool so a caller can show the user all of the problems at
+    once instead of making them fix one, resubmit, and discover the next.
+    """
+    problems: list[str] = []
+    if len(password) < PASSWORD_MIN_LENGTH:
+        problems.append(f"must be at least {PASSWORD_MIN_LENGTH} characters")
+    return problems
+
+
+# scrypt already makes each guess cost ~50ms, which blunts online guessing but does not stop
+# it: 5 attempts/second sustained overnight is still ~150k guesses. These bound it. The state
+# lives on the users row rather than in process memory so it survives a Streamlit restart and
+# is shared if the app is ever run with more than one worker.
+MAX_FAILED_LOGINS = 5
+LOCKOUT_MINUTES = 15
+
+
+def lockout_state(failed_logins: int, locked_until: "datetime.datetime | None",
+                  now: "datetime.datetime") -> tuple[bool, int]:
+    """Whether this account is currently locked, and for how many more seconds.
+
+    `failed_logins` is accepted but deliberately not consulted: `locked_until` is the single
+    source of truth for whether a lock is active, so a stale counter left behind by a partial
+    write can never lock an account on its own.
+    """
+    if locked_until is None or locked_until <= now:
+        return False, 0
+    return True, int((locked_until - now).total_seconds())
+
+
+def next_failure_state(failed_logins: int,
+                       now: "datetime.datetime") -> tuple[int, "datetime.datetime | None"]:
+    """The (count, locked_until) to store after one more failed attempt."""
+    count = failed_logins + 1
+    if count >= MAX_FAILED_LOGINS:
+        return count, now + datetime.timedelta(minutes=LOCKOUT_MINUTES)
+    return count, None
+
+
+# 12 hours: long enough that nobody is re-authenticating during a working day, short enough
+# that a browser left open on a shared training-ground machine does not stay logged in all week.
+SESSION_TTL_MINUTES = 720
+
+
+def session_expired(logged_in_at: "datetime.datetime | None",
+                    now: "datetime.datetime") -> bool:
+    """True if a session started at `logged_in_at` should no longer be trusted.
+
+    A missing timestamp expires: an absent value means the session was never properly
+    established, and defaulting that to 'still valid' would be the wrong direction to fail.
+    """
+    if logged_in_at is None:
+        return True
+    return now - logged_in_at > datetime.timedelta(minutes=SESSION_TTL_MINUTES)
