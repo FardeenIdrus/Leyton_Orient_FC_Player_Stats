@@ -257,10 +257,20 @@ class PlayerScorecard(Base):
     financial_band: Mapped[float | None] = mapped_column(Float, nullable=True)
     resale_band: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Psychological/Medical are human scout inputs (scout_scores.resolve_bands), NULL until
+    # both dimensions of an assessment exist for the player (Decision 9).
+    psychological_band: Mapped[float | None] = mapped_column(Float, nullable=True)
+    medical_band: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     objective_composite: Mapped[float | None] = mapped_column(Float, nullable=True)
     objective_weight_covered: Mapped[float | None] = mapped_column(Float, nullable=True)
     full_composite: Mapped[float | None] = mapped_column(Float, nullable=True)
     full_weight_covered: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # assessed_composite: Performance + Physical + Psychological + Medical (Decision 15) --
+    # deliberately excludes the modelled Financial/Resale dimensions. NULL unless both scout
+    # dimensions are present (Decision 9).
+    assessed_composite: Mapped[float | None] = mapped_column(Float, nullable=True)
+    assessed_weight_covered: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     veto: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     below_min_composite: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
