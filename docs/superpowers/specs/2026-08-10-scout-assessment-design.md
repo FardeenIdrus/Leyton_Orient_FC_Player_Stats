@@ -87,8 +87,8 @@ applied one level down.
 
 A partially assessed player must not appear in a ranked list beside a fully assessed one.
 Requiring both means every non-NULL `assessed_composite` reflects a complete human assessment.
-Under Decision 12 both dimensions are human judgements, and under §11 both must be **signed
-off** before they count.
+Under Decision 12 both dimensions are human judgements. Under Decision 14 a **submitted**
+assessment counts — sign-off is not required for it to score, only to mark it approved.
 
 ### Decision 10 — The availability *figure* counts injury absence only
 
@@ -379,9 +379,15 @@ panel does not.
 4. The form shows the club's criteria **for that player's position**: the Psychological bullets,
    each scored 1–5; and a Medical panel carrying the evidence panel of §6 plus the club's
    per-position medical requirement checklist.
-5. The scout saves. The assessment is **submitted**. It does **not** score.
-6. The Head of Recruitment reviews it and **signs it off**. Now it scores.
+5. The scout saves. The assessment is **submitted** and **scores immediately** (Decision 14),
+   badged 🟠 *Assessed — awaiting sign-off*.
+6. The Head of Recruitment reviews it and **signs it off**. The score does not change — the badge
+   turns 🟢 *Signed off*, and the assessment becomes eligible for export as final rather than
+   provisional.
 7. The profile shows the assessed composite, who assessed it, who approved it, and both dates.
+
+**Nothing in this workflow ever hides a player** (Decision 14). Step 6 changes the badge and what
+may leave the building; it does not change what you can see or how anyone ranks.
 
 ---
 
@@ -549,13 +555,50 @@ decided by recency. The model below is written as the intended design, but it is
 
 **Assessment states: `draft` → `submitted` → `signed_off`.**
 
-- **Only a signed-off assessment scores.** Draft and submitted assessments are visible on the
-  player profile, clearly marked **pending**, and never reach `assessed_composite`.
+### Decision 14 — sign-off is NON-BLOCKING (agreed 2026-08-14)
+
+An earlier draft had only signed-off assessments score, leaving submitted work absent from the
+ranking. **That is reversed.** A submitted assessment **scores immediately and ranks normally.**
+
+**Why.** Every other gate in this platform flags but never excludes — the club's "below 3.0 = do
+not proceed", the "under 2.0 = veto", the affordability gates, the medical screening flag. A
+blocking sign-off would be the **only** place the platform hides a player from the user, and it
+would hide them for an administrative reason rather than a football one. It would also make
+completed work invisible: a player assessed on Monday would look identical to one nobody had
+opened, until someone clicked approve.
+
+| State | Scores and ranks? | Badge shown |
+|---|---|---|
+| No assessment | No — genuinely no data | *(none)* |
+| **`submitted`** | **Yes, normally** | 🟠 **Assessed — awaiting sign-off**, with the assessor's name and date |
+| **`signed_off`** | Yes | 🟢 **Signed off by \<name\>, \<date\>** |
+
+**What sign-off then controls.** If an unsigned assessment scored identically with no other
+difference, approval would be decorative and would never happen. So approval gates **what leaves
+the building**, not what you can see inside it:
+
+- **Exports and shared player reports mark unsigned assessments as provisional**, and can exclude
+  them entirely.
+- **An optional "signed-off only" filter** on the Players list, for presenting a shortlist
+  formally. Off by default.
+
+**Accepted cost.** A single scout's judgement moves the ranking before anyone reviews it. That is
+acceptable *only because* the badge, the assessor's name, and any competing assessment are all
+visible on the profile. It would not be acceptable if the number were anonymous.
+
+**Accessibility:** colour never carries the meaning alone — the badge always states the status in
+words, because printed reports and colour-blind users lose the colour.
+
+### The rest of the model
+
 - **Multiple scouts may submit** an assessment for the same player, dimension, competition and
-  season. The Head of Recruitment marks **one** authoritative by signing it off.
+  season. The Head of Recruitment marks **one** authoritative by signing it off; that one is the
+  scoring value once it exists.
 - **All submissions are retained and attributed.** Nothing is deleted or averaged away, so
   disagreement between two scouts is visible on the profile rather than silently resolved.
 - Signing off records the approver and the timestamp alongside the original author and date.
+- Where several assessments are submitted and none signed off, the **most recent** scores, and the
+  profile shows the others alongside it.
 
 ---
 
@@ -650,7 +693,48 @@ None of this is built.
 
 ---
 
-## 15. Testing
+## 15. Presentation quality — a hard requirement
+
+**These three surfaces are seen by people outside the recruitment room, and their presentation is
+part of the product, not decoration:**
+
+1. **The assessment form** — used by scouts and medical staff, often at speed
+2. **The workflow / sign-off view** — used by the Head of Recruitment
+3. **The player report** — **shared with recruitment analysts and directors**, and exported
+
+The report carries the highest bar: it leaves the building and represents the department's
+judgement. A number without visible provenance, or a layout that buries the caveat, actively
+misleads its reader.
+
+### Requirements
+
+- **Information hierarchy.** The decision comes first — the composite, the two human bands, the
+  flags. Evidence supports it below. A reader who stops after the first screen must not be
+  misled by what they missed.
+- **Provenance is never optional.** Every figure states where it came from and when: scraped vs
+  hand-entered, the assessor's name, the approver's name, the dates, the data snapshot date.
+- **Caveats sit beside the number they qualify**, not in a footer. The league coverage warning
+  belongs next to the availability figure, not at the bottom of the page (§9).
+- **Colour never carries meaning alone.** Every badge and flag states its status in words, because
+  printed reports and colour-blind readers lose the colour (Decision 14).
+- **Density with scannability.** A recruiter reads this between meetings. Dense is fine; cluttered
+  is not. Tables over prose for anything comparative.
+- **The export must reproduce the screen faithfully**, including flags, provenance and the
+  provisional/signed-off status. An export that quietly drops a warning is worse than no export.
+- **Consistency with the existing dashboard** — the club theme, the existing typography and the
+  established table and band-badge patterns already in `dashboard/theme.py` and `charts.py`. This
+  is one product, not a new one bolted on.
+
+### Build-time requirement
+
+When these surfaces are implemented, the implementer **must invoke the relevant frontend/UI design
+skill** before writing the page, and follow it. This is recorded here so it is a requirement of
+the spec rather than a preference expressed once in conversation. The implementation plan must
+carry it into the affected tasks explicitly.
+
+---
+
+## 16. Testing
 
 All parser tests run against **saved HTML fixtures. No network access in the test suite.**
 
@@ -682,7 +766,7 @@ The existing **301** tests must remain green.
 
 ---
 
-## 16. Error handling
+## 17. Error handling
 
 | Situation | Behaviour |
 |---|---|
@@ -700,7 +784,7 @@ The existing **301** tests must remain green.
 
 ---
 
-## 17. What does not change
+## 18. What does not change
 
 `objective_composite`, `full_composite`, the default Players ranking, the `shortlists` table
 ordering, and all **301** existing tests. `assessed_composite` is opt-in and NULL until a human
@@ -708,7 +792,7 @@ has completed **and a Head of Recruitment has signed off** both dimensions for t
 
 ---
 
-## 18. Follow-ons (registered, not in scope)
+## 19. Follow-ons (registered, not in scope)
 
 - **R3b** — scout document upload. Uploads are an **evidence trail, never a scoring input**,
   which is what makes deferring them safe. Medical documents are special-category personal
@@ -722,7 +806,7 @@ has completed **and a Head of Recruitment has signed off** both dimensions for t
 
 ---
 
-## 19. Open questions
+## 20. Open questions
 
 - **Open — is Head of Recruitment sign-off the right model (§11)?** It is written here as the
   design, but it is **provisional pending the owner's discussion with the recruitment team.** It
