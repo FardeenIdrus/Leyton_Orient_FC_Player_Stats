@@ -381,8 +381,7 @@ matches missed regardless of category.
 
 **Availability, validated end to end on real data:** computed for **2,870** player-season rows
 across the four EFL leagues; **77 fall below the club's stated 60% bar**; the most affected are
-recognisable long-term-injured players (e.g. Charlie Wyke, 128 matches missed, availability
-0.0).
+recognisable long-term-injured players. **NB these figures pre-date R9** — they were computed before overlapping injury spells were merged, so they overstate the worst cases. Charlie Wyke, the most affected, read as 128 matches missed / availability 0.0 then; after the R9 fix he is **64 matches missed, availability ~0.30**. The 2,870 and 77 counts have not been recomputed since — treat them as indicative, not current.
 
 **Design question, now resolved (Decision 12, 2026-08-14):** an earlier design considered
 scoring Medical automatically off this availability figure via a band formula
