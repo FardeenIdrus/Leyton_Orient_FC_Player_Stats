@@ -160,15 +160,49 @@ def test_touching_spells_are_merged():
 def test_ongoing_injury_with_null_date_until_does_not_crash():
     # A NULL date_until means the injury is still ongoing. It must not crash
     # and must be treated as extending to the end of the window, not dropped.
+    # The ongoing spell sorts LAST here, so this alone does not prove the
+    # sentinel actually extends anything -- see the "sorted first" case below
+    # for that.
     injuries = pd.DataFrame({
         "season_label": ["25/26", "24/25"],
         "date_from": ["2025-06-01", "2024-11-01"],
         "date_until": [None, "2024-11-15"],
         "games_missed": [10, 3],
     })
-    # The two spells don't overlap (Nov 2024 vs June 2026 onward), so both
+    # The two spells don't overlap (Nov 2024 vs June 2025 onward), so both
     # count: 10 + 3 = 13.
     assert games_missed_in_window(injuries, 318) == 13
+
+
+def test_ongoing_injury_sorted_first_absorbs_a_later_overlapping_spell():
+    # The ongoing spell (NULL date_until, from 2024-11-01) sorts FIRST here.
+    # It must actually extend forward and absorb the second spell, which
+    # starts well within its indefinite span -- proving the sentinel
+    # propagates rather than sitting unused. A mutant that does no extension
+    # at all (or extends only to date_from) would sum instead of merge here:
+    # 10 + 20 = 30, not the correct max(10, 20) = 20.
+    injuries = pd.DataFrame({
+        "season_label": ["24/25", "25/26"],
+        "date_from": ["2024-11-01", "2025-06-01"],
+        "date_until": [None, "2025-06-15"],
+        "games_missed": [10, 20],
+    })
+    assert games_missed_in_window(injuries, 318) == 20
+
+
+def test_merge_takes_the_max_not_the_first_spell():
+    # Regression: a merge that kept the FIRST spell's games_missed (instead
+    # of the max across the group) would pass every other merge test in this
+    # file, since in all of them the larger value happens to belong to the
+    # earliest-sorted spell. Here the later spell (starting 2025-01-15) has
+    # the larger games_missed, to catch that specifically.
+    injuries = pd.DataFrame({
+        "season_label": ["24/25", "24/25"],
+        "date_from": ["2025-01-01", "2025-01-15"],
+        "date_until": ["2025-03-01", "2025-04-01"],
+        "games_missed": [3, 12],
+    })
+    assert games_missed_in_window(injuries, 318) == 12
 
 
 def test_a_single_spell_is_unchanged():
@@ -192,7 +226,10 @@ def test_has_records_is_measured_and_matches_availability():
         "games_missed": [4],
     })
     result = availability_with_evidence(injuries, 4, CHAMPIONSHIP, minutes_played=1000)
-    assert result == AvailabilityEvidence(AvailabilityStatus.MEASURED, availability(4, CHAMPIONSHIP))
+    # Literal expected value (46 scheduled games * 2 seasons = 92), not a call
+    # into availability() itself -- asserting against the function under test
+    # would still pass if that function were broken.
+    assert result == AvailabilityEvidence(AvailabilityStatus.MEASURED, pytest.approx(1 - 4 / 92))
 
 
 def test_no_records_but_minutes_clear_the_bar_confirms_availability():
@@ -228,6 +265,61 @@ def test_no_records_and_no_minutes_data_is_unknown_not_assumed_clean():
     # clean record -- this is the core of R8.
     empty = pd.DataFrame(columns=["season_label", "date_from", "date_until", "games_missed"])
     result = availability_with_evidence(empty, 0, CHAMPIONSHIP, minutes_played=None)
+    assert result == AvailabilityEvidence(AvailabilityStatus.UNKNOWN, None)
+
+
+def test_measured_value_is_unaffected_by_minutes_seasons():
+    # Regression: seasons sets the availability denominator; minutes_seasons
+    # (independent) sets the minutes bar. A MEASURED player's value must not
+    # change depending on how many seasons of minutes the caller happened to
+    # hold -- previously the module told callers to pass seasons=1 for a
+    # single-season minutes figure, which silently halved the denominator
+    # (46 * 2 = 92 -> 46) for every MEASURED player sharing that call: 30
+    # games missed read as 0.674 with seasons=2 but 0.348 with seasons=1.
+    injuries = pd.DataFrame({
+        "season_label": ["25/26"],
+        "date_from": ["2025-09-01"],
+        "date_until": ["2025-10-01"],
+        "games_missed": [30],
+    })
+    expected = AvailabilityEvidence(AvailabilityStatus.MEASURED, pytest.approx(1 - 30 / 92))
+    result_minutes_seasons_1 = availability_with_evidence(
+        injuries, 30, CHAMPIONSHIP, minutes_played=1000, seasons=2, minutes_seasons=1
+    )
+    result_minutes_seasons_2 = availability_with_evidence(
+        injuries, 30, CHAMPIONSHIP, minutes_played=1000, seasons=2, minutes_seasons=2
+    )
+    assert result_minutes_seasons_1 == expected
+    assert result_minutes_seasons_2 == expected
+
+
+def test_minutes_seasons_defaults_to_seasons_when_not_given():
+    empty = pd.DataFrame(columns=["season_label", "date_from", "date_until", "games_missed"])
+    # seasons=1 and no minutes_seasons override -> bar is 1 * 2000 = 2000.
+    result = availability_with_evidence(
+        empty, 0, CHAMPIONSHIP, minutes_played=MINUTES_CONFIRM_AVAILABILITY_PER_SEASON, seasons=1
+    )
+    assert result == AvailabilityEvidence(AvailabilityStatus.CONFIRMED_BY_MINUTES, 1.0)
+
+
+def test_minutes_seasons_overrides_seasons_for_the_bar_only():
+    # seasons=2 (so the bar would default to 4000) but minutes_seasons=1
+    # explicitly -> bar is 2000, and a single season of minutes confirms.
+    empty = pd.DataFrame(columns=["season_label", "date_from", "date_until", "games_missed"])
+    result = availability_with_evidence(
+        empty, 0, CHAMPIONSHIP,
+        minutes_played=MINUTES_CONFIRM_AVAILABILITY_PER_SEASON,
+        seasons=2, minutes_seasons=1,
+    )
+    assert result == AvailabilityEvidence(AvailabilityStatus.CONFIRMED_BY_MINUTES, 1.0)
+
+
+def test_pd_na_minutes_played_does_not_raise():
+    # pd.NA passes an `is not None` check but raises on boolean evaluation --
+    # must use pd.isna() so a pandas-native missing value behaves the same as
+    # a plain None.
+    empty = pd.DataFrame(columns=["season_label", "date_from", "date_until", "games_missed"])
+    result = availability_with_evidence(empty, 0, CHAMPIONSHIP, minutes_played=pd.NA)
     assert result == AvailabilityEvidence(AvailabilityStatus.UNKNOWN, None)
 
 

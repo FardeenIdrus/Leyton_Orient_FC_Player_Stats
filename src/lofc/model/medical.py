@@ -4,12 +4,20 @@
 
 Only games missed THROUGH INJURY enter the numerator, so a player who was fit but
 simply not selected is not penalised. Deriving availability from minutes played was
-tested and rejected: 73% of rankable 2025/26 players fall below a 60% bar on
-minutes / (46 * 90), which measures rotation, not fitness.
+tested and rejected as the PRIMARY signal: 73% of rankable 2025/26 players fall
+below a 60% bar on minutes / (46 * 90), which measures rotation, not fitness. It is
+still used as a secondary, independent confirmation signal for players with no
+injury records at all -- see `availability_with_evidence` below.
 
 The club states 60% availability over the prior two seasons as the minimum standard.
 The band formula that consumes this lives alongside it (added in the scout
 assessment plan).
+
+This module produces more than one number. `availability()` is a bare fraction and
+cannot tell "genuinely never injured" from "Transfermarkt never recorded this
+player" -- both look like a perfect record. Anything shown to a human (scout,
+medical staff) as evidence must go through `availability_with_evidence()` instead,
+which carries that distinction explicitly via `AvailabilityStatus`.
 """
 
 from __future__ import annotations
@@ -36,12 +44,17 @@ AVAILABILITY_SEASONS = 2
 # Transfermarkt labels seasons "25/26"; our season_ids are 317 = 2024/25 upward.
 _SEASON_LABELS: dict[int, str] = {317: "24/25", 318: "25/26", 319: "26/27"}
 
-# Sentinel for an ongoing injury (NULL date_until): treated as extending to the
-# end of the availability window rather than being dropped or crashing. This
-# module only knows the window as a set of season labels, not exact calendar
-# boundaries, so a far-future sentinel is used instead -- it is guaranteed to
-# dominate every other date_until on record, which is what "still ongoing"
-# means for merge purposes.
+# Sentinel for an ongoing injury (NULL date_until): treated as still open, so it
+# merges with -- and absorbs -- every later spell inside the window, however far
+# apart their dates are, rather than being dropped or crashing. That can
+# understate a genuinely separate later absence: an ongoing 10-match spell plus
+# a truly distinct later 20-match spell merges to max(10, 20) = 20, not 30. That
+# is the same conservative direction as the max-not-sum rule in
+# _merge_overlapping_spells, and it is correct when the injury really is still
+# open. But if a NULL here instead reflects missing/unscraped data rather than a
+# genuinely open injury, this sentinel would silently erase a real later
+# absence from the total -- there is currently no way to tell the two apart in
+# the data, so that is a known limitation, not a bug.
 _ONGOING_INJURY_SENTINEL = pd.Timestamp.max
 
 
@@ -112,7 +125,7 @@ def _merge_overlapping_spells(inside: pd.DataFrame) -> int:
             group_max = missed
             group_end = end
     total += group_max
-    return int(total)
+    return int(round(total))
 
 
 def games_missed_in_window(injuries: pd.DataFrame, season_id: int,
@@ -129,6 +142,12 @@ def games_missed_in_window(injuries: pd.DataFrame, season_id: int,
 
     Overlapping/concurrent spells inside the window are merged before counting
     -- see _merge_overlapping_spells for why summing raw rows double-counts.
+
+    Column contract: a frame with any row surviving the season-label filter
+    must have `date_from` and `date_until` columns (real injury rows always
+    do -- see the module's column list in docs/DATA_ARCHITECTURE.md); missing
+    either raises KeyError. A frame that is empty, or whose rows are all
+    outside the window, never reaches the merge step and does not need them.
     """
     labels = window_labels(season_id, seasons)
     if injuries.empty:
@@ -144,6 +163,13 @@ def availability(games_missed: int, competition_id: int,
     Returns None for a competition with no scheduled-games constant -- the criterion
     is then unscored rather than defaulted, because a guessed availability feeding a
     medical score is worse than an honest gap.
+
+    Do not call this directly for anything shown to a human. It only ever sees
+    an integer `games_missed`, so it cannot tell "genuinely never injured"
+    (games_missed=0 because there is real evidence of zero) from "never
+    recorded" (games_missed=0 because there is no evidence at all) -- both
+    read as a perfect 1.0. Use `availability_with_evidence()` instead, which
+    carries that distinction explicitly.
     """
     scheduled = SCHEDULED_GAMES.get(competition_id)
     if not scheduled:
@@ -162,11 +188,15 @@ def availability(games_missed: int, competition_id: int,
 # Championship vs 18% in the National League), but this confirmation rate
 # does not track that gap, so it is measuring fitness, not reporting quality.
 #
-# Scale by `seasons` for a multi-season bar, matching the availability window.
-# If a caller only holds minutes for a single season (not the full window),
-# pass seasons=1 to this function even when the window itself spans more --
-# otherwise the bar would be doubled against data that only covers one
-# season, and a fit player would wrongly fail to confirm.
+# `availability_with_evidence()` scales this by its OWN `minutes_seasons`
+# parameter, not by `seasons` -- those two are deliberately independent.
+# `seasons` sets the availability DENOMINATOR (scheduled games in the window);
+# `minutes_seasons` sets how many seasons of minutes the caller is vouching
+# for. Conflating them is a real bug we hit once already: telling a caller who
+# only holds one season of minutes to pass seasons=1 "for this call" also
+# halves the denominator for every MEASURED player sharing that call, since
+# `seasons` is forwarded straight into `availability()`. Pass `minutes_seasons`
+# instead, and leave `seasons` matching the actual availability window.
 MINUTES_CONFIRM_AVAILABILITY_PER_SEASON = 2000
 
 
@@ -187,10 +217,18 @@ class AvailabilityStatus(Enum):
 class AvailabilityEvidence:
     """The availability figure plus how it was arrived at.
 
-    `value` is only meaningful alongside `status`: for UNKNOWN it is always
-    None. Consumers must not treat a None value as "unavailable" (0.0) or
-    silently coalesce it to anything -- it means "not known", and the whole
-    point of this type is to stop that distinction from being lost.
+    `value` is `None` in two distinct cases, not one:
+      - status is UNKNOWN: always None -- there is no evidence at all.
+      - status is MEASURED and `competition_id` has no SCHEDULED_GAMES entry:
+        also None -- there IS injury evidence, but the criterion is unscored
+        for this league (see `availability()`), not a data gap about the
+        player. Do not assume MEASURED implies a non-None value.
+    CONFIRMED_BY_MINUTES is always 1.0.
+
+    Consumers must check `status` before using `value` in arithmetic, and must
+    never treat a None as "unavailable" (0.0) or silently coalesce it to
+    anything -- it means "not known" or "not scored", and the whole point of
+    this type is to stop that distinction from being lost.
     """
 
     status: AvailabilityStatus
@@ -203,6 +241,7 @@ def availability_with_evidence(
     competition_id: int,
     minutes_played: int | None,
     seasons: int = AVAILABILITY_SEASONS,
+    minutes_seasons: int | None = None,
 ) -> AvailabilityEvidence:
     """Availability plus whether it is measured, confirmed, or unknown.
 
@@ -218,27 +257,43 @@ def availability_with_evidence(
     inside it still has genuine TM coverage (he was tracked and had no
     qualifying injury), which is a real MEASURED zero, unlike a player TM
     never tracked at all. Window-filtering happens separately, inside
-    `games_missed` (typically via `games_missed_in_window`).
+    `games_missed` (typically via `games_missed_in_window`). Caveat: this
+    means a player whose ENTIRE history predates the window also reads
+    MEASURED, value 1.0 -- defensible (he was demonstrably tracked and has no
+    qualifying absence anywhere on record), but that 1.0 rests on inference
+    (no evidence of injury) rather than direct measurement (evidence of zero
+    injury inside the window itself). Worth surfacing differently in the
+    evidence panel if that distinction matters there.
       - Non-empty -> MEASURED. The value is whatever `availability()` returns
         for `games_missed` (which may itself be None, if `competition_id` has
         no SCHEDULED_GAMES entry -- that pass-through is deliberate, matching
-        `availability()`'s own "unscored rather than defaulted" behaviour).
+        `availability()`'s own "unscored rather than defaulted" behaviour; see
+        AvailabilityEvidence's docstring, MEASURED does not imply non-None).
       - Empty and `minutes_played` clears MINUTES_CONFIRM_AVAILABILITY_PER_SEASON
-        (scaled by `seasons`) -> CONFIRMED_BY_MINUTES, value 1.0. This check is
-        independent of `competition_id` / SCHEDULED_GAMES: minutes played is a
-        fact about the player, not something derived from the league's fixture
-        count, so it applies even to competitions with no scheduled-games
-        constant.
-      - Empty and minutes don't clear the bar (including `minutes_played` being
-        None/missing -- never assume) -> UNKNOWN, value None. A blank record
-        must never render as a clean one.
+        scaled by `minutes_seasons` (defaults to `seasons` if not given) ->
+        CONFIRMED_BY_MINUTES, value 1.0. This check is independent of
+        `competition_id` / SCHEDULED_GAMES: minutes played is a fact about the
+        player, not something derived from the league's fixture count, so it
+        applies even to competitions with no scheduled-games constant.
+
+        `minutes_seasons` is deliberately separate from `seasons`: `seasons`
+        sets the availability DENOMINATOR via `availability()`, so it must
+        match the actual window regardless of what minutes data happens to be
+        available. If a caller only holds one season of minutes (not the
+        full multi-season window), pass `minutes_seasons=1` -- do NOT pass
+        `seasons=1` to compensate, since that would also halve the
+        denominator for every MEASURED player sharing the call.
+      - Empty and minutes don't clear the bar (including `minutes_played`
+        being None/missing/NA -- never assume) -> UNKNOWN, value None. A
+        blank record must never render as a clean one.
     """
     if not injuries.empty:
         return AvailabilityEvidence(AvailabilityStatus.MEASURED,
                                     availability(games_missed, competition_id, seasons))
 
-    threshold = MINUTES_CONFIRM_AVAILABILITY_PER_SEASON * seasons
-    if minutes_played is not None and minutes_played >= threshold:
+    effective_minutes_seasons = seasons if minutes_seasons is None else minutes_seasons
+    threshold = MINUTES_CONFIRM_AVAILABILITY_PER_SEASON * effective_minutes_seasons
+    if not pd.isna(minutes_played) and minutes_played >= threshold:
         return AvailabilityEvidence(AvailabilityStatus.CONFIRMED_BY_MINUTES, 1.0)
 
     return AvailabilityEvidence(AvailabilityStatus.UNKNOWN, None)
