@@ -66,7 +66,7 @@ paper form. Each bullet is classified:
 | Kind | Example | Treatment |
 |---|---|---|
 | `availability` | "Minimum 60% availability over prior 2 seasons" | **Computed as a figure and displayed as evidence** (§4). Under Decision 12 it informs the assessor's judgement; it never produces a band |
-| `screening` | "No ACL or significant knee ligament injury within prior 12 months" | **Pass/fail**, recorded by the assessor; acts as a cap on the band the assessor enters (§5) |
+| `screening` | "No ACL or significant knee ligament injury within prior 12 months" | **Pass/fail**, recorded by the assessor; raises a warning flag but never overrides the band they enter (Decision 13, §5) |
 | `protocol` | "Permanent signings undergo MRI scan on 8 sites" | **Not scored.** A club process step, not a player attribute. Shown as a checklist reminder |
 
 The `protocol` class matters: "undergo an MRI scan" says nothing about the player and must
@@ -301,19 +301,29 @@ flattening it.
 labelling in this design exist because of what Decision 11 found, and deleting the record would
 leave them looking unmotivated.
 
-**Screening criteria act as caps.** The assessor records each `screening` criterion as pass/fail.
-Any failure raises an explicit `medical_screening_failed` flag and caps the band the assessor
-entered at **2.0**, mirroring the club's deviation protocol ("requires independent orthopedic
-assessment", "triggers enhanced medical protocol"). This is a club rule constraining a human
-judgement, not a score generated from data — nothing here computes a band.
+### Decision 13 — screening criteria WARN, they never override the assessor (agreed 2026-08-14)
 
-The flag is raised **separately from the existing veto**, deliberately. `VETO_BAND = 2.0` and
-the existing test is `band < 2.0`, so a band capped *at* 2.0 does not trip it. Rather than
-invent a fractionally lower cap to force the veto, the failed screening is surfaced as its own
-named flag — clearer to a recruiter, and it leaves the club's stated veto rule untouched.
+An earlier draft had a failed `screening` criterion **cap** the entered band at 2.0. That is
+reversed. **The platform never overwrites a qualified human's number.**
 
-Consistent with the rest of the platform, **both are advisory**: they flag the player, they
-never remove them from any list.
+The assessor records each `screening` criterion as pass/fail. Any failure raises an explicit
+`medical_screening_failed` flag, shown prominently on the assessment form, the player profile
+and the export — but **the band the assessor entered stands unchanged**.
+
+The reasoning: the assessor has seen the medical report and the scans; the platform has seen a
+Transfermarkt row. A system that silently overrules the better-informed party is the same
+failure mode that destroyed 1,381 contract dates on 11 Aug — code deciding it knew better than
+the evidence in front of it. Where the platform and the person disagree, **surface the
+disagreement, do not resolve it silently.**
+
+If the assessor scores above the flag, the mandatory reason field captures why, and the
+disagreement is visible to whoever signs off.
+
+This leaves the club's own `VETO_BAND = 2.0` rule untouched: a genuinely unacceptable player is
+scored below 2.0 by the assessor and trips the veto normally.
+
+Consistent with the rest of the platform, **every flag is advisory**: it marks a player, it
+never removes them from any list.
 
 ### Override
 
