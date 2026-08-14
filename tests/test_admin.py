@@ -64,3 +64,43 @@ def test_set_password_rejects_a_weak_password(engine):
 def test_set_password_rejects_an_unknown_user(engine):
     with pytest.raises(SystemExit):
         admin.set_password(engine, "nobody", "a perfectly fine passphrase")
+
+
+def test_create_user_rejects_a_weak_password_before_writing_a_row(engine):
+    """Pins that the password check runs BEFORE the database write, not after: if the check
+    were removed or reordered past session.add()/commit(), this would still raise SystemExit
+    (from the weak password) but the row would already exist -- the assertion below on
+    session.scalar(...) is what would catch that regression."""
+    with pytest.raises(SystemExit):
+        admin.create_user(engine, "newuser", "New User", "scout", "short")
+
+    with Session(engine) as session:
+        assert session.scalar(select(User).where(User.username == "newuser")) is None
+
+
+def test_create_user_creates_the_row_with_a_verifying_hash_and_role(engine):
+    admin.create_user(engine, "newuser", "New User", "scout", "a perfectly fine passphrase")
+
+    with Session(engine) as session:
+        user = session.scalar(select(User).where(User.username == "newuser"))
+        assert user is not None
+        assert user.role == "scout"
+        assert user.full_name == "New User"
+        assert auth.verify_password("a perfectly fine passphrase", user.password_hash)
+
+
+def test_create_user_rejects_an_unknown_role(engine):
+    with pytest.raises(SystemExit):
+        admin.create_user(engine, "newuser", "New User", "goalkeeper coach",
+                          "a perfectly fine passphrase")
+
+
+def test_create_user_rejects_a_duplicate_username(engine):
+    with Session(engine) as session:
+        session.add(User(username="jsmith", full_name="J. Smith", role="scout",
+                         password_hash=auth.hash_password("original passphrase")))
+        session.commit()
+
+    with pytest.raises(SystemExit):
+        admin.create_user(engine, "jsmith", "Someone Else", "scout",
+                          "a perfectly fine passphrase")
