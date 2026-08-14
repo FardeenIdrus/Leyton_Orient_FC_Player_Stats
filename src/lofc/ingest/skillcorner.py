@@ -34,7 +34,7 @@ METRIC_MAP = {
     "Running Distance P90": "running_distance_p90",
     "HSR Distance P90": "hsr_distance_p90",
     "HSR Count P90": "hsr_count_p90",
-    "Sprint Distance P90": "sprint_distance_p90",
+    "Sprint Distance P90": "sprint_distance_p90", 
     "Sprint Count P90": "sprint_count_p90",
     "HI Distance P90": "hi_distance_p90",
     "HI Count P90": "hi_count_p90",

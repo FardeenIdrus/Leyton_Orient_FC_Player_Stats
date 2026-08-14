@@ -70,8 +70,19 @@ DOB_NAME_CUTOFF = 0.55
 
 
 def _norm(name: str) -> str:
-    """Lowercase, strip accents and punctuation, collapse spaces."""
-    stripped = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode()
+    """Lowercase, strip accents, DROP apostrophes, replace other punctuation with
+    spaces, collapse spaces.
+
+    Apostrophes are DELETED, not turned into spaces, so a name is spelled the same
+    however the provider encodes the mark: O’Mahony (curly U+2019), O'Mahony
+    (straight U+0027) and OMahony all normalise to "omahony". This matters because
+    the un-normalised behaviour differed by glyph — NFKD+ascii silently dropped the
+    curly form while the straight form became a space — which split the tokens and
+    sank the name-similarity score below the match cutoff for real players
+    (e.g. Mark O’Mahony vs Mark O'Mahony failed despite an identical birth date).
+    """
+    text = re.sub(r"[’‘'`]", "", str(name))          # drop apostrophe glyphs first
+    stripped = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", stripped.lower())).strip()
 
 
@@ -240,9 +251,12 @@ def match_players_efl(metrics: pd.DataFrame, efl: pd.DataFrame,
                       fallback: pd.DataFrame | None = None) -> tuple[pd.DataFrame, list[str]]:
     """Attach a market value to each rankable EFL player of the valuation season.
 
-    Three stages: birth date + name within the league's squad scrape, then the
-    demo-era name matching within the same league, then birth date + name against
-    the fallback file (loanees from outside the four leagues, January movers).
+    Four stages: birth date + name within the league's squad scrape, then the
+    demo-era name matching within the same league, then birth date + name across
+    ALL four scraped leagues (a loanee's value is listed under the parent club's
+    league, e.g. a Championship-owned player on loan in League One), then birth
+    date + name against the fallback file (loanees from outside the four leagues,
+    January movers).
     """
     eligible = metrics[
         metrics["rankable"]
@@ -250,11 +264,14 @@ def match_players_efl(metrics: pd.DataFrame, efl: pd.DataFrame,
         & (metrics["season_id"] == EFL_SEASON_ID)
     ]
 
-    # (league, birth date) -> TM row indices, for the primary DOB join.
+    # (league, birth date) -> TM row indices, for the primary DOB join; plus a
+    # league-agnostic birth-date index for the cross-league loanee pass.
     by_dob: dict[tuple[int, datetime.date], list[int]] = defaultdict(list)
+    by_dob_all: dict[datetime.date, list[int]] = defaultdict(list)
     for i, row in enumerate(efl.itertuples()):
         if pd.notna(row.birth_date):
             by_dob[(row.competition_id, row.birth_date.date())].append(i)
+            by_dob_all[row.birth_date.date()].append(i)
     league_index = {}
     for comp_id in efl["competition_id"].unique():
         subset = efl[efl["competition_id"] == comp_id].reset_index()
@@ -278,7 +295,7 @@ def match_players_efl(metrics: pd.DataFrame, efl: pd.DataFrame,
                 "height_cm": column("height_cm", int), "tm_player_id": column("tm_player_id", int)}
 
     rows, unmatched = [], []
-    n_fallback = 0
+    n_fallback = n_cross_league = 0
     for r in eligible.itertuples():
         our_dob = pd.to_datetime(r.birth_date).date() if pd.notna(r.birth_date) else None
         nname = _norm(r.player_name)
@@ -301,6 +318,18 @@ def match_players_efl(metrics: pd.DataFrame, efl: pd.DataFrame,
             if sub_i is not None:
                 value_eur, tm_birth = float(subset.at[sub_i, "value_eur"]), subset.at[sub_i, "birth_date"]
                 bio = _bio(subset, sub_i)
+
+        # Cross-league: a loanee's TM value sits under the parent club, which can be
+        # in a different division from where they are playing. Exact birth date +
+        # the same name cutoff makes a false positive vanishingly unlikely, and this
+        # only runs when both in-league passes found nothing, so no existing match
+        # can change.
+        if value_eur is None and our_dob is not None:
+            i = _dob_name_match(nname, by_dob_all.get(our_dob, []), efl)
+            if i is not None:
+                value_eur, tm_birth = float(efl.at[i, "value_eur"]), efl.at[i, "birth_date"]
+                bio = _bio(efl, i)
+                n_cross_league += 1
 
         if value_eur is None and our_dob is not None and fb_by_dob:
             i = _dob_name_match(nname, fb_by_dob.get(our_dob, []), fallback)
@@ -329,6 +358,8 @@ def match_players_efl(metrics: pd.DataFrame, efl: pd.DataFrame,
             "birth_date": best_birth,
             **bio,
         })
+    if n_cross_league:
+        print(f"  (cross-league pass matched {n_cross_league} loanees listed under a parent club)")
     if n_fallback:
         print(f"  (fallback file matched {n_fallback} players the squad scrape missed)")
     return pd.DataFrame(rows), unmatched
@@ -402,10 +433,22 @@ def bio_update_stmt():
 
 def main() -> None:
     engine = get_engine()
-    # Lineup birth dates live on players, not the metrics table; the EFL match needs them.
+    # Feature source follows the scoring source (SCORING_SOURCE): valuation percentiles
+    # must be built from the SAME metric table the scores use, or fair value and the
+    # displayed scores would rest on different data. Lineup birth dates live on players,
+    # not the metrics table; the EFL match needs them, so they are joined in.
+    table = settings.scoring_metrics_table
+    print(f"Valuation feature source: {table} (SCORING_SOURCE={settings.scoring_source})")
     metrics = pd.read_sql(
-        "SELECT m.*, p.birth_date FROM player_season_metrics m "
+        f"SELECT m.*, p.birth_date FROM {table} m "
         "LEFT JOIN players p ON p.player_id = m.player_id", engine)
+    # competition_name is league metadata absent from the neutral table; join it from
+    # the spine so the unmatched-players report can name the league (display only).
+    if "competition_name" not in metrics.columns:
+        comp_names = pd.read_sql(
+            "SELECT DISTINCT competition_id, season_id, competition_name "
+            "FROM player_season_metrics", engine)
+        metrics = metrics.merge(comp_names, on=["competition_id", "season_id"], how="left")
 
     # Each era trains its own model: price levels a decade apart must never mix.
     eras: list[pd.DataFrame] = []

@@ -3,13 +3,21 @@
 import numpy as np
 import pandas as pd
 
-from lofc.model.valuation import _build_index, _match_one, _norm, value_players
+from lofc.model.valuation import (_build_index, _match_one, _norm,
+                                  match_players_efl, value_players)
 
 
 def test_norm_strips_accents_and_punctuation():
-    # Punctuation becomes a space (applied to both sides, so matching stays consistent).
-    assert _norm("N'Golo Kanté") == "n golo kante"
+    # Apostrophes are DROPPED (not spaced); other punctuation becomes a space.
+    assert _norm("N'Golo Kanté") == "ngolo kante"
     assert _norm("Sergio Agüero") == "sergio aguero"
+
+
+def test_norm_apostrophe_glyphs_normalise_identically():
+    # The bug this fixes: curly (U+2019) and straight (U+0027) apostrophes must
+    # produce the SAME normalised name, or real players fail to match on it.
+    assert _norm("Mark O’Mahony") == _norm("Mark O'Mahony") == "mark omahony"
+    assert _norm("Max O’Leary") == _norm("Max O'Leary") == "max oleary"
 
 
 def _tm(names):
@@ -33,6 +41,68 @@ def test_collision_keeps_higher_value_player():
     tm.loc[1, "value_eur"] = 5e7   # the more valuable namesake
     exact, _ = _build_index(tm)
     assert exact["juanfran"] == 1
+
+
+def _efl_metrics_row(**overrides):
+    row = {"player_id": 1, "competition_id": 4, "season_id": 318,
+           "player_name": "Josh Stokes", "birth_date": "2004-04-29",
+           "position_group": "Attacking Mid", "minutes": 1500,
+           "competition_name": "League One", "rankable": True}
+    row.update(overrides)
+    return row
+
+
+def _efl_scrape(rows):
+    efl = pd.DataFrame(rows).rename(columns={"market_value_eur": "value_eur"})
+    efl["nname"] = efl["player_name"].map(_norm)
+    efl["tokens"] = efl["nname"].str.split().map(set)
+    efl["birth_date"] = pd.to_datetime(efl["date_of_birth"])
+    return efl.reset_index(drop=True)
+
+
+def test_efl_cross_league_dob_match_catches_loanee():
+    # The player appears in League One (comp 4) but his Transfermarkt value is
+    # listed under the parent club in the Championship (comp 3) — the Josh
+    # Stokes case. Exact birth date + name across leagues must still match.
+    metrics = pd.DataFrame([_efl_metrics_row()])
+    efl = _efl_scrape([{"player_name": "Josh Stokes", "competition_id": 3,
+                        "date_of_birth": "2004-04-29", "market_value_eur": 400_000.0}])
+
+    matched, unmatched = match_players_efl(metrics, efl)
+
+    assert unmatched == []
+    assert len(matched) == 1
+    assert matched.at[0, "player_id"] == 1
+    assert matched.at[0, "market_value_eur"] == 400_000.0
+
+
+def test_efl_cross_league_requires_name_agreement():
+    # Same birth date in another league but a completely different name must
+    # NOT match: birth-date coincidences across four leagues are real.
+    metrics = pd.DataFrame([_efl_metrics_row()])
+    efl = _efl_scrape([{"player_name": "Kwame Boateng", "competition_id": 3,
+                        "date_of_birth": "2004-04-29", "market_value_eur": 900_000.0}])
+
+    matched, unmatched = match_players_efl(metrics, efl)
+
+    assert len(matched) == 0
+    assert unmatched == ["Josh Stokes (League One)"]
+
+
+def test_efl_in_league_match_still_wins_over_cross_league():
+    # A same-league entry takes priority: the cross-league pass only fires when
+    # the in-league passes found nothing.
+    metrics = pd.DataFrame([_efl_metrics_row()])
+    efl = _efl_scrape([
+        {"player_name": "Josh Stokes", "competition_id": 4,   # own league
+         "date_of_birth": "2004-04-29", "market_value_eur": 350_000.0},
+        {"player_name": "Josh Stokes", "competition_id": 3,   # other league namesake
+         "date_of_birth": "2004-04-29", "market_value_eur": 400_000.0},
+    ])
+
+    matched, _ = match_players_efl(metrics, efl)
+
+    assert matched.at[0, "market_value_eur"] == 350_000.0
 
 
 def test_underpriced_player_is_flagged_as_undervalued():

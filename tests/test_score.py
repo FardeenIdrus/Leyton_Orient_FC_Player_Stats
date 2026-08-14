@@ -2,9 +2,19 @@
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from lofc.model.normalise import DISPLAY_METRICS, compute_percentiles_wide, to_long
-from lofc.model.score import KEY_COLUMNS, ROLE_METRICS, compute_scores
+from lofc.model import score as score_mod
+from lofc.model.score import (IMPECT_SUCCESSOR, KEY_COLUMNS, ROLE_METRICS, _successor_metrics,
+                              _successor_profile, compute_scores)
+
+
+@pytest.fixture(autouse=True)
+def _default_statsbomb_scoring(monkeypatch):
+    """Default every test to StatsBomb-inclusive scoring, independent of the deployment's
+    IMPECT_ONLY env; the Impect-only test opts in explicitly."""
+    monkeypatch.setattr(score_mod.settings, "impect_only", False)
 
 
 def _metric_row(player_id, position, **overrides):
@@ -60,6 +70,41 @@ def test_scores_are_mean_and_weighted_sum():
     assert scores["performance_score"].iloc[0] == 52.2
     # fit = 0.5*80 + 0.5*40 = 60
     assert scores["fit_score"].iloc[0] == 60.0
+
+
+def test_successor_metrics_maps_and_dedupes():
+    # tackles->duels, interceptions+ball_recoveries both -> ball_wins (collapse to one),
+    # Impect-native metrics pass through unchanged.
+    out = _successor_metrics(["tackles_p90", "interceptions_p90", "ball_recoveries_p90",
+                              "pressures_p90"])
+    assert out == ["ground_duels_won_p90", "ball_wins_p90", "pressures_p90"]
+
+
+def test_successor_profile_sums_collapsed_weights_and_keeps_strictest_floor():
+    profile = pd.DataFrame([
+        {"position_group": "Defensive Mid", "metric": "interceptions_p90", "weight": 0.2, "min_percentile": 45},
+        {"position_group": "Defensive Mid", "metric": "ball_recoveries_p90", "weight": 0.15, "min_percentile": None},
+    ])
+    out = _successor_profile(profile).set_index("metric")
+    # both collapse onto ball_wins_p90: weights summed (0.35), strictest floor kept (45)
+    assert out.loc["ball_wins_p90", "weight"] == 0.35
+    assert out.loc["ball_wins_p90", "min_percentile"] == 45
+
+
+def test_impect_only_scoring_uses_successors(monkeypatch):
+    # In Impect-only mode, a defender scored on tackles/interceptions must instead be
+    # scored on the successor percentiles (ground_duels_won / ball_wins).
+    monkeypatch.setattr(score_mod.settings, "impect_only", True)
+    idx = pd.MultiIndex.from_tuples([(1, 2, 27, "Centre Back")], names=KEY_COLUMNS)
+    # Only the SUCCESSOR columns carry signal; the StatsBomb-only originals are absent.
+    wide = pd.DataFrame([{ "ground_duels_won_p90": 90.0, "ball_wins_p90": 80.0 }], index=idx)
+    identity = pd.DataFrame([
+        {"position_group": "Centre Back", "metric": "tackles_p90", "weight": 0.5, "min_percentile": None},
+        {"position_group": "Centre Back", "metric": "interceptions_p90", "weight": 0.5, "min_percentile": None},
+    ])
+    scores = compute_scores(wide, identity)
+    # fit is built from the successors: 0.5*ground_duels(90) + 0.5*ball_wins(80) = 85
+    assert scores["fit_score"].iloc[0] == 85.0
 
 
 def test_ranks_are_best_first():

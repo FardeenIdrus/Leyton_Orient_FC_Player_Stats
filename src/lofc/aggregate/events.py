@@ -1,6 +1,6 @@
 """Turn one match's raw events and lineups into per-player numbers.
 
-Two jobs:
+Two jobs: 
   1. Minutes played and position time, derived from the lineup position spells.
      The match clock restarts at 45:00 each half, so a spell that crosses halves
      is converted to a single cumulative timeline using each period's real length.

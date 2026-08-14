@@ -18,6 +18,14 @@ from lofc.store.models import PER90_COLUMNS
 # left out on purpose: lower is better there, so we rank save_pct instead.
 DISPLAY_METRICS = PER90_COLUMNS + ["pass_completion_pct", "dribble_success_pct", "save_pct"]
 
+# Impect successors used by Phase C scoring (Impect-only mode). Ranked too so their
+# percentiles exist; absent from the StatsBomb-only table, so ranking skips what's missing.
+IMPECT_SUCCESSOR_METRICS = [
+    "ground_duels_won_p90", "ball_wins_p90", "packing_bypassed_opponents_p90",
+    "deep_progressions_p90", "dribble_carry_value_p90", "gk_gsaa_p90", "gk_shot_stopping_pct",
+]
+RANKED_METRICS = DISPLAY_METRICS + IMPECT_SUCCESSOR_METRICS
+
 KEY_COLUMNS = ["player_id", "competition_id", "season_id", "position_group"]
 
 
@@ -32,7 +40,9 @@ def compute_percentiles_wide(metrics: pd.DataFrame) -> pd.DataFrame:
     group = df.groupby(["competition_id", "position_group"])
 
     out = df[KEY_COLUMNS].copy()
-    for metric in DISPLAY_METRICS:
+    for metric in RANKED_METRICS:
+        if metric not in df.columns:      # e.g. Impect successors absent from the SB-only table
+            continue
         # rank(pct=True) gives 0..1 within each group; average ties; ->0..100.
         out[metric] = group[metric].rank(pct=True) * 100.0
     return out.set_index(KEY_COLUMNS)

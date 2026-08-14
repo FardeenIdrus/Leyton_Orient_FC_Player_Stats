@@ -18,6 +18,9 @@ from lofc.store.models import Shortlist
 COLUMNS = [
     "player_id", "competition_id", "season_id", "position_group", "rank",
     "affordable_fee", "affordable_wage", "wage_marginal", "on_profile", "is_near_miss",
+    # The ranking key (club composite) first; fit_score is the retired Style-fit, kept only
+    # for historical comparison.
+    "objective_composite", "full_composite",
     "performance_score", "fit_score", "undervaluation_pct", "market_value_eur",
     "estimated_weekly_wage_gbp", "wage_low_gbp", "wage_high_gbp",
     "wage_ceiling_gbp", "transfer_budget_eur",
@@ -49,8 +52,9 @@ def _spot_check(shortlists: pd.DataFrame) -> None:
         rows = shortlists[shortlists["position_group"] == position].sort_values("rank").head(5)
         tag = "near-misses (nobody passed both gates at this budget)" if rows["is_near_miss"].all() else "shortlist"
         print(f"\n{position} - {tag}:")
-        print(rows[["rank", "player_name", "team_name", "fit_score", "market_value_eur",
-                    "estimated_weekly_wage_gbp", "wage_ceiling_gbp", "on_profile"]].to_string(index=False))
+        print(rows[["rank", "player_name", "team_name", "objective_composite",
+                    "market_value_eur", "estimated_weekly_wage_gbp",
+                    "wage_ceiling_gbp"]].to_string(index=False))
 
 
 if __name__ == "__main__":

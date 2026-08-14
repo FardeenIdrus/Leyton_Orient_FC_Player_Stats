@@ -27,6 +27,8 @@ dependencies = [
     "beautifulsoup4>=4.12",
     "lxml>=5.0",
     "openpyxl>=3.1",
+    "impectPy>=2.7",
+    "skillcorner>=2.2",
 ]
 
 [project.optional-dependencies]

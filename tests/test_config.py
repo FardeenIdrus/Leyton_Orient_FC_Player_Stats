@@ -35,6 +35,24 @@ def test_settings_load_with_defaults(clean_env):
     assert settings.statsbomb_authenticated is False
 
 
+def test_scoring_source_defaults_to_neutral_table(clean_env):
+    clean_env.delenv("SCORING_SOURCE", raising=False)
+    s = Settings(_env_file=None)
+    assert s.scoring_source == "neutral"
+    assert s.scoring_metrics_table == "player_metrics_neutral"
+
+
+def test_scoring_source_statsbomb_selects_the_spine_table(clean_env):
+    s = Settings(_env_file=None, scoring_source="statsbomb")
+    assert s.scoring_metrics_table == "player_season_metrics"
+
+
+def test_scoring_source_rejects_unknown_value(clean_env):
+    s = Settings(_env_file=None, scoring_source="bogus")
+    with pytest.raises(ValueError):
+        _ = s.scoring_metrics_table
+
+
 def test_target_competitions_default_to_the_2015_16_trio(clean_env):
     settings = Settings(_env_file=None)
     ids = {(c.competition_id, c.season_id) for c in settings.competitions}

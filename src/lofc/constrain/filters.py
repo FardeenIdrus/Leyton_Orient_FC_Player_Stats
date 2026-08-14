@@ -1,4 +1,9 @@
-"""Phase 7: filter players to affordable + on-profile, then rank the shortlist.
+"""Phase 7: apply the affordability gates, then rank the shortlist on the club composite.
+
+RANKING: the club's **objective composite** (Performance + Physical, 1-5, from
+`player_scorecards`) -- the same number the dashboard ranks on. The old invented Style-fit
+(`fit_score`) is RETIRED and no longer orders anything; it is still carried on the row for
+historical comparison only.
 
 Two affordability gates run live:
   - fee gate: real market value <= a transfer budget (a parameter the dashboard drives).
@@ -6,9 +11,14 @@ Two affordability gates run live:
     position and age. The wage is a modelled estimate (data/reference/wage_estimates),
     never derived from market value, and is replaced by real club wage data when available.
 
-On-profile means the player clears the identity-profile minimum thresholds for the position.
-If nothing passes all gates (common at a tight budget on this top-league demo data), we
-return the closest on-profile players as near-misses, so the result is never empty.
+The old identity-profile "on-profile" gate is RETIRED too: the platform ranks everyone on the
+club framework and never excludes a player on a quality threshold (the club's own < 3.0 / < 2.0
+rules are advisory flags on the scorecard, not filters). `on_profile` is still computed and
+stored for continuity, but it no longer gates anything -- matching the dashboard, which
+dropped it when the composite became the primary ranking.
+
+If nobody passes the affordability gates (common at a tight budget), the best players by
+composite are returned as near-misses, so the result is never empty.
 """
 
 from __future__ import annotations
@@ -17,6 +27,9 @@ import pandas as pd
 
 DEFAULT_TRANSFER_BUDGET_EUR = 5_000_000
 NEAR_MISS_COUNT = 5
+# The shortlist ranks on the club's objective composite (real football data only). The
+# modelled Financial/Resale full composite deliberately does NOT order the shortlist.
+RANK_COLUMN = "objective_composite"
 
 
 def age_band(age: float | None) -> str | None:
@@ -85,22 +98,26 @@ def apply_gates(candidates: pd.DataFrame, transfer_budget_eur: float) -> pd.Data
     cand["affordable_wage"] = (cand["wage_low_gbp"] <= cand["wage_ceiling_gbp"]).fillna(False)
     cand["wage_marginal"] = cand["affordable_wage"] & ~(
         (cand["wage_high_gbp"] <= cand["wage_ceiling_gbp"]).fillna(False))
-    cand["qualifies"] = cand["affordable_fee"] & cand["affordable_wage"] & cand["on_profile"]
+    # Affordability only. The retired on-profile gate no longer excludes anyone.
+    cand["qualifies"] = cand["affordable_fee"] & cand["affordable_wage"]
     return cand
 
 
 def rank_position(candidates: pd.DataFrame, transfer_budget_eur: float,
                   near_miss_n: int = NEAR_MISS_COUNT) -> pd.DataFrame:
-    """Apply both gates to one position and rank by fit, with a near-miss fallback."""
+    """Apply both affordability gates to one position and rank on the club composite,
+    with a near-miss fallback so the result is never empty."""
     cand = apply_gates(candidates, transfer_budget_eur)
+    # na_position="last": a player with no composite (nothing scored) never outranks a
+    # scored one, but is still listed rather than dropped.
+    ranker = dict(by=RANK_COLUMN, ascending=False, na_position="last")
 
     if cand["qualifies"].any():
-        out = cand[cand["qualifies"]].sort_values("fit_score", ascending=False).copy()
+        out = cand[cand["qualifies"]].sort_values(**ranker).copy()
         out["is_near_miss"] = False
     else:
-        # Closest alternatives: best on-profile players (or best overall if none on-profile).
-        pool = cand[cand["on_profile"]] if cand["on_profile"].any() else cand
-        out = pool.sort_values("fit_score", ascending=False).head(near_miss_n).copy()
+        # Closest alternatives: simply the best players by composite at this budget.
+        out = cand.sort_values(**ranker).head(near_miss_n).copy()
         out["is_near_miss"] = True
 
     out["rank"] = range(1, len(out) + 1)
@@ -108,14 +125,24 @@ def rank_position(candidates: pd.DataFrame, transfer_budget_eur: float,
     return out
 
 
-def build_candidates(engine, wage_ceiling_multiplier: float = 1.0) -> pd.DataFrame:
-    """Assemble every valued player with scores, age band, tier, wage estimate and ceiling."""
+def build_candidates(engine, wage_ceiling_multiplier: float = 1.0,
+                     all_leagues: bool = False) -> pd.DataFrame:
+    """Assemble every player with scores, age band, tier, wage estimate and ceiling.
+
+    Default (all_leagues=False): only valued players — an INNER join on valuations, so the
+    affordability shortlist is EFL-only (the snapshot generator's behaviour). With
+    all_leagues=True the join is LEFT, keeping EVERY scored player across all leagues
+    (Scottish/PL2 included); those with no market value simply carry NaN money columns and
+    can never pass the affordability gates, but are fully browsable/rankable. Names then
+    come from the combined table (which covers all leagues), not the EFL-only spine.
+    """
     scores = pd.read_sql("SELECT player_id, competition_id, season_id, position_group, "
                          "performance_score, fit_score FROM player_scores", engine)
     vals = pd.read_sql("SELECT player_id, competition_id, season_id, market_value_eur, "
                        "fair_value_eur, undervaluation_pct, age FROM valuations", engine)
-    names = pd.read_sql("SELECT player_id, competition_id, season_id, player_name, team_name, minutes "
-                        "FROM player_season_metrics", engine)
+    name_table = "player_metrics_neutral" if all_leagues else "player_season_metrics"
+    names = pd.read_sql(f"SELECT player_id, competition_id, season_id, player_name, team_name, "
+                        f"minutes FROM {name_table}", engine)
     wage_est = pd.read_sql("SELECT competition_id, position_group, age_band, performance_tier, "
                            "estimated_weekly_wage_gbp, wage_low_gbp, wage_high_gbp "
                            "FROM wage_estimates", engine)
@@ -127,7 +154,8 @@ def build_candidates(engine, wage_ceiling_multiplier: float = 1.0) -> pd.DataFra
                          "WHERE min_percentile IS NOT NULL", engine)
 
     keys = ["player_id", "competition_id", "season_id"]
-    cand = scores.merge(vals, on=keys, how="inner").merge(names, on=keys, how="left")
+    cand = scores.merge(vals, on=keys, how=("left" if all_leagues else "inner")).merge(
+        names, on=keys, how="left")
 
     cand["age_band"] = cand["age"].map(age_band)
     # Tier within league as well as position: a League One "Top" tercile must not be
@@ -148,10 +176,29 @@ def build_candidates(engine, wage_ceiling_multiplier: float = 1.0) -> pd.DataFra
     return cand
 
 
+def load_composite(engine) -> pd.DataFrame:
+    """The club's stored 1-5 composite per player-season (the full-profile default archetype).
+
+    Read from `player_scorecards`, written by `lofc.model.scorecard_run` — so the shortlist
+    ranks on exactly the number the dashboard shows. Only the OBJECTIVE composite is used for
+    ranking; the modelled full composite is carried alongside but never orders the list.
+    """
+    return pd.read_sql(
+        "SELECT player_id, competition_id, season_id, objective_composite, full_composite, "
+        "performance_band, physical_band FROM player_scorecards "
+        "WHERE archetype = 'All Metrics'", engine)
+
+
 def generate(engine, transfer_budget_eur: float = DEFAULT_TRANSFER_BUDGET_EUR,
              wage_ceiling_multiplier: float = 1.0) -> pd.DataFrame:
-    """Build and rank a shortlist for every position group."""
+    """Build and rank a shortlist for every position group, on the club composite."""
     candidates = build_candidates(engine, wage_ceiling_multiplier)
+    composite = load_composite(engine)
+    if composite.empty:
+        raise RuntimeError(
+            "player_scorecards is empty: run `python -m lofc.model.scorecard_run` first "
+            "(the shortlist ranks on the club composite).")
+    candidates = candidates.merge(composite, on=ROW_KEYS, how="left")
     per_position = [rank_position(group, transfer_budget_eur)
                     for _, group in candidates.groupby("position_group")]
     return pd.concat(per_position, ignore_index=True)

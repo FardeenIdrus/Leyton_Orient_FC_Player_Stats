@@ -1,85 +1,118 @@
 # Leyton Orient FC — Player Recruitment Intelligence Platform
 
-Turns StatsBomb match data into a ranked shortlist of **affordable, on-profile,
-undervalued** signings a Head of Recruitment can act on directly.
+Turns event and physical data into a ranked shortlist of **affordable, undervalued** signings,
+scored on **Leyton Orient's own recruitment framework**. It is a *decision* intelligence
+platform, not a reporting dashboard: the core deliverable is a scoring and ranking model that
+produces a judgement not already in the data, with a clean Streamlit layer on top. It runs end
+to end as one Docker stack.
 
-This is a *decision* intelligence platform, not a reporting dashboard. The core deliverable
-is a valuation and ranking model that produces a judgement not already in the data, with a
-clean Streamlit layer on top. It runs end to end as one Docker stack.
+> **New to the project?** Read [`plan/BUILD_PLAN.md`](plan/BUILD_PLAN.md) first — it is the
+> master plan and documentation map (current state, where every doc lives, what's next).
 
 ## What it does
 
-Raw StatsBomb events in → for every player: per-90 metrics, a Performance score and a Fit
-score (ranked within position and league), a playing-style archetype, a fair-value estimate
-and undervaluation flag, filtered against a transfer budget and a wage ceiling → a ranked
-shortlist a recruiter reads in a themed dashboard.
+For every player, across 7 leagues, the platform computes per-90 metrics, ranks them into
+percentiles within position and league, and scores each player **1–5 on the club's framework**
+(the metrics, thresholds and dimension weights come straight from the club's own documents).
+Each player gets a **composite** score; the shortlist ranks by it and layers on market value,
+modelled wages, and affordability gates. A themed dashboard lets a recruiter drill into
+profiles, compare players, and see exactly how every score is built.
+
+- **Performance** data → **Impect** · **Physical** data → **SkillCorner** · **Market values** →
+  **Transfermarkt**.
+- Leagues: the EFL (Championship, League One, League Two, National League), the Scottish
+  Premiership & Championship, and Premier League 2.
 
 ## Quick start
 
 ```bash
-cp .env.example .env                 # defaults work out of the box (free open-data mode)
-docker compose up -d                 # starts Postgres + app + dashboard + pgAdmin
+cp .env.example .env                 # then add the provider credentials (see below)
+docker compose up -d                 # starts Postgres + app + dashboard + pgAdmin + Metabase
 docker compose exec app python -m lofc.pipeline   # populate the database end to end
 ```
 
 Then open the dashboard at **http://localhost:8501**.
 
-> The first `pipeline` run downloads the raw data (~2.6 GB of events plus Transfermarkt
-> values) and takes roughly 20-40 minutes. It is idempotent, so re-running is fast and safe.
-> Every command is also listed, with comments, in [`cli_commands.txt`](cli_commands.txt).
+> The first `pipeline` run downloads the data and takes a while; it is idempotent, so
+> re-running is fast and safe (data already on disk is skipped). Every command is also listed,
+> with comments, in [`cli_commands.txt`](cli_commands.txt).
 
 ## The pipeline
 
 `python -m lofc.pipeline` runs all stages in order, each idempotent:
 
 ```
-schema → ingest → aggregate → reference data → load → score → archetypes
-       → Transfermarkt download → valuation → shortlists
+schema → ingest (Impect + SkillCorner) → aggregate → reference data → load
+       → build combined 91-metric table → Transfermarkt values → score
+       → archetypes → valuation → shortlists
 ```
 
-You can also run any stage on its own (see `cli_commands.txt`).
+Players are then ranked on the club **1–5 composite**, computed by a pipeline stage and stored
+in `player_scorecards`, so the dashboard, the offline shortlist and the BI layer all read the
+same numbers. You can run any stage on its own (see `cli_commands.txt`).
+
+## Dashboard tabs
+
+- **Players** — the one decision workspace: a composite-ranked list and, on click or search,
+  the full player detail (bio, dimension scores, the club-framework grand table of
+  metric → percentile → 1–5 band, and charts on the club's own metrics). Merged from the
+  former Shortlist + Club scorecard + Player profile tabs. **Money is opt-in** — market value,
+  modelled wages and the affordability gates appear only when "Show affordability" is ticked,
+  and never reorder the default ranking.
+- **Compare** — two or three players head-to-head on the club's Performance metrics, plus a
+  raw physical table (raw because physical output *is* comparable across leagues).
+- **Watchlist · Player types · Physical** — saved targets, playing-style groups, tracking data.
+- **Glossary** — searchable definitions for every metric (Impect's own wording; substitutes
+  labelled honestly).
+- **Methodology** — how the pipeline works, step by step, including a worked example of the
+  1–5 composite.
 
 ## Interfaces
 
-- **Dashboard** — http://localhost:8501 (position selector, ranked shortlist, player profiles
-  with percentile charts, side-by-side comparison, live budget/wage sliders, methodology tab).
-- **pgAdmin** — http://localhost:5050 (visual database browser; the LOFC server is pre-listed,
-  password `lofc`).
-- **Metabase (BI)** — http://localhost:3000 (self-serve reporting layer over the same database,
-  demonstrating the wider-BI growth path; one-time setup, then connect to host `db` / `lofc` / `lofc`).
-- **psql / SQL** — `docker compose exec db psql -U lofc -d lofc`.
+- **Dashboard** — http://localhost:8501
+- **pgAdmin** — http://localhost:5050 (visual database browser; password `lofc`)
+- **Metabase (BI)** — http://localhost:3000 (self-serve reporting over the same database)
+- **psql / SQL** — `docker compose exec db psql -U lofc -d lofc`
 
 ## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — components, pipeline, data model, tech choices.
-- [`docs/methodology.md`](docs/methodology.md) — the modelling: normalisation, scoring, archetypes, valuation, and the honest assumptions.
-- [`docs/scaling.md`](docs/scaling.md) — what was left out of v1 (MongoDB, MinIO, BI tools) and when to add it; the wider-BI growth path.
-- [`plan/BUILD_PLAN.md`](plan/BUILD_PLAN.md) — the full phase-by-phase build plan and decisions.
+The master plan and full documentation map is [`plan/BUILD_PLAN.md`](plan/BUILD_PLAN.md).
+Key deep-dives:
+
+- [`docs/architecture.md`](docs/architecture.md) — the system: pipeline stages, which file
+  does what, data flow, dashboard tabs.
+- [`docs/methodology.md`](docs/methodology.md) — the scoring method: percentiles, the club
+  1–5 composite, and the design decisions.
+- [`docs/DATA_ARCHITECTURE.md`](docs/DATA_ARCHITECTURE.md) — the 91-metric layer: the four data
+  sources and per-metric provenance.
+- [`docs/scaling.md`](docs/scaling.md) — scaling considerations and the wider-BI growth path.
+- [`plan/HISTORY.md`](plan/HISTORY.md) — the frozen build log (the rationale behind past
+  decisions).
 
 ## Deployment
 
 `docker compose up` is the whole stack, so deploying is running it on a server. See
-[`DEPLOY.md`](DEPLOY.md) for: a production setup (`docker-compose.prod.yml` + Caddy for HTTPS and
-a dashboard login, database/admin tools kept internal) for a permanent URL, and a quick tunnel
-option to get a shareable link from your laptop for a demo.
+[`DEPLOY.md`](DEPLOY.md) for a production setup (Caddy for HTTPS + a dashboard login, database
+and admin tools kept internal) and a quick tunnel option for a demo link.
 
 ## Tech stack
 
-Python 3.11 · statsbombpy · pandas / numpy / scikit-learn · PostgreSQL 16 ·
-SQLAlchemy + Alembic · Streamlit + Plotly · Docker / docker compose · pydantic-settings · pytest.
+Python 3.11 · Impect / SkillCorner / Transfermarkt clients · pandas / numpy / scikit-learn ·
+PostgreSQL 16 · SQLAlchemy + Alembic · Streamlit + Plotly · Docker / docker compose ·
+pydantic-settings · pytest.
 
 ## Data and credentials
 
-Runs on **free StatsBomb open data** (2015/16 Premier League, La Liga, Serie A) — the only
-complete men's-club seasons on the free tier. Leyton Orient's own division is not free, so this
-demonstrates the method; pointing it at the club's real, current data is a credentials and
-config change (`USE_OPEN_DATA`, `SB_*` in `.env`, target competitions in `config.py`), not a
-rewrite. Wages and the club identity profile are clearly-labelled modelled stand-ins, swappable
-for the club's real documents in `data/reference/`.
+The platform runs on **licensed data** — Impect (event), SkillCorner (physical) and
+Transfermarkt (market values). Provider credentials go in `.env`; target leagues/seasons are
+configured in `src/lofc/config.py`. **Licensed feeds and the club's confidential documents
+(`docs/*.xlsx`, `*.docx`) are gitignored and never published.** Modelled inputs (wages, and —
+until the club's real files land — parts of the framework) are clearly labelled and swappable
+for real club data via drop-in CSVs in `data/reference/`.
 
 ## Tests
 
 ```bash
-docker compose exec app pytest -q
-docker compose exec app pytest --cov=lofc --cov-report=term-missing
+docker compose exec app python -m pytest -q
+docker compose exec app python -m pytest --cov=lofc --cov-report=term-missing
 ```

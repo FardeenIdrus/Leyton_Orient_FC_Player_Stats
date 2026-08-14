@@ -1,6 +1,8 @@
 """Phase 4: read the stored metrics, compute percentiles and scores, write them back.
 
-Reads player_season_metrics and identity_profiles from Postgres, ranks every rankable
+Reads the configured metric table (settings.scoring_metrics_table — the provider-neutral
+player_metrics_neutral by default, or the StatsBomb-only player_season_metrics when
+SCORING_SOURCE=statsbomb) plus identity_profiles from Postgres, ranks every rankable
 player against their positional peers in each league, builds the performance and fit
 scores, and upserts player_percentiles and player_scores. Idempotent.
 
@@ -11,6 +13,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from lofc.config import settings
 from lofc.model.normalise import compute_percentiles_wide, to_long
 from lofc.model.score import compute_scores
 from lofc.store.load import _records, _upsert, get_engine
@@ -39,7 +42,9 @@ def _spot_check(scores: pd.DataFrame, names: pd.DataFrame) -> None:
 
 def main() -> None:
     engine = get_engine()
-    metrics = pd.read_sql("SELECT * FROM player_season_metrics", engine)
+    table = settings.scoring_metrics_table
+    print(f"Scoring source: {table} (SCORING_SOURCE={settings.scoring_source})")
+    metrics = pd.read_sql(f"SELECT * FROM {table}", engine)
     identity = pd.read_sql("SELECT position_group, metric, weight FROM identity_profiles", engine)
 
     wide = compute_percentiles_wide(metrics)
@@ -59,8 +64,15 @@ def main() -> None:
     print(f"player_percentiles: upserted {n_pct}")
     print(f"player_scores: upserted {n_scores}")
 
-    names = metrics[["player_id", "competition_id", "season_id", "player_name",
-                     "team_name", "competition_name"]]
+    # competition_name is not on the neutral table; join it from the spine for the
+    # cosmetic spot-check (identity lookup only, never used in scoring).
+    id_cols = ["player_id", "competition_id", "season_id", "player_name", "team_name"]
+    names = metrics[id_cols].copy()
+    if "competition_name" not in names.columns:
+        comp_names = pd.read_sql(
+            "SELECT DISTINCT competition_id, season_id, competition_name "
+            "FROM player_season_metrics", engine)
+        names = names.merge(comp_names, on=["competition_id", "season_id"], how="left")
     _spot_check(scores, names)
 
 

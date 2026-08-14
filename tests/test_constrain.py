@@ -52,43 +52,68 @@ def test_on_profile_judges_each_season_row_alone():
     assert (2, 65, 318) not in on
 
 
-def _candidate(pid, value, wage, ceiling, on_profile, fit):
+def _candidate(pid, value, wage, ceiling, on_profile, composite):
     # The gate reads the band around the central wage estimate (0.7x / 1.4x here).
+    # The shortlist ranks on the club's objective 1-5 composite; fit_score is the retired
+    # Style-fit, carried on the row but never used to order anything.
     return {"player_id": pid, "market_value_eur": value, "estimated_weekly_wage_gbp": wage,
             "wage_low_gbp": wage * 0.7, "wage_high_gbp": wage * 1.4,
-            "wage_ceiling_gbp": ceiling, "on_profile": on_profile, "fit_score": fit}
+            "wage_ceiling_gbp": ceiling, "on_profile": on_profile,
+            "objective_composite": composite, "fit_score": 50.0}
 
 
-def test_qualifying_passes_both_gates_and_profile():
+def test_qualifying_needs_both_affordability_gates_only():
+    """The retired on-profile gate must NOT exclude anyone: affordability is the only gate."""
     cand = pd.DataFrame([
-        _candidate(1, 1_000_000, 2000, 5000, True, 80),    # cheap, low wage, on profile -> qualifies
-        _candidate(2, 50_000_000, 90000, 5000, True, 90),  # too expensive + too high wage
-        _candidate(3, 1_000_000, 2000, 5000, False, 95),   # affordable but off profile
+        _candidate(1, 1_000_000, 2000, 5000, True, 4.0),    # cheap + low wage -> qualifies
+        _candidate(2, 50_000_000, 90000, 5000, True, 4.5),  # too expensive + too high wage
+        _candidate(3, 1_000_000, 2000, 5000, False, 4.2),   # affordable, "off profile" -> still in
     ])
     out = rank_position(cand, transfer_budget_eur=5_000_000)
 
-    assert list(out["player_id"]) == [1]
+    # Player 3 survives (the identity-profile gate is retired) and outranks 1 on the composite.
+    assert list(out["player_id"]) == [3, 1]
     assert not out["is_near_miss"].any()
-    assert out["rank"].tolist() == [1]
+    assert out["rank"].tolist() == [1, 2]
+
+
+def test_ranking_uses_the_club_composite_not_the_retired_fit_score():
+    """fit_score is deliberately inverted against the composite: the composite must win."""
+    cand = pd.DataFrame([
+        {**_candidate(1, 1_000_000, 2000, 5000, True, 3.1), "fit_score": 99.0},
+        {**_candidate(2, 1_000_000, 2000, 5000, True, 4.6), "fit_score": 10.0},
+    ])
+    out = rank_position(cand, transfer_budget_eur=5_000_000)
+    assert list(out["player_id"]) == [2, 1]      # by composite, not by the retired Style-fit
 
 
 def test_near_miss_fallback_when_nobody_qualifies():
-    # Both are on profile but wages blow the ceiling -> nobody qualifies -> near-misses by fit.
+    # Wages blow the ceiling -> nobody qualifies -> near-misses, best composite first.
     cand = pd.DataFrame([
-        _candidate(1, 1_000_000, 90000, 5000, True, 80),
-        _candidate(2, 1_000_000, 90000, 5000, True, 90),
+        _candidate(1, 1_000_000, 90000, 5000, True, 3.8),
+        _candidate(2, 1_000_000, 90000, 5000, True, 4.4),
     ])
     out = rank_position(cand, transfer_budget_eur=5_000_000)
 
     assert out["is_near_miss"].all()
-    assert list(out["player_id"]) == [2, 1]   # ranked by fit, best first
+    assert list(out["player_id"]) == [2, 1]   # ranked by composite, best first
+
+
+def test_unscored_player_is_ranked_last_but_not_dropped():
+    """A player with no composite must still appear, never above a scored one."""
+    cand = pd.DataFrame([
+        _candidate(1, 1_000_000, 2000, 5000, True, None),
+        _candidate(2, 1_000_000, 2000, 5000, True, 3.2),
+    ])
+    out = rank_position(cand, transfer_budget_eur=5_000_000)
+    assert list(out["player_id"]) == [2, 1]
 
 
 def test_wage_band_semantics():
     cand = pd.DataFrame([
-        _candidate(1, 1_000_000, 3000, 5000, True, 80),   # high band 4200 <= 5000: clean pass
-        _candidate(2, 1_000_000, 4500, 5000, True, 85),   # band 3150-6300 straddles: marginal pass
-        _candidate(3, 1_000_000, 8000, 5000, True, 90),   # low band 5600 > 5000: fails the gate
+        _candidate(1, 1_000_000, 3000, 5000, True, 4.0),   # high band 4200 <= 5000: clean pass
+        _candidate(2, 1_000_000, 4500, 5000, True, 4.2),   # band 3150-6300 straddles: marginal pass
+        _candidate(3, 1_000_000, 8000, 5000, True, 4.4),   # low band 5600 > 5000: fails the gate
     ])
     out = rank_position(cand, transfer_budget_eur=5_000_000)
 
