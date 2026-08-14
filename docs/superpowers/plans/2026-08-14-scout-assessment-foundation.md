@@ -474,11 +474,16 @@ and `hmac.compare_digest` for comparison — **never `==`**, which leaks timing.
 
 | action | scout | medical | head_of_recruitment | admin |
 |---|---|---|---|---|
-| `assess_psychological` | ✅ | — | ✅ | — |
-| `assess_medical` | — | ✅ | ✅ | — |
-| `enter_injury` | — | ✅ | ✅ | — |
-| `sign_off` | — | — | ✅ | — |
+| `assess_psychological` | ✅ | ✅ | ✅ | ✅ |
+| `assess_medical` | ✅ | ✅ | ✅ | ✅ |
+| `enter_injury` | ✅ | ✅ | ✅ | ✅ |
+| `sign_off` | — | — | ✅ | ✅ |
 | `manage_users` | — | — | — | ✅ |
+
+**Decision 16: everyone assesses; only sign-off is restricted.** The department is small enough
+that splitting the two dimensions by role would block routine work. The role is therefore a
+**record** — displayed wherever an assessment appears ("entered by J. Smith (scout)") — not a
+restriction. Tightening later is one line in `_PERMISSIONS`, with no migration and no data change.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -526,23 +531,20 @@ def test_roles_are_exactly_the_four_the_spec_defines():
     assert set(ROLES) == {"scout", "medical", "head_of_recruitment", "admin"}
 
 
-def test_a_scout_cannot_score_the_medical_dimension():
-    assert can("scout", "assess_psychological")
-    assert not can("scout", "assess_medical")
-    assert not can("scout", "sign_off")
+def test_every_role_may_assess_both_dimensions():
+    """Decision 16: the department is too small to split the dimensions by role.
+    The role records WHO entered a band; it does not restrict which band they may enter."""
+    for role in ROLES:
+        assert can(role, "assess_psychological"), role
+        assert can(role, "assess_medical"), role
+        assert can(role, "enter_injury"), role
 
 
-def test_medical_staff_cannot_score_psychological_and_cannot_sign_off():
-    assert can("medical", "assess_medical")
-    assert can("medical", "enter_injury")
-    assert not can("medical", "assess_psychological")
-    assert not can("medical", "sign_off")
-
-
-def test_only_the_head_of_recruitment_signs_off():
+def test_sign_off_is_the_only_gated_assessment_action():
     assert can("head_of_recruitment", "sign_off")
-    for role in ("scout", "medical", "admin"):
-        assert not can(role, "sign_off"), role
+    assert can("admin", "sign_off")
+    assert not can("scout", "sign_off")
+    assert not can("medical", "sign_off")
 
 
 def test_only_admin_manages_users():
@@ -590,12 +592,18 @@ _DKLEN = 32
 
 ROLES: tuple[str, ...] = ("scout", "medical", "head_of_recruitment", "admin")
 
+# Decision 16: EVERY role may assess both dimensions. The department is small enough that
+# splitting them by role would block routine work, so the role is a RECORD of who entered a
+# band -- displayed wherever the assessment appears -- rather than a restriction.
+# Sign-off is the only gated assessment action. To tighten this later, narrow the sets below:
+# no migration and no data change is needed, because the roles already recorded stay valid.
+_ASSESSING = {"assess_psychological", "assess_medical", "enter_injury"}
+
 _PERMISSIONS: dict[str, frozenset[str]] = {
-    "scout": frozenset({"assess_psychological"}),
-    "medical": frozenset({"assess_medical", "enter_injury"}),
-    "head_of_recruitment": frozenset({
-        "assess_psychological", "assess_medical", "enter_injury", "sign_off"}),
-    "admin": frozenset({"manage_users"}),
+    "scout": frozenset(_ASSESSING),
+    "medical": frozenset(_ASSESSING),
+    "head_of_recruitment": frozenset(_ASSESSING | {"sign_off"}),
+    "admin": frozenset(_ASSESSING | {"sign_off", "manage_users"}),
 }
 
 
@@ -685,12 +693,12 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `docker compose exec app python -m pytest tests/test_auth.py -v`
-Expected: PASS — 12 tests
+Expected: PASS — 11 tests
 
 - [ ] **Step 5: Run the full suite**
 
 Run: `docker compose exec app python -m pytest -q`
-Expected: PASS — **344 tests**
+Expected: PASS — **343 tests** (332 + 11)
 
 - [ ] **Step 6: Commit**
 
@@ -881,7 +889,7 @@ Expected: PASS — 7 tests
 - [ ] **Step 5: Run the full suite**
 
 Run: `docker compose exec app python -m pytest -q`
-Expected: PASS — **351 tests** (344 + 7)
+Expected: PASS — **350 tests** (343 + 7)
 
 - [ ] **Step 6: Commit**
 

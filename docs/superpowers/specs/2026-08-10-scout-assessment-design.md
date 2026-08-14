@@ -209,7 +209,7 @@ criteria must be scored or the assessment stays a draft. Decision 12 changes not
 
 ### Medical — entered by a person
 
-**There is no formula.** The Medical band is entered by a user holding the `medical` role,
+**There is no formula.** The Medical band is entered by an authenticated user (Decision 16),
 scoring the player against the club's per-position medical requirement checklist, with the
 injury evidence on the screen in front of them (§6).
 
@@ -346,7 +346,7 @@ will ever open an assessment form. So the same evidence appears in **two** place
 | Place | Who sees it | Behaviour |
 |---|---|---|
 | **The player profile** | Everyone — analysts, directors, recruiters | **Read-only.** No assessment controls |
-| **The assessment page** | `scout` and `medical` roles | Shown **alongside the form**, so the assessor judges with the evidence in front of them |
+| **The assessment page** | any authenticated user (Decision 16) | Shown **alongside the form**, so the assessor judges with the evidence in front of them |
 
 Neither copy is a summary of the other; both render the same evidence panel.
 
@@ -392,7 +392,7 @@ R3a-2 does not have to design it from scratch.
 2. **An "Assess" action directly from a watchlist row**, so a recruiter working their shortlist
    does not have to navigate back to the Players list to open the assessment form. Role-gated
    exactly as elsewhere (`can(role, "assess_psychological")` / `can(role, "assess_medical")`,
-   §12) — the button is visible only to `scout` and `medical` roles, same as the profile's
+   §12) — the button is visible to any authenticated user (Decision 16), same as the profile's
    **Assess** button (§8).
 3. **Filter the watchlist by assessment status**, answering "which of my targets still need a
    scout?" — not assessed, awaiting sign-off, or signed off.
@@ -410,7 +410,7 @@ R3a-2 does not have to design it from scratch.
 1. A recruiter finds a player in the Players list.
 2. He opens the **player profile** — performance, physical, injury history, availability, and the
    league coverage warning.
-3. He clicks **Assess**. The button is visible only to `scout` and `medical` roles.
+3. He clicks **Assess**. Any authenticated user may assess either dimension (Decision 16).
 4. The form shows the club's criteria **for that player's position**: the Psychological bullets,
    each scored 1–5; and a Medical panel carrying the evidence panel of §6 plus the club's
    per-position medical requirement checklist.
@@ -613,10 +613,38 @@ override must be traceable to a person.
 
 | Role | Permissions |
 |---|---|
-| `scout` | Create and submit Psychological assessments; view everything |
-| `medical` | Create and submit Medical assessments; manual injury entry |
-| `head_of_recruitment` | Both, plus **sign-off** and full assessment history |
-| `admin` | Manage users |
+| `scout` | Assess **both** dimensions; manual injury entry; view everything |
+| `medical` | Assess **both** dimensions; manual injury entry; view everything |
+| `head_of_recruitment` | The above, plus **sign-off** |
+| `admin` | The above, plus manage users |
+
+### Decision 16 — everyone assesses; only sign-off is restricted (agreed 2026-08-14)
+
+An earlier draft restricted the Psychological dimension to `scout` and the Medical dimension to
+`medical`. **The recruitment department is currently small enough that such a split would block
+routine work**, so the only permission that gates anything is **sign-off**.
+
+**The role becomes a record rather than a restriction.** It is displayed wherever an assessment
+appears:
+
+> Medical band **3.0** — entered by **J. Smith (scout)**, 14 Aug 2026
+
+so a reader can see that a scout entered a medical judgement rather than medical staff. That is
+the honest-record principle doing the work a hard gate would otherwise do — visible rather than
+silently prevented, consistent with the rest of the platform.
+
+**Tightening later is one line in the permission map** — no migration, no data change, no
+reassigning users. When the department grows and medical bands should come only from medical
+staff, the map is edited and the roles already recorded stay valid.
+
+**Self-sign-off is permitted, and labelled.** With three people, requiring a different approver
+would jam the queue constantly — and since a submitted assessment already scores (Decision 14),
+blocking it would gain nothing. But the record must not hide it:
+
+> 🟢 Signed off by **F. Idrus (self-approved)**
+
+A second pair of eyes and one pair of eyes must not look identical in a report going to a
+director.
 
 ### Sign-off — **provisional, pending the owner's discussion with the recruitment team**
 
