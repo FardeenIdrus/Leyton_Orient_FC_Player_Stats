@@ -41,6 +41,29 @@ def test_merged_winger_text_is_the_club_wording_not_a_new_sentence():
     assert not any("tracks back when required" in c for c in winger)
 
 
+def test_merged_winger_medical_keeps_the_left_winger_hamstring_wording():
+    # The count-only tests would still pass if the merge had kept the Right Winger's bare
+    # "No hamstring injury in prior 12 months" instead of the Left Winger's wording, which
+    # carries the club's sprint-dependent-position rationale. Pin the actual text so a
+    # wrong-side merge fails loudly.
+    texts = [c.text for c in MEDICAL_CRITERIA["Winger"]]
+    assert "No hamstring injury in prior 12 months (sprint-dependent position)" in texts
+    assert "No hamstring injury in prior 12 months" not in texts
+    # Both screening bullets concern different structures and were kept on purpose --
+    # neither should be dropped as a "duplicate" of the other.
+    assert "Quadriceps and hip flexor screening clear" in texts
+    assert "Hip and groin screening clear for high-COD activities" in texts
+
+
+def test_merged_full_back_medical_keeps_both_distinct_hamstring_bullets():
+    # These two bullets differ in scope (one time-bounded, one broader by injury type), so
+    # the brief kept both deliberately. Only the count is otherwise pinned (4), so a future
+    # "tidy-up" that collapses these into one wording must fail this test.
+    texts = [c.text for c in MEDICAL_CRITERIA["Full Back"]]
+    assert "No recurring hamstring injuries within the prior 12 months" in texts
+    assert "No recurring hamstring or calf injuries" in texts
+
+
 def test_no_duplicate_criteria_within_a_position():
     for position in POSITION_GROUPS:
         psych = PSYCHOLOGICAL_CRITERIA[position]
