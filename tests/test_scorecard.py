@@ -229,3 +229,88 @@ def test_objective_and_full_composites_are_unchanged_by_scout_bands():
             == _composite(with_scout, weights, [cf.PERFORMANCE, cf.PHYSICAL]))
     assert (_composite(without, weights, cf.DATA_DIMENSIONS)
             == _composite(with_scout, weights, cf.DATA_DIMENSIONS))
+
+
+# --- build_scorecards integration: scout_bands actually reaches assessed_composite --------
+#
+# The tests above only ever call _composite directly, so they pin the ASSESSED_DIMENSIONS
+# constant and the renormalisation arithmetic, but nothing exercises build_scorecards's own
+# wiring: resolving scout_bands, enforcing Decision 9's both-or-neither guard, and calling
+# _composite with the right dimension list. A bug at any of those three points -- e.g. the
+# call site quietly swapped to cf.DATA_DIMENSIONS + cf.SCOUT_DIMENSIONS -- would pass every
+# test above while corrupting the stored column. These three close that gap.
+
+def _one_player_neutral(player_id=1, competition_id=1, season_id=1, position="Winger"):
+    """A single player, alone in his (competition, season, position) group, so his one
+    Performance metric ranks at the 100th percentile -> performance_band == 5.0 exactly,
+    a deterministic value to build expectations from. No physical columns, so
+    physical_band is absent and the composites renormalise over what's left."""
+    return pd.DataFrame([{"player_id": player_id, "competition_id": competition_id,
+                          "season_id": season_id, "position_group": position,
+                          "rankable": True, "np_xg_p90": 1.0}])
+
+
+def test_build_scorecards_assessed_composite_with_both_scout_bands():
+    """A fully-assessed player gets a real assessed_composite, and it is immune to the
+    Financial/Resale bands even when those are present and extreme -- kills the call-site
+    mutation where ASSESSED_DIMENSIONS is swapped for cf.DATA_DIMENSIONS + cf.SCOUT_DIMENSIONS
+    (which would let modelled money move the number)."""
+    neutral = _one_player_neutral()
+    scout_bands = pd.DataFrame([{"player_id": 1, "competition_id": 1, "season_id": 1,
+                                 "psychological_band": 3.8, "medical_band": 3.0}])
+    fr_cheap = pd.DataFrame([{"player_id": 1, "competition_id": 1, "season_id": 1,
+                              "financial_band": 1.0, "resale_band": 1.0}])
+    fr_rich = pd.DataFrame([{"player_id": 1, "competition_id": 1, "season_id": 1,
+                             "financial_band": 5.0, "resale_band": 5.0}])
+
+    row_cheap = scorecard.build_scorecards(
+        neutral, financial_resale=fr_cheap, scout_bands=scout_bands).iloc[0]
+    row_rich = scorecard.build_scorecards(
+        neutral, financial_resale=fr_rich, scout_bands=scout_bands).iloc[0]
+
+    assert pd.notna(row_cheap["assessed_composite"])
+    # Financial/Resale swung from worst (1.0) to best (5.0) -- assessed_composite must not move.
+    assert row_cheap["assessed_composite"] == row_rich["assessed_composite"]
+    assert row_cheap["assessed_weight_covered"] == row_rich["assessed_weight_covered"]
+
+    # Independently reconstruct the expected value from the bands build_scorecards derived
+    # (performance_band == 5.0, per _one_player_neutral) over ASSESSED_DIMENSIONS -- Physical
+    # is absent (no physical columns), so this renormalises over Performance + Psych + Medical.
+    weights = cf.DIMENSION_WEIGHTS["Winger"]
+    expected, expected_w = scorecard._composite(
+        {cf.PERFORMANCE: row_cheap["performance_band"], cf.PSYCHOLOGICAL: 3.8, cf.MEDICAL: 3.0},
+        weights, scorecard.ASSESSED_DIMENSIONS)
+    assert row_cheap["assessed_composite"] == expected
+    assert row_cheap["assessed_weight_covered"] == expected_w
+
+
+def test_build_scorecards_assessed_composite_null_with_only_one_scout_dimension():
+    """Decision 9 enforced end-to-end: a player with only Psychological (no Medical) must
+    not get an assessed_composite, and objective_composite must be untouched -- kills the
+    mutation where the both-or-neither guard is loosened to write whichever band exists."""
+    neutral = _one_player_neutral(player_id=2)
+    scout_bands = pd.DataFrame([{"player_id": 2, "competition_id": 1, "season_id": 1,
+                                 "psychological_band": 3.8, "medical_band": None}])
+
+    without_scout = scorecard.build_scorecards(neutral, scout_bands=None).iloc[0]
+    partial = scorecard.build_scorecards(neutral, scout_bands=scout_bands).iloc[0]
+
+    assert pd.isna(partial["assessed_composite"])
+    assert partial["assessed_weight_covered"] == 0.0
+    assert partial["objective_composite"] == without_scout["objective_composite"]
+
+
+def test_build_scorecards_assessed_composite_null_with_neither_scout_dimension():
+    """No assessment at all for this player (scout_bands has no row for him) -> NaN, and the
+    row is otherwise byte-identical to one built with scout_bands=None entirely -- proves an
+    empty/irrelevant scout_bands frame is inert, not just a missing one."""
+    neutral = _one_player_neutral(player_id=3)
+    scout_bands_for_someone_else = pd.DataFrame(
+        [{"player_id": 999, "competition_id": 1, "season_id": 1,
+          "psychological_band": 3.8, "medical_band": 3.0}])
+
+    row_none = scorecard.build_scorecards(neutral, scout_bands=None)
+    row_irrelevant = scorecard.build_scorecards(neutral, scout_bands=scout_bands_for_someone_else)
+
+    assert pd.isna(row_irrelevant.iloc[0]["assessed_composite"])
+    pd.testing.assert_frame_equal(row_none, row_irrelevant)

@@ -13,12 +13,18 @@ What it writes: one row per player-season PER ARCHETYPE.
 Scoring is WITHIN season + league + position group. `build_scorecards` groups by season
 itself, so the whole neutral table can be scored in one pass and both seasons stay separate.
 
-Two composites are stored side by side, deliberately:
+Three composites are stored side by side, deliberately:
   * objective_composite -- Performance + Physical, 100% real Impect + SkillCorner data. This
     is what the shortlist ranks on.
   * full_composite -- adds the MODELLED Financial + Resale (wage grid + valuation regression,
     a screening prior, NOT decision-grade). Kept in its own column so nothing reading the
     objective ranking is contaminated by modelled money.
+  * assessed_composite -- Performance + Physical + Psychological + Medical (Decision 15).
+    Adds human scout judgement (from `scout_assessments`, resolved via
+    `scout_scores.resolve_bands`) but DELIBERATELY EXCLUDES Financial + Resale -- money
+    stays out of this column too. NULL unless a player has both scout dimensions
+    (Decision 9); with `scout_assessments` empty, every row's assessed_composite is NULL,
+    which is expected, not a bug.
 
 Fully derived, so it is clear-then-insert: a re-run rebuilds the table exactly and
 re-targeting the competitions never leaves orphan rows behind. Idempotent.

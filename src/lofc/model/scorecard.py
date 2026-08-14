@@ -11,15 +11,23 @@ Pipeline per player (all within position group + league):
      dimensions actually present (so a player with no market value, hence no
      Financial/Resale, still gets a composite and stays in the ranking).
 
-TWO composites (the two-view model, so modelled money never distorts the headline order):
+THREE composites, kept as separate columns so modelled money and human judgement never
+distort the headline order:
   * objective_composite -- Performance + Physical only. Built entirely on real Impect +
-    SkillCorner data. This is the DEFAULT ranking.
-  * full_composite -- adds the MODELLED Financial + Resale dimensions (and, later, scout
-    Psychological + Medical). Clearly labelled as part-modelled.
+    SkillCorner data. This is the DEFAULT ranking (the shortlist's RANK_COLUMN).
+  * full_composite -- adds the MODELLED Financial + Resale dimensions. Clearly labelled as
+    part-modelled; never used to rank.
+  * assessed_composite -- Performance + Physical + Psychological + Medical (Decision 15).
+    Adds human scout judgement but DELIBERATELY EXCLUDES Financial + Resale, even when
+    both are present for the same player -- see ASSESSED_DIMENSIONS below, which must
+    never be "completed" to include them. NULL unless a player has BOTH Psychological and
+    Medical (Decision 9): one scout dimension present is not a partial assessment.
 
 Performance and Physical come from the metric table here. Financial and Resale are computed
 from valuation/age/wage data (financial_resale.py) and passed in. Psychological and Medical
-are human scout inputs, merged in later; absent here, they simply renormalise out.
+are human scout inputs (scout_scores.py), passed in the same way; a player with no
+assessment simply has no assessed_composite -- objective_composite and full_composite are
+computed exactly as if scout_bands were never passed.
 
 GATES ARE ADVISORY ONLY. The club framework's "composite < 3.0 = do not proceed" and
 "dimension < 2.0 = veto" are computed and surfaced as flags for transparency, but NEVER
