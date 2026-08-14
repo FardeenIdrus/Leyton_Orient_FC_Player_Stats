@@ -186,7 +186,7 @@ injury) and reads as **0**.
 
 Undefined when a player has no Transfermarkt id, and **equally undefined when he has an id but no
 injury record** — the two cases are shown as "not known", never as a clean record and never
-defaulted to 100%. See §8 for why that distinction is still only partly recoverable.
+defaulted to 100%. See §9 for why that distinction is still only partly recoverable.
 
 **Known limitation:** a mid-season transfer or a player who joined the league part-way through
 the window is measured against the full 92 games, which slightly understates his availability.
@@ -332,7 +332,7 @@ The Psychological band may be overridden by an authorised user: an override requ
 The player detail shows overridden bands as such.
 
 The Medical band has **nothing to override** — it was a person's judgement to begin with. A
-different judgement is a new assessment, submitted and signed off through §11, with both
+different judgement is a new assessment, submitted and signed off through §12, with both
 retained and attributed.
 
 ---
@@ -370,7 +370,42 @@ panel does not.
 
 ---
 
-## 7. Workflow
+## 7. Watchlist integration
+
+**The gap this closes.** The watchlist (`src/lofc/store/watchlist.py`) already models the front
+half of this workflow informally. Its statuses are **Watching · Scout sent · Contact agent ·
+Dropped** (`WATCHLIST_STATUSES`). "Scout sent" is today a manual reminder that a scout was
+dispatched — a note a recruiter types in, not a fact the platform verifies. The assessment system
+makes that fact real. Left undesigned, the two features would sit side by side knowing nothing
+about each other: a recruiter would tick "Scout sent" on a watchlist row and the assessment system
+would have no idea a scout had, or had not, actually delivered.
+
+**This is interface work belonging to R3a-2, not this foundation plan.** No change to the
+`watchlist` table is required — the assessment status is derived by joining on the same (player,
+competition, season) triple both tables already use. What follows specifies the integration so
+R3a-2 does not have to design it from scratch.
+
+1. **Each watched row shows its assessment status.** Not assessed / 🟠 Assessed — awaiting
+   sign-off / 🟢 Signed off, using the **same badges and the same words-not-just-colour rule as
+   Decision 14** (§12). A watchlist row and a player-profile row must never disagree about a
+   player's status because they render two different badge sets.
+2. **An "Assess" action directly from a watchlist row**, so a recruiter working their shortlist
+   does not have to navigate back to the Players list to open the assessment form. Role-gated
+   exactly as elsewhere (`can(role, "assess_psychological")` / `can(role, "assess_medical")`,
+   §12) — the button is visible only to `scout` and `medical` roles, same as the profile's
+   **Assess** button (§8).
+3. **Filter the watchlist by assessment status**, answering "which of my targets still need a
+   scout?" — not assessed, awaiting sign-off, or signed off.
+4. **"Scout sent" stays a manual status.** It is **not** auto-driven from assessment state. It
+   records *"I asked someone to look at this player"*; the assessment badge already reports
+   *"someone did"*. Those are genuinely different facts — a recruiter may mark "Scout sent" weeks
+   before an assessment lands, or a player may already carry a signed-off assessment from prior
+   interest with no "Scout sent" ever recorded against this particular watchlist entry.
+   Conflating the two would silently discard information the recruiter entered deliberately.
+
+---
+
+## 8. Workflow
 
 1. A recruiter finds a player in the Players list.
 2. He opens the **player profile** — performance, physical, injury history, availability, and the
@@ -391,7 +426,7 @@ may leave the building; it does not change what you can see or how anyone ranks.
 
 ---
 
-## 8. Known defects in the injury evidence
+## 9. Known defects in the injury evidence
 
 Both are recorded here because this evidence is about to be put in front of people who will act
 on it.
@@ -421,7 +456,7 @@ scored from it any more) but not the display obligation.
 
 ---
 
-## 9. Transparency: what the page must tell the user
+## 10. Transparency: what the page must tell the user
 
 **This is a hard requirement, not a nice-to-have.** Every assumption, caveat and coverage limit
 behind the scores in this design must be shown to the user, on the page — not left in this
@@ -463,7 +498,7 @@ no statistics vocabulary:
    the full 92 matches, which understates his availability. It only affects players who were also
    injured, and the spells behind the figure are shown so a reader can see it.
 10. **"No injuries recorded" is not the same as "no injuries".** Where the platform cannot tell,
-    it says "not known" rather than showing a clean record (§8, D2).
+    it says "not known" rather than showing a clean record (§9, D2).
 11. **Psychological is entirely human judgement.** There is no data behind it — it is the scout's
     assessment against the club's own criteria for that position.
 12. **Nothing here excludes a player.** Every flag is advisory, consistent with the rest of the
@@ -477,7 +512,7 @@ figures they qualify. Detailed UI layout is for the implementation plan, not thi
 
 ---
 
-## 10. `assessed_composite`
+## 11. `assessed_composite`
 
 **Mechanism unchanged; both inputs are now human.** Not a new formula: the existing `_composite()`
 in `model/scorecard.py` called with a longer dimension list — weighted average over the dimensions
@@ -485,50 +520,87 @@ present, divided by the weight present.
 
 `assessed_composite` is **NULL unless both** Psychological **and** Medical have a **signed-off**
 assessment for that (player, competition, season). Draft and submitted assessments are visible on
-the profile, marked pending, and never reach it (Decision 9, §11).
+the profile, marked pending, and never reach it (Decision 9, §12).
+
+### Decision 15 — `assessed_composite` carries no modelled money (agreed 2026-08-14)
+
+**This supersedes the definition given below when this section was first written**, which added
+Financial and Resale (the two *modelled* dimensions) into `assessed_composite` alongside
+Psychological and Medical.
+
+**Why that was wrong**, verified against the code:
+
+- `constrain/filters.py` sets `RANK_COLUMN = "objective_composite"` — Performance + Physical only.
+  Nothing else in the platform is ever sorted on.
+- `full_composite` is **stored but never used for ranking anywhere**. A grep across
+  `src/lofc/dashboard/` and `src/lofc/constrain/` finds it only in column lists that load it for
+  display, never in a sort.
+- The affordability toggle ("Show affordability (modelled)") reveals money **columns and optional
+  gates**. It has never changed the ranking metric.
+
+Defining `assessed_composite` to include Financial and Resale would have made it **the first
+ranking number in the platform's history to contain modelled money** — and it would do so in the
+default view of the assessed tier, on a platform that advertises itself as 100% real football
+data. The modelled wage grid is explicitly labelled elsewhere as a screening placeholder, not
+decision-grade, and Decision 15 keeps it out of any composite a recruiter might rank on.
+
+**The corrected definition.** `assessed_composite` = **Performance + Physical + Psychological +
+Medical**. Real data plus human judgement. No money. There is one assessed tier — a reader who
+wants money uses the existing opt-in `full_composite` columns, exactly as today; this decision
+does not add a second, money-inclusive assessed composite.
 
 | Composite | Dimensions | Outfield weight | Role |
 |---|---|---|---|
 | `objective_composite` | Performance + Physical | 64% | **Default ranking — unchanged** |
 | `full_composite` | + Financial + Resale (modelled) | 77% | Opt-in money view — unchanged |
-| `assessed_composite` | + Psychological + Medical | **100%** | Opt-in, assessed players only |
+| `assessed_composite` | + Psychological + Medical (no modelled money — Decision 15) | **86%** | Opt-in, assessed players only |
 
 Worked example, a League One winger with Performance 4.0, Physical 3.5, Financial 3.0,
 Resale 4.0, Psychological 3.8 (the mean of his scored criteria), and Medical **3.0** — a
 **scout-entered** band, the club's "Meets Standard", signed off by the Head of Recruitment. It is
 *not* computed from his injury record; the same 3.0 could sit beside a clean record or an unknown
-one, and the profile shows which.
+one, and the profile shows which. Financial and Resale are shown here only because they are needed
+for the `full_composite` row of the table below — under Decision 15 they never enter the assessed
+row for this player or any other.
 
 Outfield weights are the club's own numbers normalised by their 1.10 sum (`DIMENSION_WEIGHTS` in
 `model/club_framework.py`): Performance 0.40/1.10 = 0.3636, Physical 0.2727, Financial 0.0909,
-Resale 0.0455, Psychological 0.0909, Medical 0.1364.
+Resale 0.0455, Psychological 0.0909, Medical 0.1364. The four weights `assessed_composite` actually
+uses — Performance, Physical, Psychological, Medical Risk — are 0.3636, 0.2727, 0.0909 and 0.1364,
+summing to **0.8636**.
 
 | Composite | Working | Weighted sum | ÷ weight present | Result | Measured |
 |---|---|---|---|---|---|
 | objective | 4.0×0.3636 + 3.5×0.2727 | 2.4091 | 0.6364 | **3.79** | 64% |
 | full | + 3.0×0.0909 + 4.0×0.0455 | 2.8636 | 0.7727 | **3.71** | 77% |
-| assessed | + 3.8×0.0909 + 3.0×0.1364 | 3.6182 | 1.0000 | **3.62** | 100% |
+| assessed | + 3.8×0.0909 + 3.0×0.1364 (added to **objective**, not full — Financial and Resale are excluded, Decision 15) | 3.1636 | 0.8636 | **3.66** | 86% |
 
-(2.4091 ÷ 0.6364 = 3.786 → **3.79**; 2.8636 ÷ 0.7727 = 3.706 → **3.71**; 3.6182 ÷ 1.0000 =
-**3.62**. The Medical band is unchanged at 3.0, so these figures are unchanged from the previous
-revision — only the *origin* of the 3.0 has changed.)
+(2.4091 ÷ 0.6364 = 3.786 → **3.79**; 2.8636 ÷ 0.7727 = 3.706 → **3.71**; 3.1636 ÷ 0.8636 =
+3.6624 → **3.66**. The Medical band is unchanged at 3.0, so this is the same underlying scout
+judgement as before Decision 15 — only which dimensions get summed alongside it has changed.)
 
-A player with no market value (Scottish/PL2) has Financial and Resale absent: sum 3.6182 − 0.4545
-= 3.1636, weight 1.0000 − 0.1364 = 0.8636, giving **3.66 at 86% measured**. Renormalisation
-handles it and the Measured % column keeps the difference visible — the mechanism already used
-for missing physical data.
+Because Decision 15 excludes the two modelled money dimensions for **every** player, not only
+those lacking a market value, a player *with* Financial and Resale figures computes his
+`assessed_composite` exactly the same way as a player without them — those two dimensions are
+simply never in the sum. The 86%-weight, 3.66 result above is therefore the general case, not an
+edge case: a Championship player with a market value and a Scottish Premiership player without one
+land on the same 86% Measured once both scout dimensions exist. The renormalisation machinery in
+`_composite()` that elsewhere handles missing physical data still exists, but for
+`assessed_composite` it has nothing to renormalise around money for — money is excluded by
+definition, not by absence.
 
 **Why this is safe:** the default ranking never includes the scout dimensions, so shipping this
-moves nothing. In practice the Medical band spans 1.0–3.0 (§5: the club has defined no elite
-threshold), so its effect on this player's composite runs from 3.35 to 3.62 — a **0.27** swing.
-2.8636 + 0.3455 + 1.0×0.1364 = 3.3455 → **3.35**; at 3.0 it is 3.6182 → **3.62**. Were the club to
-define an elite threshold and a 5.0 become scoreable, the top of that range would be
-2.8636 + 0.3455 + 5.0×0.1364 = 3.8909 → **3.89**. An unassessed player is still absent from the
-assessed view rather than ranked badly within it (Decision 9).
+moves nothing, and — per Decision 15 — it never includes modelled money either, so it cannot move
+the platform's money-free default view even indirectly. In practice the Medical band spans 1.0–3.0
+(§5: the club has defined no elite threshold), so its effect on this player's composite runs from
+3.35 to 3.66 — a **0.31** swing. 2.4091 + 0.3455 + 1.0×0.1364 = 2.8910 → **3.35**; at 3.0 it is
+3.1636 → **3.66**. Were the club to define an elite threshold and a 5.0 become scoreable, the top
+of that range would be 2.4091 + 0.3455 + 5.0×0.1364 = 3.4366 → **3.98**. An unassessed player is
+still absent from the assessed view rather than ranked badly within it (Decision 9).
 
 ---
 
-## 11. Users, roles and sign-off
+## 12. Users, roles and sign-off
 
 Authentication is required because an unattributed scout rating has little value and a medical
 override must be traceable to a person.
@@ -551,7 +623,7 @@ This replaces the earlier latest-per-role rule, under which the most recent asse
 simply won. That rule gave a junior scout's assessment authority over a senior's purely by being
 newer, and with Medical now a human judgement too (Decision 12) *both* dimensions would have been
 decided by recency. The model below is written as the intended design, but it is **not settled**
-— the club's recruitment team may want something else, and it is an open question in §19.
+— the club's recruitment team may want something else, and it is an open question in §21.
 
 **Assessment states: `draft` → `submitted` → `signed_off`.**
 
@@ -602,7 +674,7 @@ words, because printed reports and colour-blind users lose the colour.
 
 ---
 
-## 12. Data model
+## 13. Data model
 
 One Alembic migration. `player_injuries` is **already built and migrated**; the rest is designed.
 
@@ -651,14 +723,14 @@ Same fields the scrape produces, entered in a form somebody will realistically c
 
 ---
 
-## 13. Modules
+## 14. Modules
 
 | Module | Purpose | Depends on | State |
 |---|---|---|---|
 | `ingest/transfermarkt_common.py` | Shared polite fetch client | — | **Built** |
 | `ingest/transfermarkt_injuries.py` | Scrape + parse injury spells | common | **Built** |
 | `store/injuries.py` | Loads scraped spells into `player_injuries` | store | **Built** |
-| `model/medical.py` | Availability figure + window (no band rule — Decision 12) | — | **Built**; needs the D1 overlap merge (§8) |
+| `model/medical.py` | Availability figure + window (no band rule — Decision 12) | — | **Built**; needs the D1 overlap merge (§9) |
 | `model/club_criteria.py` | The club's per-position criteria, verbatim, typed by kind | — | Designed |
 | `model/scout_scores.py` | **Signed-off** bands keyed (player, competition, season) | store | Designed |
 | `model/scorecard.py` | *Modified:* accepts `scout_bands`, emits `assessed_composite` | club_framework | Designed |
@@ -673,7 +745,7 @@ is why the change to `scorecard.py` is small and surgical rather than structural
 
 ---
 
-## 14. Dashboard
+## 15. Dashboard
 
 - **Login gate** in front of the whole app; the current user and role are shown in the sidebar.
 - **Player detail** gains, for **everyone**: the §6 evidence panel (availability, matches missed,
@@ -693,7 +765,7 @@ None of this is built.
 
 ---
 
-## 15. Presentation quality — a hard requirement
+## 16. Presentation quality — a hard requirement
 
 **These three surfaces are seen by people outside the recruitment room, and their presentation is
 part of the product, not decoration:**
@@ -714,7 +786,7 @@ misleads its reader.
 - **Provenance is never optional.** Every figure states where it came from and when: scraped vs
   hand-entered, the assessor's name, the approver's name, the dates, the data snapshot date.
 - **Caveats sit beside the number they qualify**, not in a footer. The league coverage warning
-  belongs next to the availability figure, not at the bottom of the page (§9).
+  belongs next to the availability figure, not at the bottom of the page (§10).
 - **Colour never carries meaning alone.** Every badge and flag states its status in words, because
   printed reports and colour-blind readers lose the colour (Decision 14).
 - **Density with scannability.** A recruiter reads this between meetings. Dense is fine; cluttered
@@ -734,7 +806,7 @@ carry it into the affected tasks explicitly.
 
 ---
 
-## 16. Testing
+## 17. Testing
 
 All parser tests run against **saved HTML fixtures. No network access in the test suite.**
 
@@ -766,7 +838,7 @@ The existing **301** tests must remain green.
 
 ---
 
-## 17. Error handling
+## 18. Error handling
 
 | Situation | Behaviour |
 |---|---|
@@ -775,16 +847,16 @@ The existing **301** tests must remain green.
 | Scrape interrupted | Resumes from checkpoint, skipping captured ids |
 | Unknown injury phrasing | Stored raw, categorised `other`, logged |
 | Player has no TM id | No scraped evidence; the panel says so; assessment still possible |
-| Player has a TM id but no injury rows | Shown as **not known**, never as a clean record (§8, D2) |
+| Player has a TM id but no injury rows | Shown as **not known**, never as a clean record (§9, D2) |
 | Player has no scheduled-games constant | No availability figure shown; the panel says why |
-| Overlapping spells | Merged before counting (§8, D1) — must ship before the panel does |
+| Overlapping spells | Merged before counting (§9, D1) — must ship before the panel does |
 | Unknown position group | Assessment blocked with a clear message — never scored against no criteria |
 | Partial assessment | Stays `draft`; does not reach the composite |
 | Submitted but unsigned | Visible and marked pending; does not reach the composite |
 
 ---
 
-## 18. What does not change
+## 19. What does not change
 
 `objective_composite`, `full_composite`, the default Players ranking, the `shortlists` table
 ordering, and all **301** existing tests. `assessed_composite` is opt-in and NULL until a human
@@ -792,7 +864,7 @@ has completed **and a Head of Recruitment has signed off** both dimensions for t
 
 ---
 
-## 19. Follow-ons (registered, not in scope)
+## 20. Follow-ons (registered, not in scope)
 
 - **R3b** — scout document upload. Uploads are an **evidence trail, never a scoring input**,
   which is what makes deferring them safe. Medical documents are special-category personal
@@ -806,9 +878,9 @@ has completed **and a Head of Recruitment has signed off** both dimensions for t
 
 ---
 
-## 20. Open questions
+## 21. Open questions
 
-- **Open — is Head of Recruitment sign-off the right model (§11)?** It is written here as the
+- **Open — is Head of Recruitment sign-off the right model (§12)?** It is written here as the
   design, but it is **provisional pending the owner's discussion with the recruitment team.** It
   adds an approval step and a queue somebody has to work; a club that assesses two players a week
   may want it, a club that assesses forty may not. The alternative previously specified

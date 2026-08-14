@@ -8,9 +8,9 @@
 
 **Tech Stack:** Python 3.11 in Docker, PostgreSQL 16, SQLAlchemy 2.0 + Alembic, pandas, pytest.
 
-**Spec:** `docs/superpowers/specs/2026-08-10-scout-assessment-design.md` — read Decisions 6–14 before starting.
+**Spec:** `docs/superpowers/specs/2026-08-10-scout-assessment-design.md` — read Decisions 6–15 before starting.
 
-**Scope split:** this plan is the foundation. **The interface — evidence panel, assessment form, sign-off view, badges — is a separate plan (R3a-2)** and must invoke the frontend design skill, per spec §15. Nothing here renders anything.
+**Scope split:** this plan is the foundation. **The interface — evidence panel, assessment form, sign-off view, badges, and watchlist integration (spec §7) — is a separate plan (R3a-2)** and must invoke the frontend design skill, per spec §16. Nothing here renders anything.
 
 ## Global Constraints
 
@@ -276,7 +276,7 @@ git commit -m "feat: encode the club's per-position psychological and medical cr
 - Consumes: `club_criteria.POSITION_GROUPS` (for nothing at runtime — the tables are generic)
 - Produces: models `User`, `ScoutAssessment`, `ScoutCriterionScore`, and the matching tables
 
-**Schema** (spec §12, amended by Decision 14):
+**Schema** (spec §13, amended by Decision 14):
 
 `users` — `id`, `username` (unique), `full_name`, `role`, `password_hash`, `is_active`, `created_at`.
 Roles: `scout`, `medical`, `head_of_recruitment`, `admin`.
@@ -470,7 +470,7 @@ git commit -m "feat: scout assessment tables"
 changed later without invalidating existing users. Use `secrets.token_bytes(16)` for the salt
 and `hmac.compare_digest` for comparison — **never `==`**, which leaks timing.
 
-**Permissions** (spec §11):
+**Permissions** (spec §12):
 
 | action | scout | medical | head_of_recruitment | admin |
 |---|---|---|---|---|
@@ -713,7 +713,7 @@ git commit -m "feat: password hashing, role permissions and the user admin CLI"
   `(player_id, competition_id, season_id)` with columns `psychological_band`, `medical_band`,
   `psychological_status`, `medical_status`
 
-**The resolution rule** (Decision 14, spec §11):
+**The resolution rule** (Decision 14, spec §12):
 1. A **signed-off** assessment wins for its dimension.
 2. If none is signed off, the **most recent submitted** one scores.
 3. `draft` never scores.
@@ -907,7 +907,11 @@ git commit -m "feat: resolve scout assessments into scoring bands"
 
 **The change to `scorecard.py`:** `build_scorecards` gains an optional `scout_bands` parameter,
 handled exactly like the existing `financial_resale`. Where a player has both scout bands, they
-enter `dim_bands` and a third composite is computed over all six dimensions.
+enter `dim_bands` and a third composite is computed over **four** dimensions — Performance,
+Physical, Psychological and Medical. **Not six: per spec Decision 15, the modelled Financial and
+Resale dimensions are deliberately excluded from `assessed_composite`, in every case, whether or
+not the player has a market value.** `full_composite` (Performance + Physical + Financial +
+Resale) remains the only composite carrying modelled money, exactly as today.
 
 **Decision 9 — `assessed_composite` is NULL unless BOTH dimensions are present.** A player with
 only one is not partially assessed; he is unassessed for this purpose.
@@ -931,16 +935,39 @@ def test_composite_renormalises_so_the_both_or_neither_guard_must_live_in_the_ca
     assert value is not None and covered < 1.0
 
 
-def test_assessed_composite_uses_the_full_framework_weight():
-    from lofc.model.scorecard import _composite
+def test_assessed_composite_excludes_financial_and_resale():
+    """Decision 15: assessed_composite = Performance + Physical + Psychological + Medical --
+    never the modelled Financial and Resale dimensions. Financial and Resale are present in
+    `bands` here, exactly as they would be for a real player with a market value, precisely to
+    prove they are NOT picked up: ASSESSED_DIMENSIONS never names them, so `covered` stops at
+    0.86, not 1.0, and the two modelled bands cannot move `value`."""
+    from lofc.model.scorecard import ASSESSED_DIMENSIONS, _composite
     from lofc.model import club_framework as cf
 
     weights = cf.DIMENSION_WEIGHTS["Winger"]
     bands = {cf.PERFORMANCE: 4.0, cf.PHYSICAL: 3.5, cf.FINANCIAL: 3.0,
              cf.RESALE: 4.0, cf.PSYCHOLOGICAL: 3.8, cf.MEDICAL: 3.0}
-    value, covered = _composite(bands, weights, cf.DATA_DIMENSIONS + cf.SCOUT_DIMENSIONS)
-    assert covered == 1.0
-    assert value == pytest.approx(3.62, abs=0.01)
+    value, covered = _composite(bands, weights, ASSESSED_DIMENSIONS)
+    assert covered == pytest.approx(0.86, abs=0.01)
+    assert value == pytest.approx(3.66, abs=0.01)
+
+
+def test_assessed_composite_does_not_move_when_the_money_bands_change():
+    """The regression Decision 15 exists to catch: if changing Financial or Resale ever moved
+    assessed_composite, modelled money would have leaked back into the assessed tier."""
+    from lofc.model.scorecard import ASSESSED_DIMENSIONS, _composite
+    from lofc.model import club_framework as cf
+
+    weights = cf.DIMENSION_WEIGHTS["Winger"]
+    base = {cf.PERFORMANCE: 4.0, cf.PHYSICAL: 3.5, cf.PSYCHOLOGICAL: 3.8, cf.MEDICAL: 3.0}
+    cheap = dict(base, **{cf.FINANCIAL: 1.0, cf.RESALE: 1.0})
+    expensive = dict(base, **{cf.FINANCIAL: 5.0, cf.RESALE: 5.0})
+    no_market_value = dict(base)  # Scottish/PL2 player: Financial and Resale absent entirely
+
+    assert (_composite(base, weights, ASSESSED_DIMENSIONS)
+            == _composite(cheap, weights, ASSESSED_DIMENSIONS)
+            == _composite(expensive, weights, ASSESSED_DIMENSIONS)
+            == _composite(no_market_value, weights, ASSESSED_DIMENSIONS))
 
 
 def test_objective_and_full_composites_are_unchanged_by_scout_bands():
@@ -963,20 +990,30 @@ Ensure `import pytest` is present at the top of that test file.
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `docker compose exec app python -m pytest tests/test_scorecard.py -k assessed -v`
-Expected: FAIL — the third test fails, or `SCOUT_DIMENSIONS` is not exported as expected.
+Expected: FAIL — `ImportError: cannot import name 'ASSESSED_DIMENSIONS' from 'lofc.model.scorecard'`.
 
 - [ ] **Step 3: Implement**
 
 In `src/lofc/model/scorecard.py`:
 
-1. Add the parameter: `def build_scorecards(neutral, financial_resale=None, archetype_by_position=None, scout_bands=None)`.
-2. Index it like the existing frame:
+1. Near the top of the module, define the dimension list `assessed_composite` sums over —
+   **not** `cf.DATA_DIMENSIONS + cf.SCOUT_DIMENSIONS`, which would pull in the modelled
+   Financial and Resale dimensions:
+```python
+# Decision 15: assessed_composite is real data (Performance, Physical) plus human judgement
+# (Psychological, Medical) -- deliberately NOT cf.DATA_DIMENSIONS, which also carries the
+# modelled Financial and Resale dimensions. Money stays out of every ranking-shaped number
+# in the platform; do not "complete" this list later.
+ASSESSED_DIMENSIONS = [cf.PERFORMANCE, cf.PHYSICAL] + cf.SCOUT_DIMENSIONS
+```
+2. Add the parameter: `def build_scorecards(neutral, financial_resale=None, archetype_by_position=None, scout_bands=None)`.
+3. Index it like the existing frame:
 ```python
     scout = None
     if scout_bands is not None and not scout_bands.empty:
         scout = scout_bands.set_index(["player_id", "competition_id", "season_id"])
 ```
-3. After the financial/resale block, add the scout bands to `dim_bands`:
+4. After the financial/resale block, add the scout bands to `dim_bands`:
 ```python
         psychological = medical = None
         if scout is not None and (player_id, competition_id, season_id) in scout.index:
@@ -990,12 +1027,15 @@ In `src/lofc/model/scorecard.py`:
             dim_bands[cf.PSYCHOLOGICAL] = psychological
             dim_bands[cf.MEDICAL] = medical
 ```
-4. Compute the third composite and add both fields to `record`:
+5. Compute the third composite and add both fields to `record`. Note this uses
+   `ASSESSED_DIMENSIONS`, not `dim_bands`' full key set — `dim_bands` may also carry
+   `cf.FINANCIAL` / `cf.RESALE` from the financial/resale block above, and `_composite` only
+   sums the dimensions named in the list it is given, so those two are never picked up here:
 ```python
         assessed, assessed_w = (None, 0.0)
         if cf.PSYCHOLOGICAL in dim_bands and cf.MEDICAL in dim_bands:
             assessed, assessed_w = _composite(
-                dim_bands, weights, cf.DATA_DIMENSIONS + cf.SCOUT_DIMENSIONS)
+                dim_bands, weights, ASSESSED_DIMENSIONS)
 ```
 and in the record dict:
 ```python
@@ -1047,7 +1087,7 @@ ranking changed, which this plan forbids.
 - [ ] **Step 6: Run the full suite**
 
 Run: `docker compose exec app python -m pytest -q`
-Expected: PASS — **354 tests** (319 existing + 35 new: 9 + 4 + 12 + 7 + 3)
+Expected: PASS — **355 tests** (319 existing + 36 new: 9 + 4 + 12 + 7 + 4)
 
 - [ ] **Step 7: Commit**
 
@@ -1064,16 +1104,23 @@ git commit -m "feat: assessed_composite from scout assessments"
 - `users`, `scout_assessments` and `scout_criterion_scores` exist; `player_injuries` has `entered_by`.
 - Passwords hash with stdlib scrypt; roles gate the four actions; an admin can be created by CLI.
 - A submitted assessment resolves to a scoring band; a signed-off one wins over a newer submitted one.
-- `assessed_composite` is computed over the full framework, and is NULL unless both dimensions exist.
+- `assessed_composite` is computed over Performance + Physical + Psychological + Medical — 86% of
+  the outfield weight, deliberately excluding the modelled Financial and Resale dimensions (spec
+  Decision 15) — and is NULL unless both scout dimensions exist.
 - **`objective_composite` and `full_composite` are unchanged** — verified numerically, not assumed.
-- 354 tests pass.
+- 355 tests pass.
 
 ## What this plan deliberately does not do
 
 - **No user interface.** No login screen, no assessment form, no evidence panel, no badges. That
-  is R3a-2, which must invoke the frontend design skill per spec §15.
+  is R3a-2, which must invoke the frontend design skill per spec §16.
 - **No injury evidence display.** The panel showing availability, injury history and the coverage
   warning belongs to R3a-2.
 - **No export.** That is R3c.
+- **No watchlist integration.** The assessment-status badge on watchlist rows, the "Assess" action
+  from a watchlist row, and filtering the watchlist by assessment status (spec §7) are all
+  interface work for R3a-2, not this foundation plan. No change to the `watchlist` table is
+  required here or there — the status is derived by joining on the (player, competition, season)
+  triple both tables already share.
 - **Nothing is wired into the Players tab.** `assessed_composite` is computed and stored, but no
   surface reads it yet.
