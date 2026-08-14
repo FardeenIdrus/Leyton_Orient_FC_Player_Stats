@@ -43,6 +43,9 @@ def resolve_bands(assessments: pd.DataFrame) -> pd.DataFrame:
     Psychological winner for the same player/competition/season, since each
     (dimension, *key) group is resolved on its own.
 
+    A `dimension` value that is neither PSYCHOLOGICAL nor MEDICAL is skipped (with a
+    printed warning naming it), not folded into either bucket -- see the loop body.
+
     Always returns a frame with OUTPUT_COLUMNS, even when nothing scores -- an
     empty DataFrame(columns=...), never a bare DataFrame() -- so callers can
     .set_index on it unconditionally.
@@ -56,8 +59,21 @@ def resolve_bands(assessments: pd.DataFrame) -> pd.DataFrame:
 
     records: dict[tuple, dict] = {}
     for (dimension, *key), group in scoring.groupby(["dimension"] + KEY):
+        if dimension == PSYCHOLOGICAL:
+            prefix = "psychological"
+        elif dimension == MEDICAL:
+            prefix = "medical"
+        else:
+            # An unrecognised dimension must not silently fall into either bucket --
+            # `dimension` has no database CHECK constraint, so a typo on the write path
+            # (e.g. lowercase "psychological") must surface, not get misfiled as
+            # Medical by an if/else that treats "anything else" as the other case.
+            # One bad row shouldn't take down a whole scorecard rebuild, so this
+            # skips the group rather than raising -- but it must not vanish either.
+            print(f"  [scout_scores] unrecognised dimension {dimension!r} -- skipped, "
+                  "not scored to psychological or medical", flush=True)
+            continue
         row = _winner(group)
-        prefix = "psychological" if dimension == PSYCHOLOGICAL else "medical"
         record = records.setdefault(tuple(key), dict(zip(KEY, key)))
         record[f"{prefix}_band"] = float(row["band"]) if pd.notna(row["band"]) else None
         record[f"{prefix}_status"] = row["status"]
