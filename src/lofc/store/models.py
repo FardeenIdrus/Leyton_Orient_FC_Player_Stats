@@ -446,6 +446,13 @@ class ScoutAssessment(Base):
     Decision 14: a `submitted` assessment SCORES. Sign-off does not gate visibility or
     ranking -- it marks the assessment approved and controls what may be exported as final.
     Nothing here is ever deleted, so disagreement between two assessors stays visible.
+
+    Deliberately NOT unique on (player_id, competition_id, season_id, dimension), unlike its
+    player/competition/season-keyed siblings elsewhere in this file (PlayerSeasonMetric,
+    PlayerScore, Archetype, ...): several people may assess the same player-season on the
+    same dimension, and every one of their rows is kept so disagreement between assessors
+    stays visible rather than being overwritten. See test_store.py for the regression test
+    that guards against a future unique constraint being added here.
     """
 
     __tablename__ = "scout_assessments"
@@ -470,7 +477,10 @@ class ScoutAssessment(Base):
 
 class ScoutCriterionScore(Base):
     """One criterion inside an assessment. Psychological criteria carry `score` (1-5);
-    medical screening criteria carry `passed`. Exactly one of the two is set."""
+    medical screening criteria carry `passed`. Exactly one of the two is set -- that is an
+    application-layer rule, not a database constraint: there is deliberately no CHECK
+    enforcing it, because a later plan may add further kinds this schema has not
+    anticipated."""
 
     __tablename__ = "scout_criterion_scores"
 

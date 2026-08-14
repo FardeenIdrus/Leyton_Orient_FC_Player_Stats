@@ -207,3 +207,27 @@ def test_player_injuries_gained_entered_by():
 
     assert "entered_by" in {c.name for c in PlayerInjury.__table__.columns}
     assert PlayerInjury.__table__.c.entered_by.nullable
+
+
+def test_scout_assessments_has_no_unique_constraint_on_player_competition_season_dimension():
+    # Guard rail, not incidental: unlike every other player/competition/season-keyed table
+    # in this file, scout_assessments is DELIBERATELY not unique on this combination, because
+    # several people may assess the same player-season on the same dimension and all of their
+    # rows must be kept so disagreement between assessors stays visible. A well-meaning cleanup
+    # that "fixes" this by adding the constraint back would break nothing in the current suite
+    # while silently destroying the multi-assessor workflow -- hence this test.
+    from sqlalchemy import UniqueConstraint
+
+    from lofc.store.models import ScoutAssessment
+
+    key = {"player_id", "competition_id", "season_id", "dimension"}
+    unique_constraints = [
+        c for c in ScoutAssessment.__table__.constraints
+        if isinstance(c, UniqueConstraint)
+    ]
+    for constraint in unique_constraints:
+        covered = {col.name for col in constraint.columns}
+        assert not key <= covered, (
+            "scout_assessments must stay non-unique on player/competition/season/dimension "
+            "so multiple assessors' rows are all retained"
+        )
