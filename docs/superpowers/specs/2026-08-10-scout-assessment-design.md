@@ -518,9 +518,10 @@ figures they qualify. Detailed UI layout is for the implementation plan, not thi
 in `model/scorecard.py` called with a longer dimension list — weighted average over the dimensions
 present, divided by the weight present.
 
-`assessed_composite` is **NULL unless both** Psychological **and** Medical have a **signed-off**
-assessment for that (player, competition, season). Draft and submitted assessments are visible on
-the profile, marked pending, and never reach it (Decision 9, §12).
+`assessed_composite` is **NULL unless both** Psychological **and** Medical have a **scoring**
+assessment for that (player, competition, season) — that is, `submitted` **or** `signed_off`
+(Decision 14). Only a `draft` fails to reach it. Sign-off does not gate the composite; it marks
+the assessment approved and controls what may be exported as final (Decision 9, §12).
 
 ### Decision 15 — `assessed_composite` carries no modelled money (agreed 2026-08-14)
 
@@ -758,8 +759,9 @@ is why the change to `scorecard.py` is small and surgical rather than structural
   Medical band.
 - **A sign-off queue** for `head_of_recruitment`: submitted assessments awaiting sign-off.
 - **Players tab** gains an optional "Assessed" ranking mode: filters to players with both
-  dimensions signed off and ranks on `assessed_composite`, with Measured % beside every row.
-  **Off by default.**
+  dimensions **assessed** (submitted or signed off) and ranks on `assessed_composite`, with
+  Measured % and the status badge beside every row. **Off by default.** A separate, also-optional
+  "signed-off only" filter narrows it further, for presenting a shortlist formally (Decision 14).
 
 None of this is built.
 
@@ -824,9 +826,10 @@ All parser tests run against **saved HTML fixtures. No network access in the tes
 - **No automatic Medical band** — there is no function mapping availability to a band, and the
   composite path rejects a Medical band that has no `author_id`.
 - **Psychological** — mean, and that an incomplete set stays a draft and does not score.
-- **Sign-off** — a `submitted` assessment does not reach `assessed_composite`; signing it off
-  does; a second submission does not displace a signed-off one; nothing is deleted.
-- **Composite** — `assessed_composite` NULL unless both dimensions are signed off (Decision 9),
+- **Sign-off** — a `submitted` assessment **does** reach `assessed_composite` (Decision 14); a
+  signed-off assessment wins over a newer submitted one; a `draft` never scores; nothing is deleted.
+- **Composite** — `assessed_composite` NULL unless both dimensions have a scoring assessment
+  (Decision 9 as amended by Decision 14),
   correct renormalisation with and without market value, and that `objective_composite` and
   `full_composite` are **byte-identical to their current values**.
 - **Roles** — a `scout` cannot write a Medical band; only `head_of_recruitment` can sign off; a
@@ -859,8 +862,9 @@ The existing **301** tests must remain green.
 ## 19. What does not change
 
 `objective_composite`, `full_composite`, the default Players ranking, the `shortlists` table
-ordering, and all **301** existing tests. `assessed_composite` is opt-in and NULL until a human
-has completed **and a Head of Recruitment has signed off** both dimensions for that player.
+ordering, and all **319** existing tests. `assessed_composite` is opt-in and NULL until a human
+has completed **both** dimensions for that player. Sign-off is **not** required for it to score
+(Decision 14).
 
 ---
 
