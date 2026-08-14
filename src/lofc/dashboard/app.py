@@ -26,10 +26,12 @@ from lofc.config import settings
 from lofc.constrain.filters import apply_gates
 from lofc.dashboard.controls import synced_budget, synced_min_minutes, synced_wage_budget
 from lofc.dashboard.loaders import (
-    available_seasons, league_names, load_candidates, load_metric_values, load_percentiles,
-    load_scorecards, load_scorecards_archetype, load_wage_framework, max_minutes)
+    available_seasons, get_engine, league_names, load_candidates, load_metric_values,
+    load_percentiles, load_scorecards, load_scorecards_archetype, load_wage_framework,
+    max_minutes)
 from lofc.dashboard.seasons import (
     CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_mask, season_name_for)
+from lofc.dashboard.session import require_login, sidebar_identity
 from lofc.dashboard.tabs.compare import _compare
 from lofc.dashboard.tabs.glossary import _glossary
 from lofc.dashboard.tabs.methodology import _methodology
@@ -58,6 +60,11 @@ def main() -> None:
                        layout="wide", initial_sidebar_state="expanded")
     style()
     header()
+
+    user = require_login(get_engine())
+    if user is None:
+        return          # the gate renders the form; nothing else on the page exists yet
+    sidebar_identity(user)
 
     st.sidebar.header("Filters")
     seasons = available_seasons()
