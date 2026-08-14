@@ -1095,7 +1095,7 @@ ranking changed, which this plan forbids.
 - [ ] **Step 6: Run the full suite**
 
 Run: `docker compose exec app python -m pytest -q`
-Expected: PASS — **355 tests** (319 existing + 36 new: 9 + 4 + 12 + 7 + 4)
+Expected: PASS — **354 tests** (319 existing + 35 new: 9 + 4 + 11 + 7 + 4)
 
 - [ ] **Step 7: Commit**
 
@@ -1116,7 +1116,7 @@ git commit -m "feat: assessed_composite from scout assessments"
   the outfield weight, deliberately excluding the modelled Financial and Resale dimensions (spec
   Decision 15) — and is NULL unless both scout dimensions exist.
 - **`objective_composite` and `full_composite` are unchanged** — verified numerically, not assumed.
-- 355 tests pass.
+- 354 tests pass.
 
 ## What this plan deliberately does not do
 
