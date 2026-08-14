@@ -1,6 +1,6 @@
 """Password hashing and role permissions. No database, no network."""
 
-import pytest
+import hashlib
 
 from lofc.dashboard.auth import ROLES, can, hash_password, verify_password
 
@@ -22,8 +22,11 @@ def test_the_same_password_hashes_differently_each_time():
 
 
 def test_the_stored_hash_never_contains_the_password():
-    stored = hash_password("hunter2")
-    assert "hunter2" not in stored
+    # A hex-only password: "hunter2" contains non-hex characters ('h', 'u', 't', ...) and
+    # could never appear inside a hex-encoded digest regardless of what is actually stored,
+    # so it would not catch a bug. "deadbeef" is valid hex, so this assertion can actually fail.
+    stored = hash_password("deadbeef")
+    assert "deadbeef" not in stored
 
 
 def test_the_hash_carries_its_parameters_so_they_can_change_later():
@@ -66,3 +69,18 @@ def test_only_admin_manages_users():
 def test_an_unknown_role_or_action_is_denied_not_crashed():
     assert not can("intern", "sign_off")
     assert not can("admin", "launch_missiles")
+
+
+def test_a_hash_made_under_older_parameters_still_verifies():
+    """The whole point of storing n/r/p alongside the hash: a password hashed years ago
+    under weaker parameters still verifies today, without a migration. If verify_password
+    silently substituted the current module constants instead of reading the stored ones,
+    this would fail even though every other test in this file -- which all hash fresh with
+    today's constants -- would keep passing."""
+    n, r, p = 2 ** 12, 1, 1  # smallest parameters verify_password accepts
+    salt = bytes.fromhex("00" * 16)
+    digest = hashlib.scrypt(b"legacy password", salt=salt, n=n, r=r, p=p, dklen=32)
+    legacy_stored = f"scrypt${n}${r}${p}${salt.hex()}${digest.hex()}"
+
+    assert verify_password("legacy password", legacy_stored)
+    assert not verify_password("wrong password", legacy_stored)

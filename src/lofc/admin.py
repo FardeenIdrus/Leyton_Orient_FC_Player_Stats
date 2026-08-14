@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import sys
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -19,7 +20,10 @@ from lofc.store.models import User
 def create_user(username: str, full_name: str, role: str, password: str) -> None:
     if role not in ROLES:
         raise SystemExit(f"unknown role {role!r}; expected one of {', '.join(ROLES)}")
-    engine = create_engine(settings.database_url)
+    # hide_parameters: an IntegrityError from the insert below would otherwise print the
+    # failing statement's bound parameters -- including the salt and password hash -- to
+    # stderr. Not plaintext, but there is no reason for either to appear in a terminal or log.
+    engine = create_engine(settings.database_url, hide_parameters=True)
     with Session(engine) as session:
         if session.scalar(select(User).where(User.username == username)):
             raise SystemExit(f"user {username!r} already exists")
@@ -39,6 +43,10 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "create-user":
+        if not sys.stdin.isatty():
+            # Without a TTY, getpass degrades to echoing the password to the terminal (with
+            # a warning) instead of hiding it -- refuse rather than display it.
+            raise SystemExit("refusing to prompt for a password on a non-interactive stdin")
         password = getpass.getpass("password: ")
         if not password:
             raise SystemExit("empty password")

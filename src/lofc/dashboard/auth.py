@@ -5,8 +5,10 @@ dependency. The stored form carries its own parameters:
 
     scrypt$<n>$<r>$<p>$<salt_hex>$<hash_hex>
 
-so the cost can be raised later without invalidating existing users: verify with the
-parameters in the stored string, and re-hash on the next successful login if they are stale.
+so that a hash made under old parameters still verifies once the constants below change:
+verify_password reads n/r/p from the stored string itself, never from the current constants.
+`needs_rehash` tells a caller (a future login page) when a hash it just verified was made
+under parameters other than today's, so it can be re-hashed and re-saved on that login.
 """
 
 from __future__ import annotations
@@ -15,10 +17,30 @@ import hashlib
 import hmac
 import secrets
 
-# scrypt cost. n must be a power of two. These are the interactive-login parameters from
-# the Python docs; raising n is the way to make hashing more expensive later.
+# scrypt cost for freshly hashed passwords. n must be a power of two.
 _N, _R, _P = 2 ** 14, 8, 1
 _DKLEN = 32
+
+# Passed explicitly to hashlib.scrypt (both calls below) instead of relying on OpenSSL's
+# default ~32 MiB maxmem, which would otherwise silently reject n=2**16 -- the top of the
+# range below -- and cap any future rise of _N at the current value. 128 MiB comfortably
+# covers n=2**16 at r=8 (~64 MiB), leaving 4x headroom over today's n=2**14 to raise _N into.
+_MAXMEM = 128 * 1024 * 1024
+
+# Bounds enforced on n/r/p READ BACK from a stored hash, before they are used to spend
+# CPU/memory in hashlib.scrypt. Without this, a stored row with e.g. p=16000 turns one login
+# attempt into ~13 minutes of pinned CPU -- raising maxmem above (needed so _N can grow) would
+# otherwise remove the only thing currently limiting how large a stored p can be. The range
+# for n brackets the constants above with the same headroom to raise _N later.
+_N_MIN, _N_MAX = 2 ** 12, 2 ** 16
+_R_MAX = 8
+_P_MAX = 2
+
+
+def _valid_cost(n: int, r: int, p: int) -> bool:
+    is_power_of_two = n > 0 and (n & (n - 1)) == 0
+    return is_power_of_two and _N_MIN <= n <= _N_MAX and 1 <= r <= _R_MAX and 1 <= p <= _P_MAX
+
 
 ROLES: tuple[str, ...] = ("scout", "medical", "head_of_recruitment", "admin")
 
@@ -42,23 +64,44 @@ def hash_password(password: str) -> str:
     password do not share a hash."""
     salt = secrets.token_bytes(16)
     digest = hashlib.scrypt(password.encode("utf-8"), salt=salt,
-                            n=_N, r=_R, p=_P, dklen=_DKLEN)
+                            n=_N, r=_R, p=_P, dklen=_DKLEN, maxmem=_MAXMEM)
     return f"scrypt${_N}${_R}${_P}${salt.hex()}${digest.hex()}"
 
 
 def verify_password(password: str, stored: str) -> bool:
-    """True if `password` produced `stored`. A malformed or unrecognised stored value
-    returns False rather than raising -- a corrupt row must not crash a login page."""
+    """True if `password` produced `stored`. A malformed, unrecognised, or out-of-bounds
+    stored value returns False rather than raising or spending unbounded CPU/memory -- a
+    corrupt or tampered row must not crash a login page or become a denial-of-service lever."""
     try:
-        scheme, n, r, p, salt_hex, digest_hex = stored.split("$")
+        scheme, n_s, r_s, p_s, salt_hex, digest_hex = stored.split("$")
         if scheme != "scrypt":
             return False
+        n, r, p = int(n_s), int(r_s), int(p_s)
+        if not _valid_cost(n, r, p):
+            return False
         expected = bytes.fromhex(digest_hex)
-        actual = hashlib.scrypt(password.encode("utf-8"), salt=bytes.fromhex(salt_hex),
-                                n=int(n), r=int(r), p=int(p), dklen=len(expected))
-    except (ValueError, TypeError):
+        if len(expected) != _DKLEN:
+            return False
+        salt = bytes.fromhex(salt_hex)
+        actual = hashlib.scrypt(password.encode("utf-8"), salt=salt,
+                                n=n, r=r, p=p, dklen=_DKLEN, maxmem=_MAXMEM)
+    except (ValueError, TypeError, AttributeError):
         return False
     return hmac.compare_digest(actual, expected)
+
+
+def needs_rehash(stored: str) -> bool:
+    """True if `stored` was hashed under parameters other than today's _N/_R/_P (or is not a
+    well-formed scrypt hash at all). Call this right after a successful verify_password; if
+    True, hash the now-known-correct plaintext again with hash_password and save that instead."""
+    try:
+        scheme, n_s, r_s, p_s, _salt_hex, digest_hex = stored.split("$")
+        if scheme != "scrypt":
+            return True
+        current = (int(n_s), int(r_s), int(p_s), len(bytes.fromhex(digest_hex)))
+        return current != (_N, _R, _P, _DKLEN)
+    except (ValueError, TypeError, AttributeError):
+        return True
 
 
 def can(role: str, action: str) -> bool:
