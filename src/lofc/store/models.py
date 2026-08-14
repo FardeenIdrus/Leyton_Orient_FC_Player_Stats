@@ -422,6 +422,66 @@ class WatchlistEntry(Base):
                                                           onupdate=func.now())
 
 
+class User(Base):
+    """A person who can record or approve an assessment.
+
+    USER DATA: never written or cleared by the pipeline. Passwords are stored only as a
+    scrypt hash (see dashboard/auth.py); the plaintext never reaches the database.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String, unique=True, index=True)
+    full_name: Mapped[str] = mapped_column(String)
+    role: Mapped[str] = mapped_column(String)          # scout | medical | head_of_recruitment | admin
+    password_hash: Mapped[str] = mapped_column(String)
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default="true")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ScoutAssessment(Base):
+    """One person's judgement of one dimension for one player-season.
+
+    Decision 14: a `submitted` assessment SCORES. Sign-off does not gate visibility or
+    ranking -- it marks the assessment approved and controls what may be exported as final.
+    Nothing here is ever deleted, so disagreement between two assessors stays visible.
+    """
+
+    __tablename__ = "scout_assessments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("players.player_id"), index=True)
+    competition_id: Mapped[int] = mapped_column(Integer, index=True)
+    season_id: Mapped[int] = mapped_column(Integer, index=True)
+    dimension: Mapped[str] = mapped_column(String, index=True)   # Psychological | Medical Risk
+    author_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"))
+    band: Mapped[float | None] = mapped_column(Float, nullable=True)
+    band_note: Mapped[str | None] = mapped_column(String, nullable=True)
+    screening_failed: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, server_default="draft")
+    approved_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now(),
+                                                          onupdate=func.now())
+
+
+class ScoutCriterionScore(Base):
+    """One criterion inside an assessment. Psychological criteria carry `score` (1-5);
+    medical screening criteria carry `passed`. Exactly one of the two is set."""
+
+    __tablename__ = "scout_criterion_scores"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    assessment_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("scout_assessments.id", ondelete="CASCADE"), index=True)
+    criterion_key: Mapped[str] = mapped_column(String)
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    passed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+
 class PlayerInjury(Base):
     """One injury spell. Scraped from Transfermarkt, or entered by hand where
     Transfermarkt has no coverage (Scottish/PL2).
@@ -447,6 +507,7 @@ class PlayerInjury(Base):
     games_missed: Mapped[int] = mapped_column(Integer, server_default="0")
     source: Mapped[str] = mapped_column(String, server_default="transfermarkt")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+    entered_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
 
 
 # The curated SkillCorner physical metrics, shared by the team and player tables.

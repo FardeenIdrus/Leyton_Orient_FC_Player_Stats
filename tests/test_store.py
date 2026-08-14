@@ -171,3 +171,39 @@ def test_upsert_of_key_columns_only_does_nothing_on_conflict():
     sql = str(_upsert_stmt(Player.__table__, [{"player_id": 1}], ["player_id"])
               .compile(dialect=postgresql.dialect()))
     assert "DO NOTHING" in sql
+
+
+def test_scout_assessment_table_shape():
+    from lofc.store.models import ScoutAssessment
+
+    columns = {c.name for c in ScoutAssessment.__table__.columns}
+    assert {"player_id", "competition_id", "season_id", "dimension", "author_id",
+            "band", "status", "approved_by", "approved_at", "screening_failed"} <= columns
+    # A new assessment is a draft until someone submits it.
+    assert ScoutAssessment.__table__.c.status.server_default.arg == "draft"
+
+
+def test_users_table_stores_a_hash_not_a_password():
+    from lofc.store.models import User
+
+    columns = {c.name for c in User.__table__.columns}
+    assert "password_hash" in columns
+    assert "password" not in columns, "never store a plaintext password"
+    assert User.__table__.c.username.unique
+
+
+def test_criterion_scores_carry_either_a_score_or_a_pass_flag():
+    from lofc.store.models import ScoutCriterionScore
+
+    columns = {c.name for c in ScoutCriterionScore.__table__.columns}
+    assert {"assessment_id", "criterion_key", "score", "passed"} <= columns
+    # Psychological uses `score`, medical screening uses `passed`; both nullable.
+    assert ScoutCriterionScore.__table__.c.score.nullable
+    assert ScoutCriterionScore.__table__.c.passed.nullable
+
+
+def test_player_injuries_gained_entered_by():
+    from lofc.store.models import PlayerInjury
+
+    assert "entered_by" in {c.name for c in PlayerInjury.__table__.columns}
+    assert PlayerInjury.__table__.c.entered_by.nullable
