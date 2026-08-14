@@ -3,7 +3,7 @@
 **Purpose:** one place that answers "what metrics do we have, from which source, and
 which file does what". For presenting to the recruitment team and for onboarding.
 
-Last updated: 2026-08-10. **Status: LIVE.** The combined 91-metric table
+Last updated: 2026-08-14. **Status: LIVE.** The combined 91-metric table
 (`player_metrics_neutral`, 9,451 rows = every player × league × season across all 14
 league-seasons: EFL + Scottish Premiership/Championship + Premier League 2) is the spine the
 scoring reads. Scoring is 100% Impect + SkillCorner (zero StatsBomb). Players are ranked on
@@ -278,8 +278,29 @@ event-data proxy for sweeper-keeper behaviour.
 
 **Status: the code path is built, wired into the pipeline, and the real scrape has completed
 and been loaded (11 Aug 2026).** `player_injuries` holds production data for the EFL today.
-**This section covers the injury data and the availability calculation only — Medical is not
-yet wired into the composite score** (that is a later plan item, R3 in `plan/BUILD_PLAN.md`).
+**This section covers the injury data and the availability calculation only.** Medical (and
+Psychological) are now scored by **human scout assessment, not computed from this data** —
+see the note below.
+
+### Scout-assessment tables (built 2026-08-14, on branch `r3a0-injury-scrape`, not pushed)
+
+The Psychological and Medical dimensions are entered by a person, not computed. The schema and
+scoring-resolution machinery are built: `model/club_criteria.py` (the club's per-position
+Psychological/Medical criteria, transcribed verbatim from the club document), the `users`,
+`scout_assessments` and `scout_criterion_scores` tables plus `player_injuries.entered_by`
+(migration `a3fd42bcb2c2`), `dashboard/auth.py` (scrypt password hashing) + `dashboard/admin.py`
+(the `create-user` CLI), `model/scout_scores.py` (`resolve_bands()` — signed-off wins, else most
+recent submitted, drafts never score), and `assessed_composite` / `assessed_weight_covered` /
+`psychological_band` / `medical_band` on `player_scorecards` (migration `5e80ab6fe191`).
+Transfermarkt injury data (this section) feeds the Medical assessor as **evidence only, never a
+score** — injury-record coverage is 74% in the Championship but 18% in the National League, so
+an automatic score would have rewarded obscurity, and the club's own 1–5 rubric never defines
+the "elite threshold" bands 4–5 need for Medical. `assessed_composite` is **86%** of outfield
+weight (Performance + Physical + Psychological + Medical; excludes modelled Financial/Resale).
+
+**No interface exists yet to create an assessment** (that is R3a-2 in `plan/BUILD_PLAN.md`'s
+register), so `assessed_composite` is **NULL for every player** today; `objective_composite`
+(the ranking) is unaffected. Full design: `docs/superpowers/specs/2026-08-10-scout-assessment-design.md`.
 
 **Source: one Transfermarkt page per player** — `/verletzungen/spieler/<id>`, the injury
 history page, a stable six-column table (`Season | Injury | from | until | Days | Games
@@ -363,9 +384,11 @@ across the four EFL leagues; **77 fall below the club's stated 60% bar**; the mo
 recognisable long-term-injured players (e.g. Charlie Wyke, 128 matches missed, availability
 0.0).
 
-**Open design question (not yet decided):** under the design spec's band formula
-`band = 3 + 5 × (availability − 0.60)`, **2,201 of 2,870 (77%)** would score the maximum
-Medical band of 5.0, because they had no injuries recorded in the two-season window. Medical
-carries 13.6% of the outfield composite weight. Whether a *risk* dimension that awards
-three-quarters of players an identical maximum is the intended behaviour is an open question
-for the scout-assessment plan — recorded in `plan/BUILD_PLAN.md`, not answered here.
+**Design question, now resolved (Decision 12, 2026-08-14):** an earlier design considered
+scoring Medical automatically off this availability figure via a band formula
+`band = 3 + 5 × (availability − 0.60)`; under that formula **2,201 of 2,870 (77%)** would have
+scored the maximum Medical band of 5.0, because they had no injuries recorded in the two-season
+window — a *risk* dimension awarding three-quarters of players an identical maximum. Decision 12
+resolved this by making Medical a **human-entered band**: this availability figure is shown to
+the assessor as evidence, but never produces a score by formula. See §"Scout-assessment tables"
+above and `docs/superpowers/specs/2026-08-10-scout-assessment-design.md`.

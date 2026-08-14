@@ -9,7 +9,7 @@
 >   read only when you need the *why* behind something).
 > - **Technical deep-dives** are in `docs/` (see the Documentation map below).
 >
-> _Last updated: 2026-08-11._
+> _Last updated: 2026-08-14._
 
 ---
 
@@ -43,7 +43,69 @@ model), not a reporting dashboard. It runs end to end via `docker compose up` +
 
 ---
 
-## Current state (2026-08-11)
+## Current state (2026-08-14)
+
+> **2026-08-14 — scout-assessment foundation built, on branch `r3a0-injury-scrape` (50 commits,
+> not pushed).** Two pieces landed, both complete: **R3a-0** (Transfermarkt injury data) and
+> **R3a-1** (scout-assessment foundation, 5 tasks).
+>
+> **R3a-0 — injury data:** `ingest/transfermarkt_common.py` (shared polite fetch client, 2.5s
+> delay, browser UA, backoff) + `ingest/transfermarkt_injuries.py` (resumable scraper, one page
+> per player) + `store/injuries.py` (CSV→Postgres loader) + `model/medical.py` — availability
+> with three **honest** states, `MEASURED` / `CONFIRMED_BY_MINUTES` / `UNKNOWN` (an unknown
+> record returns `None`, never a confident 1.0) + the `player_injuries` table. **3,766 injury
+> rows loaded for 1,176 players** (superseded the earlier figures quoted lower in this register).
+>
+> **R3a-1 — scout-assessment foundation:** `model/club_criteria.py` (the club's per-position
+> Psychological and Medical criteria, transcribed verbatim from the club document — Full Back
+> and Winger are de-duplicated unions of the club's left/right profiles; per-position counts vary
+> 2–8, which is the source document, not an error) + `users` / `scout_assessments` /
+> `scout_criterion_scores` tables + `player_injuries.entered_by` (migration `a3fd42bcb2c2`) +
+> `dashboard/auth.py` (scrypt password hashing, stdlib only, no auth dependency; role
+> permissions) + `dashboard/admin.py` (the `create-user` CLI) + `model/scout_scores.py`
+> (`resolve_bands()`: signed-off wins, else most recent submitted; drafts never score; the two
+> dimensions resolve independently) + `assessed_composite` / `assessed_weight_covered` /
+> `psychological_band` / `medical_band` on `player_scorecards` (migration `5e80ab6fe191`).
+>
+> **The design is fully settled** — `docs/superpowers/specs/2026-08-10-scout-assessment-design.md`
+> (16 decisions). The load-bearing ones: **Decision 12** — Medical is a **human-entered band**,
+> not computed from injury data. Injury-record coverage is 74% in the Championship but 18% in
+> the National League, so an automatic score rewarded obscurity in exactly the direction this
+> club recruits, and the club's own 1–5 rubric never defines the "elite threshold" that bands 4
+> and 5 need for Medical — so Transfermarkt injury data is **evidence shown to the assessor,
+> never a score.** **Decision 13** — screening criteria **warn, never override** the assessor's
+> entered band. **Decision 14** — sign-off is **non-blocking**: a `submitted` assessment scores
+> and ranks immediately; sign-off marks it approved and gates what may be exported as final
+> (badges: 🟠 assessed / 🟢 signed off, always with words as well as colour). **Decision 15** —
+> `assessed_composite` = Performance + Physical + Psychological + Medical = **86%** of outfield
+> weight; it **excludes** the modelled Financial and Resale dimensions, because `RANK_COLUMN` is
+> `objective_composite` and modelled money has never entered a ranking number (worked example:
+> Performance 4.0, Physical 3.5, Financial 3.0, Resale 4.0, Psychological 3.8, Medical 3.0 →
+> `assessed_composite` **3.66** at 86% measured). **Decision 16** — **every role may assess both
+> dimensions**; only sign-off is gated. The role is a record displayed beside each entry, not a
+> restriction; self-sign-off is allowed but labelled.
+>
+> **Verified state of the scoring:** `objective_composite` (the ranking) is **unchanged** — 6,573
+> rows, average **3.029285**. `assessed_composite` is **NULL for every player** —
+> `scout_assessments` is empty, because **no interface exists yet to create an assessment.**
+>
+> **NOT built, stated plainly:** the entire user interface — no login screen, no assessment
+> form, no evidence panel, no badges, no watchlist integration. That is **R3a-2**, planned but
+> not written, and it **must invoke the frontend-design skill** per spec §15. The **player report
+> export (R3c)** is also not built. **The final whole-branch review has not been run** — each of
+> the 50 commits was reviewed individually; the cross-cutting pass across the whole branch has
+> not happened.
+>
+> **New open items:** **auth gaps** — no password reset, no login rate limiting, no password
+> strength rules; all belong with the login screen (R3a-2). **S4 (show "current club") is
+> deferred until after the interface**, by the owner's decision — see the register entry below
+> for why it matters. Contract data was refreshed 11 Aug 2026: **1,363 players carry a contract
+> date — 701 expiring summer 2027, 408 in 2028, 163 in 2029.** Coverage is roughly 55% in the top
+> three English tiers, **28% National League, 2–5% Scottish/PL2 — not adequate coverage for
+> those leagues.**
+>
+> **365 tests pass** (was 301 as of the 2026-08-11 note below; the scout-assessment branch added
+> the rest).
 
 > **2026-08-03 — audit + fixes.** A full metric audit (club-document fidelity, API pull, computation)
 > confirmed the framework is faithful to the club files and the composite maths is correct. It found
@@ -89,9 +151,14 @@ only to seed player identity — stable IDs, birth dates, league names — durin
   - `Impect Data - Positional Metrics.xlsx` → the per-position metric lists (`PERFORMANCE_METRICS`).
   - `LOFC - Position Archetype.docx` → the seven dimensions, their per-position weights
     (`DIMENSION_WEIGHTS`), the 1–5 scoring, and the median/70th thresholds.
-- **Every player gets a 1–5 composite.** Two composites: **objective** (Performance +
-  Physical, real data — the default ranking) and **full** (adds the *modelled* Financial +
-  Resale). Psychological + Medical are scout inputs (not yet collected).
+- **Every player gets a 1–5 composite.** Three composites now exist in the schema:
+  **objective** (Performance + Physical, real data — the default ranking, `RANK_COLUMN`,
+  unaffected by anything below), **full** (adds the *modelled* Financial + Resale), and
+  **assessed** (Performance + Physical + Psychological + Medical, 86% of outfield weight,
+  excludes modelled money — Decision 15, see the 2026-08-14 note above). Psychological and
+  Medical are scout inputs: the scoring/resolution machinery is built (`model/scout_scores.py`,
+  `model/club_criteria.py`), but **`assessed_composite` is NULL for every player** until the
+  scout-assessment interface (R3a-2, not yet built) exists to enter one.
 - **The old invented "Style-fit" is retired** from every live surface. The Shortlist, Player
   profile, Compare, Player-types and Watchlist all rank/show the club composite.
 - **Nobody is excluded automatically.** The club's "< 3.0 = do not proceed" / "< 2.0 = veto"
@@ -136,7 +203,9 @@ only to seed player identity — stable IDs, birth dates, league names — durin
   **1,606** feet and **1,635** heights, against 5,626 players. Market values were unaffected
   throughout (**2,526** present — that field is located by CSS selector, not by column position).
   Full incident record and recovery outcome in the Pending work register below.
-- **301 tests pass.** The dashboard renders clean.
+- **365 tests pass.** The dashboard renders clean. The scout-assessment foundation (schema,
+  scoring resolution, injury data) is built but its interface is not — see the 2026-08-14 note
+  above and register item R3a-2.
 
 Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
 `docs/DATA_ARCHITECTURE.md`.
@@ -247,13 +316,16 @@ loader joins on `players.tm_player_id`). **The real scrape has finished and is l
   across the four EFL leagues; **77 fall below the club's stated 60% bar**; the most affected are
   recognisable long-term-injured players (e.g. Charlie Wyke, 128 matches missed, availability
   0.0).
-- **Open design question, not yet answered:** under the design spec's band formula
-  `band = 3 + 5 × (availability − 0.60)`, **2,201 of 2,870 (77%)** would score the maximum
-  Medical band of 5.0, because they had no injuries in the two-season window. Medical carries
-  13.6% of the outfield composite weight. Whether a *risk* dimension that awards three-quarters
-  of players an identical maximum is the intended behaviour is an open question for the
-  scout-assessment plan (R3) — recorded here, not decided. **Medical is not wired into scoring
-  yet**; this branch delivers the injury data and the availability calculation only.
+- **Design question, now resolved (Decision 12, 2026-08-14):** an earlier design considered the
+  band formula `band = 3 + 5 × (availability − 0.60)` to score Medical automatically; under it
+  **2,201 of 2,870 (77%)** would have scored the maximum Medical band of 5.0, because they had no
+  injuries in the two-season window — a *risk* dimension awarding three-quarters of players an
+  identical maximum. Medical carries 13.6% of the outfield composite weight (Financial/Resale
+  included) or a share of the 86%-weight `assessed_composite` (Financial/Resale excluded, see
+  R3a-1 in the register below). Decision 12 resolved this: Medical is now a **human-entered
+  band**; this availability figure is evidence shown to the assessor, never a score by formula.
+  **The scoring machinery (`assessed_composite`) is built but not yet populated** — no interface
+  exists to enter an assessment (R3a-2, not started).
 
 Full detail: `docs/DATA_ARCHITECTURE.md` §5.
 
@@ -293,15 +365,19 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
 | S1 | **Weekly refresh** — manual for now | a cron container in `docker-compose` is the unattended option |
 | S2 | **Build season 319 into the DB** | deliberately NOT done yet: only the two Scottish leagues have data, so a 2026/27 view would be Scotland-only. Run `build_neutral --write` once the English leagues kick off |
 | S3 | ✅ **SkillCorner 2026/27 editions (DONE 2026-08-10)** | six editions added (Championship 1569, League One 1574, League Two 1575, National League 1576, PL2 1578, Scottish Premiership **1683** — SkillCorner labels it just "Premiership"). The **Scottish Championship is deliberately excluded**: the competition exists but holds **zero** physical data (0 rows for 24/25 and 25/26 vs 358 for the Scottish Prem), so configuring it would emit a false "no data" warning every week. The live-season rule now covers **both** providers off one `LIVE_SEASON_ID`. Verified live: Scottish Prem 26/27 already returning **146 players**; the English leagues skipped cleanly (they would have **crashed** the run before this fix) |
-| S4 | **Show "current club"** | the Players list shows the club a player played for *in that season* (by design). A transferred player therefore shows his old club until he plays for the new one. The Transfermarkt scrape carries current club (`club_name`) and is not used — adding it would resolve the confusion |
+| S4 | **Show "current club" — deferred until after the interface (owner's decision, 2026-08-14)** | the Players list shows the club a player played for *in that season* (by design). Why it matters now: contract dates come from Transfermarkt's 2026/27 squad pages and are current, but the **club name displayed comes from `player_metrics_neutral.team_name`, which is Impect 2025/26 data** — so a player who moved this summer shows his old club beside a current contract date. Transfermarkt's scrape already carries the correct current club in `efl_values.csv`'s `club_name` column, and **nothing reads it**. The fix is to join that column through and display it as "Current club" alongside the season club |
 
 **Ready to do (not blocked):**
 
 | # | Item | Why |
 |---|---|---|
 | R1 | **Full pipeline re-run** (`python -m lofc.pipeline`) | a clean end-to-end recompute; now covers the new scorecard stage. NB it *fetches nothing* — every ingest step skips existing files, so it is a recompute, not a refresh |
-| R2 | ✅ **Refactor `dashboard/app.py` (DONE 2026-08-10)** | 2,560 lines → **191**, split into 15 focused modules (`theme` · `labels` · `charts` · `seasons` · `loaders` · `controls` + `tabs/` one per tab), dependencies strictly one-way so there are no import cycles. **337 lines of dead code deleted** (`_club_scorecard`, `_scorecard_player_detail`, `_profile`, `_render_score_composition`, `percentile_vector`, `_dimension_metric_labels`) plus the retired Style-fit helpers `score_composition`/`load_fit_profiles` and their 3 tests. Done in verified phases against a captured behaviour snapshot: **the final output is byte-for-byte identical to before the refactor**; 191 tests passed at the time (301 now, after later branches added tests) |
-| R3 | **Scout-entry fields** for Psychological + Medical (roadmap #4) | completes the club's 7-dimension framework — the biggest remaining gap vs the club document |
+| R2 | ✅ **Refactor `dashboard/app.py` (DONE 2026-08-10)** | 2,560 lines → **191**, split into 15 focused modules (`theme` · `labels` · `charts` · `seasons` · `loaders` · `controls` + `tabs/` one per tab), dependencies strictly one-way so there are no import cycles. **337 lines of dead code deleted** (`_club_scorecard`, `_scorecard_player_detail`, `_profile`, `_render_score_composition`, `percentile_vector`, `_dimension_metric_labels`) plus the retired Style-fit helpers `score_composition`/`load_fit_profiles` and their 3 tests. Done in verified phases against a captured behaviour snapshot: **the final output is byte-for-byte identical to before the refactor**; 191 tests passed at the time — that had grown to 301 by the 2026-08-03 audit, and stands at **365 now** (2026-08-14), after the scout-assessment branch added tests |
+| R3a-0 | ✅ **DONE (branch `r3a0-injury-scrape`, not pushed) — Transfermarkt injury data** | scraper (`ingest/transfermarkt_injuries.py`), loader (`store/injuries.py`), `player_injuries` table, `model/medical.py` availability with honest `MEASURED`/`CONFIRMED_BY_MINUTES`/`UNKNOWN` states (never a confident 1.0 for an unknown record). **3,766 injury rows for 1,176 players** loaded. See R8/R9 above for the two evidence-quality fixes made on top of this |
+| R3a-1 | ✅ **DONE (same branch) — scout-assessment foundation, 5 tasks** | `model/club_criteria.py` (club's per-position Psychological/Medical criteria, transcribed verbatim), `users`/`scout_assessments`/`scout_criterion_scores` tables (migration `a3fd42bcb2c2`), `dashboard/auth.py` (scrypt hashing) + `dashboard/admin.py` (`create-user` CLI), `model/scout_scores.py` (`resolve_bands()`), `assessed_composite`/`assessed_weight_covered`/`psychological_band`/`medical_band` on `player_scorecards` (migration `5e80ab6fe191`). Design fully settled: `docs/superpowers/specs/2026-08-10-scout-assessment-design.md` (16 decisions). **`assessed_composite` is NULL for every player — `scout_assessments` is empty, because no UI exists yet to create one.** |
+| R3a-2 | **NOT STARTED — the scout-assessment user interface** | login screen, assessment form, evidence panel (injury data + screening-criteria warnings, which warn but never override per Decision 13), badges (🟠 assessed / 🟢 signed off — colour **and** words), watchlist integration. **Must invoke the frontend-design skill** (spec §15). This is the only thing standing between the built scoring machinery and a populated `assessed_composite`. Auth gaps to close alongside it: **no password reset, no login rate limiting, no password strength rules** |
+| R3c | **NOT STARTED — player report export** | export gated on sign-off (Decision 14: sign-off is non-blocking for scoring, but gates what may be exported as final) |
+| R3a-review | **NOT RUN — final whole-branch review** | each of the 50 commits on `r3a0-injury-scrape` was reviewed individually as it landed; the cross-cutting review across the whole branch has not happened |
 | R4 | **Full StatsBomb retirement** (roadmap #6) | seed identity from Impect, delete the ingest + ~21 GB raw events + 22 dead all-NULL columns |
 | R5 | **Playing-style clusters: season split + move onto Impect** (roadmap #8) | the last season-mixing and last StatsBomb read; style label only, never touches the composite |
 | R6 | **Extend the Transfermarkt squad scrape to Scottish Premiership, Scottish Championship and Premier League 2** | those three leagues carry **low Transfermarkt coverage today** — 2025/26 `tm_player_id` coverage is **Premier League 2 182/1,141 (16%), Scottish Premiership 28/385 (7%), Scottish Championship 8/284 (3%)** — so almost no market value, contract-expiry data, or injury history (the injury loader only ever sees players with a `tm_player_id`, and none of the three has a `SCHEDULED_GAMES` constant for availability either way). Needs a squad-page scrape built for those competitions (`transfermarkt_efl`-equivalent); not started |
@@ -337,6 +413,10 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
   UX fixes (season-specific "Players analysed", all-round shown alongside archetype composite,
   excluded archetype metrics struck through, clickable scorecard rows, clear-selection buttons)
 - ✅ Documentation reorganised (this hub + frozen history + deep-dive spokes)
+- ✅ Scout-assessment foundation, R3a-0 + R3a-1 (branch `r3a0-injury-scrape`, not pushed):
+  Transfermarkt injury data, the club's Psychological/Medical criteria, `users`/
+  `scout_assessments`/`scout_criterion_scores` tables, auth + scoring resolution,
+  `assessed_composite` on `player_scorecards` (schema only — see register R3a-1/R3a-2)
 
 **Next** (in rough priority order):
 
@@ -362,8 +442,12 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
    Verified: stored == live to 0.0, writer idempotent, 160 tests pass.
 3. **Midfield archetypes** (DM / Box-to-Box / AM) — await the club's per-archetype metric lists
    (the workbook doesn't fully specify them; not fabricated).
-4. **Scout-entry fields** for the two human dimensions (Psychological, Medical), completing the
-   *full* composite per player.
+4. ⚠️ **Scout-entry fields, partially done.** The foundation (R3a-0 injury data + R3a-1 club
+   criteria/tables/auth/scoring resolution) is **built** — see register R3a-0/R3a-1. **The
+   interface is not** (R3a-2, next up: login, assessment form, evidence panel, badges,
+   watchlist integration — must invoke the frontend-design skill per spec §15), so
+   `assessed_composite` is still NULL for every player. The player-report export (R3c) and the
+   final whole-branch review are also outstanding.
 5. **Real financial models (deferred, a separate workstream):** the club's real **wage framework**
    (CSV drop-in) + a better **valuation model**. The current wage grid (±10% vs payrolls) and
    valuation regression (CV R² ~0.75, but ±40% median error within league) are honest *screening*
