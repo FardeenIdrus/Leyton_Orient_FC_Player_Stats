@@ -1,6 +1,10 @@
 # Design — Scout assessment system (R3a-0 + R3a)
 
-_Status: proposed. Written 2026-08-10._
+_Status: proposed. Written 2026-08-10. Revised 2026-08-14 — **Decision 12 reverses Decision 11**:
+the Medical band is now entered by a person, and Transfermarkt injury data is evidence only. Nothing
+in this document is built except the injury collector, its storage, the availability function and
+the data-loss guards; the scout page, the assessment form, the sign-off states and the evidence
+panel are **designed, not implemented**._
 
 Closes the largest remaining gap between the platform and the club's own recruitment
 framework: the two dimensions a human scores. Together they carry **22.7% of the outfield
@@ -15,8 +19,9 @@ currently reads 64% for an outfielder.
 | **R3a** — user accounts, scout assessment entry, scoring | **R3c** — player-profile export |
 
 R3b and R3c are deliberately separate: neither the score nor the assessment workflow depends
-on them. R3a-0 comes first because the availability rule must be designed against real injury
-records, not guesses.
+on them. R3a-0 comes first because the medical design had to be settled against real injury
+records rather than guesses — and, as Decision 12 records, doing so overturned the design that
+was written before the records existed.
 
 ---
 
@@ -60,12 +65,17 @@ paper form. Each bullet is classified:
 
 | Kind | Example | Treatment |
 |---|---|---|
-| `availability` | "Minimum 60% availability over prior 2 seasons" | **Computed** from injury + appearance data (§4) |
-| `screening` | "No ACL or significant knee ligament injury within prior 12 months" | **Pass/fail**, acts as a cap (§5) |
+| `availability` | "Minimum 60% availability over prior 2 seasons" | **Computed as a figure and displayed as evidence** (§4). Under Decision 12 it informs the assessor's judgement; it never produces a band |
+| `screening` | "No ACL or significant knee ligament injury within prior 12 months" | **Pass/fail**, recorded by the assessor; acts as a cap on the band the assessor enters (§5) |
 | `protocol` | "Permanent signings undergo MRI scan on 8 sites" | **Not scored.** A club process step, not a player attribute. Shown as a checklist reminder |
 
 The `protocol` class matters: "undergo an MRI scan" says nothing about the player and must
 never move a score.
+
+**Amended by Decision 12.** When this decision was written, `availability` was expected to
+produce the Medical band arithmetically. It no longer does. The three-way classification
+survives — it is still the right way to read the club's bullets — but the `availability` class
+is now an evidence figure shown to a human, not an input to a formula.
 
 ### Decision 8 — Psychological criteria are equal-weighted
 
@@ -77,16 +87,23 @@ applied one level down.
 
 A partially assessed player must not appear in a ranked list beside a fully assessed one.
 Requiring both means every non-NULL `assessed_composite` reflects a complete human assessment.
+Under Decision 12 both dimensions are human judgements, and under §11 both must be **signed
+off** before they count.
 
-### Decision 10 — Availability counts injury absence only
+### Decision 10 — The availability *figure* counts injury absence only
 
-Only games missed **through injury** enter the calculation. Deriving availability from minutes
-played was tested and rejected: 73% of rankable 2025/26 players fall below a 60% bar on
-minutes ÷ (46 × 90), which is rotation and substitution, not injury. Minutes measure
-selection; the medical dimension must measure fitness.
+Only games missed **through injury** enter the availability calculation. Deriving availability
+from minutes played was tested and rejected as a *substitute* for it: 73% of rankable 2025/26
+players fall below a 60% bar on minutes ÷ (46 × 90), which is rotation and substitution, not
+injury. Minutes measure selection; a fitness figure must measure fitness.
 
-A player who was fit but simply not picked is therefore **not penalised** — his games missed
-through injury is zero and his availability is 100%.
+A player who was fit but simply not picked is therefore **not penalised** by the availability
+figure — his games missed through injury is zero and his availability reads 100%.
+
+**Minutes played is still shown, for a different job.** It is not folded into availability, but
+it is displayed beside it as an **independent check on the injury record**: a player with 2,000+
+minutes was demonstrably on the pitch whatever Transfermarkt does or does not say about him.
+Decision 12 uses it in exactly that role and no other.
 
 ---
 
@@ -135,15 +152,24 @@ Unmapped text falls to `other` and is logged, so new phrasings surface rather th
 
 `tm_player_id` exists only for EFL players.
 
-| Leagues | Players (2025/26) | Medical facts |
+| Leagues | Players (2025/26) | Injury evidence |
 |---|---|---|
-| Championship, League One, League Two, National League | 2,298 | Scraped |
-| PL2, Scottish Premiership, Scottish Championship | 1,047 | Manual entry only |
-| | **3,345** | **69% automated / 31% manual** |
+| Championship, League One, League Two, National League | 2,298 | Scraped (see Decision 12 for how thin it gets) |
+| PL2, Scottish Premiership, Scottish Championship | 1,047 | None scraped — the assessor works from the club's own sources |
+| | **3,345** | **69% have scraped evidence / 31% have none** |
+
+This is *evidence* coverage, not score coverage. Since Decision 12 no Medical score is produced
+from this data at all, so a player outside the English leagues is not unscorable — he is
+assessable on exactly the same footing as everyone else, with less on the screen in front of the
+assessor.
 
 ---
 
-## 4. Availability
+## 4. Availability — an evidence figure, not a score
+
+**Built.** `model/medical.py` exists and computes this today. What changed in Decision 12 is what
+the number is *for*: it is displayed to the assessor and to anyone reading a player profile, and
+it is never converted into a band.
 
 One documented function, `model/medical.py`:
 
@@ -158,77 +184,128 @@ per competition, not hard-coded at the call site, so other leagues can be added.
 A `-` in the Games missed column means the injury cost no matches (typically an off-season
 injury) and reads as **0**.
 
-Undefined only when a player has no Transfermarkt id, in which case the criterion is unscored
-rather than defaulted and the assessment cannot complete without manual entry.
+Undefined when a player has no Transfermarkt id, and **equally undefined when he has an id but no
+injury record** — the two cases are shown as "not known", never as a clean record and never
+defaulted to 100%. See §8 for why that distinction is still only partly recoverable.
 
 **Known limitation:** a mid-season transfer or a player who joined the league part-way through
 the window is measured against the full 92 games, which slightly understates his availability.
-The manual override exists for this case, and it only ever affects a player who was *also*
-injured.
+It only ever affects a player who was *also* injured. Since Decision 12 this can no longer push
+a score down by itself — it can only mislead a reader, which is why the window and the spells
+behind the figure are shown in full rather than the percentage alone.
 
 ---
 
 ## 5. Scoring rules
 
-### Psychological
+### Psychological — unchanged
 
 ```
 band = mean(criterion scores)          each criterion scored 1–5
 ```
 
-All of the position's criteria must be scored or the assessment stays a draft.
+Equal-weight mean of the club's criteria for that position (Decision 8). All of the position's
+criteria must be scored or the assessment stays a draft. Decision 12 changes nothing here.
 
-### Medical
+### Medical — entered by a person
 
-```
-band = 3 + 5 × (availability − 0.60)          clamped to [1, 3.0]
-```
+**There is no formula.** The Medical band is entered by a user holding the `medical` role,
+scoring the player against the club's per-position medical requirement checklist, with the
+injury evidence on the screen in front of them (§6).
 
-Meeting the club's stated 60% availability bar yields **3.0**, their stated minimum standard.
-Below it the band falls, reaching 1.0 at 20% availability, consistent with their veto
-language. **The band is capped at 3.0: absence of injury data is neutral, never favourable.**
-Rising above 3.0 requires positive evidence — a scout's recorded override — never data alone.
+The evidence shown — availability %, matches missed, injury history by type and category, days
+lost, recurrence, and minutes played — is **displayed to inform that judgement and is never
+summed, weighted or mapped into a score**.
 
-#### Decision 11 — the ceiling is 3.0, not 5.0 (agreed 2026-08-11, **flagged for revisit**)
+The scoring guide is the club's own 1–5 rubric, verbatim:
 
-The original rule ran the scale to 5.0 at 100% availability. Measured against real data that
-proved to be wrong, for a reason that only appeared once the injury data existed:
-
-| League | Share scoring the top band under the 5.0 rule |
+| Band | Club's wording |
 |---|---|
-| Championship | 47% |
-| League One | 79% |
-| League Two | 89% |
-| **National League** | **93%** |
+| 1 | Unacceptable |
+| 2 | Below Standard |
+| 3 | Meets Standard |
+| 4 | Above Standard |
+| 5 | Elite |
 
-National League players are not twice as durable as Championship players. This is
-**Transfermarkt's injury reporting thinning down the pyramid**, and because Performance and
-Physical are scored *within league* while Medical was scored on an absolute scale, the
-reporting gap did not cancel out. The dimension **rewarded obscurity** — and Leyton Orient
-recruit *down* the pyramid, so the bias ran in exactly the wrong direction.
+**4 and 5 are defined by reference to an elite threshold, and the club has not defined one for
+Medical.** Its metric tables carry both a "Minimum Standard" and an "Elite Threshold" column;
+Medical & Durability lists minimum requirements only. So in practice **3 is the ceiling** for
+this dimension until the club supplies an elite threshold — not as a rule the platform imposes,
+but as a direct consequence of the club's own rubric having nothing to score 4 and 5 against.
+The form states this next to the input rather than silently clamping the value.
 
-Capping at 3.0 removes it: the between-league gap collapses from **46 points to 4** (Championship
-95% at the top band, National League 99%). The same **77 players** are marked down; **nobody is
-marked up**.
+#### Decision 12 — Medical is scored by human assessment; Transfermarkt is evidence only (2026-08-14)
 
-The justification is that serious injuries are reported in every league while minor ones are
-reported only in well-covered ones — so the data is trustworthy at the extreme and unreliable
-in the middle. This rule uses it where it is reliable and declines to guess where it is not.
-It also restores the platform's stated principle, already in `model/medical.py`: *a guessed
-value is worse than an honest gap.*
+**This supersedes Decision 11.** No automatic rule produces a Medical band. Transfermarkt injury
+data is evidence, shown to a person, and nothing else.
 
-**Known cost, accepted:** above the 60% bar there is now **no discrimination** — a player who
-missed 20 matches scores the same 3.0 as one who missed none.
+**The evidence.** Injury-record coverage collapses down the pyramid:
 
-**Revisit when** any of these change: Transfermarkt injury coverage improves in the lower
-leagues; the club supplies its own medical records; or scouts have entered enough manual
-assessments to score durability positively rather than only penalise its absence. At that
-point the ceiling could be raised again, or Medical moved to a within-league percentile like
-every other dimension. **This decision is provisional and expected to be revisited.**
+| League | Linked to Transfermarkt | Have an injury record |
+|---|---|---|
+| Championship | 98% | 74% |
+| League One | 95% | 39% |
+| League Two | 96% | 32% |
+| National League | 92% | 18% |
+| Premier League 2 | 16% | 4% |
+| Scottish Premiership | 7% | 5% |
+| Scottish Championship | 3% | 1% |
 
-**Screening criteria act as caps.** Any failed `screening` criterion caps the band at **2.0**
-and raises an explicit `medical_screening_failed` flag, mirroring the club's deviation
-protocol ("requires independent orthopedic assessment", "triggers enhanced medical protocol").
+Minutes played is an **independent** check on that: a player with 2,000+ minutes was demonstrably
+available whatever Transfermarkt says. Of players with no injury record, **~37%** clear that bar,
+and the rate is near-identical across leagues (**34%, 39%, 37%, 36%**) — so this signal is **not**
+distorted by reporting coverage, which is precisely what makes it usable where the injury records
+are not.
+
+Combining both, what is actually knowable about a player's availability:
+
+| League | Knowable |
+|---|---|
+| Championship | 84% |
+| League One | 64% |
+| League Two | 58% |
+| **National League** | **49%** |
+
+The unknown share climbs down the pyramid — exactly where this club recruits.
+
+**Four reasons for the reversal:**
+
+1. **Roughly half of National League targets are unknowable.** Any automatic score assigns them a
+   number that is not evidence. There is no version of the formula that fixes this, because the
+   input does not exist.
+2. **The bias correlates with league.** It therefore corrupts precisely the cross-league
+   comparison the platform exists to perform: the dimension would systematically say something
+   different about a Championship player and a National League player for reasons that have
+   nothing to do with either player.
+3. **The club defines no elite threshold for Medical.** Under the club's own 1–5 rubric, 4 and 5
+   are defined by reference to an elite threshold; Medical & Durability lists minimum requirements
+   only. An automatic score therefore **cannot discriminate upward at all** — the best it can
+   honestly do is 3, which is not a ranking.
+4. **Medical risk is a gate, not a rank.** Real recruitment shortlists on ability and then
+   medically screens the shortlist. Nobody ranks thousands of players by injury risk, because the
+   question is "is there a problem with this one?", not "who is the 400th most durable?".
+
+#### What Decision 11 was, and why it was abandoned
+
+Decision 11 (agreed 2026-08-11, provisional from the day it was written) kept the automatic band
+but capped it at 3.0, so that a missing injury record read as neutral rather than favourable. It
+was a response to the same underlying finding recorded here — Transfermarkt's injury reporting
+thins down the pyramid, and because Performance and Physical are scored *within league* while
+Medical was scored on an absolute scale, the reporting gap did not cancel out and the dimension
+rewarded obscurity. The cap removed the reward but kept the deeper problem: it still emitted a
+number for players about whom nothing was known, and because it could never exceed 3.0 every
+player without a recorded injury history landed on the identical band — it could only ever mark
+players down, never tell two acceptable players apart. Decision 12 removes the number instead of
+flattening it.
+**This history is retained deliberately** — the guards, the coverage checks and the "not known"
+labelling in this design exist because of what Decision 11 found, and deleting the record would
+leave them looking unmotivated.
+
+**Screening criteria act as caps.** The assessor records each `screening` criterion as pass/fail.
+Any failure raises an explicit `medical_screening_failed` flag and caps the band the assessor
+entered at **2.0**, mirroring the club's deviation protocol ("requires independent orthopedic
+assessment", "triggers enhanced medical protocol"). This is a club rule constraining a human
+judgement, not a score generated from data — nothing here computes a band.
 
 The flag is raised **separately from the existing veto**, deliberately. `VETO_BAND = 2.0` and
 the existing test is `band < 2.0`, so a band capped *at* 2.0 does not trip it. Rather than
@@ -240,13 +317,95 @@ never remove them from any list.
 
 ### Override
 
-Either band may be overridden by an authorised user. An override requires a **mandatory
-reason**, and stores the original computed value, the new value, the author and the timestamp.
+The Psychological band may be overridden by an authorised user: an override requires a
+**mandatory reason**, and stores the computed mean, the new value, the author and the timestamp.
 The player detail shows overridden bands as such.
+
+The Medical band has **nothing to override** — it was a person's judgement to begin with. A
+different judgement is a new assessment, submitted and signed off through §11, with both
+retained and attributed.
 
 ---
 
-## 6. Transparency: what the page must tell the user
+## 6. Where the information appears
+
+Injury history and availability are **player facts, not scout workflow.** A director asking why a
+target is being pushed, and an analyst reading a shortlist, both need the injury record; neither
+will ever open an assessment form. So the same evidence appears in **two** places:
+
+| Place | Who sees it | Behaviour |
+|---|---|---|
+| **The player profile** | Everyone — analysts, directors, recruiters | **Read-only.** No assessment controls |
+| **The assessment page** | `scout` and `medical` roles | Shown **alongside the form**, so the assessor judges with the evidence in front of them |
+
+Neither copy is a summary of the other; both render the same evidence panel.
+
+### The evidence panel
+
+1. **Availability %** for the window, with the window stated (§4).
+2. **Total matches missed** through injury in the window.
+3. **The injury table** — one row per spell: type (raw Transfermarkt text), category, date from,
+   date until, days out, matches missed, and **whether the spell falls inside the scoring
+   window**. A spell outside the window is shown, greyed, not hidden — a scout wants the history
+   even when the figure does not count it.
+4. **Minutes played**, as the independent check on the injury record (Decision 10), not as a
+   component of availability.
+5. **The league coverage warning** — how much an empty injury record is worth in *this player's*
+   league, using the Decision 12 figures. A blank record in the Championship and a blank record in
+   the National League are different statements and must not look identical.
+6. **Provenance on every row** — scraped versus hand-entered, by whom, and when.
+
+**Designed, not implemented.** The collector, the storage and the availability function exist; the
+panel does not.
+
+---
+
+## 7. Workflow
+
+1. A recruiter finds a player in the Players list.
+2. He opens the **player profile** — performance, physical, injury history, availability, and the
+   league coverage warning.
+3. He clicks **Assess**. The button is visible only to `scout` and `medical` roles.
+4. The form shows the club's criteria **for that player's position**: the Psychological bullets,
+   each scored 1–5; and a Medical panel carrying the evidence panel of §6 plus the club's
+   per-position medical requirement checklist.
+5. The scout saves. The assessment is **submitted**. It does **not** score.
+6. The Head of Recruitment reviews it and **signs it off**. Now it scores.
+7. The profile shows the assessed composite, who assessed it, who approved it, and both dates.
+
+---
+
+## 8. Known defects in the injury evidence
+
+Both are recorded here because this evidence is about to be put in front of people who will act
+on it.
+
+### D1 — Overlapping injury spells are double-counted. **Blocking.**
+
+Transfermarkt lists concurrent diagnoses as separate rows. Charlie Wyke carries "Ankle injury"
+and "Broken leg" **both** running 26 Oct 2024 → 30 Jan 2026, **462 days and 64 matches each**.
+Summing the rows inflates the total: he reads as **128 matches missed against an actual 64**.
+
+Scale: **73 spells across 54 players — 5% of those with an injury record.** It is not evenly
+spread: it bites hardest in the severe cases, because concurrent diagnoses are exactly what
+happens in a serious injury. The players it distorts are the players the dimension exists to
+identify.
+
+**Fix: merge overlapping date ranges before counting days and matches.** This **must be fixed
+before this evidence is displayed to scouts** — a scout shown "128 matches missed" for a player
+who missed 64 has been actively misinformed, which is worse than showing him nothing.
+
+### D2 — "Never injured" and "never checked" remain partly indistinguishable
+
+A player with no injury rows may have had a clean two seasons, or may simply never have been
+covered. The minutes cross-check resolves roughly **37%** of them — 2,000+ minutes is direct
+evidence of availability regardless of what was reported. **The remainder is genuinely unknown
+and must be labelled as such, never as clean.** Decision 12 removes the scoring harm (nothing is
+scored from it any more) but not the display obligation.
+
+---
+
+## 9. Transparency: what the page must tell the user
 
 **This is a hard requirement, not a nice-to-have.** Every assumption, caveat and coverage limit
 behind the scores in this design must be shown to the user, on the page — not left in this
@@ -256,35 +415,44 @@ between meetings, so a wall of text fails the requirement as surely as saying no
 The page must disclose at least the following, each as a short, plain-English line — no jargon,
 no statistics vocabulary:
 
-1. **Almost every player scores the same on Medical, and that is deliberate.** Under Decision 11
-   the band is capped at 3.0, so a player with no injury record is *neutral*, not rewarded —
-   because in the lower leagues an empty injury record usually means nobody recorded it, not
-   that the player was never hurt. Only the **77 players** with a heavy injury history are
-   marked down. The dimension is
-   designed to flag the injury-prone, not to separate healthy players from each other.
-2. **Where injury data comes from and who it misses.** Transfermarkt, English leagues only.
-   Coverage: Championship 98%, League One 95%, League Two 96%, National League 92%; Premier
-   League 2 16%, Scottish Premiership 7%, Scottish Championship 3%. Outside the English leagues,
-   a scout must enter it by hand or the player has no medical score.
-3. **What "availability" counts.** Matches missed through injury, over the last two seasons,
+1. **The Medical score is a person's judgement, not a calculation.** A member of medical staff
+   scored this player against the club's requirement checklist. No number on this page was turned
+   into that score by the platform.
+2. **The injury data informs that judgement; it never determines it.** Availability, matches
+   missed, days out and the injury table are shown to the assessor as evidence. They are not added
+   up, weighted, or mapped to a band.
+3. **How much a blank injury record is worth depends on the league.** Share of players with an
+   injury record: Championship 74%, League One 39%, League Two 32%, National League 18%; Premier
+   League 2 4%, Scottish Premiership 5%, Scottish Championship 1%. (Share linked to Transfermarkt
+   at all: 98%, 95%, 96%, 92%; PL2 16%, Scottish Premiership 7%, Scottish Championship 3%.) Empty
+   means "we have nothing" far more often at the bottom of the pyramid than at the top.
+4. **What is actually knowable**, once minutes played is used as a cross-check: Championship 84%,
+   League One 64%, League Two 58%, National League 49%. About half of National League targets
+   cannot be established either way — say so, do not fill the gap.
+5. **What "availability" counts.** Matches missed through injury, over the last two seasons,
    against a 92-match window. A fit player who simply was not picked is **not** penalised — he
    counts as fully available.
-4. **What it deliberately does not use.** Minutes played was rejected as a measure: 73% of
-   players would fall below the club's 60% bar on minutes alone, which reflects squad rotation
-   rather than fitness.
-5. **What the injury categories do and do not affect.** Illness, knocks and unspecified entries
+6. **What minutes played is for.** It is not part of availability (73% of players would fall below
+   the club's 60% bar on minutes alone, which reflects squad rotation rather than fitness). It is
+   shown as an independent check: 2,000+ minutes is proof of availability whatever the injury
+   record says, and that check behaves the same in every league (34%, 39%, 37%, 36%).
+7. **What the injury categories do and do not affect.** Illness, knocks and unspecified entries
    land in "other". Category never changes the availability figure, which counts matches missed
    regardless. Categories matter only for the club's specific screening criteria.
-6. **Where the 1–5 scale comes from.** 60% availability scores 3.0 because that is the club's own
-   stated minimum standard; 100% scores 5.0. Nothing in the scale is invented.
-7. **A known blind spot.** A player who joined part-way through the window is measured against
-   the full 92 matches, which understates his availability. Only affects players who were also
-   injured; the manual override exists for it.
-8. **Psychological is entirely human judgement.** There is no data behind it — it is the scout's
-   assessment against the club's own criteria for that position.
-9. **Nothing here excludes a player.** Every flag is advisory, consistent with the rest of the
-   platform.
-10. **Every figure shows its provenance and its date** — scraped versus hand-entered, who entered
+8. **Where the 1–5 scale comes from.** It is the club's own rubric — 1 Unacceptable, 2 Below
+   Standard, 3 Meets Standard, 4 Above Standard, 5 Elite. For Medical the club has defined
+   minimum requirements but **no elite threshold**, so 4 and 5 have nothing to be measured
+   against and 3 is the practical ceiling. Nothing in the scale is invented.
+9. **A known blind spot.** A player who joined part-way through the window is measured against
+   the full 92 matches, which understates his availability. It only affects players who were also
+   injured, and the spells behind the figure are shown so a reader can see it.
+10. **"No injuries recorded" is not the same as "no injuries".** Where the platform cannot tell,
+    it says "not known" rather than showing a clean record (§8, D2).
+11. **Psychological is entirely human judgement.** There is no data behind it — it is the scout's
+    assessment against the club's own criteria for that position.
+12. **Nothing here excludes a player.** Every flag is advisory, consistent with the rest of the
+    platform.
+13. **Every figure shows its provenance and its date** — scraped versus hand-entered, who entered
     it, and when.
 
 **Implementation note.** These belong on the page itself, not buried in a separate document: a
@@ -293,10 +461,15 @@ figures they qualify. Detailed UI layout is for the implementation plan, not thi
 
 ---
 
-## 7. `assessed_composite`
+## 10. `assessed_composite`
 
-Not a new formula. The existing `_composite()` in `model/scorecard.py` called with a longer
-dimension list — weighted average over the dimensions present, divided by the weight present.
+**Mechanism unchanged; both inputs are now human.** Not a new formula: the existing `_composite()`
+in `model/scorecard.py` called with a longer dimension list — weighted average over the dimensions
+present, divided by the weight present.
+
+`assessed_composite` is **NULL unless both** Psychological **and** Medical have a **signed-off**
+assessment for that (player, competition, season). Draft and submitted assessments are visible on
+the profile, marked pending, and never reach it (Decision 9, §11).
 
 | Composite | Dimensions | Outfield weight | Role |
 |---|---|---|---|
@@ -305,28 +478,41 @@ dimension list — weighted average over the dimensions present, divided by the 
 | `assessed_composite` | + Psychological + Medical | **100%** | Opt-in, assessed players only |
 
 Worked example, a League One winger with Performance 4.0, Physical 3.5, Financial 3.0,
-Resale 4.0, Psychological 3.8, and Medical **3.0** (the Decision 11 neutral band — no injury
-history):
+Resale 4.0, Psychological 3.8 (the mean of his scored criteria), and Medical **3.0** — a
+**scout-entered** band, the club's "Meets Standard", signed off by the Head of Recruitment. It is
+*not* computed from his injury record; the same 3.0 could sit beside a clean record or an unknown
+one, and the profile shows which.
 
-| Composite | Weighted sum | ÷ weight present | Result | Measured |
-|---|---|---|---|---|
-| objective | 2.4091 | 0.6364 | **3.79** | 64% |
-| full | 2.8636 | 0.7727 | **3.71** | 77% |
-| assessed | 3.6182 | 1.0000 | **3.62** | 100% |
+Outfield weights are the club's own numbers normalised by their 1.10 sum (`DIMENSION_WEIGHTS` in
+`model/club_framework.py`): Performance 0.40/1.10 = 0.3636, Physical 0.2727, Financial 0.0909,
+Resale 0.0455, Psychological 0.0909, Medical 0.1364.
 
-A player with no market value (Scottish/PL2) has Financial and Resale absent, so the same
-assessment yields **3.66 at 86% measured**. Renormalisation handles it and the Measured %
-column keeps the difference visible — the mechanism already used for missing physical data.
+| Composite | Working | Weighted sum | ÷ weight present | Result | Measured |
+|---|---|---|---|---|---|
+| objective | 4.0×0.3636 + 3.5×0.2727 | 2.4091 | 0.6364 | **3.79** | 64% |
+| full | + 3.0×0.0909 + 4.0×0.0455 | 2.8636 | 0.7727 | **3.71** | 77% |
+| assessed | + 3.8×0.0909 + 3.0×0.1364 | 3.6182 | 1.0000 | **3.62** | 100% |
 
-**Why this is safe:** the default ranking never includes the scout dimensions, so shipping
-this moves nothing. Under Decision 11 the Medical band spans 1.0–3.0, so its effect on this
-player's composite runs from 3.35 to 3.62 — a **0.27 band** swing, and it only ever pulls a
-player *down* from the neutral 3.0. An unassessed player is still absent from the assessed
-view rather than ranked badly within it (Decision 9).
+(2.4091 ÷ 0.6364 = 3.786 → **3.79**; 2.8636 ÷ 0.7727 = 3.706 → **3.71**; 3.6182 ÷ 1.0000 =
+**3.62**. The Medical band is unchanged at 3.0, so these figures are unchanged from the previous
+revision — only the *origin* of the 3.0 has changed.)
+
+A player with no market value (Scottish/PL2) has Financial and Resale absent: sum 3.6182 − 0.4545
+= 3.1636, weight 1.0000 − 0.1364 = 0.8636, giving **3.66 at 86% measured**. Renormalisation
+handles it and the Measured % column keeps the difference visible — the mechanism already used
+for missing physical data.
+
+**Why this is safe:** the default ranking never includes the scout dimensions, so shipping this
+moves nothing. In practice the Medical band spans 1.0–3.0 (§5: the club has defined no elite
+threshold), so its effect on this player's composite runs from 3.35 to 3.62 — a **0.27** swing.
+2.8636 + 0.3455 + 1.0×0.1364 = 3.3455 → **3.35**; at 3.0 it is 3.6182 → **3.62**. Were the club to
+define an elite threshold and a 5.0 become scoreable, the top of that range would be
+2.8636 + 0.3455 + 5.0×0.1364 = 3.8909 → **3.89**. An unassessed player is still absent from the
+assessed view rather than ranked badly within it (Decision 9).
 
 ---
 
-## 8. Users and roles
+## 11. Users, roles and sign-off
 
 Authentication is required because an unattributed scout rating has little value and a medical
 override must be traceable to a person.
@@ -338,33 +524,47 @@ override must be traceable to a person.
 
 | Role | Permissions |
 |---|---|
-| `scout` | Create Psychological assessments; view everything |
-| `medical` | Create Medical assessments and overrides; manual injury entry |
-| `head_of_recruitment` | Both, plus full assessment history |
+| `scout` | Create and submit Psychological assessments; view everything |
+| `medical` | Create and submit Medical assessments; manual injury entry |
+| `head_of_recruitment` | Both, plus **sign-off** and full assessment history |
 | `admin` | Manage users |
 
-**Latest-per-role wins.** Psychological takes the most recent `scout` assessment; Medical the
-most recent from a `medical`-capable user. Nothing is deleted — prior assessments remain
-visible and attributed, so disagreement is on screen rather than averaged away.
+### Sign-off — **provisional, pending the owner's discussion with the recruitment team**
 
-This deliberately avoids an approval workflow. A sign-off state machine can be added later
-without changing the scoring path.
+This replaces the earlier latest-per-role rule, under which the most recent assessment for a role
+simply won. That rule gave a junior scout's assessment authority over a senior's purely by being
+newer, and with Medical now a human judgement too (Decision 12) *both* dimensions would have been
+decided by recency. The model below is written as the intended design, but it is **not settled**
+— the club's recruitment team may want something else, and it is an open question in §19.
+
+**Assessment states: `draft` → `submitted` → `signed_off`.**
+
+- **Only a signed-off assessment scores.** Draft and submitted assessments are visible on the
+  player profile, clearly marked **pending**, and never reach `assessed_composite`.
+- **Multiple scouts may submit** an assessment for the same player, dimension, competition and
+  season. The Head of Recruitment marks **one** authoritative by signing it off.
+- **All submissions are retained and attributed.** Nothing is deleted or averaged away, so
+  disagreement between two scouts is visible on the profile rather than silently resolved.
+- Signing off records the approver and the timestamp alongside the original author and date.
 
 ---
 
-## 9. Data model
+## 12. Data model
 
-One Alembic migration.
+One Alembic migration. `player_injuries` is **already built and migrated**; the rest is designed.
 
 **`users`** — id, username (unique), full_name, role, password_hash, is_active, created_at.
 
 **`scout_assessments`** — id, player_id, competition_id, season_id, dimension
-(`Psychological` | `Medical Risk`), author_id → users, `band` (the value that scores),
-`band_computed` (the value the rule produced before any override; equal to `band` when not
-overridden), `override_reason`, `screening_failed` (boolean, medical only), notes,
-status (`draft` | `complete`), created_at, updated_at.
+(`Psychological` | `Medical Risk`), author_id → users, `band` (the value that scores once signed
+off), `band_computed` (Psychological only — the mean before any override, equal to `band` when not
+overridden; **NULL for Medical, where nothing computes a band**), `override_reason`,
+`screening_failed` (boolean, medical only), notes,
+status (`draft` | `submitted` | `signed_off`), `approved_by` → users (null until signed off),
+`approved_at`, created_at, updated_at.
 Scoped to (player, competition, season) — the same triple as every other player row, and the
-same choice already made for `watchlist`.
+same choice already made for `watchlist`. **Not unique on that triple:** several scouts may hold
+submitted assessments for the same player and dimension; at most one may be `signed_off`.
 
 **`scout_criterion_scores`** — assessment_id, criterion_key, score (1–5, nullable),
 passed (boolean, nullable). Numeric for psychological, boolean for medical screening.
@@ -381,77 +581,98 @@ scheduled_games, availability_pct, `source`, `entered_by`, updated_at.
 
 ### One schema, two provenances
 
-Manual and scraped records share one table and one scoring rule; the rule never inspects
-`source`. A hand-assessed Scottish Premiership player and a scraped League One player are
-computed identically and are directly comparable. Only the **display** differs — every field
-shows its origin ("from Transfermarkt, 14 Aug 2026" vs "entered by <name>, 12 Aug 2026").
+Manual and scraped injury records share one table and one availability function; the function
+never inspects `source`. A hand-entered Scottish Premiership record and a scraped League One
+record produce the availability figure the same way and are directly comparable. Only the
+**display** differs — every field shows its origin ("from Transfermarkt, 14 Aug 2026" vs "entered
+by <name>, 12 Aug 2026"), which §6 requires on every row.
 
-This is safe specifically because the Medical band is an **absolute** rule against a fixed bar,
-not a percentile. A hand-entered value cannot shift anyone else's score. The same would not be
-acceptable for Performance or Physical, which are ranked within league peers.
+This is safe specifically because none of it is a percentile: the availability figure is an
+absolute count against a fixed window, and since Decision 12 it does not become a score at all,
+so a hand-entered record cannot shift anyone else's standing. The same would not be acceptable
+for Performance or Physical, which are ranked within league peers.
 
-For manual entry, scouts record the **summary fields the criteria test** — availability %,
+For manual entry, scouts record the **summary fields the club's criteria test** — availability %,
 injuries in the prior 12 months by category, total days out — not an injury-by-injury log.
 Same fields the scrape produces, entered in a form somebody will realistically complete.
 
 ---
 
-## 10. Modules
+## 13. Modules
 
-| Module | Purpose | Depends on |
-|---|---|---|
-| `ingest/transfermarkt_common.py` | Shared polite fetch client | — |
-| `ingest/transfermarkt_injuries.py` | Scrape + parse injuries and appearances | common |
-| `model/club_criteria.py` | The club's per-position criteria, verbatim, typed by kind | — |
-| `model/medical.py` | Availability + medical band rule | club_criteria |
-| `model/scout_scores.py` | Latest-per-role bands keyed (player, competition, season) | store |
-| `model/scorecard.py` | *Modified:* accepts `scout_bands`, emits `assessed_composite` | club_framework |
-| `model/scorecard_run.py` | *Modified:* passes scout bands, persists new columns | scout_scores |
-| `dashboard/auth.py` | Login gate, current user, role checks | store |
-| `dashboard/tabs/assessment.py` | The entry form | club_criteria, auth |
-| `admin.py` | `create-user` CLI | store |
+| Module | Purpose | Depends on | State |
+|---|---|---|---|
+| `ingest/transfermarkt_common.py` | Shared polite fetch client | — | **Built** |
+| `ingest/transfermarkt_injuries.py` | Scrape + parse injury spells | common | **Built** |
+| `store/injuries.py` | Loads scraped spells into `player_injuries` | store | **Built** |
+| `model/medical.py` | Availability figure + window (no band rule — Decision 12) | — | **Built**; needs the D1 overlap merge (§8) |
+| `model/club_criteria.py` | The club's per-position criteria, verbatim, typed by kind | — | Designed |
+| `model/scout_scores.py` | **Signed-off** bands keyed (player, competition, season) | store | Designed |
+| `model/scorecard.py` | *Modified:* accepts `scout_bands`, emits `assessed_composite` | club_framework | Designed |
+| `model/scorecard_run.py` | *Modified:* passes scout bands, persists new columns | scout_scores | Designed |
+| `dashboard/auth.py` | Login gate, current user, role checks | store | Designed |
+| `dashboard/injury_panel.py` | The §6 evidence panel, rendered on both pages | medical, store | Designed |
+| `dashboard/tabs/assessment.py` | The entry form + sign-off queue | club_criteria, auth | Designed |
+| `admin.py` | `create-user` CLI | store | Designed |
 
 `model/scout_scores.py` mirrors the interface of the existing `financial_resale` frame, which
 is why the change to `scorecard.py` is small and surgical rather than structural.
 
 ---
 
-## 11. Dashboard
+## 14. Dashboard
 
 - **Login gate** in front of the whole app; the current user and role are shown in the sidebar.
-- **New "Assessment" tab** — search a player, see their computed medical facts and injury
-  history, score the club's criteria for their position, save. Role-gated: a `scout` cannot
-  write a Medical band.
-- **Player detail** gains a scout section — the two bands, who assessed and when, criterion
-  breakdown, and the injury history table. Visible to everyone; editable per role.
-- **Players tab** gains an optional "Assessed" ranking mode: filters to assessed players and
-  ranks on `assessed_composite`, with Measured % beside every row. **Off by default.**
+- **Player detail** gains, for **everyone**: the §6 evidence panel (availability, matches missed,
+  injury table, minutes played, coverage warning, provenance), read-only; plus a scout section
+  showing the two bands, who assessed, who signed off, and when, with the criterion breakdown.
+  Submitted-but-unsigned assessments appear here marked **pending**.
+- **An "Assess" button** on the profile, visible only to `scout` and `medical` roles.
+- **New "Assessment" page** — the club's criteria for the player's position, the same evidence
+  panel beside the Medical input, save → **submitted**. Role-gated: a `scout` cannot enter a
+  Medical band.
+- **A sign-off queue** for `head_of_recruitment`: submitted assessments awaiting sign-off.
+- **Players tab** gains an optional "Assessed" ranking mode: filters to players with both
+  dimensions signed off and ranks on `assessed_composite`, with Measured % beside every row.
+  **Off by default.**
+
+None of this is built.
 
 ---
 
-## 12. Testing
+## 15. Testing
 
 All parser tests run against **saved HTML fixtures. No network access in the test suite.**
 
 - **Parsers** — injury rows including "no injuries", multi-season histories, missing "until"
-  (ongoing injury), `-` in games missed, and the header row being skipped.
+  (ongoing injury), `-` in games missed, and the header row being skipped. *(Built.)*
 - **Availability** — no injuries (→ 1.0), games missed exceeding scheduled games (clamped to
-  0.0), window filtering by season.
-- **Medical band** — the anchors (60% → 3.0, 100% → 5.0, 20% → 1.0), clamping, and the
-  screening cap at 2.0 including the case where availability alone would have scored 5.
+  0.0), window filtering by season, and an unmapped season id raising rather than silently
+  returning a short window. *(Built.)*
+- **Overlap merge (D1)** — two spells covering the same dates count once, not twice; the Charlie
+  Wyke case (462 days / 64 matches recorded twice) yields 64, not 128; partial overlaps merge to
+  the union; adjacent-but-disjoint spells still sum.
+- **Unknown vs clean (D2)** — a player with no injury rows reports "not known", never 100%
+  available; a player with 2,000+ minutes and no rows is reported as available *on the minutes
+  evidence*, labelled as such.
+- **No automatic Medical band** — there is no function mapping availability to a band, and the
+  composite path rejects a Medical band that has no `author_id`.
 - **Psychological** — mean, and that an incomplete set stays a draft and does not score.
-- **Composite** — `assessed_composite` NULL when either dimension is missing (Decision 9),
+- **Sign-off** — a `submitted` assessment does not reach `assessed_composite`; signing it off
+  does; a second submission does not displace a signed-off one; nothing is deleted.
+- **Composite** — `assessed_composite` NULL unless both dimensions are signed off (Decision 9),
   correct renormalisation with and without market value, and that `objective_composite` and
   `full_composite` are **byte-identical to their current values**.
-- **Roles** — a `scout` cannot write a Medical band; an override without a reason is rejected.
-- **Provenance** — manual and scraped records produce identical bands.
+- **Roles** — a `scout` cannot write a Medical band; only `head_of_recruitment` can sign off; a
+  Psychological override without a reason is rejected.
+- **Provenance** — manual and scraped injury records produce identical availability figures.
 - **Idempotency** — re-running the scorecard writer changes nothing.
 
-The existing 191 tests must remain green.
+The existing **301** tests must remain green.
 
 ---
 
-## 13. Error handling
+## 16. Error handling
 
 | Situation | Behaviour |
 |---|---|
@@ -459,48 +680,51 @@ The existing 191 tests must remain green.
 | Single player page fails | Logged, skipped, run continues |
 | Scrape interrupted | Resumes from checkpoint, skipping captured ids |
 | Unknown injury phrasing | Stored raw, categorised `other`, logged |
-| Player has no TM id | No scraped facts; manual entry is the only path |
-| Player has no scheduled-games constant | Criterion unscored; manual entry required |
+| Player has no TM id | No scraped evidence; the panel says so; assessment still possible |
+| Player has a TM id but no injury rows | Shown as **not known**, never as a clean record (§8, D2) |
+| Player has no scheduled-games constant | No availability figure shown; the panel says why |
+| Overlapping spells | Merged before counting (§8, D1) — must ship before the panel does |
 | Unknown position group | Assessment blocked with a clear message — never scored against no criteria |
 | Partial assessment | Stays `draft`; does not reach the composite |
+| Submitted but unsigned | Visible and marked pending; does not reach the composite |
 
 ---
 
-## 14. What does not change
+## 17. What does not change
 
 `objective_composite`, `full_composite`, the default Players ranking, the `shortlists` table
-ordering, and all 191 existing tests. `assessed_composite` is opt-in and NULL until a human
-has completed both dimensions for that player.
+ordering, and all **301** existing tests. `assessed_composite` is opt-in and NULL until a human
+has completed **and a Head of Recruitment has signed off** both dimensions for that player.
 
 ---
 
-## 15. Follow-ons (registered, not in scope)
+## 18. Follow-ons (registered, not in scope)
 
 - **R3b** — scout document upload. Uploads are an **evidence trail, never a scoring input**,
   which is what makes deferring them safe. Medical documents are special-category personal
   data under UK GDPR and need a club policy decision before storage is designed.
 - **R3c** — player-profile export.
 - Extend the injury scrape beyond the EFL if Transfermarkt ids can be resolved for
-  Scottish/PL2 players.
+  Scottish/PL2 players. Note the ceiling: only 16% / 7% / 3% of PL2 and Scottish players are
+  linked at all today, and only 4% / 5% / 1% have an injury record.
 - Scrape the appearance page for squad counts, if mid-season transfers turn out to distort
-  real assessments in practice (§4, Known limitation).
-- Sign-off workflow, if the club wants an authoritative assessment rather than latest-per-role.
+  what the panel shows in practice (§4, Known limitation).
 
 ---
 
-## 16. Open questions
+## 19. Open questions
 
-- ~~**Is a Medical dimension that awards 77% of players an identical maximum the intended
-  behaviour?**~~ **DECIDED 2026-08-11 — see Decision 11 in §5.** The band is capped at 3.0:
-  absence of injury data is neutral, never favourable. **Flagged as provisional and expected to
-  be revisited** when injury coverage improves, the club supplies its own medical records, or
-  enough manual assessments exist to score durability positively.
+- **Open — is Head of Recruitment sign-off the right model (§11)?** It is written here as the
+  design, but it is **provisional pending the owner's discussion with the recruitment team.** It
+  adds an approval step and a queue somebody has to work; a club that assesses two players a week
+  may want it, a club that assesses forty may not. The alternative previously specified
+  (latest-per-role) was rejected because it gave authority by recency alone.
 
-- **Open — no seniority in the latest-per-role rule (§8).** A junior scout's assessment supersedes
-  a senior's purely by being newer. A Head of Recruitment sign-off step would fix it, and can be
-  added later without changing how scoring works, but it adds an approval workflow.
-
-- **Open — "never injured" and "never checked" are still indistinguishable.** A player with no
-  injury rows scores as though he has a clean record. Decision 11 reduces the harm (neutral
-  rather than top marks) but does not remove it. Tracked as **R8** in `plan/BUILD_PLAN.md`, and
-  it **must be closed before the Medical dimension is wired into the scorecard.**
+- **Open — is any automatic Medical scoring worth revisiting once real scout usage exists?**
+  Decision 12 removes it on the evidence available today. Once scouts have entered a body of real
+  assessments, that body becomes something an automatic rule could be checked against — which is
+  the one thing that has never been possible. Worth asking then, on three conditions: injury
+  coverage in the lower leagues has materially improved or the club supplies its own medical
+  records; the club has defined an elite threshold for Medical, without which no rule can
+  discriminate upward; and the entered assessments show the automatic figure would have agreed
+  with the humans. **Absent all three, the answer stays no.**
