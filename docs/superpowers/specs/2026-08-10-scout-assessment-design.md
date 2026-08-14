@@ -776,16 +776,24 @@ is why the change to `scorecard.py` is small and surgical rather than structural
 
 ## 15. Dashboard
 
+> **Corrected 2026-08-14.** This section was written before Decision 16 and still carried the
+> superseded role split — an Assess button limited to `scout` and `medical`, and a rule that a
+> `scout` could not enter a Medical band. Decision 16 (§12) reversed that: **every role assesses
+> both dimensions, and sign-off is the only gated action.** The permission map in
+> `dashboard/auth.py` already implements Decision 16; the two bullets below now match it.
+
 - **Login gate** in front of the whole app; the current user and role are shown in the sidebar.
 - **Player detail** gains, for **everyone**: the §6 evidence panel (availability, matches missed,
   injury table, minutes played, coverage warning, provenance), read-only; plus a scout section
   showing the two bands, who assessed, who signed off, and when, with the criterion breakdown.
   Submitted-but-unsigned assessments appear here marked **pending**.
-- **An "Assess" button** on the profile, visible only to `scout` and `medical` roles.
+- **An "Assess" button** on the profile, visible to **any authenticated user** (Decision 16).
 - **New "Assessment" page** — the club's criteria for the player's position, the same evidence
-  panel beside the Medical input, save → **submitted**. Role-gated: a `scout` cannot enter a
-  Medical band.
-- **A sign-off queue** for `head_of_recruitment`: submitted assessments awaiting sign-off.
+  panel beside the Medical input, save → **submitted**. **Not** dimension-gated by role: every
+  role may enter both bands (Decision 16), and the assessor's role is recorded and displayed
+  beside the band rather than restricting which band they may enter.
+- **A sign-off queue** for `head_of_recruitment` and `admin`: submitted assessments awaiting
+  sign-off. Sign-off is the **only** gated assessment action.
 - **Players tab** gains an optional "Assessed" ranking mode: filters to players with both
   dimensions **assessed** (submitted or signed off) and ranks on `assessed_composite`, with
   Measured % and the status badge beside every row. **Off by default.** A separate, also-optional
