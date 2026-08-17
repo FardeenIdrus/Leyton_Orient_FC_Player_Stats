@@ -58,3 +58,6 @@ data/backups/
 
 # Club-to-Impect metric mapping (confidential club metric names + licensed Impect KPI codes)
 data/reference/impect_metric_map.csv
+
+# Generated reports: player data, regenerate rather than commit.
+data/exports/

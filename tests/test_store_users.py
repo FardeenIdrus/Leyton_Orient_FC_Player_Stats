@@ -1,6 +1,8 @@
 """Authentication against the users table. In-memory sqlite; no live Postgres, no network."""
 
 import datetime as dt
+import hashlib
+import secrets
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -44,6 +46,24 @@ def test_unknown_user_is_indistinguishable_from_a_wrong_password(engine):
     unknown = store_users.authenticate(engine, "nobody", GOOD, NOW)
     wrong = store_users.authenticate(engine, "jsmith", "the wrong passphrase", NOW)
     assert unknown.outcome == wrong.outcome == "bad_credentials"
+
+
+def test_the_unknown_user_path_still_pays_the_password_check_cost(engine, monkeypatch):
+    """Finding 1: the outcome string is identical for an unknown user and a wrong password,
+    but if the unknown-user branch skipped the hash check entirely, the RESPONSE TIME would
+    still give away which usernames exist. Pin the mechanism (verify_password is actually
+    invoked, against the fixed dummy hash) rather than a wall-clock duration -- timing
+    assertions are flaky."""
+    calls = []
+    real_verify = store_users.verify_password
+
+    def counting_verify(password, stored):
+        calls.append(stored)
+        return real_verify(password, stored)
+
+    monkeypatch.setattr(store_users, "verify_password", counting_verify)
+    store_users.authenticate(engine, "nobody", GOOD, NOW)
+    assert calls == [store_users._DUMMY_HASH]
 
 
 def test_failed_attempts_accumulate_on_the_row(engine):
@@ -92,6 +112,51 @@ def test_an_inactive_user_cannot_log_in(engine):
         user.is_active = False
         session.commit()
     assert store_users.authenticate(engine, "jsmith", GOOD, NOW).outcome == "inactive"
+
+
+def test_an_inactive_user_with_a_wrong_password_gets_bad_credentials_not_inactive(engine):
+    """Finding 2: the ORDER of the is_active and password checks matters, not just that both
+    exist. If is_active were checked first, a wrong password against an inactive account
+    would still come back 'inactive' -- telling an attacker holding nothing but a guess that
+    the account exists, even though it is deactivated. Checking the password first means a
+    wrong password against an inactive account looks identical to a wrong password anywhere
+    else."""
+    with Session(engine) as session:
+        user = session.scalar(select(User).where(User.username == "jsmith"))
+        user.is_active = False
+        session.commit()
+    result = store_users.authenticate(engine, "jsmith", "the wrong passphrase", NOW)
+    assert result.outcome == "bad_credentials"
+
+
+def test_a_stale_hash_is_upgraded_on_a_successful_login(engine):
+    """Finding 3: the needs_rehash upgrade path (store/users.py) is otherwise never reached
+    by any test, so it could be silently removed or moved without a test noticing. Build a
+    hash under non-current scrypt parameters (auth._N_MIN is in-range and cheap), log in
+    with it, and confirm the stored hash changed, still verifies the same password, and no
+    longer needs a rehash."""
+    stale_n, stale_r, stale_p = auth._N_MIN, 8, 1
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(GOOD.encode("utf-8"), salt=salt, n=stale_n, r=stale_r, p=stale_p,
+                            dklen=32, maxmem=128 * 1024 * 1024)
+    stale_hash = f"scrypt${stale_n}${stale_r}${stale_p}${salt.hex()}${digest.hex()}"
+    assert auth.verify_password(GOOD, stale_hash)
+    assert auth.needs_rehash(stale_hash)
+
+    with Session(engine) as session:
+        user = session.scalar(select(User).where(User.username == "jsmith"))
+        user.password_hash = stale_hash
+        session.commit()
+        user_id = user.id
+
+    result = store_users.authenticate(engine, "jsmith", GOOD, NOW)
+    assert result.outcome == "ok"
+
+    with Session(engine) as session:
+        user = session.scalar(select(User).where(User.id == user_id))
+        assert user.password_hash != stale_hash
+        assert auth.verify_password(GOOD, user.password_hash)
+        assert not auth.needs_rehash(user.password_hash)
 
 
 def test_change_password_stores_a_new_hash_and_clears_the_must_change_flag(engine):

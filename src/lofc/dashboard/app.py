@@ -28,16 +28,18 @@ from lofc.dashboard.controls import synced_budget, synced_min_minutes, synced_wa
 from lofc.dashboard.loaders import (
     available_seasons, get_engine, league_names, load_candidates, load_metric_values,
     load_percentiles, load_scorecards, load_scorecards_archetype, load_wage_framework,
-    max_minutes)
+    max_minutes, player_names)
 from lofc.dashboard.seasons import (
     CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_mask, season_name_for)
 from lofc.dashboard.session import require_login, sidebar_identity
+from lofc.dashboard.tabs.assess import _assess
 from lofc.dashboard.tabs.compare import _compare
 from lofc.dashboard.tabs.glossary import _glossary
 from lofc.dashboard.tabs.methodology import _methodology
 from lofc.dashboard.tabs.physical import _physical
 from lofc.dashboard.tabs.player_types import _player_types
 from lofc.dashboard.tabs.players import _kpi_strip, _players
+from lofc.dashboard.tabs.signoff import render as _signoff
 from lofc.dashboard.tabs.watchlist import _watchlist
 from lofc.dashboard.theme import LOGO, header, style
 from lofc.model import club_framework as cf
@@ -176,13 +178,17 @@ def main() -> None:
     metrics = role_metrics_for(position)
 
     _kpi_strip(pool, season_name_for(season_id), season_id, show_money)
-    (players_tab, compare_tab, watchlist_tab,
+    (players_tab, compare_tab, watchlist_tab, assess_tab, signoff_tab,
      types_tab, physical_tab, glossary_tab, method_tab) = st.tabs(
-        ["Players", "Compare", "Watchlist", "Player types", "Physical", "Glossary", "Methodology"])
+        ["Players", "Compare", "Watchlist", "Assess", "Sign-off", "Player types", "Physical",
+         "Glossary", "Methodology"])
     _players(players_tab, pool, position, percentiles, metrics, metric_values, archetype, show_money,
              contract_horizon, contract_unknown)
     _compare(compare_tab, pool, position, archetype, season_id, show_money, metric_values)
     _watchlist(watchlist_tab)
+    _assess(assess_tab, get_engine(), user, pool)
+    with signoff_tab:
+        _signoff(get_engine(), user, player_names())
     _player_types(types_tab, pool, percentiles, metrics, position)
     _physical(physical_tab)
     _glossary(glossary_tab)

@@ -8,8 +8,24 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from lofc.dashboard.loaders import _competition_name_by_id, get_engine
+from lofc.dashboard import badges
+from lofc.dashboard.loaders import _competition_name_by_id, get_engine, load_assessment_status
+from lofc.model import assessment_status
 from lofc.store import watchlist
+
+# The three-value assessment_status category maps onto the raw statuses badges.for_status
+# already renders text for, so the watchlist's badge column is never a second source of
+# wording (Rule/spec section 7.1) -- it just doesn't know a single author/approver, since
+# the aggregate can span two dimensions entered by two different people.
+_AGGREGATE_TO_RAW_STATUS = {
+    assessment_status.NOT_ASSESSED: None,
+    assessment_status.AWAITING: "submitted",
+    assessment_status.SIGNED_OFF: "signed_off",
+}
+
+
+def _badge_text(aggregate_status: str) -> str:
+    return badges.for_status(_AGGREGATE_TO_RAW_STATUS[aggregate_status]).text
 
 
 @st.dialog("Watchlist entry")
@@ -27,6 +43,9 @@ def _watchlist_entry_dialog(pid: int, cid: int, sid: int, player_name: str,
                               index=watchlist.WATCHLIST_STATUSES.index(status)
                               if status in watchlist.WATCHLIST_STATUSES else 0,
                               key="wl_dialog_status")
+    st.caption("'Scout sent' above is a note you enter yourself — it records that you asked "
+               "someone to look at this player. It is separate from the assessment status "
+               "shown in the table, which records that someone actually did.")
 
     def _close():
         st.session_state["watchlist_table_ver"] = st.session_state.get("watchlist_table_ver", 0) + 1
@@ -41,6 +60,12 @@ def _watchlist_entry_dialog(pid: int, cid: int, sid: int, player_name: str,
         watchlist.remove(get_engine(), pid, cid, sid)
         _close()
     if close_col.button("Close", key="wl_dialog_close"):
+        _close()
+
+    if st.button("Assess this player", key="wl_dialog_assess"):
+        # Same session-state handoff the profile's "Assess this player" button uses
+        # (dashboard/tabs/players.py::_scout_section), so both entry points agree.
+        st.session_state["assess_player_id"] = pid
         _close()
 
 
@@ -58,8 +83,24 @@ def _watchlist(tab) -> None:
                     "“☆ Add to watchlist” — tracked players, statuses and scout notes live here.")
             return
 
+        # Derived, never stored: joins on the same (player, competition, season) triple the
+        # profile's scout section reads, so a watchlist row and a profile row can't disagree.
+        df = assessment_status.attach(df, load_assessment_status())
+
         st.markdown("**Players the club is tracking.** Click a row to read the full note, "
                     "edit it, change the status, or remove the player.")
+        chosen = st.multiselect(
+            "Assessment status", list(assessment_status.STATUSES),
+            default=list(assessment_status.STATUSES),
+            help="Which of your targets still need a scout?")
+        df = df[df["assessment_status"].isin(chosen)].reset_index(drop=True)
+        st.caption("'Scout sent' is a note you enter — it records that you asked someone to "
+                   "look at a player. The assessment status records that someone did. They "
+                   "are deliberately separate.")
+        if df.empty:
+            st.info("No watched players match the chosen assessment status.")
+            return
+
         name_by_id = _competition_name_by_id()   # all leagues incl. Scottish/PL2 (901/902/903)
         frame = pd.DataFrame({
             "Player": df["player_name"], "Club": df["team_name"],
@@ -70,7 +111,9 @@ def _watchlist(tab) -> None:
             "Market value": (df["market_value_eur"] / 1e6).round(1),
             "Contract": pd.to_datetime(df["contract_until"], errors="coerce")
                         .dt.strftime("%m/%Y").fillna("—"),
-            "Status": df["status"], "Note": df["note"].fillna(""),
+            "Status": df["status"],
+            "Assessed": df["assessment_status"].map(_badge_text),
+            "Note": df["note"].fillna(""),
             "Added": pd.to_datetime(df["created_at"]).dt.strftime("%d %b %Y"),
             "Transfermarkt": df["tm_player_id"].map(
                 lambda t: f"https://www.transfermarkt.com/-/profil/spieler/{int(t)}"
@@ -89,6 +132,10 @@ def _watchlist(tab) -> None:
                 "Quality": st.column_config.ProgressColumn("Quality", min_value=0, max_value=100, format="%d"),
                 "Style fit": st.column_config.ProgressColumn("Style fit", min_value=0, max_value=100, format="%d"),
                 "Market value": st.column_config.NumberColumn("Market value", format="€%.1fm"),
+                "Assessed": st.column_config.TextColumn(
+                    "Assessed", help="Whether a scout has completed the Psychological and "
+                                     "Medical assessment (click the row to open the "
+                                     "assessment form). Separate from the manual 'Status'."),
                 "Note": st.column_config.TextColumn(
                     "Note", help="Preview — click the row to read or edit the full note."),
                 "Transfermarkt": st.column_config.LinkColumn(

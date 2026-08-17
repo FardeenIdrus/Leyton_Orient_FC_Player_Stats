@@ -10,6 +10,7 @@ isolation. This module is the only place those rules meet a live row.
 from __future__ import annotations
 
 import datetime
+import secrets
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -18,6 +19,16 @@ from sqlalchemy.orm import Session
 from lofc.dashboard.auth import (hash_password, lockout_state, needs_rehash,
                                  next_failure_state, password_problems, verify_password)
 from lofc.store.models import User
+
+# A fixed, never-matched hash used to burn the same ~50ms of scrypt work on the
+# unknown-user path as a real login spends verifying a wrong password. Built ONCE at
+# import time -- building it per call would double the real cost of every login attempt
+# for no benefit. Without this, `outcome` is "bad_credentials" either way but the RESPONSE
+# TIME is not: an unknown username returns instantly while a known one always pays the
+# scrypt cost, so an attacker can still enumerate accounts by timing the response even
+# though the returned outcome string is identical. Do not remove this as "dead code" --
+# its return value is discarded on purpose; it exists purely for the CPU time it costs.
+_DUMMY_HASH = hash_password(secrets.token_urlsafe(32))
 
 
 @dataclass(frozen=True)
@@ -51,7 +62,11 @@ def authenticate(engine, username: str, password: str,
     with Session(engine) as session:
         user = session.scalar(select(User).where(User.username == username))
         if user is None:
-            # No row to update, but return the same outcome as a wrong password.
+            # No row to update, but spend the same ~50ms a real password check would cost
+            # (see _DUMMY_HASH above) before returning the same outcome as a wrong
+            # password -- otherwise the outcome string matches but the response TIME
+            # gives away whether the username exists.
+            verify_password(password, _DUMMY_HASH)
             return AuthResult("bad_credentials")
 
         locked, remaining = lockout_state(user.failed_logins, user.locked_until, now)

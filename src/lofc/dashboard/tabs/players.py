@@ -11,17 +11,22 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from lofc.constrain.filters import RANK_COLUMN
+from lofc.dashboard import badges, evidence
 from lofc.dashboard.charts import PLOTLY_CONFIG, bar_chart, radar_chart
 from lofc.dashboard.labels import LABELS, _metric_source, metric_label
 from lofc.dashboard.loaders import (
-    get_engine, headline, league_names, load_scorecard_percentiles, load_trajectory,
-    season_label)
+    get_engine, headline, league_names, load_assessment_status, load_scorecard_percentiles,
+    load_scorecards, load_trajectory, season_label)
 from lofc.dashboard.seasons import (
     CONTRACT_EXPIRED, CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_data_date)
 from lofc.dashboard.theme import RED
+from lofc.model import assessment_status
 from lofc.model import club_framework as cf
 from lofc.model.score import POSITION_ROLE
 from lofc.model import scorecard as scorecard_mod
+from lofc.model import scout_scores
+from lofc.store import assessments as store_assess
 from lofc.store import watchlist
 
 
@@ -358,6 +363,9 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
                  else radar_chart([(row["player_name"], values)], chart_metrics))
         st.plotly_chart(chart, width="stretch", config=PLOTLY_CONFIG, key=f"{key_prefix}_chart")
 
+    st.divider()
+    _scout_section(get_engine(), row)
+
 
 def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, metrics: list[str],
              metric_values: pd.DataFrame, archetype: str = cf.DEFAULT_ARCHETYPE,
@@ -395,6 +403,45 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
                     f"context. Change the **Archetype** in the sidebar.")
         full_pool = pool.copy()   # keep the unfiltered pool so search can reach any player
 
+        # Assessed ranking mode: opt-in, off by default. The `else` branch below leaves the
+        # default ranking (RANK_COLUMN = objective_composite) byte-for-byte unchanged.
+        mode_col, check_col = st.columns([2, 2])
+        assessed_mode = mode_col.toggle(
+            "Rank on assessed composite", value=False,
+            help="Ranks on Performance + Physical + Psychological + Medical (86% of the "
+                 "framework's weight), and shows only players where a person has completed "
+                 "both human dimensions. Off by default — the standard ranking is unchanged.")
+        if assessed_mode:
+            # A single season is passed into _players via `pool` already scoped to it (app.py
+            # scores/ranks within one season); read it back rather than adding a parameter.
+            season_id = int(pool["season_id"].iloc[0]) if not pool.empty else None
+            assessed_col = load_scorecards(season_id)[
+                ["player_id", "competition_id", "season_id", "assessed_composite"]]
+            pool = pool.merge(assessed_col, on=["player_id", "competition_id", "season_id"],
+                              how="left")
+            # attach() must run BEFORE the signed-off filter reads the column -- the Players
+            # pool does not carry assessment_status otherwise, and the filter would KeyError.
+            pool = assessment_status.attach(pool, load_assessment_status(season_id))
+            pool = pool[pool["assessed_composite"].notna()]
+            rank_column = "assessed_composite"
+            signed_only = check_col.checkbox(
+                "Signed-off assessments only", value=False,
+                help="For presenting a shortlist formally. Off by default — an unsigned "
+                     "assessment still scores and still ranks.")
+            if signed_only:
+                pool = pool[pool["assessment_status"] == assessment_status.SIGNED_OFF]
+            # An empty list here is expected, not broken -- say so plainly rather than
+            # showing zero rows with no explanation.
+            if pool.empty:
+                st.caption("No player has both dimensions assessed yet — the assessed "
+                           "ranking is empty until a scout completes Psychological and Medical.")
+            else:
+                st.caption(f"{len(pool)} players have both human dimensions assessed. "
+                           "This is a different ranking from the default, not a filter on it.")
+        else:
+            rank_column = RANK_COLUMN
+            signed_only = False
+
         # Playing-style filter + grouping.
         types = sorted(pool["cluster_label"].dropna().unique().tolist())
         fc1, fc2 = st.columns([3, 1])
@@ -405,7 +452,7 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
                                    help="Order by playing-style group, then by composite within each group.")
         if chosen:
             pool = pool[pool["cluster_label"].isin(chosen) | pool["cluster_label"].isna()]
-        sort_cols = (["cluster_label", "objective_composite"] if group_by_type else ["objective_composite"])
+        sort_cols = (["cluster_label", rank_column] if group_by_type else [rank_column])
         pool = pool.sort_values(sort_cols, ascending=[True, False] if group_by_type else False,
                                 na_position="last").reset_index(drop=True)
 
@@ -441,10 +488,11 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
 
         table = view.rename(columns={
             "player_name": "Player", "team_name": "Club", "league": "League", "age": "Age",
-            "objective_composite": "Composite", "performance_band": "Performance",
+            rank_column: "Composite", "performance_band": "Performance",
             "physical_band": "Physical", "cluster_label": "Player type",
             "affordable_fee": "Fee in budget", "affordable_wage": "Wages in budget"})
-        composite_label = f"Composite ({archetype})" if lens else "Composite"
+        composite_label = ("Assessed composite" if assessed_mode
+                           else f"Composite ({archetype})" if lens else "Composite")
         display_cols = ["Rank", "Player", "Club", "League", "Age", "Minutes", "Composite"]
         if lens:
             display_cols.append("All-round")
@@ -455,10 +503,13 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
                              "Fee in budget", "Wages in budget"]
 
         band = lambda lbl, hlp: st.column_config.ProgressColumn(lbl, help=hlp, min_value=1, max_value=5, format="%.2f")
+        composite_help = ("Performance + Physical + Psychological + Medical (1-5) — the "
+                          "assessed ranking, opt-in.") if assessed_mode else \
+                         "The club's objective composite (1-5) — the ranking."
         col_cfg = {
             "Age": st.column_config.NumberColumn("Age", format="%.1f"),
             "Minutes": st.column_config.NumberColumn("Minutes", format="%d"),
-            "Composite": band(composite_label, "The club's objective composite (1-5) — the ranking."),
+            "Composite": band(composite_label, composite_help),
             "All-round": band("All-round", "Full-profile composite (All Metrics), for context."),
             "Performance": band("Performance", "The club-framework Performance dimension (1-5)."),
             "Physical": band("Physical", "The club-framework Physical dimension (1-5), where tracking exists."),
@@ -488,7 +539,11 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             style = table.style.apply(_tint, axis=1)
             st.caption("🟢 affordable (fee + wage in budget) · 🟠 outside budget.")
 
-        base_key = f"players_{position}_{archetype}_{show_money}_{only_qualifying}_{group_by_type}_{'|'.join(chosen)}"
+        # Byte-for-byte identical to the pre-existing key when assessed_mode is off (Rule A):
+        # the suffix only appears once the opt-in ranking mode is engaged.
+        mode_suffix = f"_{assessed_mode}_{signed_only}" if assessed_mode else ""
+        base_key = (f"players_{position}_{archetype}_{show_money}_{only_qualifying}_"
+                   f"{group_by_type}_{'|'.join(chosen)}{mode_suffix}")
         selection = st.dataframe(
             style, column_order=display_cols, hide_index=True, width="stretch", height=560,
             on_select="rerun", selection_mode="single-row", key=_selectable_key(base_key), column_config=col_cfg)
@@ -525,6 +580,68 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
                                  archetype=archetype, show_money=show_money)
         else:
             st.caption("⬆️ Click a player in the table, or search above, to open their full detail.")
+
+
+def _scout_assessment_card(entry) -> None:
+    """One assessment row rendered as a self-contained card: decision, provenance, flag,
+    notes -- the same fields and the same order everywhere an assessment appears, so a
+    single card and a side-by-side pair never disagree about what to show."""
+    band = "—" if entry.band is None else f"{entry.band:.2f}"
+    st.markdown(f"Band **{band}**")
+    st.caption(f"Entered by **{entry.author_name}** ({entry.author_role}), "
+               f"{entry.created_at:%d %b %Y}")
+    badges.render(badges.for_status(entry.status, entry.author_name, entry.approver_name,
+                                    entry.approved_at))
+    if entry.screening_failed:
+        st.warning("**A screening criterion was not met — the band above is unchanged.** "
+                   "This flag records the assessor's disagreement; it does not cap or "
+                   "alter the figure.")
+    if entry.notes:
+        st.caption(f"Notes: {entry.notes}")
+
+
+def _scout_section(engine, row) -> None:
+    """The two human bands, who entered them, who approved them, and when.
+
+    Shows EVERY assessment, not just the one that scores: two assessors who disagree must
+    both be visible, because Decision 14 accepts an unsigned assessment moving the ranking
+    only on the basis that the competing view is on the page. Where more than one exists for
+    a dimension, they render SIDE BY SIDE (frontend-design skill, spec section 16) rather
+    than collapsed to the one that scores, so the disagreement is a comparison, not a scroll.
+    """
+    st.markdown("#### Scout assessment")
+    frame = store_assess.load_for_player(engine, int(row["player_id"]),
+                                         int(row["competition_id"]), int(row["season_id"]))
+    if frame.empty:
+        badges.render(badges.for_status(None))
+        st.caption("No psychological or medical assessment has been recorded for this "
+                   "player-season.")
+    else:
+        for dimension in (scout_scores.PSYCHOLOGICAL, scout_scores.MEDICAL):
+            rows = frame[frame["dimension"] == dimension]
+            st.markdown(f"**{dimension}**")
+            if rows.empty:
+                badges.render(badges.for_status(None))
+                continue
+            entries = list(rows.itertuples())
+            if len(entries) == 1:
+                _scout_assessment_card(entries[0])
+            else:
+                st.caption(f"{len(entries)} assessments exist for this dimension, shown "
+                           "side by side. The signed-off one scores, otherwise the most "
+                           "recent submitted one.")
+                for col, entry in zip(st.columns(len(entries)), entries):
+                    with col:
+                        _scout_assessment_card(entry)
+
+    minutes = row.get("minutes")
+    evidence.render(engine, int(row["player_id"]), int(row["competition_id"]),
+                    int(row["season_id"]), int(minutes) if pd.notna(minutes) else None)
+
+    if st.button("Assess this player", key=f"assess_{row['player_id']}"):
+        # Any authenticated user may assess either dimension (Decision 16).
+        st.session_state["assess_player_id"] = int(row["player_id"])
+        st.rerun()
 
 
 def _player_options(pool: pd.DataFrame) -> tuple[list[str], dict[str, int]]:

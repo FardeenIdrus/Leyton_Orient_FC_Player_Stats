@@ -1,4 +1,4 @@
-"""Load the scraped injury CSV into Postgres.
+"""Load the scraped injury CSV into Postgres, and read it back for the evidence panel.
 
 Joins on players.tm_player_id, which the valuation stage populates. A Transfermarkt
 player we hold no metrics for is dropped rather than guessed at.
@@ -11,6 +11,10 @@ than the table already holds therefore ABORTS before the DELETE, and --allow-shr
 the deliberate human override.
 
 Run:  python -m lofc.store.injuries
+
+`load_for_player` and `COVERAGE` below are the read side, used by the evidence panel
+(`dashboard/evidence.py`). They are plain SQLAlchemy Core, matching `store/watchlist.py`,
+so they run identically on production Postgres and the sqlite used in tests.
 """
 
 from __future__ import annotations
@@ -19,10 +23,11 @@ import argparse
 from pathlib import Path
 
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 
 from lofc.config import settings
 from lofc.ingest.transfermarkt_injuries import output_path
+from lofc.store.models import PlayerInjury
 
 COLUMNS = ["player_id", "tm_player_id", "season_label", "injury_type_raw",
            "injury_category", "date_from", "date_until", "days_out", "games_missed",
@@ -31,6 +36,42 @@ COLUMNS = ["player_id", "tm_player_id", "season_label", "injury_type_raw",
 # histories only grow, so the floor is loose purely to absorb squad churn (players
 # leaving the four EFL divisions take their history out of the join with them).
 MIN_ROW_RATIO = 0.70
+
+_TABLE = PlayerInjury.__table__
+
+_PLAYER_COLUMNS = ["id", "player_id", "season_label", "injury_type_raw", "injury_category",
+                   "date_from", "date_until", "days_out", "games_missed", "source",
+                   "entered_by"]
+
+# Decision 12 / spec section 10, point 3. Measured on live data 2026-08-14.
+#   linked       -- share of the league's players matched to a Transfermarkt profile at all
+#   with_record  -- share that have at least one injury row
+#   knowable     -- share whose availability can be established either way, once minutes
+#                   played is used as the independent cross-check. None where it was not
+#                   measured for that league.
+# These are DISPLAY figures. Nothing in scoring reads them -- Decision 12 removed the
+# automatic Medical band precisely because these numbers make it unsound.
+COVERAGE: dict[int, dict[str, float | None]] = {
+    3:  {"linked": 0.98, "with_record": 0.74, "knowable": 0.84},   # Championship
+    4:  {"linked": 0.95, "with_record": 0.39, "knowable": 0.64},   # League One
+    5:  {"linked": 0.96, "with_record": 0.32, "knowable": 0.58},   # League Two
+    65: {"linked": 0.92, "with_record": 0.18, "knowable": 0.49},   # National League
+}
+
+
+def load_for_player(engine, player_id: int) -> pd.DataFrame:
+    """Every recorded spell for one player, newest first.
+
+    Returns an empty frame WITH the full column set when there are none: the caller indexes
+    into these columns to decide between "no injuries" and "not known", and a bare empty
+    frame would raise KeyError instead of rendering that distinction.
+    """
+    query = (select(*[_TABLE.c[name] for name in _PLAYER_COLUMNS])
+             .where(_TABLE.c.player_id == player_id)
+             .order_by(_TABLE.c.date_from.desc(), _TABLE.c.id.desc()))
+    with engine.connect() as conn:
+        frame = pd.DataFrame(conn.execute(query).fetchall(), columns=_PLAYER_COLUMNS)
+    return frame
 
 
 def unambiguous_players(players: pd.DataFrame) -> pd.DataFrame:

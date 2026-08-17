@@ -16,10 +16,12 @@ from lofc.config import settings
 from lofc.constrain.filters import build_candidates
 from lofc.dashboard.labels import LABELS
 from lofc.dashboard.seasons import SEASON_REF_DATE
+from lofc.model import assessment_status
 from lofc.model import club_framework as cf
 from lofc.model import metric_registry as reg
 from lofc.model import scorecard as scorecard_mod
 from lofc.model.financial_resale import financial_resale_bands
+from lofc.store import assessments as store_assess
 
 @st.cache_resource
 def get_engine():
@@ -48,6 +50,18 @@ def available_seasons() -> list[int]:
     df = pd.read_sql("SELECT DISTINCT season_id FROM player_metrics_neutral ORDER BY season_id DESC",
                      get_engine())
     return df["season_id"].astype(int).tolist()
+
+
+@st.cache_data(ttl=600)
+def player_names() -> dict[int, str]:
+    """Every player's display name, keyed by player_id, across EVERY competition and season.
+
+    The sign-off queue (spec section 16) lists submitted assessments regardless of the
+    sidebar's season/position filters -- like the watchlist, it must resolve a name for a
+    player who may sit outside whatever the sidebar currently shows.
+    """
+    df = pd.read_sql("SELECT player_id, player_name FROM player_metrics_neutral", get_engine())
+    return dict(zip(df["player_id"].astype(int), df["player_name"]))
 
 
 @st.cache_data(ttl=600)
@@ -192,6 +206,20 @@ def load_metric_values(season_id: int | None = None) -> pd.DataFrame:
     return pd.read_sql(
         f"SELECT player_id, competition_id, {', '.join(cols)} FROM player_metrics_neutral "
         f"WHERE {where}", engine)
+
+
+@st.cache_data(ttl=60)
+def load_assessment_status(season_id: int | None = None) -> pd.DataFrame:
+    """One status per assessed player-season.
+
+    A 60s TTL rather than the 600s used elsewhere: assessments change while people are
+    working, and a scout who saves an assessment and does not see the badge update for ten
+    minutes will reasonably conclude the save failed.
+    """
+    frame = store_assess.load_all(get_engine())
+    if season_id is not None and not frame.empty:
+        frame = frame[frame["season_id"] == season_id]
+    return assessment_status.per_player(frame)
 
 
 @st.cache_data(ttl=600)
