@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import create_engine
 
 from lofc.store import watchlist
-from lofc.store.models import Base, PlayerScore, PlayerSeasonMetric
+from lofc.store.models import Base, PlayerMetricNeutral, PlayerScore, PlayerSeasonMetric, Valuation
 
 
 def _full_row(table, partial: dict) -> dict:
@@ -85,6 +85,43 @@ def test_load_joins_and_survives_missing_valuation(engine):
     assert row["team_name"] == "Testville"
     assert row["performance_score"] == 80.0
     assert pd.isna(row["market_value_eur"])
+
+
+def test_load_shows_club_position_for_non_efl_player(engine):
+    # Bug: player_season_metrics only ever holds the four English leagues. A Scottish
+    # Prem/Champ or PL2 player has no row there, so joining on it alone left the watchlist's
+    # Club/Position blank for exactly those players even though their profile shows both
+    # fine (the profile reads the combined 7-league player_metrics_neutral table).
+    pd.DataFrame([{"player_id": 2, "player_name": "Test Winger",
+                   "birth_date": "2000-01-01"}]).to_sql(
+        "players", engine, index=False, if_exists="append")
+    pd.DataFrame([_full_row(PlayerMetricNeutral.__table__, {
+        "player_id": 2, "competition_id": 901, "season_id": 318,
+        "player_name": "Test Winger", "team_name": "Glasgow Testers",
+        "position_group": "Winger", "minutes": 1800.0, "rankable": True})]).to_sql(
+        "player_metrics_neutral", engine, index=False, if_exists="append")
+    watchlist.add(engine, 2, 901, 318)
+    row = watchlist.load(engine).iloc[0]
+    assert row["team_name"] == "Glasgow Testers"
+    assert row["position_group"] == "Winger"
+    # Age from birth_date at the 2025/26 season midpoint (2026-01-01) -- no valuations row
+    # exists for a non-EFL player, so this also proves the birth_date path works standalone.
+    assert row["age"] == 26.0
+
+
+def test_load_age_falls_back_to_valuation_when_birth_date_missing(engine):
+    # Test Striker (player 1, seeded with no birth_date) must still get an age from
+    # valuations.age, exactly as the profile falls back (dashboard/loaders.py).
+    pd.DataFrame([_full_row(Valuation.__table__, {
+        "player_id": 1, "competition_id": 4, "season_id": 318,
+        "position_group": "Centre Forward", "age": 24.0,
+        "market_value_eur": 500000.0, "fair_value_eur": 500000.0,
+        "undervaluation_eur": 0.0, "undervaluation_pct": 0.0,
+        "model_version": "test"})]).to_sql(
+        "valuations", engine, index=False, if_exists="append")
+    watchlist.add(engine, 1, 4, 318)
+    row = watchlist.load(engine).iloc[0]
+    assert row["age"] == 24.0
 
 
 def test_same_player_in_two_leagues_coexists(engine):

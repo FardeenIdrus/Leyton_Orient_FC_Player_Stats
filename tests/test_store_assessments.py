@@ -165,3 +165,111 @@ def test_load_all_output_flows_through_resolve_bands(engine):
     assert len(resolved) == 1
     assert resolved.iloc[0]["psychological_band"] == 4.0
     assert resolved.iloc[0]["medical_band"] == 3.0
+
+
+# --- conflicts() (Decision 17) -------------------------------------------------------
+
+
+def _save_at(engine, *, created_at: dt.datetime, updated_at: dt.datetime | None = None,
+            **overrides):
+    """Insert a row with an explicit created_at/updated_at, bypassing `save`'s server
+    defaults -- needed to control waiting_days deterministically in tests."""
+    kwargs = dict(player_id=1, competition_id=4, season_id=318,
+                  dimension=scout_scores.PSYCHOLOGICAL, author_id=1, band=4.0,
+                  status="submitted")
+    kwargs.update(overrides)
+    with Session(engine) as session:
+        row = ScoutAssessment(created_at=created_at, updated_at=updated_at or created_at,
+                              **kwargs)
+        session.add(row)
+        session.commit()
+        return row.id
+
+
+def test_conflicts_lists_a_contested_dimension_with_every_competing_assessment(engine):
+    """The queue must show BOTH sides -- the approver is choosing, not rubber-stamping."""
+    first = _save(engine, band=4.0)
+    second = _save(engine, band=2.0, author_id=2)
+    frame = store_assess.conflicts(engine)
+    assert sorted(frame["id"].tolist()) == sorted([first, second])
+    assert sorted(frame["band"].tolist()) == [2.0, 4.0]
+
+
+def test_conflicts_carries_each_authors_name_and_role(engine):
+    """Decision 16: the role is a record, displayed beside the band. Useless if not carried."""
+    _save(engine, band=4.0, author_id=1)
+    _save(engine, band=2.0, author_id=2)
+    frame = store_assess.conflicts(engine)
+    assert set(frame["author_name"]) == {"Scout One", "Head Of Rec"}
+    assert set(frame["author_role"]) == {"scout", "head_of_recruitment"}
+
+
+def test_conflicts_excludes_a_dimension_that_has_a_signed_off_assessment(engine):
+    """A signed-off assessment is never in conflict."""
+    signed = _save(engine, band=4.0)
+    store_assess.sign_off(engine, signed, approver_id=2, now=NOW)
+    _save(engine, band=2.0)
+    frame = store_assess.conflicts(engine)
+    assert frame.empty
+
+
+def test_conflicts_excludes_drafts(engine):
+    _save(engine, status="draft", band=None)
+    _save(engine, status="draft", band=None)
+    _save(engine, band=3.0)
+    frame = store_assess.conflicts(engine)
+    assert frame.empty
+
+
+def test_conflicts_reports_how_long_the_conflict_has_been_waiting(engine):
+    """Decision 17: the queue should show waiting time, so nothing sits unresolved unseen.
+    Measured from the OLDEST competing assessment's created_at."""
+    _save_at(engine, created_at=NOW - dt.timedelta(days=5), band=4.0, author_id=1)
+    _save_at(engine, created_at=NOW - dt.timedelta(days=1), band=2.0, author_id=2)
+    frame = store_assess.conflicts(engine, now=NOW)
+    assert (frame["waiting_days"] == 5).all()
+
+
+def test_conflicts_returns_an_empty_frame_with_columns_when_there_are_none(engine):
+    """Callers .groupby on this unconditionally; a bare DataFrame() would raise."""
+    frame = store_assess.conflicts(engine)
+    assert frame.empty
+    for column in ("player_id", "competition_id", "season_id", "dimension", "id", "band",
+                   "author_name", "author_role", "created_at", "waiting_days"):
+        assert column in frame.columns
+    frame.groupby(["player_id", "competition_id", "season_id", "dimension"])
+
+
+# --- sign-off recomputes the composite (Decision 17, Rule 4) -------------------------
+
+
+def test_sign_off_triggers_the_refresh(engine, monkeypatch):
+    """Rule 4: sign-off decides which assessment scores, so it must recompute the composite,
+    same as save() already does."""
+    from lofc.model import assessed_refresh
+    assessment_id = _save(engine)  # save() triggers its own refresh; not what's under test.
+
+    calls = []
+    monkeypatch.setattr(
+        assessed_refresh, "refresh_for_player",
+        lambda engine, player_id, competition_id, season_id: calls.append(
+            (player_id, competition_id, season_id)))
+    store_assess.sign_off(engine, assessment_id, approver_id=2, now=NOW)
+    assert calls == [(1, 4, 318)]
+
+
+def test_sign_off_refresh_failure_never_undoes_the_approval(engine, monkeypatch):
+    """The approval is already committed when the refresh runs; a refresh failure must not
+    roll it back or hide it."""
+    from lofc.model import assessed_refresh
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("refresh exploded")
+    monkeypatch.setattr(assessed_refresh, "refresh_for_player", boom)
+
+    assessment_id = _save(engine)
+    store_assess.sign_off(engine, assessment_id, approver_id=2, now=NOW)
+    with Session(engine) as session:
+        row = session.get(ScoutAssessment, assessment_id)
+        assert row.status == "signed_off"
+        assert row.approved_by == 2

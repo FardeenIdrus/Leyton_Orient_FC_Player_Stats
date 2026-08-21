@@ -1,8 +1,14 @@
 """Resolve many submitted assessments into one scoring band per dimension.
 
-Decision 14: a `submitted` assessment SCORES. Sign-off marks it approved and controls what
-may be exported as final; it is not a gate on ranking. A signed-off assessment still wins
-over a newer submitted one, because it is the reviewed judgement.
+Decision 17: a signed-off assessment is never in conflict, and beats any number of submitted
+ones -- signing off is a deliberate act, so among several signed-off rows the most recently
+APPROVED one is the considered revision. But two or more `submitted` assessments on the same
+dimension, with none signed off, are a conflict: nobody has decided, so nothing scores. This
+replaces the old "most recently updated submitted wins" tiebreak, which gave the final word to
+whoever saved last -- a junior scout's Friday assessment silently overriding a senior's Monday
+one, on no principle beyond recency. There is deliberately no threshold: a 3.0 and a 3.5 are
+still two people who have not agreed, and judging which gaps "matter" would put the platform
+back in the business of resolving disagreement on the user's behalf.
 
 The frame this returns is keyed the same way `financial_resale` is, so `scorecard.py`
 consumes it through the interface it already has.
@@ -14,6 +20,7 @@ import pandas as pd
 
 PSYCHOLOGICAL = "Psychological"
 MEDICAL = "Medical Risk"
+CONFLICT = "conflict"
 
 KEY = ["player_id", "competition_id", "season_id"]
 _SCORING_STATUSES = ("signed_off", "submitted")
@@ -21,21 +28,38 @@ OUTPUT_COLUMNS = KEY + ["psychological_band", "psychological_status",
                         "medical_band", "medical_status"]
 
 
-def _winner(group: pd.DataFrame) -> pd.Series:
-    """Signed-off wins; otherwise the most recently updated submitted assessment.
+def _winner(group: pd.DataFrame) -> pd.Series | None:
+    """Decision 17. Signed-off rows present -> the most recently approved one wins (no row
+    here has any other write path after sign-off, so `updated_at` IS the approval time).
+    Otherwise, exactly one submitted row scores it. Two or more submitted rows with none
+    signed off are a conflict -- returns None, and the caller records CONFLICT with no band.
 
-    A tie on both status and updated_at is broken by a stable sort, taking the
-    last row -- deterministic, not a crash, since the UI shows all submissions
-    anyway and which one wins in that exact tie is not meaningful.
+    A tie on updated_at within the signed-off pool is broken by a stable sort, taking the
+    last row -- deterministic, not a crash, and which one wins in that exact tie is not
+    meaningful since the UI shows every submission regardless.
     """
     signed = group[group["status"] == "signed_off"]
-    pool = signed if not signed.empty else group[group["status"] == "submitted"]
-    return pool.sort_values("updated_at", kind="stable").iloc[-1]
+    if not signed.empty:
+        return signed.sort_values("updated_at", kind="stable").iloc[-1]
+
+    submitted = group[group["status"] == "submitted"]
+    if len(submitted) == 1:
+        return submitted.iloc[0]
+    # Zero submitted rows cannot happen here: `group` is drawn from _SCORING_STATUSES, so
+    # every row is signed_off (handled above) or submitted -- reaching this branch with an
+    # empty `submitted` would mean `signed` was also empty, which is impossible for a
+    # non-empty group. Two or more submitted, none signed off: nobody has agreed.
+    return None
 
 
 def resolve_bands(assessments: pd.DataFrame) -> pd.DataFrame:
     """One row per (player_id, competition_id, season_id) with the band that scores for
     each dimension.
+
+    Decision 17: a contested dimension -- two or more submitted rows, none signed off --
+    yields `band = None` and `status = CONFLICT` rather than picking a side. Rule 3 downstream
+    (`assessed_refresh`) means a conflict on either dimension blocks the assessed composite
+    for that player-season, not just the contested dimension.
 
     `draft` rows never score -- they are filtered out before grouping, so no code
     path downstream ever sees one. The two dimensions are grouped and resolved
@@ -75,7 +99,12 @@ def resolve_bands(assessments: pd.DataFrame) -> pd.DataFrame:
             continue
         row = _winner(group)
         record = records.setdefault(tuple(key), dict(zip(KEY, key)))
-        record[f"{prefix}_band"] = float(row["band"]) if pd.notna(row["band"]) else None
-        record[f"{prefix}_status"] = row["status"]
+        if row is None:
+            # Decision 17: two or more submitted, none signed off -- a conflict, not a band.
+            record[f"{prefix}_band"] = None
+            record[f"{prefix}_status"] = CONFLICT
+        else:
+            record[f"{prefix}_band"] = float(row["band"]) if pd.notna(row["band"]) else None
+            record[f"{prefix}_status"] = row["status"]
 
     return pd.DataFrame(list(records.values())).reindex(columns=OUTPUT_COLUMNS)

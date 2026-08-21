@@ -7,12 +7,22 @@ after a save, so a scout could complete both dimensions, see the badge on the pr
 "Rank on assessed composite" -- and their player would still show `assessed_composite = NULL`
 and vanish from that list.
 
+Decision 17 adds a second caller: `store.assessments.sign_off` also calls this now, because
+sign-off decides WHICH of several disagreeing assessments scores -- a signed-off assessment is
+never in conflict, so approving one can turn a dimension from CONFLICT (no band) into scoring,
+or change which band wins among several signed-off rows. Without a refresh there, the badge
+would read approved while the stored number was still the one that was not approved. Both
+callers wrap this in the same try/except: the write they are protecting (the assessment save,
+or the sign-off) has already committed, so a refresh failure here is logged and never allowed
+to undo it.
+
 `refresh_for_player` closes that gap without touching the pipeline: `performance_band` and
 `physical_band` are already stored on each `player_scorecards` row, so refreshing one
 player-season needs no percentile recomputation and no metric tables. It reads those stored
-bands, resolves the scout bands via `scout_scores.resolve_bands` (never re-derives that rule),
-and calls `scorecard._composite` -- the exact function the pipeline calls -- so the two paths
-can never drift apart.
+bands, resolves the scout bands via `scout_scores.resolve_bands` (never re-derives that rule --
+a contested dimension comes back as `band=None, status=CONFLICT`, handled the same way a
+missing assessment already was), and calls `scorecard._composite` -- the exact function the
+pipeline calls -- so the two paths can never drift apart.
 
 This module writes ONLY: `psychological_band`, `medical_band`, `assessed_composite`,
 `assessed_weight_covered`, `veto`. `objective_composite` is the platform's default ranking and
@@ -35,7 +45,14 @@ _S = PlayerScorecard.__table__
 
 
 def _band(value) -> float | None:
-    return None if value is None or pd.isna(value) else float(value)
+    """Round to 2dp, matching `scorecard.py`'s `build_scorecards` (`round(float(srow[...]), 2)`).
+
+    A position with 3 psychological criteria produces means like 10/3 routinely. Without
+    this the pipeline stores 3.33 (rounded) while a save/sign-off through this module stored
+    3.3333333333333335 (not rounded), so the two paths could disagree by 0.01 at a rounding
+    boundary purely because of which one last wrote the row -- MINOR 7.
+    """
+    return None if value is None or pd.isna(value) else round(float(value), 2)
 
 
 def refresh_for_player(engine, player_id: int, competition_id: int, season_id: int) -> int:
@@ -63,9 +80,21 @@ def refresh_for_player(engine, player_id: int, competition_id: int, season_id: i
         psychological = _band(winner.get("psychological_band"))
         medical = _band(winner.get("medical_band"))
 
-    if psychological is None and medical is None:
-        # Nothing scores for this player-season (no assessment, or only drafts) -- a true
-        # no-op, not an update that writes back the same NULLs.
+    if resolved.empty:
+        # No submitted/signed-off assessment exists for EITHER dimension of this
+        # player-season (no assessment at all, or only drafts) -- a true no-op: there is no
+        # previously-written band that could be stale, so skip the write rather than
+        # clearing columns that were already NULL.
+        #
+        # Deliberately NOT `psychological is None and medical is None` (the old guard): a
+        # dimension that is contested, or a dimension that was never assessed, both resolve
+        # to `None` here -- but `resolved` is still non-empty as long as at least one
+        # dimension has a submitted/signed-off row. A player scored on Psychological alone
+        # (medical never assessed, so medical is already None) whose Psychological then goes
+        # into conflict has BOTH locals go to None on this call -- the old guard returned 0
+        # here and left the previous non-conflicted `psychological_band` on the row, stale,
+        # even though the badge now reads "conflict". The loop below is what actually clears
+        # a contested-or-absent dimension to NULL; short-circuiting on both-None skipped it.
         return 0
 
     updated = 0

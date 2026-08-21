@@ -11,6 +11,7 @@ import pandas as pd
 from sqlalchemy import and_, select
 from sqlalchemy.exc import IntegrityError
 
+from lofc.config import SEASON_REF_DATE
 from lofc.store.models import WatchlistEntry
 
 WATCHLIST_STATUSES = ["Watching", "Scout sent", "Contact agent", "Dropped"]
@@ -78,15 +79,34 @@ def load(engine) -> pd.DataFrame:
     LEFT joins on purpose: a pipeline rebuild clears the derived tables before
     refilling them, and a watched player must survive that with blanks rather
     than vanish from the list.
+
+    `player_season_metrics` only ever holds the four English leagues (Championship down
+    to National League); a watched Scottish Premiership/Championship or PL2 player has no
+    row there, so team_name/position_group joined from it alone come back blank even though
+    the same player's profile shows both fine. `player_metrics_neutral` is the combined
+    7-league table the profile itself reads from, so it is joined first and preferred via
+    COALESCE, with `player_season_metrics` kept as the fallback (it is still the only source
+    of `competition_name`, used by the dashboard only when a competition_id lookup misses).
+
+    Age likewise cannot rely on `valuations` alone -- that table is Transfermarkt-derived
+    and only covers a subset of (mostly EFL) players. As on the profile
+    (`dashboard/loaders.py::load_candidates`), age is derived primarily from
+    `players.birth_date` at the season's reference midpoint, falling back to the valuation's
+    age only when no birth date is on file.
     """
     query = """
         SELECT w.player_id, w.competition_id, w.season_id, w.note, w.status, w.created_at,
-               p.player_name, p.contract_until, p.tm_player_id,
-               m.team_name, m.position_group, m.competition_name,
+               p.player_name, p.contract_until, p.tm_player_id, p.birth_date,
+               COALESCE(n.team_name, m.team_name) AS team_name,
+               COALESCE(n.position_group, m.position_group) AS position_group,
+               m.competition_name,
                s.performance_score, s.fit_score,
-               v.market_value_eur, v.age
+               v.market_value_eur, v.age AS valuation_age
         FROM watchlist w
         LEFT JOIN players p ON p.player_id = w.player_id
+        LEFT JOIN player_metrics_neutral n
+               ON n.player_id = w.player_id AND n.competition_id = w.competition_id
+              AND n.season_id = w.season_id
         LEFT JOIN player_season_metrics m
                ON m.player_id = w.player_id AND m.competition_id = w.competition_id
               AND m.season_id = w.season_id
@@ -98,4 +118,10 @@ def load(engine) -> pd.DataFrame:
               AND v.season_id = w.season_id
         ORDER BY w.created_at DESC, w.id DESC
     """
-    return pd.read_sql(query, engine)
+    frame = pd.read_sql(query, engine)
+    frame["birth_date"] = pd.to_datetime(frame["birth_date"], errors="coerce")
+    ref_date = frame["season_id"].map(SEASON_REF_DATE)
+    dob_age = ((ref_date - frame["birth_date"]).dt.days / 365.25).round(1)
+    dob_age = dob_age.where(dob_age.between(14, 50))          # drop nonsense before using
+    frame["age"] = dob_age.where(dob_age.notna(), frame["valuation_age"])
+    return frame.drop(columns=["birth_date", "valuation_age"])

@@ -9,7 +9,7 @@
 >   read only when you need the *why* behind something).
 > - **Technical deep-dives** are in `docs/` (see the Documentation map below).
 >
-> _Last updated: 2026-08-14._
+> _Last updated: 2026-08-17._
 
 ---
 
@@ -43,7 +43,50 @@ model), not a reporting dashboard. It runs end to end via `docker compose up` +
 
 ---
 
-## Current state (2026-08-14)
+## Current state (2026-08-17)
+
+> **2026-08-17 — the scout-assessment interface is built, on the same branch
+> (`r3a0-injury-scrape`, not pushed).** Login, the assessment form, the injury/availability
+> evidence panel, status badges, the sign-off queue and watchlist integration are all live.
+> Recruitment staff sign in — accounts are created by an administrator (`python -m lofc.admin
+> create-user`); `set-password` is the only password-reset route (the `users` table holds no
+> email address, so there is no self-service or email reset — an admin resets it in person) and
+> `list-users` lists every account with its lock state — score a player against the club's own
+> Psychological and Medical criteria (Medical is still a human-entered band with the injury
+> evidence beside it, per Decision 12 — the platform never computes it), and a Head of
+> Recruitment or admin signs assessments off from a queue. The Players list gained an opt-in
+> "Rank on assessed composite" toggle, off by default. Navigation was rebuilt from `st.tabs` to
+> `st.navigation` pages (new `dashboard/session.py`), so "Assess this player" (on the profile and
+> on a watchlist row) genuinely carries the player to the Assess page instead of just switching a
+> tab.
+>
+> **Decision 17 replaced the earlier tiebreak.** The design previously said the most recently
+> submitted assessment wins when two disagree on the same dimension — that gave the final word to
+> whoever saved last, which was the *normal* case rather than the exception, since sign-off was
+> optional. The rule is now one line: **a signed-off assessment is never in conflict; two or more
+> unsigned assessments that disagree score nothing** until someone with sign-off rights decides —
+> by signing one of them off, by entering and signing off their own (pre-filled from either side,
+> changed values marked "was 4, now 2"), or by leaving it, in which case the player reads
+> "assessments conflict — not scored" (badge ⚪, grey — an honest "nobody has decided yet", not an
+> error state). Authority comes from the act of signing off, never from the role: the Head of
+> Recruitment's own entry does not outrank a scout's until it is the one signed off. Full
+> reasoning: Decision 17, `docs/superpowers/specs/2026-08-10-scout-assessment-design.md` §12.
+>
+> **Auth gaps closed alongside the login screen:** passwords are scrypt-hashed (Python stdlib
+> only, no new dependency), minimum 12 characters — length is deliberately the only rule, per
+> NIST SP 800-63B — 5 failed logins locks an account for 15 minutes, and a session expires after
+> 12 hours. **Still open: no command to deactivate a user account** — the `is_active` column
+> exists and login honours it, but flipping it today means editing the database by hand.
+>
+> **Verified: `objective_composite` (the default ranking) is unchanged — 6,573 rows, average
+> 3.029285 — and no scout input touches it;** the resolution machinery only ever writes
+> `assessed_composite`, a column the objective ranking never reads. `scout_assessments` starts
+> empty on a fresh database; nothing in the interface backfills it — it fills as staff use it.
+> **511 tests pass** (was 365).
+>
+> **Still not done:** the player-report export (R3c) and the final whole-branch review — every
+> commit on this branch was reviewed individually as it landed, but the cross-cutting pass across
+> the whole branch has not happened.
 
 > **2026-08-14 — scout-assessment foundation built, on branch `r3a0-injury-scrape` (50 commits,
 > not pushed).** Two pieces landed, both complete: **R3a-0** (Transfermarkt injury data) and
@@ -62,8 +105,11 @@ model), not a reporting dashboard. It runs end to end via `docker compose up` +
 > 2–8, which is the source document, not an error) + `users` / `scout_assessments` /
 > `scout_criterion_scores` tables + `player_injuries.entered_by` (migration `a3fd42bcb2c2`) +
 > `dashboard/auth.py` (scrypt password hashing, stdlib only, no auth dependency; role
-> permissions) + `dashboard/admin.py` (the `create-user` CLI) + `model/scout_scores.py`
-> (`resolve_bands()`: signed-off wins, else most recent submitted; drafts never score; the two
+> permissions) + `admin.py` (the `create-user` CLI — corrected from `dashboard/admin.py`,
+> the module actually lives at `src/lofc/admin.py`) + `model/scout_scores.py`
+> (`resolve_bands()`: at this point, signed-off wins, else most recent submitted — **that
+> tiebreak was replaced by Decision 17 on 2026-08-17, see above: two or more unsigned
+> assessments now score nothing until someone decides**; drafts never score; the two
 > dimensions resolve independently) + `assessed_composite` / `assessed_weight_covered` /
 > `psychological_band` / `medical_band` on `player_scorecards` (migration `5e80ab6fe191`).
 >
@@ -85,27 +131,28 @@ model), not a reporting dashboard. It runs end to end via `docker compose up` +
 > dimensions**; only sign-off is gated. The role is a record displayed beside each entry, not a
 > restriction; self-sign-off is allowed but labelled.
 >
-> **Verified state of the scoring:** `objective_composite` (the ranking) is **unchanged** — 6,573
-> rows, average **3.029285**. `assessed_composite` is **NULL for every player** —
-> `scout_assessments` is empty, because **no interface exists yet to create an assessment.**
+> **Verified state of the scoring, as of 2026-08-14:** `objective_composite` (the ranking) is
+> **unchanged** — 6,573 rows, average **3.029285**. `assessed_composite` was **NULL for every
+> player** — `scout_assessments` was empty, because **no interface existed yet to create an
+> assessment. Superseded 2026-08-17 above: the interface is now built,** though
+> `objective_composite` remains unchanged and `scout_assessments` still starts empty on a fresh
+> database.
 >
-> **NOT built, stated plainly:** the entire user interface — no login screen, no assessment
-> form, no evidence panel, no badges, no watchlist integration. That is **R3a-2**, planned but
-> not written, and it **must invoke the frontend-design skill** per spec §15. The **player report
-> export (R3c)** is also not built. **The final whole-branch review has not been run** — each of
-> the 50 commits was reviewed individually; the cross-cutting pass across the whole branch has
-> not happened.
+> **NOT built, stated at the time:** the entire user interface — no login screen, no assessment
+> form, no evidence panel, no badges, no watchlist integration. That was **R3a-2**, planned but
+> not written. **Superseded 2026-08-17 — see the note above: R3a-2 is now built.** The **player
+> report export (R3c)** and the final whole-branch review remain not done (unchanged by R3a-2).
 >
-> **New open items:** **auth gaps** — no password reset, no login rate limiting, no password
-> strength rules; all belong with the login screen (R3a-2). **S4 (show "current club") is
-> deferred until after the interface**, by the owner's decision — see the register entry below
-> for why it matters. Contract data was refreshed 11 Aug 2026: **1,363 players carry a contract
-> date — 701 expiring summer 2027, 408 in 2028, 163 in 2029.** Coverage is roughly 55% in the top
-> three English tiers, **28% National League, 2–5% Scottish/PL2 — not adequate coverage for
-> those leagues.**
+> **Open items as of 2026-08-14** (auth gaps — no password reset, no login rate limiting, no
+> password strength rules — closed by R3a-2 on 2026-08-17; see the note above). **S4 (show
+> "current club") is deferred until after the interface**, by the owner's decision — see the
+> register entry below for why it matters. Contract data was refreshed 11 Aug 2026: **1,363
+> players carry a contract date — 701 expiring summer 2027, 408 in 2028, 163 in 2029.** Coverage
+> is roughly 55% in the top three English tiers, **28% National League, 2–5% Scottish/PL2 — not
+> adequate coverage for those leagues.**
 >
 > **365 tests pass** (was 301 as of the 2026-08-11 note below; the scout-assessment branch added
-> the rest).
+> the rest — since risen to **511** with R3a-2, see the 2026-08-17 note above).
 
 > **2026-08-03 — audit + fixes.** A full metric audit (club-document fidelity, API pull, computation)
 > confirmed the framework is faithful to the club files and the composite maths is correct. It found
@@ -156,9 +203,14 @@ only to seed player identity — stable IDs, birth dates, league names — durin
   unaffected by anything below), **full** (adds the *modelled* Financial + Resale), and
   **assessed** (Performance + Physical + Psychological + Medical, 86% of outfield weight,
   excludes modelled money — Decision 15, see the 2026-08-14 note above). Psychological and
-  Medical are scout inputs: the scoring/resolution machinery is built (`model/scout_scores.py`,
-  `model/club_criteria.py`), but **`assessed_composite` is NULL for every player** until the
-  scout-assessment interface (R3a-2, not yet built) exists to enter one.
+  Medical are scout inputs, entered through the **now-built** scout-assessment interface
+  (R3a-2, 2026-08-17): the login gate, the assessment form, the evidence panel and the
+  sign-off queue (`dashboard/{session,badges,evidence,transparency}.py`,
+  `dashboard/tabs/{assess,signoff}.py`) all write through `model/scout_scores.py`'s
+  `resolve_bands()` (Decision 17: a signed-off assessment always wins; two or more unsigned
+  assessments that disagree score nothing until someone decides). `assessed_composite` starts
+  NULL on a fresh database and fills in as staff assess players; it never feeds
+  `objective_composite`, the default ranking.
 - **The old invented "Style-fit" is retired** from every live surface. The Shortlist, Player
   profile, Compare, Player-types and Watchlist all rank/show the club composite.
 - **Nobody is excluded automatically.** The club's "< 3.0 = do not proceed" / "< 2.0 = veto"
@@ -203,9 +255,10 @@ only to seed player identity — stable IDs, birth dates, league names — durin
   **1,606** feet and **1,635** heights, against 5,626 players. Market values were unaffected
   throughout (**2,526** present — that field is located by CSS selector, not by column position).
   Full incident record and recovery outcome in the Pending work register below.
-- **365 tests pass.** The dashboard renders clean. The scout-assessment foundation (schema,
-  scoring resolution, injury data) is built but its interface is not — see the 2026-08-14 note
-  above and register item R3a-2.
+- **511 tests pass** (was 365 before R3a-2). The dashboard renders clean. The scout-assessment
+  foundation (schema, scoring resolution, injury data) **and its interface** (login, assessment
+  form, evidence panel, badges, sign-off queue, watchlist integration) are both built — see the
+  2026-08-17 note above and register item R3a-2.
 
 Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
 `docs/DATA_ARCHITECTURE.md`.
@@ -323,8 +376,8 @@ loader joins on `players.tm_player_id`). **The real scrape has finished and is l
   included) or a share of the 86%-weight `assessed_composite` (Financial/Resale excluded, see
   R3a-1 in the register below). Decision 12 resolved this: Medical is now a **human-entered
   band**; this availability figure is evidence shown to the assessor, never a score by formula.
-  **The scoring machinery (`assessed_composite`) is built but not yet populated** — no interface
-  exists to enter an assessment (R3a-2, not started).
+  **The scoring machinery (`assessed_composite`) is built, and the interface to populate it
+  (R3a-2) is now also built (2026-08-17)** — see the Current state note above.
 
 Full detail: `docs/DATA_ARCHITECTURE.md` §5.
 
@@ -373,10 +426,12 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
 | R1 | **Full pipeline re-run** (`python -m lofc.pipeline`) | a clean end-to-end recompute; now covers the new scorecard stage. NB it *fetches nothing* — every ingest step skips existing files, so it is a recompute, not a refresh |
 | R2 | ✅ **Refactor `dashboard/app.py` (DONE 2026-08-10)** | 2,560 lines → **191**, split into 15 focused modules (`theme` · `labels` · `charts` · `seasons` · `loaders` · `controls` + `tabs/` one per tab), dependencies strictly one-way so there are no import cycles. **337 lines of dead code deleted** (`_club_scorecard`, `_scorecard_player_detail`, `_profile`, `_render_score_composition`, `percentile_vector`, `_dimension_metric_labels`) plus the retired Style-fit helpers `score_composition`/`load_fit_profiles` and their 3 tests. Done in verified phases against a captured behaviour snapshot: **the final output is byte-for-byte identical to before the refactor**; 191 tests passed at the time — that had grown to 301 by the 2026-08-03 audit, and stands at **365 now** (2026-08-14), after the scout-assessment branch added tests |
 | R3a-0 | ✅ **DONE (branch `r3a0-injury-scrape`, not pushed) — Transfermarkt injury data** | scraper (`ingest/transfermarkt_injuries.py`), loader (`store/injuries.py`), `player_injuries` table, `model/medical.py` availability with honest `MEASURED`/`CONFIRMED_BY_MINUTES`/`UNKNOWN` states (never a confident 1.0 for an unknown record). **3,766 injury rows for 1,176 players** loaded. See R8/R9 above for the two evidence-quality fixes made on top of this |
-| R3a-1 | ✅ **DONE (same branch) — scout-assessment foundation, 5 tasks** | `model/club_criteria.py` (club's per-position Psychological/Medical criteria, transcribed verbatim), `users`/`scout_assessments`/`scout_criterion_scores` tables (migration `a3fd42bcb2c2`), `dashboard/auth.py` (scrypt hashing) + `dashboard/admin.py` (`create-user` CLI), `model/scout_scores.py` (`resolve_bands()`), `assessed_composite`/`assessed_weight_covered`/`psychological_band`/`medical_band` on `player_scorecards` (migration `5e80ab6fe191`). Design fully settled: `docs/superpowers/specs/2026-08-10-scout-assessment-design.md` (16 decisions). **`assessed_composite` is NULL for every player — `scout_assessments` is empty, because no UI exists yet to create one.** |
-| R3a-2 | **NOT STARTED — the scout-assessment user interface** | login screen, assessment form, evidence panel (injury data + screening-criteria warnings, which warn but never override per Decision 13), badges (🟠 assessed / 🟢 signed off — colour **and** words), watchlist integration. **Must invoke the frontend-design skill** (spec §15). This is the only thing standing between the built scoring machinery and a populated `assessed_composite`. Auth gaps to close alongside it: **no password reset, no login rate limiting, no password strength rules** |
+| R3a-1 | ✅ **DONE (same branch) — scout-assessment foundation, 5 tasks** | `model/club_criteria.py` (club's per-position Psychological/Medical criteria, transcribed verbatim), `users`/`scout_assessments`/`scout_criterion_scores` tables (migration `a3fd42bcb2c2`), `dashboard/auth.py` (scrypt hashing) + `admin.py` (`create-user` CLI, at `src/lofc/admin.py`), `model/scout_scores.py` (`resolve_bands()`), `assessed_composite`/`assessed_weight_covered`/`psychological_band`/`medical_band` on `player_scorecards` (migration `5e80ab6fe191`). Design settled at the time: `docs/superpowers/specs/2026-08-10-scout-assessment-design.md` (up to Decision 16; Decision 17 followed with R3a-2). **At this point `assessed_composite` was NULL for every player and `scout_assessments` was empty — no UI existed yet to create one. Superseded by R3a-2 below, which built that UI.** |
+| R3a-2 | ✅ **DONE (2026-08-17) — the scout-assessment user interface** | login gate (`dashboard/session.py`), assessment form (`dashboard/tabs/assess.py`), evidence panel (`dashboard/evidence.py` — injury data + screening-criteria warnings, which warn but never override per Decision 13), status badges (`dashboard/badges.py`: 🟠 assessed / 🟢 signed off / ⚪ conflict — colour **and** words), a sign-off queue (`dashboard/tabs/signoff.py`) that also resolves conflicts (Decision 17, new — replaced the earlier "most recent submitted wins" tiebreak: a signed-off assessment is never in conflict, two or more unsigned ones score nothing until someone decides), watchlist integration, and an opt-in "Rank on assessed composite" toggle on the Players list. Navigation rebuilt from `st.tabs` to `st.navigation` so "Assess this player" carries the player across pages. Auth gaps closed alongside it: password strength (12-char minimum, length-only), login throttling (5 attempts / 15-minute lock), session expiry (12 hours); `set-password`/`list-users` added to `lofc.admin`. **Still no self-service or email password reset** (`users` holds no email — an admin resets in person) **and no command to deactivate a user account** (`is_active` exists and is honoured, but flipping it means editing the database by hand) |
 | R3c | **NOT STARTED — player report export** | export gated on sign-off (Decision 14: sign-off is non-blocking for scoring, but gates what may be exported as final) |
-| R3a-review | **NOT RUN — final whole-branch review** | each of the 50 commits on `r3a0-injury-scrape` was reviewed individually as it landed; the cross-cutting review across the whole branch has not happened |
+| R3a-review | **NOT RUN — final whole-branch review** | each commit on `r3a0-injury-scrape` (including R3a-2) was reviewed individually as it landed; the cross-cutting review across the whole branch has not happened |
+| R3a-gap1 | **No loan status captured anywhere** | affects how a contract date should be read (a loanee's parent-club contract is not the club he is playing for); not modelled by any table today |
+| R3a-gap2 | **Two metrics are empty for every player in every league:** `pressured_pass_pct` and `xg_buildup_p90` (0 of 9,451 `player_metrics_neutral` rows for both, verified) | StatsBomb-era leftovers with no Impect equivalent; harmless to the composite because bands renormalise over the metrics actually present, but the columns and their `DATA_ARCHITECTURE.md` entries are dead weight |
 | R4 | **Full StatsBomb retirement** (roadmap #6) | seed identity from Impect, delete the ingest + ~21 GB raw events + 22 dead all-NULL columns |
 | R5 | **Playing-style clusters: season split + move onto Impect** (roadmap #8) | the last season-mixing and last StatsBomb read; style label only, never touches the composite |
 | R6 | **Extend the Transfermarkt squad scrape to Scottish Premiership, Scottish Championship and Premier League 2** | those three leagues carry **low Transfermarkt coverage today** — 2025/26 `tm_player_id` coverage is **Premier League 2 182/1,141 (16%), Scottish Premiership 28/385 (7%), Scottish Championship 8/284 (3%)** — so almost no market value, contract-expiry data, or injury history (the injury loader only ever sees players with a `tm_player_id`, and none of the three has a `SCHEDULED_GAMES` constant for availability either way). Needs a squad-page scrape built for those competitions (`transfermarkt_efl`-equivalent); not started |
@@ -415,7 +470,10 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
 - ✅ Scout-assessment foundation, R3a-0 + R3a-1 (branch `r3a0-injury-scrape`, not pushed):
   Transfermarkt injury data, the club's Psychological/Medical criteria, `users`/
   `scout_assessments`/`scout_criterion_scores` tables, auth + scoring resolution,
-  `assessed_composite` on `player_scorecards` (schema only — see register R3a-1/R3a-2)
+  `assessed_composite` on `player_scorecards` (schema — see register R3a-1)
+- ✅ Scout-assessment interface, R3a-2 (same branch, 2026-08-17): login gate, assessment form,
+  evidence panel, status badges, sign-off queue (with Decision 17 conflict resolution),
+  watchlist integration, opt-in assessed-composite ranking — see register R3a-2
 
 **Next** (in rough priority order):
 
@@ -441,12 +499,11 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
    Verified: stored == live to 0.0, writer idempotent, 160 tests pass.
 3. **Midfield archetypes** (DM / Box-to-Box / AM) — await the club's per-archetype metric lists
    (the workbook doesn't fully specify them; not fabricated).
-4. ⚠️ **Scout-entry fields, partially done.** The foundation (R3a-0 injury data + R3a-1 club
-   criteria/tables/auth/scoring resolution) is **built** — see register R3a-0/R3a-1. **The
-   interface is not** (R3a-2, next up: login, assessment form, evidence panel, badges,
-   watchlist integration — must invoke the frontend-design skill per spec §15), so
-   `assessed_composite` is still NULL for every player. The player-report export (R3c) and the
-   final whole-branch review are also outstanding.
+4. ✅ **Scout-entry fields (DONE 2026-08-17).** Both the foundation (R3a-0 injury data + R3a-1
+   club criteria/tables/auth/scoring resolution) and the interface (R3a-2: login, assessment
+   form, evidence panel, badges, sign-off queue, watchlist integration) are built — see register
+   R3a-0/R3a-1/R3a-2. `assessed_composite` fills in as staff assess players. **Still
+   outstanding:** the player-report export (R3c) and the final whole-branch review.
 5. **Real financial models (deferred, a separate workstream):** the club's real **wage framework**
    (CSV drop-in) + a better **valuation model**. The current wage grid (±10% vs payrolls) and
    valuation regression (CV R² ~0.75, but ±40% median error within league) are honest *screening*

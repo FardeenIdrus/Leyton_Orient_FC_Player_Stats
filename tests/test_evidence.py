@@ -46,6 +46,16 @@ def test_spell_rows_preserves_provenance():
     assert frame["source"].tolist() == ["manual"]
 
 
+def test_source_labels_name_the_actual_source_not_internal_jargon():
+    """"Scraped" was internal jargon on a panel that appears in reports leaving the
+    building; the label must name the real source instead, and the two sources must
+    still read as distinct from one another."""
+    assert evidence.SOURCE_LABELS["transfermarkt"] == "Transfermarkt"
+    assert evidence.SOURCE_LABELS["manual"] == "Entered by hand"
+    assert evidence.SOURCE_LABELS["transfermarkt"] != evidence.SOURCE_LABELS["manual"]
+    assert "scraped" not in evidence.SOURCE_LABELS["transfermarkt"].lower()
+
+
 def test_availability_caption_says_measured_with_the_window():
     ev = AvailabilityEvidence(status=AvailabilityStatus.MEASURED, value=0.87)
     caption = evidence.availability_caption(ev, WINDOW)
@@ -92,3 +102,16 @@ def test_coverage_caption_handles_an_unmapped_competition():
     caption = evidence.coverage_caption(999999)
     assert caption
     assert "no coverage figure" in caption.lower()
+
+
+def test_resolve_window_returns_the_window_for_a_mapped_season():
+    assert evidence.resolve_window(318) == ("24/25", "25/26")
+
+
+def test_resolve_window_returns_none_rather_than_raising_for_an_unmapped_season():
+    """CRITICAL 1: `available_seasons()` can offer 317 (2024/25) before `_SEASON_LABELS` has
+    the season one step further back (316) that a two-season window needs -- `window_labels`
+    then raises. The player profile and the Assess page both call through here, so this must
+    come back as a plain None the caller can degrade on, not propagate the exception and take
+    the whole page down."""
+    assert evidence.resolve_window(317) is None

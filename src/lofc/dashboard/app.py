@@ -1,6 +1,6 @@
 """Leyton Orient recruitment dashboard (Streamlit) — the entry point.
 
-This module owns only the page setup, the sidebar filters and the tab wiring; everything
+This module owns only the page setup, the sidebar filters and the page wiring; everything
 else lives in a focused module beside it:
 
     theme      brand colours, page CSS, header
@@ -9,11 +9,23 @@ else lives in a focused module beside it:
     seasons    season identity + contract-expiry horizons
     loaders    every cached database read
     controls   the synced sidebar widgets
-    tabs/      one module per tab (players, compare, watchlist, player_types,
-               physical, glossary, methodology)
+    session    the login gate, current-user session, the assess-page player carry
+    tabs/      one module per page (players, compare, watchlist, assess, signoff,
+               player_types, physical, glossary, methodology)
 
-Dependencies run one way — theme/labels -> charts -> loaders -> controls -> tabs -> app —
-so the layers stay free of import cycles.
+Dependencies run one way — theme/labels -> charts -> loaders -> controls -> session ->
+tabs -> app — so the layers stay free of import cycles. `st.switch_page` needs a live
+`st.Page` object, which only `app.py` builds (it is the one module that imports every tabs/
+module); `session.register_pages`/`session.switch_to` let a tabs/ module navigate to a named
+page without importing `app.py` back, which would cycle.
+
+NAVIGATION (Part A of task 10): nine `st.tabs()` panes became nine `st.Page`s under
+`st.navigation`. The login gate is unchanged in effect -- `main()` still returns immediately
+after `require_login` yields no user, and that `return` happens BEFORE the sidebar filters,
+BEFORE the pool is built, and BEFORE `st.navigation(...)` is even constructed, so an
+unauthenticated visitor sees the sign-in form and literally nothing else: no page list, no
+filters, no data. The sidebar filters stay a single source of truth: they are computed once
+here, in `main()`, above `st.navigation(...).run()` -- never duplicated inside a page.
 
 Run via docker compose (the `dashboard` service) at http://localhost:8501.
 """
@@ -28,11 +40,11 @@ from lofc.dashboard.controls import synced_budget, synced_min_minutes, synced_wa
 from lofc.dashboard.loaders import (
     available_seasons, get_engine, league_names, load_candidates, load_metric_values,
     load_percentiles, load_scorecards, load_scorecards_archetype, load_wage_framework,
-    max_minutes, player_names)
+    max_minutes, player_context_lookup, player_names)
 from lofc.dashboard.seasons import (
     CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_mask, season_name_for)
-from lofc.dashboard.session import require_login, sidebar_identity
-from lofc.dashboard.tabs.assess import _assess
+from lofc.dashboard.session import register_pages, require_login, sidebar_identity
+from lofc.dashboard.tabs import assess as assess_page_mod
 from lofc.dashboard.tabs.compare import _compare
 from lofc.dashboard.tabs.glossary import _glossary
 from lofc.dashboard.tabs.methodology import _methodology
@@ -177,22 +189,70 @@ def main() -> None:
     pool = pool.sort_values("objective_composite", ascending=False, na_position="last").reset_index(drop=True)
     metrics = role_metrics_for(position)
 
+    # A season that has player data but no scorecards yet (e.g. the current season, freshly
+    # under way) must not read as a blank/broken page -- `ranking` degrades to a well-formed
+    # empty frame (see `loaders._attach_scorecard_meta`) rather than raising, so say why here,
+    # above every page, rather than leaving the recruiter looking at blank composite columns.
+    if ranking.empty:
+        st.info(f"**{season_name_for(season_id)} is under way, but no player has yet reached "
+                "the 450-minute minimum needed to be ranked.** Scores will appear here once "
+                "enough of the season has been played — try an earlier season in the meantime.")
+
     _kpi_strip(pool, season_name_for(season_id), season_id, show_money)
-    (players_tab, compare_tab, watchlist_tab, assess_tab, signoff_tab,
-     types_tab, physical_tab, glossary_tab, method_tab) = st.tabs(
-        ["Players", "Compare", "Watchlist", "Assess", "Sign-off", "Player types", "Physical",
-         "Glossary", "Methodology"])
-    _players(players_tab, pool, position, percentiles, metrics, metric_values, archetype, show_money,
-             contract_horizon, contract_unknown)
-    _compare(compare_tab, pool, position, archetype, season_id, show_money, metric_values)
-    _watchlist(watchlist_tab)
-    _assess(assess_tab, get_engine(), user, pool)
-    with signoff_tab:
-        _signoff(get_engine(), user, player_names())
-    _player_types(types_tab, pool, percentiles, metrics, position)
-    _physical(physical_tab)
-    _glossary(glossary_tab)
-    _methodology(method_tab, candidates, budget_eur, min_minutes)
+
+    # Each page below is a thin closure over this run's already-computed filter state (pool,
+    # position, season_id, ...) -- the SAME shared filters every page reads, none re-queried
+    # or re-widgeted per page. A page function receives `st.container()` in place of the
+    # `st.tabs()` pane the tab modules were written against; a container is a drop-in context
+    # manager for `with tab:`, so no tab module's internals needed to change for this. Page
+    # order matches the pre-existing tab order exactly (Part A.5).
+    engine = get_engine()
+
+    def _players_page():
+        _players(st.container(), pool, position, percentiles, metrics, metric_values,
+                 archetype, show_money, contract_horizon, contract_unknown)
+
+    def _compare_page():
+        _compare(st.container(), pool, position, archetype, season_id, show_money, metric_values)
+
+    def _watchlist_page():
+        _watchlist(st.container())
+
+    def _assess_page():
+        assess_page_mod.page(engine, user, pool)
+
+    def _signoff_page():
+        with st.container():
+            _signoff(engine, user, player_names(), player_context_lookup())
+
+    def _player_types_page():
+        _player_types(st.container(), pool, percentiles, metrics, position)
+
+    def _physical_page():
+        _physical(st.container())
+
+    def _glossary_page():
+        _glossary(st.container())
+
+    def _methodology_page():
+        _methodology(st.container(), candidates, budget_eur, min_minutes)
+
+    pages = {
+        "players": st.Page(_players_page, title="Players", url_path="players", default=True),
+        "compare": st.Page(_compare_page, title="Compare", url_path="compare"),
+        "watchlist": st.Page(_watchlist_page, title="Watchlist", url_path="watchlist"),
+        "assess": st.Page(_assess_page, title="Assess", url_path="assess"),
+        "signoff": st.Page(_signoff_page, title="Sign-off", url_path="sign-off"),
+        "player_types": st.Page(_player_types_page, title="Player types", url_path="player-types"),
+        "physical": st.Page(_physical_page, title="Physical", url_path="physical"),
+        "glossary": st.Page(_glossary_page, title="Glossary", url_path="glossary"),
+        "methodology": st.Page(_methodology_page, title="Methodology", url_path="methodology"),
+    }
+    # Registered BEFORE .run(): a page's own render call (e.g. "Assess this player") can
+    # trigger `session.switch_to`/`go_to_assess` while `.run()` is still executing below, so
+    # the lookup must already be in place.
+    register_pages(pages)
+    st.navigation(list(pages.values())).run()
 
     st.caption(f"Impect event data (+ SkillCorner physical), {season_name_for(season_id)} season. Player market values are "
                "real (Transfermarkt, EFL only — Scottish/PL2 have none, so those players are scouted on quality "

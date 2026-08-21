@@ -7,10 +7,16 @@ Small fixtures, no database.
 """
 
 import pandas as pd
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
 
+from lofc.model import assessed_refresh
 from lofc.model import club_framework as cf
 from lofc.model import scorecard
-from lofc.model.scorecard_run import STORED_COLUMNS, archetype_jobs, build_all
+from lofc.model import scout_scores
+from lofc.model.scorecard_run import STORED_COLUMNS, archetype_jobs, build_all, reconcile_assessed
+from lofc.store import assessments as store_assess
+from lofc.store.models import Base, Player, PlayerScorecard, User
 
 
 def _neutral():
@@ -110,3 +116,75 @@ def test_scout_bands_reach_build_scorecards_through_build_all():
     default = frame[frame["archetype"] == cf.DEFAULT_ARCHETYPE].set_index(
         ["player_id", "competition_id", "season_id"])
     assert pd.notna(default.loc[(0, 4, 318), "assessed_composite"])
+
+
+# --- reconcile_assessed (IMPORTANT 3) -------------------------------------------------
+
+
+KEY = dict(player_id=1, competition_id=4, season_id=318)
+
+
+def _assessed_engine():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(Player(player_id=1, player_name="A Player"))
+        session.add(User(id=1, username="scout1", full_name="Scout One", role="scout",
+                         password_hash="x"))
+        session.add(PlayerScorecard(
+            **KEY, position_group="Centre Back", archetype="All Metrics",
+            performance_band=4.0, physical_band=3.0,
+            objective_composite=3.57, objective_weight_covered=0.64,
+            assessed_composite=None, assessed_weight_covered=0.0,
+            veto=False, below_min_composite=False))
+        session.commit()
+    return engine
+
+
+def test_reconcile_assessed_is_a_no_op_with_no_scoring_assessments():
+    assert reconcile_assessed(_assessed_engine()) == 0
+
+
+def test_reconcile_assessed_repairs_a_composite_left_stale_by_a_swallowed_refresh_failure(monkeypatch):
+    """IMPORTANT 3, reproduced structurally: both callers of `refresh_for_player`
+    (`store.assessments.save` and `.sign_off`) swallow its failures so a committed assessment
+    is never lost -- which means a refresh CAN silently not happen, exactly as it did not for
+    players 42516 and 80945 on the live database. This is the recovery path: re-running the
+    refresh later, without anyone re-running the whole pipeline, must repair it."""
+    engine = _assessed_engine()
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("refresh exploded")
+
+    with monkeypatch.context() as m:
+        m.setattr(assessed_refresh, "refresh_for_player", boom)
+        store_assess.save(engine, **KEY, dimension=scout_scores.PSYCHOLOGICAL, author_id=1,
+                          band=4.0, notes=None, criterion_scores={}, criterion_passes={},
+                          screening_failed=False, status="submitted")
+        store_assess.save(engine, **KEY, dimension=scout_scores.MEDICAL, author_id=1,
+                          band=3.0, notes=None, criterion_scores={}, criterion_passes={},
+                          screening_failed=False, status="submitted")
+
+    with Session(engine) as session:
+        # Both assessments are on the record, but the refresh never ran -- stale, not fixed.
+        assert session.scalar(select(PlayerScorecard)).assessed_composite is None
+
+    updated = reconcile_assessed(engine)
+    assert updated == 1
+
+    with Session(engine) as session:
+        row = session.scalar(select(PlayerScorecard))
+        assert row.assessed_composite is not None
+        assert row.psychological_band == 4.0
+        assert row.medical_band == 3.0
+        # The reconcile route touches only assessed_refresh's own columns -- never the
+        # objective ranking.
+        assert row.objective_composite == 3.57
+
+
+def test_reconcile_assessed_ignores_drafts():
+    engine = _assessed_engine()
+    store_assess.save(engine, **KEY, dimension=scout_scores.PSYCHOLOGICAL, author_id=1,
+                      band=4.0, notes=None, criterion_scores={}, criterion_passes={},
+                      screening_failed=False, status="draft")
+    assert reconcile_assessed(engine) == 0

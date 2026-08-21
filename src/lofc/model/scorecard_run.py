@@ -30,12 +30,25 @@ Fully derived, so it is clear-then-insert: a re-run rebuilds the table exactly a
 re-targeting the competitions never leaves orphan rows behind. Idempotent.
 
 Run with:  python -m lofc.model.scorecard_run
+
+IMPORTANT 3: `assessed_composite` has a second write path -- `model/assessed_refresh.py`,
+triggered by `store.assessments.save` and `store.assessments.sign_off` -- that keeps a single
+player-season's stored composite in step with its assessments without waiting for this whole
+pipeline stage to re-run. Both callers of that refresh swallow its failures on purpose (the
+assessment itself must never be lost to a refresh error), which means a refresh CAN silently
+not happen, leaving a player's `assessed_composite` stale or NULL even though `resolve_bands`
+would produce a band for them right now. `--reconcile-assessed` (see `reconcile_assessed`
+below) is the recovery path for that: it re-runs the per-player refresh for every player-season
+that has a scoring assessment, cheaply, without rebuilding the rest of the table.
 """
 
 from __future__ import annotations
 
+import argparse
+
 import pandas as pd
 
+from lofc.model import assessed_refresh
 from lofc.model import club_framework as cf
 from lofc.model.financial_resale import financial_resale_bands
 from lofc.model.scorecard import build_scorecards
@@ -89,8 +102,43 @@ def build_all(neutral: pd.DataFrame, financial_resale: pd.DataFrame | None,
     return pd.concat(frames, ignore_index=True)[STORED_COLUMNS]
 
 
+def reconcile_assessed(engine) -> int:
+    """Recovery path for IMPORTANT 3: re-run `assessed_refresh.refresh_for_player` for every
+    player-season that has at least one scoring (submitted/signed_off) assessment.
+
+    A small, targeted repair, not a second scorecard rebuild: it touches only the columns
+    `assessed_refresh` already owns (psychological_band, medical_band, assessed_composite,
+    assessed_weight_covered, veto) for the player-seasons that could plausibly have drifted,
+    and never recomputes `objective_composite` or `full_composite` -- those stay exactly
+    `main()`'s to write. Safe to run at any time; a player-season already in step is simply
+    written back unchanged.
+    """
+    assessments = pd.read_sql(
+        "SELECT DISTINCT player_id, competition_id, season_id FROM scout_assessments "
+        "WHERE status IN ('submitted', 'signed_off')", engine)
+    updated = 0
+    for row in assessments.itertuples(index=False):
+        updated += assessed_refresh.refresh_for_player(
+            engine, player_id=row.player_id, competition_id=row.competition_id,
+            season_id=row.season_id)
+    return updated
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--reconcile-assessed", action="store_true",
+        help="Re-run the assessed_composite refresh for every player-season with a scoring "
+             "assessment, without rebuilding the rest of player_scorecards -- recovers from a "
+             "save/sign-off whose refresh silently failed (IMPORTANT 3).")
+    args = parser.parse_args()
     engine = get_engine()
+
+    if args.reconcile_assessed:
+        updated = reconcile_assessed(engine)
+        print(f"assessed_composite reconcile: refreshed {updated:,} player_scorecards row(s)")
+        return
+
     neutral = pd.read_sql("SELECT * FROM player_metrics_neutral", engine)
     if neutral.empty:
         raise SystemExit("player_metrics_neutral is empty: run build_neutral --write first.")

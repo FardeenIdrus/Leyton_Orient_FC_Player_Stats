@@ -61,3 +61,4 @@ data/reference/impect_metric_map.csv
 
 # Generated reports: player data, regenerate rather than commit.
 data/exports/
+cli_commands.txt

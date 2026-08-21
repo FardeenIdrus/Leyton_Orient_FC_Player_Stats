@@ -107,8 +107,33 @@ def load_scorecards(season_id: int | None = None) -> pd.DataFrame:
     return _build_scorecard_frame(season_id=season_id)
 
 
+# The columns `model/scorecard.build_scorecards` puts on each record. When zero players in
+# the requested season are rankable (e.g. a season three weeks old, still below the 450-minute
+# threshold), it returns `pd.DataFrame(records)` with `records = []` -- a frame with NO columns
+# at all, not this schema. `_attach_scorecard_meta` below restores this schema before merging,
+# the same "well-formed empty frame" principle already used by
+# `store/injuries.py::load_for_player` and `model/scout_scores.resolve_bands`.
+RAW_SCORECARD_COLUMNS = [
+    "player_id", "competition_id", "season_id", "position_group",
+    "performance_band", "physical_band", "financial_band", "resale_band",
+    "psychological_band", "medical_band",
+    "objective_composite", "objective_weight_covered",
+    "full_composite", "full_weight_covered",
+    "assessed_composite", "assessed_weight_covered",
+    "veto", "below_min_composite",
+]
+
+
 def _attach_scorecard_meta(sc: pd.DataFrame, neutral: pd.DataFrame) -> pd.DataFrame:
-    """Add player_name, team_name and league to a scorecard frame."""
+    """Add player_name, team_name and league to a scorecard frame.
+
+    `sc` can arrive completely columnless (0 rows, 0 columns) when nobody in the requested
+    season has reached the rankable-minutes threshold yet -- reindex onto the expected raw
+    schema first so the merge below (and every downstream .merge/.groupby/column access)
+    sees a well-formed empty frame instead of raising `KeyError: 'player_id'`.
+    """
+    if sc.empty:
+        sc = sc.reindex(columns=RAW_SCORECARD_COLUMNS)
     keys = ["player_id", "competition_id", "season_id"]
     meta = neutral[keys + ["player_name", "team_name"]].drop_duplicates(keys)
     sc = sc.merge(meta, on=keys, how="left")
@@ -220,6 +245,18 @@ def load_assessment_status(season_id: int | None = None) -> pd.DataFrame:
     if season_id is not None and not frame.empty:
         frame = frame[frame["season_id"] == season_id]
     return assessment_status.per_player(frame)
+
+
+@st.cache_data(ttl=600)
+def player_context_lookup() -> pd.DataFrame:
+    """position_group and minutes for every (player, competition, season) row that has
+    Impect data, unfiltered by the sidebar -- for the sign-off queue's conflict view
+    (`dashboard/tabs/signoff.py`), which needs the club's criteria list and the evidence
+    panel for a contested player-season that may sit in a different season than whatever the
+    sidebar currently shows (matches `player_names`' reasoning, same file)."""
+    return pd.read_sql(
+        "SELECT player_id, competition_id, season_id, position_group, minutes "
+        "FROM player_metrics_neutral", get_engine())
 
 
 @st.cache_data(ttl=600)

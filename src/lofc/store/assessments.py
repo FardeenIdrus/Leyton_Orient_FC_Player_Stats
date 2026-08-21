@@ -153,14 +153,97 @@ def sign_off(engine, assessment_id: int, approver_id: int,
     16) -- with three people, requiring a different approver would jam the queue, and since
     a submitted assessment already scores, blocking it would gain nothing. The display layer
     labels it '(self-approved)' so one pair of eyes and two never look identical.
+
+    Decision 17: sign-off decides WHICH assessment scores when several disagree, so it must
+    recompute the stored composite -- the same refresh `save` already triggers. Without this
+    the badge reads approved while the stored number is the one that was not approved. The
+    approval itself commits first (`with engine.begin()` above closes before the refresh
+    runs); a refresh failure below is logged, never allowed to undo the approval that already
+    landed.
     """
     with engine.begin() as conn:
-        current = conn.execute(select(_A.c.status)
-                               .where(_A.c.id == assessment_id)).scalar_one_or_none()
+        current = conn.execute(
+            select(_A.c.status, _A.c.player_id, _A.c.competition_id, _A.c.season_id)
+            .where(_A.c.id == assessment_id)).one_or_none()
         if current is None:
             raise ValueError(f"no assessment {assessment_id}")
-        if current != "submitted":
-            raise ValueError(f"assessment {assessment_id} is {current!r}, not 'submitted'")
+        status, player_id, competition_id, season_id = current
+        if status != "submitted":
+            raise ValueError(f"assessment {assessment_id} is {status!r}, not 'submitted'")
         conn.execute(_A.update().where(_A.c.id == assessment_id)
                      .values(status="signed_off", approved_by=approver_id,
                              approved_at=now))
+
+    # Local import: assessed_refresh needs store.assessments.load_all to read assessments
+    # back, and this module needs assessed_refresh to close the loop after a sign-off -- the
+    # same cycle `save` already resolves the same way; see the comment there.
+    from lofc.model import assessed_refresh
+    try:
+        assessed_refresh.refresh_for_player(engine, player_id=player_id,
+                                            competition_id=competition_id, season_id=season_id)
+    except Exception:
+        # The approval is already committed; the refresh is derived convenience. A refresh
+        # failure must never undo a sign-off that has already landed.
+        _LOG.exception("assessed_composite refresh failed for player_id=%s competition_id=%s "
+                       "season_id=%s after sign-off of assessment %s", player_id,
+                       competition_id, season_id, assessment_id)
+
+
+def conflicts(engine, now: datetime.datetime | None = None) -> pd.DataFrame:
+    """One row per assessment inside a contested (player, competition, season, dimension)
+    group -- both sides of every disagreement, not a single merged verdict, so the approver
+    can see what they are choosing between rather than rubber-stamping one side.
+
+    A dimension is contested exactly when `model.scout_scores` would resolve it to CONFLICT:
+    two or more `submitted` rows and no `signed_off` row. Drafts never participate (Rule 5)
+    and a signed-off assessment removes the whole dimension from this list (Rule 2) -- the
+    most recently approved one would simply win, which is not a conflict.
+
+    `waiting_days` is the same value repeated across every row of one conflict, measured from
+    the OLDEST competing assessment's created_at, since that is when the disagreement began --
+    not from the newest arrival, which would understate how long it has sat unresolved.
+
+    Always returns a frame with the columns below, even when there are no conflicts -- callers
+    `.groupby` on this unconditionally, and a bare empty DataFrame() has no columns to group.
+    """
+    now = now or datetime.datetime.now()
+    out_columns = ["player_id", "competition_id", "season_id", "dimension", "id", "band",
+                   "author_name", "author_role", "created_at", "waiting_days"]
+
+    author = _U.alias("author")
+    columns = ["player_id", "competition_id", "season_id", "dimension", "id", "band",
+               "status", "author_name", "author_role", "created_at"]
+    query = (select(_A.c.player_id, _A.c.competition_id, _A.c.season_id, _A.c.dimension,
+                    _A.c.id, _A.c.band, _A.c.status,
+                    author.c.full_name.label("author_name"),
+                    author.c.role.label("author_role"),
+                    _A.c.created_at)
+             .select_from(_A.join(author, author.c.id == _A.c.author_id))
+             .where(_A.c.status.in_(("submitted", "signed_off"))))
+    with engine.connect() as conn:
+        frame = _frame(conn, query, columns)
+
+    if frame.empty:
+        return pd.DataFrame(columns=out_columns)
+
+    key = ["player_id", "competition_id", "season_id", "dimension"]
+    rows: list[dict] = []
+    for _, group in frame.groupby(key):
+        if (group["status"] == "signed_off").any():
+            continue  # Rule 2: a signed-off assessment is never in conflict.
+        submitted = group[group["status"] == "submitted"]
+        if len(submitted) < 2:
+            continue  # exactly one submitted assessment -- nothing to decide.
+        waiting_days = (now - submitted["created_at"].min()).days
+        for row in submitted.itertuples():
+            rows.append({
+                "player_id": row.player_id, "competition_id": row.competition_id,
+                "season_id": row.season_id, "dimension": row.dimension,
+                "id": row.id, "band": row.band, "author_name": row.author_name,
+                "author_role": row.author_role, "created_at": row.created_at,
+                "waiting_days": waiting_days,
+            })
+
+    if not rows:
+        return pd.DataFrame(columns=out_columns)
+    return pd.DataFrame(rows, columns=out_columns)

@@ -22,6 +22,30 @@ from lofc.model.medical import (AVAILABILITY_SEASONS, AvailabilityEvidence,
                                 games_missed_in_window, window_labels)
 from lofc.store.injuries import COVERAGE, load_for_player
 
+# How each injury record's provenance is named on screen. "transfermarkt" used to render as
+# the internal-jargon "Scraped" -- accurate to how the data arrived, but not a source name a
+# reader outside the building would recognise on a panel that appears in reports. Naming the
+# actual source is both more professional and more informative (which league site, not just
+# "some scrape").
+SOURCE_LABELS = {"transfermarkt": "Transfermarkt", "manual": "Entered by hand"}
+
+
+def resolve_window(season_id: int, seasons: int = AVAILABILITY_SEASONS) -> tuple[str, ...] | None:
+    """The availability window's season labels, or None if this season is not yet mapped.
+
+    `window_labels` is deliberately loud (it raises) so a forgotten `_SEASON_LABELS` update
+    is a maintenance error that surfaces immediately, not a silently shrunk window -- see its
+    docstring. That is correct for the model layer, but a raise here would take down the
+    whole player profile for every player once the sidebar offers a season one step ahead of
+    `_SEASON_LABELS` (CRITICAL 1: `available_seasons()` already does this before the mapping
+    catches up). This is the one place that ValueError is expected and handled: the panel
+    degrades to 'no window configured' rather than crashing the page.
+    """
+    try:
+        return window_labels(season_id, seasons)
+    except ValueError:
+        return None
+
 
 def spell_rows(injuries: pd.DataFrame, window: tuple[str, ...]) -> pd.DataFrame:
     """Every spell with an `in_window` flag saying whether it counts towards the figure.
@@ -85,12 +109,23 @@ def render(engine, player_id: int, competition_id: int, season_id: int,
            minutes_played: int | None) -> None:
     """Draw the panel. Read-only everywhere it appears."""
     injuries = load_for_player(engine, player_id)
-    window = window_labels(season_id)
+    window = resolve_window(season_id)
+
+    st.markdown("#### Availability and injury record")
+
+    if window is None:
+        # CRITICAL 1: this season is not yet in `_SEASON_LABELS` (a maintenance gap, not a
+        # player-specific problem). Degrade -- no figure, no crash -- and still show whatever
+        # injury history exists, since that is real evidence regardless of the window.
+        st.warning("**No availability window is configured for this season yet**, so a "
+                   "two-season availability figure cannot be computed. The injury record "
+                   "below is shown on its own.")
+        _render_injury_table(injuries, window=None)
+        return
+
     missed = games_missed_in_window(injuries, season_id)
     ev = availability_with_evidence(injuries, missed, competition_id, minutes_played,
                                     seasons=AVAILABILITY_SEASONS, minutes_seasons=1)
-
-    st.markdown("#### Availability and injury record")
 
     # The figure, then its caveat, then the league-coverage warning -- all in one block, in
     # that order, so nothing about what the figure means is left for a footer to explain.
@@ -105,17 +140,35 @@ def render(engine, player_id: int, competition_id: int, season_id: int,
     st.markdown(availability_caption(ev, window))
     st.caption(coverage_caption(competition_id))
 
+    _render_injury_table(injuries, window=window)
+
+
+def _render_injury_table(injuries: pd.DataFrame, window: tuple[str, ...] | None) -> None:
+    """The 'Injury spells' table. `window=None` means no scored window is configured for
+    this season (CRITICAL 1) -- every spell is shown, with no in-window/out-of-window split,
+    since we have no window to judge them against."""
     st.markdown("**Injury spells**")
-    spells = spell_rows(injuries, window)
-    if spells.empty:
+    if injuries.empty:
         st.info("No injury spells on record for this player. Given the league coverage "
                 "above, treat this as an absence of evidence, not evidence of fitness.")
         return
 
+    if window is None:
+        display = injuries.assign(
+            Source=injuries["source"].map(SOURCE_LABELS).fillna(injuries["source"]),
+        )[["season_label", "injury_type_raw", "injury_category", "date_from", "date_until",
+           "days_out", "games_missed", "Source"]]
+        display.columns = ["Season", "Injury", "Category", "From", "Until", "Days out",
+                           "Matches missed", "Source"]
+        st.dataframe(display, width="stretch", hide_index=True)
+        st.caption("No scored window is configured for this season, so spells are listed "
+                   "without an in-window / out-of-window split.")
+        return
+
+    spells = spell_rows(injuries, window)
     display = spells.assign(
         Window=spells["in_window"].map({True: "In window", False: "Outside window"}),
-        Source=spells["source"].map({"transfermarkt": "Scraped",
-                                     "manual": "Entered by hand"}).fillna(spells["source"]),
+        Source=spells["source"].map(SOURCE_LABELS).fillna(spells["source"]),
     )[["season_label", "injury_type_raw", "injury_category", "date_from", "date_until",
        "days_out", "games_missed", "Window", "Source"]]
     display.columns = ["Season", "Injury", "Category", "From", "Until", "Days out",

@@ -6,6 +6,7 @@ player_scorecards.assessed_composite, so a completed assessment never reached th
 
 import datetime as dt
 
+import pandas as pd
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -179,6 +180,114 @@ def test_save_triggers_the_refresh(engine):
                       screening_failed=False, status="submitted")
     with Session(engine) as session:
         assert session.scalar(select(PlayerScorecard)).assessed_composite is not None
+
+
+def test_signing_off_recomputes_the_composite(engine):
+    """The defect this closes: sign-off decides WHICH assessment scores, so the stored
+    composite must be recomputed there. Previously the badge read approved while the number
+    was the one that was not approved."""
+    author = _save(engine, scout_scores.PSYCHOLOGICAL, 5.0)  # scout A
+    _save(engine, scout_scores.PSYCHOLOGICAL, 2.0)            # scout B -- disagreement
+    _save(engine, scout_scores.MEDICAL, 3.0)
+    assessed_refresh.refresh_for_player(engine, **KEY)
+    with Session(engine) as session:
+        row = session.scalar(select(PlayerScorecard))
+        # Two unsigned Psychological assessments disagree -- Decision 17: conflict, no band.
+        assert row.psychological_band is None
+        assert row.assessed_composite is None
+
+    store_assess.sign_off(engine, author, approver_id=1, now=dt.datetime(2026, 8, 17, 12, 0))
+
+    with Session(engine) as session:
+        row = session.scalar(select(PlayerScorecard))
+        assert row.psychological_band == 5.0
+        assert row.assessed_composite is not None
+
+
+def test_a_conflicted_dimension_leaves_the_composite_null_after_a_refresh(engine):
+    """Decision 9 plus Decision 17 together: a contested dimension has no scoring band, and
+    a missing band on either dimension means no assessed composite -- not a silent pick of
+    one of the two disagreeing scouts."""
+    _save(engine, scout_scores.PSYCHOLOGICAL, 4.0)
+    _save(engine, scout_scores.MEDICAL, 5.0)   # scout A
+    _save(engine, scout_scores.MEDICAL, 1.0)   # scout B -- disagreement, unsigned
+    assessed_refresh.refresh_for_player(engine, **KEY)
+    with Session(engine) as session:
+        row = session.scalar(select(PlayerScorecard))
+        assert row.psychological_band == 4.0
+        assert row.medical_band is None
+        assert row.assessed_composite is None
+
+
+def test_a_new_conflict_clears_the_previously_scored_band(engine):
+    """Part C (task 10): a player scored on both dimensions, then a second scout submits a
+    conflicting Psychological assessment. psychological_band and assessed_composite must both
+    go back to NULL -- not keep reading the value from before the disagreement arrived."""
+    _save(engine, scout_scores.PSYCHOLOGICAL, 4.0)
+    _save(engine, scout_scores.MEDICAL, 3.0)
+    assessed_refresh.refresh_for_player(engine, **KEY)
+    with Session(engine) as session:
+        assert session.scalar(select(PlayerScorecard)).assessed_composite is not None
+
+    store_assess.save(engine, **KEY, dimension=scout_scores.PSYCHOLOGICAL, author_id=1,
+                      band=2.0, notes=None, criterion_scores={}, criterion_passes={},
+                      screening_failed=False, status="submitted")   # a second, disagreeing scout
+    assessed_refresh.refresh_for_player(engine, **KEY)
+    with Session(engine) as session:
+        row = session.scalar(select(PlayerScorecard))
+        assert row.psychological_band is None
+        assert row.assessed_composite is None
+
+
+def test_a_conflict_on_a_dimension_never_assessed_on_the_other_side_clears_the_stale_band(engine):
+    """The exact defect Part C closes. Psychological alone has ever been assessed (single
+    submission, Medical untouched -- so `medical` already resolves to None and no composite
+    was ever produced). A second, disagreeing Psychological submission then makes BOTH
+    `psychological` and `medical` resolve to None on the same refresh call. The old guard
+    (`if psychological is None and medical is None: return 0`) treated that as a pure no-op
+    and returned before the UPDATE ran, leaving the row's `psychological_band` at its
+    earlier, no-longer-true value of 4.0 instead of clearing it to NULL."""
+    _save(engine, scout_scores.PSYCHOLOGICAL, 4.0)
+    assessed_refresh.refresh_for_player(engine, **KEY)
+    with Session(engine) as session:
+        row = session.scalar(select(PlayerScorecard))
+        assert row.psychological_band == 4.0
+        assert row.assessed_composite is None      # Decision 9: Medical untouched, no composite
+
+    _save(engine, scout_scores.PSYCHOLOGICAL, 2.0)   # a second, disagreeing scout
+    assessed_refresh.refresh_for_player(engine, **KEY)
+    with Session(engine) as session:
+        row = session.scalar(select(PlayerScorecard))
+        assert row.psychological_band is None
+        assert row.medical_band is None
+        assert row.assessed_composite is None
+
+
+def test_stored_band_is_rounded_the_same_way_the_pipeline_rounds_it(engine):
+    """MINOR 7: a 3-criterion position (e.g. Goalkeeper) produces raw means like 10/3 =
+    3.3333333333333335 routinely. `scorecard.py`'s `build_scorecards` rounds that to 2dp
+    before it ever reaches a composite; `assessed_refresh._band` must round identically, or
+    the pipeline and a live save/sign-off store two different numbers for the same
+    assessment depending on which one last wrote the row."""
+    raw_band = 10 / 3
+    assert raw_band != round(raw_band, 2)          # the un-rounded value really is different
+    _save(engine, scout_scores.PSYCHOLOGICAL, raw_band)
+    _save(engine, scout_scores.MEDICAL, 3.0)
+    assessed_refresh.refresh_for_player(engine, **KEY)
+    with Session(engine) as session:
+        row = session.scalar(select(PlayerScorecard))
+        assert row.psychological_band == round(raw_band, 2)
+
+        # The pipeline's own rounding, over the same raw input -- must match exactly.
+        from lofc.model.scorecard import build_scorecards
+        neutral = pd.DataFrame([{
+            "player_id": 1, "competition_id": 4, "season_id": 318,
+            "position_group": "Centre Back", "rankable": True}])
+        scout_bands = pd.DataFrame([{
+            "player_id": 1, "competition_id": 4, "season_id": 318,
+            "psychological_band": raw_band, "medical_band": 3.0}])
+        pipeline_row = build_scorecards(neutral, scout_bands=scout_bands).iloc[0]
+        assert pipeline_row["psychological_band"] == row.psychological_band
 
 
 def test_a_refresh_failure_never_loses_the_assessment(engine, monkeypatch):

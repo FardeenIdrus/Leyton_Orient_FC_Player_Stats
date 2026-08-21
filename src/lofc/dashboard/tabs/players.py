@@ -17,9 +17,10 @@ from lofc.dashboard.charts import PLOTLY_CONFIG, bar_chart, radar_chart
 from lofc.dashboard.labels import LABELS, _metric_source, metric_label
 from lofc.dashboard.loaders import (
     get_engine, headline, league_names, load_assessment_status, load_scorecard_percentiles,
-    load_scorecards, load_trajectory, season_label)
+    load_scorecards, load_scorecards_archetype, load_trajectory, season_label)
 from lofc.dashboard.seasons import (
     CONTRACT_EXPIRED, CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_data_date)
+from lofc.dashboard.session import CarriedPlayer, go_to_assess
 from lofc.dashboard.theme import RED
 from lofc.model import assessment_status
 from lofc.model import club_framework as cf
@@ -77,8 +78,26 @@ def _strengths_weaknesses(percentiles: pd.DataFrame, player_id: int, comp_id: in
     return f":green[**Strengths**] {fmt(high)}  \n:red[**Watch-outs**] {fmt(low)}"
 
 
+def _metrics_held_by_anyone(metric_values: pd.DataFrame, metric_names) -> set[str]:
+    """Which of these metric columns are non-null for at least one player in the loaded
+    population (one season, every league).
+
+    Retired StatsBomb columns Impect has no successor for (`tackles_p90`, `save_pct`, ...)
+    are NULL for every player once StatsBomb is out of scoring -- they still live in `LABELS`
+    (the full club-framework name list) and in `metric_values`'s columns, but showing them as
+    an empty row on every profile reads as the platform being broken. This decides membership
+    from the data actually held, not a hard-coded list of retired names, so it stays correct
+    as sources are added or retired. Pure (no Streamlit, no per-player state) so it is directly
+    testable.
+    """
+    return {m for m in metric_names
+           if m in metric_values.columns and metric_values[m].notna().any()}
+
+
 def _full_stats_table(row: pd.Series, percentiles: pd.DataFrame, metric_values: pd.DataFrame) -> pd.DataFrame | None:
-    """Every metric for one player as actual numbers: season total, per-90 (or rate), and percentile."""
+    """Every metric the platform actually holds data for, as real numbers for one player:
+    season total, per-90 (or rate), and percentile. Metrics nobody in the population has a
+    value for (see `_metrics_held_by_anyone`) are dropped, not shown as a blank row."""
     player_id, comp_id = int(row["player_id"]), int(row["competition_id"])
     pcts = percentiles[(percentiles["player_id"] == player_id)
                        & (percentiles["competition_id"] == comp_id)].set_index("metric")["percentile"]
@@ -88,9 +107,10 @@ def _full_stats_table(row: pd.Series, percentiles: pd.DataFrame, metric_values: 
         return None
     values = value_rows.iloc[0]
     minutes = float(row["minutes"]) if pd.notna(row.get("minutes")) else 0.0
+    held = _metrics_held_by_anyone(metric_values, LABELS)
 
     records = []
-    for metric in LABELS:
+    for metric in held:
         if metric not in pcts.index or metric not in values.index or pd.isna(values[metric]):
             continue
         value = float(values[metric])
@@ -415,13 +435,31 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             # A single season is passed into _players via `pool` already scoped to it (app.py
             # scores/ranks within one season); read it back rather than adding a parameter.
             season_id = int(pool["season_id"].iloc[0]) if not pool.empty else None
-            assessed_col = load_scorecards(season_id)[
+            # IMPORTANT 5: match the loader the rest of the page uses -- `load_scorecards`
+            # always returns the 'All Metrics' rows, so with an archetype lens selected
+            # (e.g. Winger / Inverted Winger) this used to silently rank on the all-round
+            # Performance band instead of the archetype's. player_scorecards already stores
+            # a per-archetype assessed_composite; just read the matching row.
+            scorecards = (load_scorecards(season_id) if archetype == cf.DEFAULT_ARCHETYPE
+                         else load_scorecards_archetype(position, archetype, season_id))
+            assessed_col = scorecards[
                 ["player_id", "competition_id", "season_id", "assessed_composite"]]
             pool = pool.merge(assessed_col, on=["player_id", "competition_id", "season_id"],
                               how="left")
             # attach() must run BEFORE the signed-off filter reads the column -- the Players
             # pool does not carry assessment_status otherwise, and the filter would KeyError.
             pool = assessment_status.attach(pool, load_assessment_status(season_id))
+            # IMPORTANT 4: nothing on this platform hides a player. A conflicted dimension
+            # has no assessed_composite (Decision 9 -- a None band on either side blocks the
+            # composite), so it drops out of the ranking table below just like an unassessed
+            # player would -- but unlike an unassessed player, someone DID do the work, and a
+            # conflicted player must not look identical to one nobody has touched. Count them
+            # here, before they are filtered out, and say so in the caption rather than
+            # silently dropping them: adding a conflict-badge column to this ranking table
+            # would mean carrying a second visual language (colour + badge) into a table that
+            # otherwise reads as a plain numeric ranking, for a state (no rank exists yet)
+            # the caption already states in words -- so the count is the fix, not a new column.
+            conflicted_count = int((pool["assessment_status"] == assessment_status.CONFLICTED).sum())
             pool = pool[pool["assessed_composite"].notna()]
             rank_column = "assessed_composite"
             signed_only = check_col.checkbox(
@@ -433,11 +471,17 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             # An empty list here is expected, not broken -- say so plainly rather than
             # showing zero rows with no explanation.
             if pool.empty:
-                st.caption("No player has both dimensions assessed yet — the assessed "
-                           "ranking is empty until a scout completes Psychological and Medical.")
+                msg = ("No player has both dimensions assessed yet — the assessed "
+                       "ranking is empty until a scout completes Psychological and Medical.")
             else:
-                st.caption(f"{len(pool)} players have both human dimensions assessed. "
-                           "This is a different ranking from the default, not a filter on it.")
+                msg = (f"{len(pool)} players have both human dimensions assessed. "
+                       "This is a different ranking from the default, not a filter on it.")
+            if conflicted_count:
+                msg += (f" **{conflicted_count} assessed player"
+                        f"{'s' if conflicted_count != 1 else ''} not shown** here — their "
+                        "assessments conflict, so nothing scores until someone signs one off "
+                        "from the sign-off queue.")
+            st.caption(msg)
         else:
             rank_column = RANK_COLUMN
             signed_only = False
@@ -596,8 +640,24 @@ def _scout_assessment_card(entry) -> None:
         st.warning("**A screening criterion was not met — the band above is unchanged.** "
                    "This flag records the assessor's disagreement; it does not cap or "
                    "alter the figure.")
-    if entry.notes:
+    if pd.notna(entry.notes) and (entry.notes or "").strip():
         st.caption(f"Notes: {entry.notes}")
+
+
+def _dimension_status(frame: pd.DataFrame, dimension: str) -> str | None:
+    """The Decision 17 verdict for one dimension of this player-season: 'signed_off',
+    'submitted' or `scout_scores.CONFLICT` -- None if nothing scoring exists yet.
+
+    Delegates to `model.scout_scores.resolve_bands`, the SAME function that decided
+    `assessed_composite`, rather than re-deriving the conflict rule here -- so the profile
+    can never show a different verdict than the one that actually scored (or didn't).
+    """
+    resolved = scout_scores.resolve_bands(frame)
+    if resolved.empty:
+        return None
+    prefix = "psychological" if dimension == scout_scores.PSYCHOLOGICAL else "medical"
+    value = resolved.iloc[0].get(f"{prefix}_status")
+    return None if pd.isna(value) else value
 
 
 def _scout_section(engine, row) -> None:
@@ -608,6 +668,11 @@ def _scout_section(engine, row) -> None:
     only on the basis that the competing view is on the page. Where more than one exists for
     a dimension, they render SIDE BY SIDE (frontend-design skill, spec section 16) rather
     than collapsed to the one that scores, so the disagreement is a comparison, not a scroll.
+
+    B5 (task 10): where a dimension is CONTESTED, this shows the conflict badge -- not a
+    band, and not silently one of the competing assessments -- alongside every competing
+    assessment, exactly as the non-conflicted branch already does. Nothing is hidden either
+    way; only the badge and caption differ.
     """
     st.markdown("#### Scout assessment")
     frame = store_assess.load_for_player(engine, int(row["player_id"]),
@@ -624,12 +689,19 @@ def _scout_section(engine, row) -> None:
                 badges.render(badges.for_status(None))
                 continue
             entries = list(rows.itertuples())
+            status = _dimension_status(frame, dimension)
+            if status == scout_scores.CONFLICT:
+                badges.render(badges.for_status(scout_scores.CONFLICT))
+                st.caption(f"{len(entries)} assessments exist and disagree, shown side by "
+                           "side. Nobody has signed one off, so none of them scores this "
+                           "dimension. Resolve it from the sign-off queue.")
+            elif len(entries) > 1:
+                st.caption(f"{len(entries)} assessments exist for this dimension, shown "
+                           "side by side. The signed-off one scores; the others stay on "
+                           "the record, attributed.")
             if len(entries) == 1:
                 _scout_assessment_card(entries[0])
             else:
-                st.caption(f"{len(entries)} assessments exist for this dimension, shown "
-                           "side by side. The signed-off one scores, otherwise the most "
-                           "recent submitted one.")
                 for col, entry in zip(st.columns(len(entries)), entries):
                     with col:
                         _scout_assessment_card(entry)
@@ -639,9 +711,15 @@ def _scout_section(engine, row) -> None:
                     int(row["season_id"]), int(minutes) if pd.notna(minutes) else None)
 
     if st.button("Assess this player", key=f"assess_{row['player_id']}"):
-        # Any authenticated user may assess either dimension (Decision 16).
-        st.session_state["assess_player_id"] = int(row["player_id"])
-        st.rerun()
+        # Any authenticated user may assess either dimension (Decision 16). Carry the whole
+        # player-season, not just the id, so the Assess page opens the form directly rather
+        # than making the assessor search for the player a second time.
+        minutes = row.get("minutes")
+        go_to_assess(CarriedPlayer(
+            player_id=int(row["player_id"]), player_name=str(row["player_name"]),
+            competition_id=int(row["competition_id"]), season_id=int(row["season_id"]),
+            position_group=str(row["position_group"]),
+            minutes=int(minutes) if pd.notna(minutes) else None))
 
 
 def _player_options(pool: pd.DataFrame) -> tuple[list[str], dict[str, int]]:

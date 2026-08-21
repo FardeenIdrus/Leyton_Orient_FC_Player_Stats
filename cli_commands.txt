@@ -328,3 +328,19 @@ docker compose exec app python -m lofc.ingest.transfermarkt_injuries --limit 5 -
 # when it carries under 70% of the rows already stored -- add --allow-shrink only when a
 # human has checked that the smaller history is genuinely correct.
 docker compose exec app python -m lofc.store.injuries
+
+# ===== User administration (dashboard login) =====
+# No self-service sign-up: every account is created and reset by an administrator, in person.
+
+# Create an account. Prompts for a password on a TTY (min 12 characters, length is the only
+# rule); refuses to prompt on a non-interactive stdin rather than echo the password in plain.
+# --role is one of: scout, medical, head_of_recruitment, admin.
+docker compose exec app python -m lofc.admin create-user --username fi --name "..." --role scout
+
+# Reset a forgotten password (the ONLY reset route -- the users table holds no email address,
+# so there is no self-service or email-link reset). Also clears any lockout and forces a
+# password change at the user's next login.
+docker compose exec app python -m lofc.admin set-password --username fi
+
+# List every account: role, active/inactive, and current lock state. No password hashes shown.
+docker compose exec app python -m lofc.admin list-users

@@ -37,6 +37,19 @@ Then open the dashboard at **http://localhost:8501**.
 > re-running is fast and safe (data already on disk is skipped). Every command is also listed,
 > with comments, in [`cli_commands.txt`](cli_commands.txt).
 
+## Signing in
+
+The dashboard sits behind a login gate. Accounts are created by an administrator:
+
+```bash
+docker compose exec app python -m lofc.admin create-user --username fi --name "..." --role scout
+```
+
+There is **no self-service sign-up**. A forgotten password is reset by an administrator in
+person (`python -m lofc.admin set-password --username fi`) — the accounts table holds no email
+address, so there is no email-based reset link to send. `list-users` shows every account and
+whether it is currently locked out.
+
 ## The pipeline
 
 `python -m lofc.pipeline` runs all stages in order, each idempotent:
@@ -58,10 +71,17 @@ same numbers. You can run any stage on its own (see `cli_commands.txt`).
   metric → percentile → 1–5 band, and charts on the club's own metrics). Merged from the
   former Shortlist + Club scorecard + Player profile tabs. **Money is opt-in** — market value,
   modelled wages and the affordability gates appear only when "Show affordability" is ticked,
-  and never reorder the default ranking.
+  and never reorder the default ranking. An opt-in **"Rank on assessed composite"** toggle
+  (off by default) switches the ranking to the scout-assessed composite for players who have one.
 - **Compare** — two or three players head-to-head on the club's Performance metrics, plus a
   raw physical table (raw because physical output *is* comparable across leagues).
 - **Watchlist · Player types · Physical** — saved targets, playing-style groups, tracking data.
+- **Assess** — the scout-assessment form: the club's own criteria for that player's position,
+  Psychological scored 1–5 per criterion, Medical entered as a band with an injury and
+  availability evidence panel beside it. Injury data informs the judgement; it never becomes
+  the score.
+- **Sign-off** — the approval queue for the Head of Recruitment/admin, including where two
+  scouts' assessments disagree: until one is signed off, neither scores.
 - **Glossary** — searchable definitions for every metric (Impect's own wording; substitutes
   labelled honestly).
 - **Methodology** — how the pipeline works, step by step, including a worked example of the

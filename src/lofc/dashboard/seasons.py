@@ -13,13 +13,9 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from lofc.config import settings
+from lofc.config import SEASON_REF_DATE, settings  # SEASON_REF_DATE re-exported for callers
 
 SEASON_LABELS = {317: "2024/25", 318: "2025/26", 319: "2026/27"}
-# Season midpoint (1 Jan of the season's end year), the reference date for deriving age from
-# a birth date. Per-season so a player's 2024/25 age reads ~1 year younger than his 2025/26 age.
-SEASON_REF_DATE = {317: pd.Timestamp("2025-01-01"), 318: pd.Timestamp("2026-01-01"),
-                   319: pd.Timestamp("2027-01-01")}
 
 
 def season_name_for(season_id: int) -> str:

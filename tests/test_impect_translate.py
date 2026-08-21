@@ -65,6 +65,27 @@ def test_multi_position_rows_aggregate():
     assert out.at[0, "position"] == "CENTER_FORWARD"   # dominant by matchShare
 
 
+def test_club_shown_is_by_total_minutes_not_single_row_matchshare():
+    # A player who splits a season across two clubs (a real case: Dan Crowley, League
+    # Two 2024/25 -- 1,662 min at Notts County concentrated in one position row with a
+    # big matchShare, 1,710 min at Milton Keynes Dons split across two rows each with a
+    # smaller individual matchShare). The naive per-row matchShare-argmax picks the
+    # club with FEWER total minutes, because matchShare doesn't respect a mid-season
+    # move; summing playDuration per squad first gets the club right.
+    frame = pd.DataFrame([
+        _row(playerId=1, squadName="Club A", position="CENTRAL_MIDFIELD",
+             matchShare=9.0, playDuration=56000.0),
+        _row(playerId=1, squadName="Club B", position="CENTRAL_MIDFIELD",
+             matchShare=4.5, playDuration=28000.0),
+        _row(playerId=1, squadName="Club B", position="DEFENSE_MIDFIELD",
+             matchShare=5.5, playDuration=34000.0),
+    ])
+    out = translate_frame(frame)
+    assert out.at[0, "team_name"] == "Club B"                 # more total minutes
+    assert out.at[0, "position"] == "CENTRAL_MIDFIELD"        # identity untouched: still matchShare-dominant row
+    assert out.at[0, "minutes"] == pytest_approx((56000.0 + 28000.0 + 34000.0) / 60.0)
+
+
 def test_none_metrics_are_not_produced():
     frame = pd.DataFrame([_row(matchShare=30.0, playDuration=180000.0, GOALS=0.5)])
     out = translate_frame(frame)

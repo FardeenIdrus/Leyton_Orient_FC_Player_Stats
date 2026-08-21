@@ -63,6 +63,52 @@ def test_statuses_are_separate_per_season():
     assert result.iloc[0]["season_id"] == 318
 
 
+def test_two_disagreeing_submitted_rows_read_as_conflicted():
+    """Task 10 B1: the aggregate must surface a Decision 17 conflict, not silently collapse
+    it into 'Awaiting sign-off' -- the watchlist badge has to say the same thing the profile
+    and the sign-off queue say."""
+    result = astat.per_player(_rows(
+        (1, 4, 318, scout_scores.PSYCHOLOGICAL, 4.0, "submitted", "2026-08-14"),
+        (1, 4, 318, scout_scores.PSYCHOLOGICAL, 2.0, "submitted", "2026-08-15"),
+        (1, 4, 318, scout_scores.MEDICAL, 3.0, "submitted", "2026-08-14")))
+    assert result.iloc[0]["assessment_status"] == astat.CONFLICTED
+
+
+def test_a_signed_off_dimension_beside_a_conflicted_one_still_reads_as_conflicted():
+    """Conflict takes priority: Medical being resolved doesn't hide that Psychological is
+    still contested and unscored."""
+    result = astat.per_player(_rows(
+        (1, 4, 318, scout_scores.PSYCHOLOGICAL, 4.0, "submitted", "2026-08-14"),
+        (1, 4, 318, scout_scores.PSYCHOLOGICAL, 2.0, "submitted", "2026-08-15"),
+        (1, 4, 318, scout_scores.MEDICAL, 3.0, "signed_off", "2026-08-14")))
+    assert result.iloc[0]["assessment_status"] == astat.CONFLICTED
+
+
+def test_a_signed_off_assessment_is_never_itself_a_conflict():
+    """Decision 17: signing one off resolves the disagreement -- a signed-off dimension
+    beside other unsigned ones on the SAME dimension is not a conflict."""
+    result = astat.per_player(_rows(
+        (1, 4, 318, scout_scores.PSYCHOLOGICAL, 4.0, "signed_off", "2026-08-14"),
+        (1, 4, 318, scout_scores.PSYCHOLOGICAL, 2.0, "submitted", "2026-08-15"),
+        (1, 4, 318, scout_scores.MEDICAL, 3.0, "submitted", "2026-08-14")))
+    assert result.iloc[0]["assessment_status"] == astat.AWAITING
+
+
+def test_a_signed_off_dimension_beside_a_superseded_submission_still_reads_as_signed_off():
+    """Reproduced live: player 80945, competition 5, season 318 -- both dimensions were
+    signed off, but `resolve_bands` returns 'both signed off' while the old raw-group check
+    saw a newer, superseded `submitted` row sitting beside the signed-off Psychological
+    assessment and flipped the aggregate to Awaiting sign-off. Decision 17: a signed-off row
+    beats any number of submitted ones on the same dimension, so this must read Signed off,
+    matching the profile (which resolves via `resolve_bands` too) and unhiding the player
+    from the 'Signed-off assessments only' filter."""
+    result = astat.per_player(_rows(
+        (1, 4, 318, scout_scores.PSYCHOLOGICAL, 4.0, "signed_off", "2026-08-01"),
+        (1, 4, 318, scout_scores.PSYCHOLOGICAL, 3.0, "submitted", "2026-08-14"),
+        (1, 4, 318, scout_scores.MEDICAL, 3.0, "signed_off", "2026-08-01")))
+    assert result.iloc[0]["assessment_status"] == astat.SIGNED_OFF
+
+
 def test_attach_leaves_unassessed_rows_as_not_assessed():
     frame = pd.DataFrame([{"player_id": 1, "competition_id": 4, "season_id": 318},
                           {"player_id": 2, "competition_id": 4, "season_id": 318}])

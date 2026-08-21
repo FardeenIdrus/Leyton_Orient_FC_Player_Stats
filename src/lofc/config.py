@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+import pandas as pd
 from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -131,6 +132,16 @@ DEFAULT_IMPECT_TARGETS: list[ImpectTarget] = [
 # UPDATE THIS EACH AUGUST when a new season starts (and the old one becomes final).
 # Set to None out of season to make every pull skip-if-exists again.
 LIVE_SEASON_ID: int | None = 319          # 2026/27
+
+# Season midpoint (1 Jan of the season's end year), the reference date for deriving age from
+# a birth date. Per-season so a player's 2024/25 age reads ~1 year younger than his 2025/26
+# age. Lives here (not in the dashboard layer) because both the dashboard and the plain,
+# headless store layer (e.g. `store/watchlist.py`) need it, and this is the lowest layer both
+# already import; `dashboard/seasons.py` re-exports it so its existing callers are unaffected.
+SEASON_REF_DATE: dict[int, pd.Timestamp] = {
+    317: pd.Timestamp("2025-01-01"), 318: pd.Timestamp("2026-01-01"),
+    319: pd.Timestamp("2027-01-01"),
+}
 
 
 def parse_impect_targets(raw: str) -> list[ImpectTarget]:

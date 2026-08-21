@@ -52,11 +52,23 @@ def translate_frame(frame: pd.DataFrame, competition_id: int | None = None,
     agg.update({f"_t_{c}": "sum" for c in used})
     totals = frame.groupby("playerId", as_index=False).agg(agg)
 
-    # Dominant identity = the position row with the most matchShare.
+    # Dominant identity (name/birthdate/position) = the position row with the most
+    # matchShare. Kept exactly as before: position feeds position_group, which feeds
+    # scoring, so it must not move.
     dom_idx = frame.groupby("playerId")["matchShare"].idxmax()
-    ident = frame.loc[dom_idx, ["playerId", "playerName", "birthdate",
-                                "squadName", "position"]]
-    out = totals.merge(ident, on="playerId", how="left")
+    ident = frame.loc[dom_idx, ["playerId", "playerName", "birthdate", "position"]]
+
+    # Club shown = the squad the player accumulated the most MINUTES for this season.
+    # matchShare is a per-position share and doesn't respect a mid-season move: a
+    # player's single highest-matchShare row can belong to the club he played FEWER
+    # total minutes for (his minutes there were concentrated in one position, while at
+    # his other club they were split across two or three). So club is picked
+    # separately from identity, by summing playDuration per squad first.
+    team_minutes = frame.groupby(["playerId", "squadName"])["_minutes"].sum().reset_index()
+    team_idx = team_minutes.groupby("playerId")["_minutes"].idxmax()
+    team = team_minutes.loc[team_idx, ["playerId", "squadName"]]
+
+    out = totals.merge(ident, on="playerId", how="left").merge(team, on="playerId", how="left")
 
     def tot(col: str) -> pd.Series:
         return out[f"_t_{col}"] if f"_t_{col}" in out.columns else pd.Series(0.0, index=out.index)

@@ -1,10 +1,10 @@
 # Design — Scout assessment system (R3a-0 + R3a)
 
-_Status: proposed. Written 2026-08-10. Revised 2026-08-14 — **Decision 12 reverses Decision 11**:
-the Medical band is now entered by a person, and Transfermarkt injury data is evidence only. Nothing
-in this document is built except the injury collector, its storage, the availability function and
-the data-loss guards; the scout page, the assessment form, the sign-off states and the evidence
-panel are **designed, not implemented**._
+_Status: built. Written 2026-08-10. Revised 2026-08-14 — **Decision 12 reverses Decision 11**:
+the Medical band is now entered by a person, and Transfermarkt injury data is evidence only.
+Revised 2026-08-17 — the scout page, the assessment form, the sign-off states and the evidence
+panel described below are now implemented, on branch `r3a0-injury-scrape`, pending the final
+whole-branch review before merge. The decisions and their reasoning below are unchanged._
 
 Closes the largest remaining gap between the platform and the club's own recruitment
 framework: the two dimensions a human scores. Together they carry **22.7% of the outfield
@@ -365,8 +365,8 @@ Neither copy is a summary of the other; both render the same evidence panel.
    the National League are different statements and must not look identical.
 6. **Provenance on every row** — scraped versus hand-entered, by whom, and when.
 
-**Designed, not implemented.** The collector, the storage and the availability function exist; the
-panel does not.
+**Implemented.** The collector, the storage, the availability function and the panel
+(`src/lofc/dashboard/evidence.py`) all exist, rendered in both places named above.
 
 ---
 
@@ -690,22 +690,84 @@ visible on the profile. It would not be acceptable if the number were anonymous.
 **Accessibility:** colour never carries the meaning alone — the badge always states the status in
 words, because printed reports and colour-blind users lose the colour.
 
+### Decision 17 — a disagreement is not scored until someone decides (agreed 2026-08-17)
+
+**This replaces the "most recent submitted wins" tiebreak.** That rule gave the final word to
+whoever saved last: a junior scout assessing on Friday silently overrode a senior's Monday
+assessment, on no principle beyond recency. Worse, because sign-off was optional, recency was the
+*normal* case rather than the exception.
+
+**The rule is now one line: a signed-off assessment is never in conflict; two unsigned assessments
+that disagree do not score.**
+
+| State | Scores? | Badge |
+|---|---|---|
+| One assessment, unsigned | **Yes** | 🟠 Assessed — awaiting sign-off |
+| Two or more unsigned, on the same dimension | **No** | ⚪ **Assessments conflict — not scored** |
+| One signed off (plus any number unsigned) | **Yes — the signed-off one** | 🟢 Signed off by \<name\> |
+
+**Any two unsigned assessments on the same dimension are a conflict**, regardless of how far apart
+the bands are. A 3.0 and a 3.5 is still two people who have not agreed and nobody who has chosen.
+Judging which gaps "matter" would put the platform back in the business of resolving disagreement
+on the user's behalf.
+
+**Signing off is the deciding act, not a rubber stamp.** It is the moment the number is chosen,
+which is what makes the queue a real work list rather than a badge-flipper.
+
+**Authority comes from the act, never from the role.** The Head of Recruitment's own assessment
+does not outrank a scout's because of who wrote it — it wins when they sign it off, exactly as any
+other assessment would. This is deliberate: role-weighting was considered and rejected, because it
+hard-codes a hierarchy the club has not defined and cannot express seniority within a role.
+
+**Resolving a conflict, from the sign-off queue.** Three actions, all requiring `sign_off`:
+
+1. **Sign off one of the existing assessments.** That band scores; the other stays on the profile,
+   unsigned, attributed.
+2. **Enter their own**, starting from either existing assessment or from blank. The form
+   **pre-fills** with the chosen assessment's criterion scores so only genuine disagreements are
+   re-entered — changed values are marked ("was 4, now 2"). Saving creates a **new, separate**
+   assessment under their own name; nothing is edited in place and no original is overwritten.
+   Because this happens inside the conflict view, it is signed off in the same action and labelled
+   *"Entered and signed off by \<name\>"*.
+3. **Leave it.** The player reads "assessments conflict — not scored" until someone decides.
+
+**Assessing normally is unchanged**, including for the Head of Recruitment: an ordinary assessment
+is an ordinary submission. His form carries a **"sign off now" checkbox, unticked by default**, so
+he can record a view without making it the department's position — those are different statements
+and he must be able to make the first without the second. Ticked, his assessment is immune to a
+later scout disagreeing; unticked, a later disagreement puts the player into conflict.
+
+**Sign-off must recompute the composite.** Because sign-off now decides *which* assessment scores,
+the refresh that runs on save must also run on sign-off. Without it the badge reads approved while
+the stored number is the one that was not approved — a live defect at the time this was agreed.
+
+**Accepted cost.** An unresolved conflict scores nothing, so a player can sit without an assessed
+composite while the approver is away. That is the correct direction to fail: a number that quietly
+picked one of two disagreeing scouts is worse than an honest blank. The queue should show how long
+each conflict has been waiting.
+
+**Unchanged by this decision:** `objective_composite` and the default ranking never see scout
+input at all; nothing here hides a player from any list; every flag remains advisory.
+
 ### The rest of the model
 
 - **Multiple scouts may submit** an assessment for the same player, dimension, competition and
-  season. The Head of Recruitment marks **one** authoritative by signing it off; that one is the
-  scoring value once it exists.
+  season. Where they disagree, Decision 17 governs which scores — and until someone signs one off,
+  none of them does.
 - **All submissions are retained and attributed.** Nothing is deleted or averaged away, so
   disagreement between two scouts is visible on the profile rather than silently resolved.
 - Signing off records the approver and the timestamp alongside the original author and date.
-- Where several assessments are submitted and none signed off, the **most recent** scores, and the
-  profile shows the others alongside it.
+- Where several assessments are submitted and none signed off, **none of them scores** — the
+  profile shows them all alongside each other, badged "assessments conflict — not scored", until
+  someone with sign-off rights decides (Decision 17). *(This line previously said the most recent
+  one scored; that recency rule is retired.)*
 
 ---
 
 ## 13. Data model
 
-One Alembic migration. `player_injuries` is **already built and migrated**; the rest is designed.
+One Alembic migration. `player_injuries` is **already built and migrated**; the rest below is
+built and migrated too.
 
 **`users`** — id, username (unique), full_name, role, password_hash, is_active, created_at.
 

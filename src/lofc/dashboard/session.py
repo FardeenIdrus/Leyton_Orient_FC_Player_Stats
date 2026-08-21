@@ -28,6 +28,88 @@ class CurrentUser:
     role: str
 
 
+@dataclass(frozen=True)
+class CarriedPlayer:
+    """A player selection handed from one page to the Assess page, so the assessment form
+    opens on that exact player-season without the assessor re-searching for him."""
+
+    player_id: int
+    player_name: str
+    competition_id: int
+    season_id: int
+    position_group: str | None
+    minutes: int | None
+
+
+_PAGES_KEY = "_nav_pages"          # {name: st.Page(...)}, registered once per run by app.py
+_CARRY_KEY = "_assess_carry"       # a CarriedPlayer, consumed by the Assess page on read
+_CURRENT_KEY = "_assess_current"   # the persistent "currently assessing" player, if any --
+                                    # survives a widget-triggered re-run (unlike _CARRY_KEY)
+
+
+def register_pages(pages: dict[str, object]) -> None:
+    """Record this run's `st.Page` objects so any module can `switch_to(...)` a named page
+    without importing `app.py` -- which would cycle, since `app.py` imports every tab module.
+    Call once from `main()`, before `st.navigation(...).run()`.
+    """
+    st.session_state[_PAGES_KEY] = pages
+
+
+def switch_to(name: str) -> None:
+    """Navigate to a page registered by `register_pages` (e.g. 'assess')."""
+    st.switch_page(st.session_state[_PAGES_KEY][name])
+
+
+def go_to_assess(player: CarriedPlayer) -> None:
+    """Carry `player` to the Assess page and navigate there in one call -- the handoff used
+    by 'Assess this player' on the profile and on a watchlist row."""
+    st.session_state[_CARRY_KEY] = player
+    switch_to("assess")
+
+
+def resolve_assess_target(
+        state, carried: CarriedPlayer | None, *,
+        selected: CarriedPlayer | None = None, clear: bool = False) -> CarriedPlayer | None:
+    """Decide who the Assess page is currently assessing. Pure and Streamlit-free (`state` is
+    any mapping -- Streamlit's session_state, or a plain dict in tests) so the transition is
+    unit-tested the same way `restore_user` is.
+
+    Precedence, highest first:
+      1. `clear=True`      -- the user explicitly cleared the selection. Always wins: nothing
+                               is currently being assessed.
+      2. `selected`         -- the user explicitly picked a player from the Assess page's own
+                               search box. Always replaces whatever was there.
+      3. `carried`          -- a fresh hand-off from another page ('Assess this player').
+                               Consumed on arrival, so it wins over a stale `state` value.
+      4. `state[_CURRENT_KEY]` -- nothing new happened this run (e.g. the user typed into a
+                               band selectbox); keep showing whoever was already selected.
+    Falls through to None when none of the above holds -- nothing is being assessed.
+    """
+    if clear:
+        return None
+    if selected is not None:
+        return selected
+    if carried is not None:
+        return carried
+    return state.get(_CURRENT_KEY)
+
+
+def get_assess_target(
+        *, selected: CarriedPlayer | None = None, clear: bool = False) -> CarriedPlayer | None:
+    """The Streamlit-aware wrapper over `resolve_assess_target`: pops any freshly-carried
+    player (consumed on read, so a later unrelated visit to Assess does not silently reopen a
+    stale player), reconciles it against an explicit `selected` pick or `clear`, then persists
+    the result in `_CURRENT_KEY` so it survives the re-run a widget interaction triggers.
+    """
+    carried = st.session_state.pop(_CARRY_KEY, None)
+    target = resolve_assess_target(st.session_state, carried, selected=selected, clear=clear)
+    if target is None:
+        st.session_state.pop(_CURRENT_KEY, None)
+    else:
+        st.session_state[_CURRENT_KEY] = target
+    return target
+
+
 def restore_user(state, now: datetime.datetime) -> CurrentUser | None:
     """The logged-in user held in `state`, or None if there is none or it has expired.
 

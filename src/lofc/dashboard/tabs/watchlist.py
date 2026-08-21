@@ -10,16 +10,19 @@ import streamlit as st
 
 from lofc.dashboard import badges
 from lofc.dashboard.loaders import _competition_name_by_id, get_engine, load_assessment_status
+from lofc.dashboard.session import CarriedPlayer, go_to_assess
 from lofc.model import assessment_status
+from lofc.model import scout_scores
 from lofc.store import watchlist
 
-# The three-value assessment_status category maps onto the raw statuses badges.for_status
+# The four-value assessment_status category maps onto the raw statuses badges.for_status
 # already renders text for, so the watchlist's badge column is never a second source of
 # wording (Rule/spec section 7.1) -- it just doesn't know a single author/approver, since
 # the aggregate can span two dimensions entered by two different people.
 _AGGREGATE_TO_RAW_STATUS = {
     assessment_status.NOT_ASSESSED: None,
     assessment_status.AWAITING: "submitted",
+    assessment_status.CONFLICTED: scout_scores.CONFLICT,
     assessment_status.SIGNED_OFF: "signed_off",
 }
 
@@ -30,7 +33,8 @@ def _badge_text(aggregate_status: str) -> str:
 
 @st.dialog("Watchlist entry")
 def _watchlist_entry_dialog(pid: int, cid: int, sid: int, player_name: str,
-                            club: str, note: str, status: str) -> None:
+                            club: str, note: str, status: str,
+                            position_group: str | None = None) -> None:
     """Read and edit one watched player: full note, status, save or remove.
 
     Every exit path bumps the table key (clearing the row selection) before
@@ -64,9 +68,13 @@ def _watchlist_entry_dialog(pid: int, cid: int, sid: int, player_name: str,
 
     if st.button("Assess this player", key="wl_dialog_assess"):
         # Same session-state handoff the profile's "Assess this player" button uses
-        # (dashboard/tabs/players.py::_scout_section), so both entry points agree.
-        st.session_state["assess_player_id"] = pid
-        _close()
+        # (dashboard/tabs/players.py::_scout_section), so both entry points agree. The
+        # watchlist has no `minutes` column (see store/watchlist.load's SELECT) -- the Assess
+        # page's evidence panel shows that as "—", the same as any other unknown minutes.
+        st.session_state["watchlist_table_ver"] = st.session_state.get("watchlist_table_ver", 0) + 1
+        go_to_assess(CarriedPlayer(
+            player_id=pid, player_name=player_name, competition_id=cid, season_id=sid,
+            position_group=position_group, minutes=None))
 
 
 def _watchlist(tab) -> None:
@@ -155,10 +163,12 @@ def _watchlist(tab) -> None:
                       int(picked["season_id"]), version)
             if st.session_state.get("wl_dialog_handled") != triple:
                 st.session_state["wl_dialog_handled"] = triple
+                position_group = (str(picked["position_group"])
+                                  if pd.notna(picked["position_group"]) else None)
                 _watchlist_entry_dialog(
                     triple[0], triple[1], triple[2],
                     str(picked["player_name"]), str(picked["team_name"] or ""),
-                    str(picked["note"] or ""), str(picked["status"]))
+                    str(picked["note"] or ""), str(picked["status"]), position_group)
         else:
             # No selection: clear the marker so re-selecting the same row reopens.
             st.session_state["wl_dialog_handled"] = None
