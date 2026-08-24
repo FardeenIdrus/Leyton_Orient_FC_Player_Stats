@@ -132,9 +132,30 @@ def lockout_message(seconds: int) -> str:
             "An administrator can reset it sooner.")
 
 
+_JUST_LOGGED_OUT_KEY = "_just_logged_out"
+
+
 def logout() -> None:
     for key in ("user_id", "full_name", "role", "logged_in_at"):
         st.session_state.pop(key, None)
+    # `st.navigation(...).run()` told the browser about the nine pages while this user was
+    # signed in. That page list is client-side state Streamlit keeps across an ordinary rerun
+    # -- and a rerun is all a button's on_click normally triggers -- so without this, the
+    # sidebar page list would keep showing after sign-out even though this run never calls
+    # `st.navigation` again. Flag it so `force_reload_after_logout` can force a hard browser
+    # reload instead, which is the only thing that clears it.
+    st.session_state[_JUST_LOGGED_OUT_KEY] = True
+
+
+def force_reload_after_logout() -> bool:
+    """Call first thing in `main()`, before anything else renders. If the previous run was a
+    sign-out, force a full browser reload and return True so the caller renders nothing else
+    this pass (the reload is about to blow the page away regardless). Returns False on every
+    other run -- a no-op that costs one dict lookup."""
+    if not st.session_state.pop(_JUST_LOGGED_OUT_KEY, False):
+        return False
+    st.iframe("<script>window.top.location.reload();</script>", height=1)
+    return True
 
 
 def _password_change_form(user_id: int, engine) -> None:
@@ -204,8 +225,14 @@ def require_login(engine) -> CurrentUser | None:
     return None
 
 
-def sidebar_identity(user: CurrentUser) -> None:
-    """Show who is signed in, and the logout control."""
-    st.sidebar.markdown(f"**{user.full_name}**  \n`{user.role}`")
-    st.sidebar.button("Sign out", on_click=logout, use_container_width=True)
-    st.sidebar.divider()
+def topbar_identity(user: CurrentUser) -> None:
+    """Who is signed in, and the sign-out control -- rendered top-right of the page shell
+    (inside `theme.header()`'s right-hand column), the way identity sits in the corner of an
+    ordinary website rather than buried in a sidebar. Renders into whatever container is
+    active when it is called; it holds no layout of its own."""
+    with st.container(key="topbar_identity"):
+        st.markdown(
+            f"<div class='lofc-identity-name'>{user.full_name}</div>"
+            f"<div class='lofc-identity-role'>{user.role}</div>",
+            unsafe_allow_html=True)
+        st.button("Sign out", on_click=logout)

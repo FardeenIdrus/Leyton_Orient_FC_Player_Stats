@@ -179,3 +179,184 @@ def test_change_password_rejects_a_weak_password(engine):
         user_id = session.scalar(select(User).where(User.username == "jsmith")).id
     with pytest.raises(ValueError):
         store_users.change_password(engine, user_id, "short")
+
+
+# --- Admin user management: list_users / create_user / reset_password / clear_lockout /
+# set_active -- the functions the Users page and lofc.admin's CLI both call. ----------------
+
+
+def test_list_users_reports_every_account_with_no_password_hash():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(User(username="jsmith", full_name="J. Smith", role="scout",
+                         password_hash=auth.hash_password(GOOD)))
+        session.commit()
+
+    rows = store_users.list_users(engine, NOW)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.username == "jsmith"
+    assert row.full_name == "J. Smith"
+    assert row.role == "scout"
+    assert row.is_active is True
+    assert row.locked is False
+    assert not hasattr(row, "password_hash")
+
+
+def test_list_users_reports_a_currently_locked_account():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(User(username="jsmith", full_name="J. Smith", role="scout",
+                         password_hash=auth.hash_password(GOOD),
+                         failed_logins=5, locked_until=NOW + dt.timedelta(minutes=5)))
+        session.commit()
+
+    row = store_users.list_users(engine, NOW)[0]
+    assert row.locked is True
+    assert row.locked_seconds_remaining > 0
+
+
+def test_list_users_reports_an_expired_lock_as_not_locked():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(User(username="jsmith", full_name="J. Smith", role="scout",
+                         password_hash=auth.hash_password(GOOD),
+                         failed_logins=5, locked_until=NOW - dt.timedelta(minutes=1)))
+        session.commit()
+
+    row = store_users.list_users(engine, NOW)[0]
+    assert row.locked is False
+
+
+def test_create_user_creates_a_row_that_can_then_authenticate(engine):
+    new_id = store_users.create_user(engine, "newscout", "New Scout", "scout", GOOD)
+    assert isinstance(new_id, int)
+    result = store_users.authenticate(engine, "newscout", GOOD, NOW)
+    assert result.outcome == "ok"
+    assert result.role == "scout"
+
+
+def test_create_user_rejects_a_weak_password_before_writing_a_row(engine):
+    with pytest.raises(ValueError):
+        store_users.create_user(engine, "newscout", "New Scout", "scout", "short")
+    with Session(engine) as session:
+        assert session.scalar(select(User).where(User.username == "newscout")) is None
+
+
+def test_create_user_rejects_an_unknown_role(engine):
+    with pytest.raises(ValueError):
+        store_users.create_user(engine, "newscout", "New Scout", "goalkeeper coach", GOOD)
+
+
+def test_create_user_rejects_a_duplicate_username(engine):
+    with pytest.raises(ValueError):
+        store_users.create_user(engine, "jsmith", "Someone Else", "scout", GOOD)
+
+
+def test_create_user_forces_a_password_change_at_first_login(engine):
+    """The password on a freshly created account is temporary by definition -- an admin
+    chose it, not the person who will use it -- so it must force a change at first login,
+    the same way reset_password does."""
+    new_id = store_users.create_user(engine, "newscout", "New Scout", "scout", GOOD)
+    with Session(engine) as session:
+        user = session.scalar(select(User).where(User.id == new_id))
+        assert user.must_change_password is True
+
+
+def test_reset_password_replaces_the_hash_clears_lockout_and_forces_a_change(engine):
+    with Session(engine) as session:
+        user = session.scalar(select(User).where(User.username == "jsmith"))
+        user.failed_logins = 5
+        user.locked_until = NOW + dt.timedelta(minutes=15)
+        session.commit()
+        user_id = user.id
+
+    store_users.reset_password(engine, user_id, "a replacement passphrase")
+
+    with Session(engine) as session:
+        user = session.scalar(select(User).where(User.id == user_id))
+        assert auth.verify_password("a replacement passphrase", user.password_hash)
+        assert not auth.verify_password(GOOD, user.password_hash)
+        assert user.failed_logins == 0
+        assert user.locked_until is None
+        assert user.must_change_password is True
+
+
+def test_reset_password_rejects_a_weak_password(engine):
+    with Session(engine) as session:
+        user_id = session.scalar(select(User).where(User.username == "jsmith")).id
+    with pytest.raises(ValueError):
+        store_users.reset_password(engine, user_id, "short")
+
+
+def test_reset_password_rejects_an_unknown_user_id(engine):
+    with pytest.raises(ValueError):
+        store_users.reset_password(engine, 999999, GOOD)
+
+
+def test_clear_lockout_clears_state_without_touching_the_password_or_must_change(engine):
+    with Session(engine) as session:
+        user = session.scalar(select(User).where(User.username == "jsmith"))
+        original_hash = user.password_hash
+        user.failed_logins = 5
+        user.locked_until = NOW + dt.timedelta(minutes=15)
+        # Pinned explicitly rather than relying on the column's default: clear_lockout must
+        # leave must_change_password exactly as it found it either way.
+        user.must_change_password = False
+        session.commit()
+        user_id = user.id
+
+    store_users.clear_lockout(engine, user_id)
+
+    with Session(engine) as session:
+        user = session.scalar(select(User).where(User.id == user_id))
+        assert user.failed_logins == 0
+        assert user.locked_until is None
+        assert user.password_hash == original_hash
+        assert user.must_change_password is False
+
+
+def test_clear_lockout_rejects_an_unknown_user_id(engine):
+    with pytest.raises(ValueError):
+        store_users.clear_lockout(engine, 999999)
+
+
+def test_set_active_false_blocks_login(engine):
+    with Session(engine) as session:
+        user_id = session.scalar(select(User).where(User.username == "jsmith")).id
+
+    store_users.set_active(engine, user_id, False)
+
+    assert store_users.authenticate(engine, "jsmith", GOOD, NOW).outcome == "inactive"
+
+
+def test_set_active_true_restores_login(engine):
+    with Session(engine) as session:
+        user = session.scalar(select(User).where(User.username == "jsmith"))
+        user.is_active = False
+        session.commit()
+        user_id = user.id
+
+    store_users.set_active(engine, user_id, True)
+
+    assert store_users.authenticate(engine, "jsmith", GOOD, NOW).outcome == "ok"
+
+
+def test_set_active_never_deletes_the_row(engine):
+    """Deactivate, never delete: assessments reference users.id via author_id/approved_by,
+    so the row -- and its id -- must still exist afterwards."""
+    with Session(engine) as session:
+        user_id = session.scalar(select(User).where(User.username == "jsmith")).id
+
+    store_users.set_active(engine, user_id, False)
+
+    with Session(engine) as session:
+        assert session.scalar(select(User).where(User.id == user_id)) is not None
+
+
+def test_set_active_rejects_an_unknown_user_id(engine):
+    with pytest.raises(ValueError):
+        store_users.set_active(engine, 999999, True)

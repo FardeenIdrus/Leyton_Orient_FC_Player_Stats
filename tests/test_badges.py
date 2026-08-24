@@ -87,3 +87,18 @@ def test_a_name_with_angle_brackets_does_not_emit_raw_markup():
     markup = badges._badge_html(badge)
     assert "<script>" not in markup
     assert "&lt;script&gt;" in markup
+
+
+def test_rejected_badge_states_the_status_in_words():
+    """Problem 3: a declined assessment must read as rejected, not silently as 'not
+    assessed' or fall into the unknown-status branch."""
+    badge = badges.for_status("rejected", author_name="J. Smith", approver_name="A. Approver",
+                              approved_at=dt.datetime(2026, 8, 14))
+    assert "rejected" in badge.text.lower()
+    assert "A. Approver" in badge.text
+    assert "unknown" not in badge.text.lower()
+
+
+def test_rejected_badge_has_its_own_tone():
+    badge = badges.for_status("rejected")
+    assert badge.tone == "rejected"

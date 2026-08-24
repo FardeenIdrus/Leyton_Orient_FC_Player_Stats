@@ -40,6 +40,12 @@ def per_player(assessments: pd.DataFrame) -> pd.DataFrame:
     overstate what a director is being shown. Drafts are excluded entirely -- a draft never
     scores (Decision 14) and must not read as assessed either.
 
+    A `rejected` assessment (Problem 3) is excluded the same way a `draft` is: `_SCORING`
+    lists only `submitted`/`signed_off`, and `resolve_bands` applies the identical filter, so
+    a rejected row contributes to neither the `scoring` frame below nor a resolved band/status
+    -- it cannot make a player read as assessed, and cannot keep a stale conflict alive after
+    the disagreeing row it was one side of gets rejected.
+
     both_signed is read off `resolve_bands`'s OWN psychological_status/medical_status, never
     re-derived from the raw group. Decision 17 means a signed-off row beats any number of
     submitted ones on the same dimension -- so a signed-off assessment sitting beside a

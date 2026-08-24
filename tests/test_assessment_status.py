@@ -126,3 +126,20 @@ def test_attach_never_drops_a_row():
                           for i in range(50)])
     merged = astat.attach(frame, astat.per_player(_rows()))
     assert len(merged) == 50
+
+
+def test_a_rejected_only_dimension_does_not_count_as_assessed():
+    """Problem 3: a rejected assessment must not make a player read as assessed -- it is
+    excluded the same way a draft is."""
+    result = astat.per_player(_rows(
+        (1, 4, 318, scout_scores.PSYCHOLOGICAL, 2.0, "rejected", "2026-08-14")))
+    assert result.empty
+
+
+def test_a_rejected_assessment_beside_a_submitted_one_still_reads_as_awaiting():
+    """The rejected row simply drops out -- the remaining submitted assessment scores this
+    dimension normally, same as if the rejected one had never existed."""
+    result = astat.per_player(_rows(
+        (1, 4, 318, scout_scores.PSYCHOLOGICAL, 2.0, "rejected", "2026-08-14"),
+        (1, 4, 318, scout_scores.PSYCHOLOGICAL, 4.0, "submitted", "2026-08-15")))
+    assert result.iloc[0]["assessment_status"] == astat.AWAITING

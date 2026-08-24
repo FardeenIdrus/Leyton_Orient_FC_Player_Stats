@@ -222,3 +222,27 @@ def test_recency_no_longer_decides_anything():
     ))
     assert pd.isna(out.loc[0, "psychological_band"])
     assert out.loc[0, "psychological_status"] == CONFLICT
+
+
+def test_a_rejected_assessment_never_scores():
+    """Problem 3: rejecting is a terminal review outcome, not a fourth status this module
+    resolves among -- it must behave exactly like a draft here: absent."""
+    out = resolve_bands(_rows(
+        dict(player_id=1, competition_id=4, season_id=318, dimension=PSY,
+             band=5.0, status="rejected", updated_at="2026-08-09"),
+    ))
+    assert out.empty or pd.isna(out.loc[0, "psychological_band"])
+
+
+def test_a_rejected_assessment_does_not_keep_a_conflict_alive():
+    """Rejecting one side of a two-way disagreement must leave the other as the sole
+    submitted assessment, scoring normally -- not a lingering conflict against a row that no
+    longer counts."""
+    out = resolve_bands(_rows(
+        dict(player_id=1, competition_id=4, season_id=318, dimension=PSY,
+             band=4.0, status="submitted", updated_at="2026-08-01"),
+        dict(player_id=1, competition_id=4, season_id=318, dimension=PSY,
+             band=2.0, status="rejected", updated_at="2026-08-02"),
+    ))
+    assert out.loc[0, "psychological_band"] == 4.0
+    assert out.loc[0, "psychological_status"] == "submitted"

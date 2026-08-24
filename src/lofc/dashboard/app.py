@@ -32,10 +32,13 @@ Run via docker compose (the `dashboard` service) at http://localhost:8501.
 
 from __future__ import annotations
 
+import datetime
+
 import streamlit as st
 
 from lofc.config import settings
 from lofc.constrain.filters import apply_gates
+from lofc.dashboard.auth import can
 from lofc.dashboard.controls import synced_budget, synced_min_minutes, synced_wage_budget
 from lofc.dashboard.loaders import (
     available_seasons, get_engine, league_names, load_candidates, load_metric_values,
@@ -43,7 +46,8 @@ from lofc.dashboard.loaders import (
     max_minutes, player_context_lookup, player_names)
 from lofc.dashboard.seasons import (
     CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_mask, season_name_for)
-from lofc.dashboard.session import register_pages, require_login, sidebar_identity
+from lofc.dashboard.session import (
+    force_reload_after_logout, register_pages, require_login, restore_user, topbar_identity)
 from lofc.dashboard.tabs import assess as assess_page_mod
 from lofc.dashboard.tabs.compare import _compare
 from lofc.dashboard.tabs.glossary import _glossary
@@ -52,6 +56,7 @@ from lofc.dashboard.tabs.physical import _physical
 from lofc.dashboard.tabs.player_types import _player_types
 from lofc.dashboard.tabs.players import _kpi_strip, _players
 from lofc.dashboard.tabs.signoff import render as _signoff
+from lofc.dashboard.tabs.users import render as _users_render
 from lofc.dashboard.tabs.watchlist import _watchlist
 from lofc.dashboard.theme import LOGO, header, style
 from lofc.model import club_framework as cf
@@ -73,12 +78,21 @@ def main() -> None:
                        page_icon=str(LOGO) if LOGO.exists() else None,
                        layout="wide", initial_sidebar_state="expanded")
     style()
-    header()
+    if force_reload_after_logout():
+        return          # a hard reload is already on its way; nothing else should render
+
+    # Peek at the session to know whether to draw the top-right identity in this same header
+    # row -- but this is only a peek: it does NOT gate anything. `require_login` below is
+    # still the sole gate, and it is what actually decides whether the rest of the page (the
+    # sidebar filters, the pool, `st.navigation`) renders at all. A user mid-forced-password-
+    # change is deliberately treated as "not yet in": no name shown until that is done.
+    peeked = restore_user(st.session_state, datetime.datetime.now())
+    show_identity = peeked is not None and not st.session_state.get("must_change_password")
+    header((lambda: topbar_identity(peeked)) if show_identity else None)
 
     user = require_login(get_engine())
     if user is None:
         return          # the gate renders the form; nothing else on the page exists yet
-    sidebar_identity(user)
 
     st.sidebar.header("Filters")
     seasons = available_seasons()
@@ -237,6 +251,10 @@ def main() -> None:
     def _methodology_page():
         _methodology(st.container(), candidates, budget_eur, min_minutes)
 
+    def _users_page():
+        with st.container():
+            _users_render(engine, user)
+
     pages = {
         "players": st.Page(_players_page, title="Players", url_path="players", default=True),
         "compare": st.Page(_compare_page, title="Compare", url_path="compare"),
@@ -248,11 +266,39 @@ def main() -> None:
         "glossary": st.Page(_glossary_page, title="Glossary", url_path="glossary"),
         "methodology": st.Page(_methodology_page, title="Methodology", url_path="methodology"),
     }
+    # The Users page (admin account management -- create, reset a password, deactivate/
+    # reactivate, clear a lockout) is added to `pages` ONLY for someone holding
+    # `manage_users`. This is what actually keeps it out of a non-admin's sidebar: `pages`
+    # feeds both `register_pages` (so `switch_to` can never navigate to it either) and
+    # `st.navigation` below, so a role without the permission never sees the page exist,
+    # never mind reach its actions. `tabs/users.py::render` re-checks the same permission on
+    # its own as a second line of defence -- never trust registration alone.
+    if can(user.role, "manage_users"):
+        pages["users"] = st.Page(_users_page, title="Users", url_path="users")
     # Registered BEFORE .run(): a page's own render call (e.g. "Assess this player") can
     # trigger `session.switch_to`/`go_to_assess` while `.run()` is still executing below, so
-    # the lookup must already be in place.
+    # the lookup must already be in place. `register_pages` keeps the flat name -> Page lookup
+    # `switch_to` needs; it is indifferent to how the pages are grouped for display.
     register_pages(pages)
-    st.navigation(list(pages.values())).run()
+    # Nine pages read as one flat list; grouped into the four clusters staff actually use them
+    # in, the current page reads as "where am I within this cluster" rather than "which of
+    # nine". `st.navigation` renders each dict key as a section header above its pages, in the
+    # order given -- so top-to-bottom order across the whole sidebar still matches the
+    # unchanged page order (Players, Compare, Watchlist, Assess, Sign-off, Player types,
+    # Physical, Glossary, Methodology); only the grouping and the section labels are new.
+    nav_sections = {
+        "Scouting": [pages["players"], pages["compare"], pages["watchlist"]],
+        "Assessment": [pages["assess"], pages["signoff"]],
+        "Analysis": [pages["player_types"], pages["physical"]],
+        "Reference": [pages["glossary"], pages["methodology"]],
+    }
+    # A tenth page, but its own section: it is not scouting/assessment/analysis/reference
+    # work, it is platform administration, and folding it into an existing group would bury
+    # it (or misrepresent one of those groups as containing admin tooling for everyone). Only
+    # added when the page itself was -- an admin-less `pages` dict never produces this key.
+    if "users" in pages:
+        nav_sections["Admin"] = [pages["users"]]
+    st.navigation(nav_sections).run()
 
     st.caption(f"Impect event data (+ SkillCorner physical), {season_name_for(season_id)} season. Player market values are "
                "real (Transfermarkt, EFL only — Scottish/PL2 have none, so those players are scouted on quality "

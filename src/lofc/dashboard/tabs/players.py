@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 
 from lofc.constrain.filters import RANK_COLUMN
-from lofc.dashboard import badges, evidence
+from lofc.dashboard import assessment_detail, badges, evidence
 from lofc.dashboard.charts import PLOTLY_CONFIG, bar_chart, radar_chart
 from lofc.dashboard.labels import LABELS, _metric_source, metric_label
 from lofc.dashboard.loaders import (
@@ -21,7 +21,6 @@ from lofc.dashboard.loaders import (
 from lofc.dashboard.seasons import (
     CONTRACT_EXPIRED, CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_data_date)
 from lofc.dashboard.session import CarriedPlayer, go_to_assess
-from lofc.dashboard.theme import RED
 from lofc.model import assessment_status
 from lofc.model import club_framework as cf
 from lofc.model.score import POSITION_ROLE
@@ -143,24 +142,21 @@ def _clear_selection_button(base_key: str, disabled: bool = False,
 
 def _kpi_strip(pool: pd.DataFrame, season_label_text: str | None = None,
                season_id: int | None = None, show_money: bool = False) -> None:
+    """A quiet, single-line orientation strip: which dataset am I looking at. Shown above
+    every page (chrome, not a headline) -- so it stays a slim bar rather than the large
+    metric cards a dashboard's own landing page might earn."""
     players, _ = headline(season_id)
     leagues = league_names()
-    # "Match this filter" counts fee+wage-affordable players — only meaningful (and only shown)
-    # when the affordability layer is on. Off, the list ignores the budget, so the card would
-    # contradict the list; we drop it and show three cards instead.
-    cols = st.columns(4 if show_money else 3)
-    cols[0].metric("Players analysed", f"{players:,}", border=True)
-    cols[1].metric("Leagues", len(leagues), border=True)
-    cols[2].metric("Season", season_label_text or season_label(), border=True)
+    items = [
+        f"<b>{players:,}</b> players analysed",
+        f"<b>{len(leagues)}</b> leagues",
+        f"<b>{season_label_text or season_label()}</b> season",
+    ]
     if show_money:
-        cols[3].metric("Affordable now", int(pool["qualifies"].sum()), border=True)
-    # League names as on-brand pills, centred under the strip (nicer than grey caption text).
-    pills = " ".join(
-        f"<span style='background:#FCE8EB;color:{RED};border:1px solid {RED}33;border-radius:999px;"
-        f"padding:3px 12px;margin:0 4px;font-size:.8rem;font-weight:600;white-space:nowrap;'>{lg}</span>"
-        for lg in leagues)
-    st.markdown(f"<div style='text-align:center;margin:.45rem 0 .7rem;'>{pills}</div>", unsafe_allow_html=True)
-    st.write("")
+        items.append(f"<b>{int(pool['qualifies'].sum()):,}</b> affordable now")
+    sep = "<span class='lofc-infobar-sep'>&middot;</span>"
+    body = sep.join(f"<span class='lofc-infobar-item'>{item}</span>" for item in items)
+    st.markdown(f"<div class='lofc-infobar'>{body}</div>", unsafe_allow_html=True)
 
 
 def _sc_pct_series(sc_pcts: pd.DataFrame, pid: int, cid: int, sid: int) -> pd.Series | None:
@@ -626,38 +622,10 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             st.caption("⬆️ Click a player in the table, or search above, to open their full detail.")
 
 
-def _scout_assessment_card(entry) -> None:
-    """One assessment row rendered as a self-contained card: decision, provenance, flag,
-    notes -- the same fields and the same order everywhere an assessment appears, so a
-    single card and a side-by-side pair never disagree about what to show."""
-    band = "—" if entry.band is None else f"{entry.band:.2f}"
-    st.markdown(f"Band **{band}**")
-    st.caption(f"Entered by **{entry.author_name}** ({entry.author_role}), "
-               f"{entry.created_at:%d %b %Y}")
-    badges.render(badges.for_status(entry.status, entry.author_name, entry.approver_name,
-                                    entry.approved_at))
-    if entry.screening_failed:
-        st.warning("**A screening criterion was not met — the band above is unchanged.** "
-                   "This flag records the assessor's disagreement; it does not cap or "
-                   "alter the figure.")
-    if pd.notna(entry.notes) and (entry.notes or "").strip():
-        st.caption(f"Notes: {entry.notes}")
-
-
 def _dimension_status(frame: pd.DataFrame, dimension: str) -> str | None:
-    """The Decision 17 verdict for one dimension of this player-season: 'signed_off',
-    'submitted' or `scout_scores.CONFLICT` -- None if nothing scoring exists yet.
-
-    Delegates to `model.scout_scores.resolve_bands`, the SAME function that decided
-    `assessed_composite`, rather than re-deriving the conflict rule here -- so the profile
-    can never show a different verdict than the one that actually scored (or didn't).
-    """
-    resolved = scout_scores.resolve_bands(frame)
-    if resolved.empty:
-        return None
-    prefix = "psychological" if dimension == scout_scores.PSYCHOLOGICAL else "medical"
-    value = resolved.iloc[0].get(f"{prefix}_status")
-    return None if pd.isna(value) else value
+    """See `assessment_detail.dimension_status` -- one shared implementation so the profile
+    and the sign-off queue can never derive the Decision 17 verdict two different ways."""
+    return assessment_detail.dimension_status(frame, dimension)
 
 
 def _scout_section(engine, row) -> None:
@@ -665,46 +633,59 @@ def _scout_section(engine, row) -> None:
 
     Shows EVERY assessment, not just the one that scores: two assessors who disagree must
     both be visible, because Decision 14 accepts an unsigned assessment moving the ranking
-    only on the basis that the competing view is on the page. Where more than one exists for
-    a dimension, they render SIDE BY SIDE (frontend-design skill, spec section 16) rather
-    than collapsed to the one that scores, so the disagreement is a comparison, not a scroll.
+    only on the basis that the competing view is on the page. Rendered as one table per
+    dimension (Problem 2) rather than a stack of cards -- tabular and scannable across
+    however many scouts have weighed in, with the per-criterion breakdown one click away
+    in an expander rather than always on screen.
 
     B5 (task 10): where a dimension is CONTESTED, this shows the conflict badge -- not a
     band, and not silently one of the competing assessments -- alongside every competing
     assessment, exactly as the non-conflicted branch already does. Nothing is hidden either
-    way; only the badge and caption differ.
+    way; only the badge and caption differ. A rejected assessment (Problem 3) stays in the
+    table and its reason is surfaced by `assessment_detail.render_flags`, so the scout who
+    entered it can see it was declined and why, and submit a fresh one.
     """
     st.markdown("#### Scout assessment")
     frame = store_assess.load_for_player(engine, int(row["player_id"]),
                                          int(row["competition_id"]), int(row["season_id"]))
+    position = row.get("position_group")
     if frame.empty:
         badges.render(badges.for_status(None))
         st.caption("No psychological or medical assessment has been recorded for this "
                    "player-season.")
     else:
         for dimension in (scout_scores.PSYCHOLOGICAL, scout_scores.MEDICAL):
-            rows = frame[frame["dimension"] == dimension]
+            dim_rows = frame[frame["dimension"] == dimension]
             st.markdown(f"**{dimension}**")
-            if rows.empty:
+            if dim_rows.empty:
                 badges.render(badges.for_status(None))
                 continue
-            entries = list(rows.itertuples())
+            entries = list(dim_rows.itertuples())
             status = _dimension_status(frame, dimension)
+            scoring = [e for e in entries if e.status in ("submitted", "signed_off")]
             if status == scout_scores.CONFLICT:
                 badges.render(badges.for_status(scout_scores.CONFLICT))
-                st.caption(f"{len(entries)} assessments exist and disagree, shown side by "
-                           "side. Nobody has signed one off, so none of them scores this "
-                           "dimension. Resolve it from the sign-off queue.")
+                st.caption(f"{len(scoring)} assessments disagree. Nobody has signed one off, "
+                           "so none of them scores this dimension. Resolve it from the "
+                           "sign-off queue.")
             elif len(entries) > 1:
-                st.caption(f"{len(entries)} assessments exist for this dimension, shown "
-                           "side by side. The signed-off one scores; the others stay on "
-                           "the record, attributed.")
-            if len(entries) == 1:
-                _scout_assessment_card(entries[0])
-            else:
-                for col, entry in zip(st.columns(len(entries)), entries):
-                    with col:
-                        _scout_assessment_card(entry)
+                # Which one scores depends on `status` (Decision 17): a signed-off row always
+                # wins regardless of how many others exist; short of that, exactly one
+                # `submitted` row scores. Naming the true winner here, rather than always
+                # saying "the signed-off one", matters once a rejection can leave a single
+                # ordinary `submitted` row sitting beside others that no longer score.
+                winner_desc = ("the signed-off one scores" if status == "signed_off"
+                              else "the submitted one scores" if status == "submitted"
+                              else "none of them currently scores")
+                st.caption(f"{len(entries)} assessment{'s' if len(entries) != 1 else ''} "
+                           f"exist for this dimension. {winner_desc[0].upper()}"
+                           f"{winner_desc[1:]}; the others stay on the record, attributed.")
+            st.dataframe(assessment_detail.entries_table(dim_rows), hide_index=True,
+                        width="stretch", key=f"assess_table_{row['player_id']}_"
+                        f"{row['competition_id']}_{row['season_id']}_{dimension}")
+            assessment_detail.render_flags(entries)
+            assessment_detail.render_criterion_detail(
+                engine, str(position) if pd.notna(position) else None, dimension, entries)
 
     minutes = row.get("minutes")
     evidence.render(engine, int(row["player_id"]), int(row["competition_id"]),

@@ -464,6 +464,16 @@ class ScoutAssessment(Base):
     ranking -- it marks the assessment approved and controls what may be exported as final.
     Nothing here is ever deleted, so disagreement between two assessors stays visible.
 
+    `status` is one of `draft` / `submitted` / `signed_off` / `rejected` -- no CHECK
+    constraint enforces this (application-layer rule, like the rest of this table's status
+    handling). `rejected` is a fourth, terminal outcome: a Head of Recruitment (or admin)
+    declined a `submitted` assessment with a mandatory `rejection_reason`. It is NOT a
+    deletion -- the row and its criterion scores stay exactly as entered, attributed to their
+    author -- it simply stops scoring (`model.scout_scores` only resolves `submitted` /
+    `signed_off` rows) and drops out of the sign-off queue. `approved_by` / `approved_at` are
+    reused to record who rejected it and when, since they already mean "the reviewer who
+    acted on this row and when", not "who approved this".
+
     Deliberately NOT unique on (player_id, competition_id, season_id, dimension), unlike its
     player/competition/season-keyed siblings elsewhere in this file (PlayerSeasonMetric,
     PlayerScore, Archetype, ...): several people may assess the same player-season on the
@@ -487,6 +497,7 @@ class ScoutAssessment(Base):
     status: Mapped[str] = mapped_column(String, server_default="draft")
     approved_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     approved_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now(),
                                                           onupdate=func.now())

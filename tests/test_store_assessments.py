@@ -273,3 +273,111 @@ def test_sign_off_refresh_failure_never_undoes_the_approval(engine, monkeypatch)
         row = session.get(ScoutAssessment, assessment_id)
         assert row.status == "signed_off"
         assert row.approved_by == 2
+
+
+# --- reject() (Problem 3) -------------------------------------------------------------
+
+
+def test_reject_records_the_reason_reviewer_and_time_and_changes_status(engine):
+    assessment_id = _save(engine)
+    store_assess.reject(engine, assessment_id, approver_id=2, reason="Inconsistent with tape",
+                        now=NOW)
+    with Session(engine) as session:
+        row = session.get(ScoutAssessment, assessment_id)
+        assert row.status == "rejected"
+        assert row.approved_by == 2
+        assert row.approved_at == NOW
+        assert row.rejection_reason == "Inconsistent with tape"
+
+
+def test_reject_does_not_delete_the_assessment(engine):
+    """Nothing on this platform is ever deleted or edited away -- a rejected assessment must
+    still be readable, attributed to its author, exactly like an approved one."""
+    assessment_id = _save(engine, band=2.0)
+    store_assess.reject(engine, assessment_id, approver_id=2, reason="Not enough evidence",
+                        now=NOW)
+    frame = store_assess.load_for_player(engine, 1, 4, 318)
+    assert len(frame) == 1
+    assert frame.iloc[0]["band"] == 2.0
+    assert frame.iloc[0]["author_name"] == "Scout One"
+
+
+def test_reject_requires_a_non_blank_reason(engine):
+    assessment_id = _save(engine)
+    with pytest.raises(ValueError):
+        store_assess.reject(engine, assessment_id, approver_id=2, reason="   ", now=NOW)
+    with Session(engine) as session:
+        row = session.get(ScoutAssessment, assessment_id)
+        assert row.status == "submitted"  # the refused call must not have changed anything
+
+
+def test_reject_refuses_a_draft(engine):
+    assessment_id = _save(engine, status="draft", band=None)
+    with pytest.raises(ValueError):
+        store_assess.reject(engine, assessment_id, approver_id=2, reason="No.", now=NOW)
+
+
+def test_reject_refuses_an_already_signed_off_assessment(engine):
+    """A decided assessment cannot be retroactively rejected -- rejecting is a review action
+    on something offered for review, not a way to undo someone else's earlier decision."""
+    assessment_id = _save(engine)
+    store_assess.sign_off(engine, assessment_id, approver_id=2, now=NOW)
+    with pytest.raises(ValueError):
+        store_assess.reject(engine, assessment_id, approver_id=2, reason="No.", now=NOW)
+
+
+def test_reject_refuses_an_already_rejected_assessment(engine):
+    assessment_id = _save(engine)
+    store_assess.reject(engine, assessment_id, approver_id=2, reason="First reason", now=NOW)
+    with pytest.raises(ValueError):
+        store_assess.reject(engine, assessment_id, approver_id=2, reason="Second reason",
+                            now=NOW)
+
+
+def test_a_rejected_assessment_leaves_pending_signoff(engine):
+    assessment_id = _save(engine)
+    store_assess.reject(engine, assessment_id, approver_id=2, reason="No.", now=NOW)
+    frame = store_assess.pending_signoff(engine)
+    assert frame.empty
+
+
+def test_a_rejected_assessment_never_creates_a_conflict(engine):
+    """Rejecting one side of a two-way disagreement must leave the other as the sole
+    submitted assessment -- not a lingering conflict against a row that no longer scores."""
+    winner = _save(engine, band=4.0, author_id=1)
+    loser = _save(engine, band=2.0, author_id=2)
+    store_assess.reject(engine, loser, approver_id=2, reason="Contradicted by evidence",
+                        now=NOW)
+    assert store_assess.conflicts(engine).empty
+    resolved = scout_scores.resolve_bands(store_assess.load_all(engine))
+    assert resolved.iloc[0]["psychological_band"] == 4.0
+    assert resolved.iloc[0]["psychological_status"] == "submitted"
+
+
+def test_reject_triggers_the_refresh(engine, monkeypatch):
+    """Rule 4: rejecting changes what scores for this player-season, so it must recompute
+    the composite, same as sign_off already does."""
+    from lofc.model import assessed_refresh
+    assessment_id = _save(engine)
+
+    calls = []
+    monkeypatch.setattr(
+        assessed_refresh, "refresh_for_player",
+        lambda engine, player_id, competition_id, season_id: calls.append(
+            (player_id, competition_id, season_id)))
+    store_assess.reject(engine, assessment_id, approver_id=2, reason="No.", now=NOW)
+    assert calls == [(1, 4, 318)]
+
+
+def test_reject_refresh_failure_never_undoes_the_rejection(engine, monkeypatch):
+    from lofc.model import assessed_refresh
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("refresh exploded")
+    monkeypatch.setattr(assessed_refresh, "refresh_for_player", boom)
+
+    assessment_id = _save(engine)
+    store_assess.reject(engine, assessment_id, approver_id=2, reason="No.", now=NOW)
+    with Session(engine) as session:
+        row = session.get(ScoutAssessment, assessment_id)
+        assert row.status == "rejected"

@@ -104,3 +104,56 @@ def test_create_user_rejects_a_duplicate_username(engine):
     with pytest.raises(SystemExit):
         admin.create_user(engine, "jsmith", "Someone Else", "scout",
                           "a perfectly fine passphrase")
+
+
+def test_deactivate_user_blocks_login(engine):
+    from lofc.store import users as store_users
+    with Session(engine) as session:
+        session.add(User(username="jsmith", full_name="J. Smith", role="scout",
+                         password_hash=auth.hash_password("a perfectly fine passphrase")))
+        session.commit()
+
+    admin.deactivate_user(engine, "jsmith")
+
+    import datetime as dt
+    result = store_users.authenticate(engine, "jsmith", "a perfectly fine passphrase",
+                                      dt.datetime.now())
+    assert result.outcome == "inactive"
+
+
+def test_reactivate_user_restores_login(engine):
+    from lofc.store import users as store_users
+    with Session(engine) as session:
+        session.add(User(username="jsmith", full_name="J. Smith", role="scout",
+                         password_hash=auth.hash_password("a perfectly fine passphrase"),
+                         is_active=False))
+        session.commit()
+
+    admin.reactivate_user(engine, "jsmith")
+
+    import datetime as dt
+    result = store_users.authenticate(engine, "jsmith", "a perfectly fine passphrase",
+                                      dt.datetime.now())
+    assert result.outcome == "ok"
+
+
+def test_deactivate_user_rejects_an_unknown_user(engine):
+    with pytest.raises(SystemExit):
+        admin.deactivate_user(engine, "nobody")
+
+
+def test_reactivate_user_rejects_an_unknown_user(engine):
+    with pytest.raises(SystemExit):
+        admin.reactivate_user(engine, "nobody")
+
+
+def test_deactivate_user_never_deletes_the_row(engine):
+    with Session(engine) as session:
+        session.add(User(username="jsmith", full_name="J. Smith", role="scout",
+                         password_hash=auth.hash_password("a perfectly fine passphrase")))
+        session.commit()
+
+    admin.deactivate_user(engine, "jsmith")
+
+    with Session(engine) as session:
+        assert session.scalar(select(User).where(User.username == "jsmith")) is not None

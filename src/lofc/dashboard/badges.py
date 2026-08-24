@@ -17,14 +17,15 @@ from dataclasses import dataclass
 import streamlit as st
 
 from lofc.dashboard.theme import RED
-from lofc.model.scout_scores import CONFLICT
+from lofc.model.scout_scores import CONFLICT, REJECTED
 
 
 @dataclass(frozen=True)
 class AssessmentBadge:
     text: str          # always carries the status in words
     colour: str        # reinforcement only
-    tone: str          # "none" | "draft" | "pending" | "approved" | "conflict" | "unknown"
+    tone: str          # "none" | "draft" | "pending" | "approved" | "conflict" | "rejected"
+                       # | "unknown"
 
 
 def signoff_label(author_name: str, approver_name: str | None) -> str:
@@ -59,6 +60,14 @@ def for_status(status: str | None, author_name: str | None = None,
         # not red -- this is not an error state, it is an honest "nobody has decided yet",
         # and it renders identically wherever a badge appears (profile, watchlist, queue).
         return AssessmentBadge("⚪ Assessments conflict — not scored", "#6b6b6b", "conflict")
+    if status == REJECTED:
+        # Problem 3: a reviewer declined this one. Red IS warranted here -- unlike CONFLICT,
+        # this is a decided, negative outcome, not a neutral "nobody has decided yet" -- but
+        # the reason itself is too long for a badge and is shown separately by the caller
+        # (`dashboard/assessment_detail.py`), never only implied by the colour.
+        who = f" by {approver_name}" if approver_name else ""
+        when = f", {approved_at:%d %b %Y}" if approved_at else ""
+        return AssessmentBadge(f"🔴 Rejected{who}{when}", RED, "rejected")
     # An unrecognised status must be visible, not silently rendered as one of the known ones.
     return AssessmentBadge(f"Unknown status ({status})", RED, "unknown")
 

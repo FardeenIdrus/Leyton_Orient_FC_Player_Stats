@@ -21,8 +21,14 @@ import pandas as pd
 PSYCHOLOGICAL = "Psychological"
 MEDICAL = "Medical Risk"
 CONFLICT = "conflict"
+REJECTED = "rejected"
 
 KEY = ["player_id", "competition_id", "season_id"]
+# `rejected` is deliberately absent: a rejection is a terminal review outcome (Problem 3),
+# not a fourth thing that can win or contest a dimension. Leaving it out of the statuses this
+# module groups on means a rejected row plays no part in `_winner` and cannot appear in a
+# `group` here at all -- it neither scores nor keeps a conflict alive, with no extra branching
+# needed below.
 _SCORING_STATUSES = ("signed_off", "submitted")
 OUTPUT_COLUMNS = KEY + ["psychological_band", "psychological_status",
                         "medical_band", "medical_status"]

@@ -1,33 +1,43 @@
-"""The sign-off queue: conflicts first, then the ordinary submitted assessments awaiting
-approval.
+"""The sign-off queue: one card per PLAYER, conflicts first, then the ordinary submitted
+assessments awaiting approval.
 
-Sign-off is the ONLY gated assessment action (Decision 16). It changes no number and hides
-no player (Decision 14) -- it marks an assessment reviewed, and controls what may leave the
-building as final rather than provisional.
+Sign-off (and now reject, Problem 3) are the ONLY gated assessment actions (Decision 16). They
+change no score directly and hide no player (Decision 14) -- they mark an assessment reviewed
+or declined, and control what may leave the building as final rather than provisional.
+
+Restructured (task: "the sign-off queue lists dimensions, not players") from one card per
+ASSESSMENT to one card per PLAYER-SEASON: a player with a psychological and a medical
+assessment used to appear twice, and a contested dimension with three competing assessments
+appeared three times more -- the approver reassembled the player mentally across scattered
+cards. Each card now shows a player-season's Psychological AND Medical state together, every
+assessment on either dimension (via `dashboard/assessment_detail.py`, the same component the
+player profile uses -- Problem 2, so the criterion-by-criterion detail behind "5, 5, 2" vs "4"
+is never a click away on one screen and absent on the other), and whatever action each
+dimension's current state calls for.
 
 Decision 17 / task 10 Part B: a contested dimension (two or more unsigned assessments that
-disagree) scores nothing until someone with sign-off rights decides. This is the screen where
-that decision happens -- CONFLICTS ARE SHOWN FIRST, above the ordinary queue, because they are
-a real work item (a choice to make), not a lower-priority version of the same review. Three
-actions per conflict, all gated on `auth.can(role, "sign_off")`:
+disagree) scores nothing until someone with sign-off rights decides. CONFLICTS ARE SHOWN
+FIRST, above the ordinary queue -- at the PLAYER level: any player with at least one contested
+dimension sorts into the Conflicts section, because a live disagreement is a real work item (a
+choice to make), not a lower-priority version of the same review. Four actions per contested
+or ordinary-pending dimension, all gated on `auth.can(role, "sign_off")`:
 
   1. Sign off one of the competing assessments -- that band scores; the others stay on the
      record, unsigned, attributed.
-  2. Enter your own, pre-filled from either competing assessment or blank -- a NEW, separate
+  2. Reject one (Problem 3) -- a mandatory reason, gated the same way; the assessment stays
+     on the record, stops scoring, and leaves the queue. The scout sees why on the profile.
+  3. Enter your own, pre-filled from either competing assessment or blank -- a NEW, separate
      assessment under the approver's own name, signed off in the same action.
-  3. Leave it. The player keeps reading "assessments conflict -- not scored".
+  4. Leave it. The player keeps reading "assessments conflict -- not scored".
 
 Layout (frontend-design skill, spec section 16): this is an internal tool with an established
 visual language already (bold state-words, bordered containers, `badges.py`'s three-tone
-system) -- extended here, not replaced, because a working tool used daily benefits more from
-consistency than novelty. The one deliberate addition is the conflict card's signature device:
-every competing assessment for a contested dimension renders as a matched column inside one
-bordered card, a comparison a reader can take in at a glance rather than a scroll -- so "both
-sides legible at once" is a property of the layout, not something the reader has to piece
-together. Decision/evidence ordering carries over from the existing queue: each card leads
-with WHO/WHAT/HOW LONG (the decision to make), then the competing bands with their provenance,
-then the actions -- so a reviewer working under time pressure never has to hunt for the thing
-that matters.
+system, `assessment_detail.py`'s tabular per-assessment view) -- extended here, not replaced,
+because a working tool used daily benefits more from consistency than novelty. Every
+competing assessment for a contested dimension still renders as a matched column inside one
+bordered card -- a comparison a reader can take in at a glance -- but that card now sits
+inside the player's own card alongside the OTHER dimension, so a reviewer working under time
+pressure makes one pass over a player, not two-to-six passes over fragments.
 """
 
 from __future__ import annotations
@@ -37,8 +47,10 @@ import datetime
 import pandas as pd
 import streamlit as st
 
-from lofc.dashboard import badges
+from lofc.dashboard import assessment_detail, badges
 from lofc.dashboard.auth import can
+from lofc.dashboard.loaders import _competition_name_by_id
+from lofc.dashboard.seasons import season_name_for
 from lofc.dashboard.session import CurrentUser
 from lofc.model import assessment_rules as rules
 from lofc.model import club_criteria as cc
@@ -46,6 +58,7 @@ from lofc.model import scout_scores
 from lofc.store import assessments as store_assess
 
 _BAND_HELP = " · ".join(f"{n} {label}" for n, label in rules.BAND_LABELS.items())
+_KEY_COLS = ["player_id", "competition_id", "season_id"]
 
 
 def _band_select(label: str, key: str, default: int | None = None) -> float | None:
@@ -209,47 +222,126 @@ def _enter_own_form(engine, user: CurrentUser, player_id: int, competition_id: i
                                screening_failed=failed, status=status)
 
 
-def _conflict_card(engine, user: CurrentUser, player_names: dict[int, str],
-                   context: pd.DataFrame, key: tuple, group: pd.DataFrame) -> None:
-    """One contested (player, competition, season, dimension): the decision first (who,
-    which dimension, how long it has waited), then every competing assessment SIDE BY SIDE
-    so the approver is choosing, not rubber-stamping one side."""
-    player_id, competition_id, season_id, dimension = key
-    name = player_names.get(player_id, f"Player {player_id}")
-    waiting = int(group["waiting_days"].iloc[0])
-    position, _minutes = _player_context(context, player_id, competition_id, season_id)
+def _reject_control(engine, user: CurrentUser, entry) -> None:
+    """Problem 3: reject with a mandatory reason, gated the same way sign-off is. Nothing is
+    deleted -- the assessment stays on the record, attributed, and just stops scoring and
+    leaves this queue. The reason is required here (not only by the disabled-button UI) since
+    `store.assessments.reject` itself refuses a blank one."""
+    with st.expander(f"Reject {entry.author_name}'s assessment"):
+        st.caption("Stays on the record, attributed — it stops scoring and leaves this "
+                   "queue. The scout sees the reason on the player's profile and can submit "
+                   "a fresh assessment.")
+        reason = st.text_area("Reason for rejecting (required)",
+                              key=f"reject_reason_{entry.id}")
+        if st.button("Confirm reject", key=f"reject_confirm_{entry.id}",
+                     disabled=not (reason or "").strip()):
+            try:
+                store_assess.reject(engine, entry.id, approver_id=user.id,
+                                    reason=reason.strip(), now=datetime.datetime.now())
+            except ValueError:
+                # Someone else acted on it (signed it off, or rejected it) since the page
+                # loaded -- not a bug, just a race on a shared queue. Stashed for `render` to
+                # show on the next run -- see MINOR 6 below.
+                st.session_state["signoff_error"] = (
+                    "This assessment is no longer awaiting sign-off — most likely someone "
+                    "else already acted on it. Refreshing the queue.")
+            st.rerun()
 
-    with st.container(border=True):
-        st.markdown(f"**{name}** — {dimension}")
+
+def _dimension_block(engine, user: CurrentUser, player_id: int, competition_id: int,
+                     season_id: int, dimension: str, frame: pd.DataFrame,
+                     position: str | None, now: datetime.datetime) -> None:
+    """One dimension's whole state inside a player's card: every assessment ever entered for
+    it (table + per-criterion detail via `assessment_detail`, exactly as the profile shows
+    it), followed by whatever action its current state calls for -- sign off, reject, choose
+    among several, or nothing if nothing is pending."""
+    dim_rows = frame[frame["dimension"] == dimension]
+    st.markdown(f"**{dimension}**")
+    if dim_rows.empty:
+        st.caption("Not assessed.")
+        return
+
+    entries = list(dim_rows.itertuples())
+    st.dataframe(assessment_detail.entries_table(dim_rows), hide_index=True, width="stretch",
+                key=f"queue_table_{player_id}_{competition_id}_{season_id}_{dimension}")
+    assessment_detail.render_flags(entries)
+    assessment_detail.render_criterion_detail(engine, position, dimension, entries)
+
+    submitted = dim_rows[dim_rows["status"] == "submitted"]
+    if submitted.empty:
+        return  # signed off, rejected, draft-only -- nothing awaiting a decision right now
+
+    # NOT `len(submitted) > 1` -- a signed-off row beside several newer submitted
+    # re-assessments is not a conflict (Decision 17); `dimension_status` is the one function
+    # that knows that.
+    is_conflict = assessment_detail.dimension_status(frame, dimension) == scout_scores.CONFLICT
+    waiting = int((now - submitted["created_at"].min()).days)
+    if is_conflict:
         badges.render(badges.for_status(scout_scores.CONFLICT))
         st.caption(f"Waiting {waiting} day{'s' if waiting != 1 else ''} for a decision — "
                    "measured from the older of the disagreeing assessments.")
+    else:
+        st.caption(f"Waiting {waiting} day{'s' if waiting != 1 else ''} for sign-off.")
 
-        cols = st.columns(len(group))
-        for col, entry in zip(cols, group.itertuples()):
+    if not can(user.role, "sign_off"):
+        return
+
+    if len(submitted) > 1:
+        cols = st.columns(len(submitted))
+        for col, entry in zip(cols, submitted.itertuples()):
             with col:
-                band_txt = "—" if entry.band is None else f"{entry.band:.2f}"
-                st.markdown(f"Band **{band_txt}**")
-                st.caption(f"Entered by **{entry.author_name}** ({entry.author_role}), "
-                           f"{entry.created_at:%d %b %Y}")
-                if can(user.role, "sign_off"):
-                    if st.button("Sign off this one", key=f"conflict_signoff_{entry.id}"):
-                        try:
-                            store_assess.sign_off(engine, entry.id, approver_id=user.id,
-                                                  now=datetime.datetime.now())
-                        except ValueError:
-                            # Someone else resolved it, or signed off a competing one, since
-                            # the page loaded -- not a bug, just a race on a shared queue.
-                            # Stashed for `render` to show on the next run -- see MINOR 6.
-                            st.session_state["signoff_error"] = (
-                                "This conflict was just resolved by someone else. "
-                                "Refreshing.")
-                        st.rerun()
+                band_txt = "—" if pd.isna(entry.band) else f"{entry.band:.2f}"
+                st.markdown(f"Band **{band_txt}** — {entry.author_name} ({entry.author_role})")
+                if st.button("Sign off this one", key=f"conflict_signoff_{entry.id}"):
+                    try:
+                        store_assess.sign_off(engine, entry.id, approver_id=user.id, now=now)
+                    except ValueError:
+                        st.session_state["signoff_error"] = (
+                            "This was just resolved by someone else. Refreshing.")
+                    st.rerun()
+                _reject_control(engine, user, entry)
+        with st.expander("Enter my own"):
+            _enter_own_form(engine, user, player_id, competition_id, season_id, dimension,
+                            position, submitted)
+    else:
+        entry = next(submitted.itertuples())
+        if entry.author_name == user.full_name:
+            st.caption("You entered this assessment. Approving it is permitted and will be "
+                       "recorded as **self-approved**.")
+        signoff_col, reject_col = st.columns(2)
+        with signoff_col:
+            if st.button("Sign off", key=f"signoff_{entry.id}", type="primary"):
+                # Two reviewers can work the queue at once, or one person can double-click
+                # before Streamlit reruns -- sign_off then raises because the row is no
+                # longer 'submitted'. Not a bug to crash the page over.
+                try:
+                    store_assess.sign_off(engine, entry.id, approver_id=user.id, now=now)
+                except ValueError:
+                    st.session_state["signoff_error"] = (
+                        "This assessment is no longer awaiting sign-off — most likely "
+                        "someone else just approved it. Refreshing the queue.")
+                st.rerun()
+        with reject_col:
+            _reject_control(engine, user, entry)
 
-        if can(user.role, "sign_off"):
-            with st.expander("Enter my own"):
-                _enter_own_form(engine, user, player_id, competition_id, season_id, dimension,
-                                position, group)
+
+def _player_card(engine, user: CurrentUser, player_names: dict[int, str],
+                 context: pd.DataFrame, key: tuple[int, int, int],
+                 now: datetime.datetime) -> None:
+    """One player-season, both dimensions together -- the approver's whole picture of this
+    player in one pass, rather than reassembled across separate psychological/medical
+    cards."""
+    player_id, competition_id, season_id = key
+    name = player_names.get(player_id, f"Player {player_id}")
+    comp_name = _competition_name_by_id().get(competition_id, f"League {competition_id}")
+    position, _minutes = _player_context(context, player_id, competition_id, season_id)
+    frame = store_assess.load_for_player(engine, player_id, competition_id, season_id)
+
+    with st.container(border=True):
+        st.markdown(f"**{name}** — {comp_name}, {season_name_for(season_id)}")
+        for dimension in (scout_scores.PSYCHOLOGICAL, scout_scores.MEDICAL):
+            _dimension_block(engine, user, player_id, competition_id, season_id, dimension,
+                             frame, position, now)
 
 
 def render(engine, user: CurrentUser, player_names: dict[int, str],
@@ -263,16 +355,18 @@ def render(engine, user: CurrentUser, player_names: dict[int, str],
 
     # MINOR 6: `st.rerun()` raises immediately, discarding everything this run already queued
     # for display -- an `st.error(...)` called right before it never reaches the screen, so a
-    # losing race on the queue looked like the button silently did nothing. The two handlers
-    # below stash their message here and rerun; this reads and clears it on the NEXT run, so
-    # it is shown exactly once.
+    # losing race on the queue looked like the button silently did nothing. The handlers above
+    # stash their message here and rerun; this reads and clears it on the NEXT run, so it is
+    # shown exactly once.
     pending_error = st.session_state.pop("signoff_error", None)
     if pending_error:
         st.error(pending_error)
 
     st.caption("Signing off does not change any score and does not hide any player. It "
                "marks the assessment reviewed, so it can be exported as final rather than "
-               "provisional.")
+               "provisional. Rejecting stops an assessment scoring and removes it from this "
+               "queue — it stays on the record, attributed, and the scout can see why on the "
+               "player's profile.")
 
     if context is None:
         context = pd.DataFrame(columns=["player_id", "competition_id", "season_id",
@@ -285,69 +379,50 @@ def render(engine, user: CurrentUser, player_names: dict[int, str],
         st.success("Nothing awaiting sign-off.")
         return
 
+    now = datetime.datetime.now()
+
+    conflict_keys: set[tuple[int, int, int]] = set()
     if not conflicts.empty:
-        # B2: conflicts first, longest-waiting first -- a real work item, not a lower
-        # priority version of the ordinary queue below.
-        groups = list(conflicts.groupby(
-            ["player_id", "competition_id", "season_id", "dimension"], sort=False))
-        groups.sort(key=lambda kv: kv[1]["waiting_days"].iloc[0], reverse=True)
+        conflict_keys = {tuple(row) for row in
+                         conflicts[_KEY_COLS].drop_duplicates().itertuples(index=False)}
+    pending_keys: set[tuple[int, int, int]] = set()
+    if not pending.empty:
+        pending_keys = {tuple(row) for row in
+                        pending[_KEY_COLS].drop_duplicates().itertuples(index=False)}
 
-        st.markdown(f"#### Conflicts — {len(groups)} dimension"
-                    f"{'s' if len(groups) != 1 else ''} contested, {len(conflicts)} "
-                    "assessments involved")
+    if conflict_keys:
+        # B2: conflicts first -- a player with at least one contested dimension is a real
+        # work item (a choice to make), not a lower-priority version of the ordinary queue
+        # below. Longest-waiting player first.
+        waiting_by_key = conflicts.groupby(_KEY_COLS)["waiting_days"].max()
+        n_dimensions = len(conflicts.groupby(_KEY_COLS + ["dimension"]))
+        ordered_conflict_keys = sorted(conflict_keys,
+                                       key=lambda k: waiting_by_key.loc[k], reverse=True)
+
+        st.markdown(f"#### Conflicts — {len(ordered_conflict_keys)} player"
+                    f"{'s' if len(ordered_conflict_keys) != 1 else ''}, {n_dimensions} "
+                    f"dimension{'s' if n_dimensions != 1 else ''} contested")
         st.caption("Two or more assessments disagree on the same dimension and nobody has "
-                   "signed one off. Choose one, enter your own, or leave it — the player "
-                   "reads 'assessments conflict — not scored' until you do.")
-        conflict_ids = set(conflicts["id"])
-        for key, group in groups:
-            _conflict_card(engine, user, player_names, context, key, group)
+                   "signed one off. Choose one, reject one, enter your own, or leave it — "
+                   "the player reads 'assessments conflict — not scored' until you do.")
+        for key in ordered_conflict_keys:
+            _player_card(engine, user, player_names, context, key, now)
         st.divider()
-    else:
-        conflict_ids = set()
 
-    # The ordinary queue excludes anything already shown above as a conflict -- both draw
-    # from 'submitted' assessments, and showing a conflicted row twice (once as a choice to
-    # make, once as a plain approval) would contradict Decision 17: a conflicted assessment
-    # is not eligible for an ordinary one-click sign-off.
-    ordinary = pending[~pending["id"].isin(conflict_ids)]
-    if ordinary.empty:
-        if not conflicts.empty:
+    # The ordinary section excludes any player already shown above -- a player's whole card,
+    # both dimensions, already rendered once (Decision 17: a conflicted dimension is not
+    # eligible for a separate one-click sign-off card of its own).
+    ordinary_keys = pending_keys - conflict_keys
+    if not ordinary_keys:
+        if conflict_keys:
             st.caption("Nothing else awaiting sign-off.")
         return
 
-    st.markdown("#### Awaiting sign-off")
-    st.caption(f"{len(ordinary)} awaiting review, oldest first.")
-    for row in ordinary.itertuples():
-        name = player_names.get(row.player_id, f"Player {row.player_id}")
-        with st.container(border=True):
-            head, action = st.columns([4, 1])
-            with head:
-                band = "—" if row.band is None else f"{row.band:.2f}"
-                st.markdown(f"**{name}** — {row.dimension} — Band **{band}**")
-                st.caption(f"Entered by **{row.author_name}** ({row.author_role}) "
-                           f"on {row.created_at:%d %b %Y}")
-                if row.screening_failed:
-                    st.warning("**A screening criterion was not met — the band above is "
-                               "unchanged.** This flag records the assessor's disagreement "
-                               "for you to weigh; it does not cap or alter the figure.")
-                if pd.notna(row.notes) and (row.notes or "").strip():
-                    st.caption(f"Notes: {row.notes}")
-                if row.author_name == user.full_name:
-                    st.caption("You entered this assessment. Approving it is permitted and "
-                               "will be recorded as **self-approved**.")
-            with action:
-                if st.button("Sign off", key=f"signoff_{row.id}", type="primary"):
-                    # Two reviewers can work the queue at once, or one person can double-
-                    # click before Streamlit reruns -- sign_off then raises because the
-                    # row is no longer 'submitted'. That is not a bug to crash the page
-                    # over; it means someone else got there first, so say so and refresh.
-                    try:
-                        store_assess.sign_off(engine, row.id, approver_id=user.id,
-                                              now=datetime.datetime.now())
-                    except ValueError:
-                        # Stashed for `render` to show on the next run -- see MINOR 6.
-                        st.session_state["signoff_error"] = (
-                            "This assessment is no longer awaiting sign-off — most "
-                            "likely someone else just approved it. Refreshing the "
-                            "queue.")
-                    st.rerun()
+    earliest_by_key = pending.groupby(_KEY_COLS)["created_at"].min()
+    ordered_ordinary_keys = sorted(ordinary_keys, key=lambda k: earliest_by_key.loc[k])
+
+    st.markdown(f"#### Awaiting sign-off — {len(ordered_ordinary_keys)} player"
+                f"{'s' if len(ordered_ordinary_keys) != 1 else ''}")
+    st.caption("Oldest first.")
+    for key in ordered_ordinary_keys:
+        _player_card(engine, user, player_names, context, key, now)

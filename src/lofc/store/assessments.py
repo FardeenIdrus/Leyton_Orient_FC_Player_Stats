@@ -30,7 +30,7 @@ _U = User.__table__
 
 _LOAD_COLUMNS = ["id", "player_id", "competition_id", "season_id", "dimension", "band",
                  "band_note", "screening_failed", "notes", "status", "author_id",
-                 "approved_by", "approved_at", "created_at", "updated_at"]
+                 "approved_by", "approved_at", "rejection_reason", "created_at", "updated_at"]
 
 
 def save(engine, *, player_id: int, competition_id: int, season_id: int, dimension: str,
@@ -186,6 +186,53 @@ def sign_off(engine, assessment_id: int, approver_id: int,
         # failure must never undo a sign-off that has already landed.
         _LOG.exception("assessed_composite refresh failed for player_id=%s competition_id=%s "
                        "season_id=%s after sign-off of assessment %s", player_id,
+                       competition_id, season_id, assessment_id)
+
+
+def reject(engine, assessment_id: int, approver_id: int, reason: str,
+          now: datetime.datetime) -> None:
+    """Decline one submitted assessment (Problem 3). Nothing is deleted: the row and its
+    criterion scores stay on the record, attributed to their author, exactly as `sign_off`
+    leaves an approved one -- only `status` and the reviewer fields change.
+
+    Refuses a draft or an already-decided assessment (signed off or already rejected) for the
+    same reason `sign_off` refuses a draft: rejecting is a review action on something that was
+    offered for review, not a way to retract someone else's earlier decision. A mandatory,
+    non-blank `reason` is enforced here as well as by the calling form, since the form is not
+    the only path into this function and an unusable, reason-less rejection must be impossible
+    however it is reached.
+
+    Decision 17 / Rule 4 applies to rejection exactly as it does to sign-off: declining an
+    assessment changes what scores for this player-season (a rejected row can no longer be
+    one side of a conflict, and can no longer be the one submitted row that scores), so this
+    recomputes the stored composite the same way `sign_off` does. The rejection itself commits
+    first; a refresh failure below is logged and never allowed to undo it.
+    """
+    if not (reason or "").strip():
+        raise ValueError("a rejection reason is required")
+    with engine.begin() as conn:
+        current = conn.execute(
+            select(_A.c.status, _A.c.player_id, _A.c.competition_id, _A.c.season_id)
+            .where(_A.c.id == assessment_id)).one_or_none()
+        if current is None:
+            raise ValueError(f"no assessment {assessment_id}")
+        status, player_id, competition_id, season_id = current
+        if status != "submitted":
+            raise ValueError(f"assessment {assessment_id} is {status!r}, not 'submitted'")
+        conn.execute(_A.update().where(_A.c.id == assessment_id)
+                     .values(status="rejected", approved_by=approver_id, approved_at=now,
+                             rejection_reason=reason.strip()))
+
+    # Local import: see the matching comment in `sign_off` -- the same import-cycle reason.
+    from lofc.model import assessed_refresh
+    try:
+        assessed_refresh.refresh_for_player(engine, player_id=player_id,
+                                            competition_id=competition_id, season_id=season_id)
+    except Exception:
+        # The rejection is already committed; the refresh is derived convenience. A refresh
+        # failure must never undo a rejection that has already landed.
+        _LOG.exception("assessed_composite refresh failed for player_id=%s competition_id=%s "
+                       "season_id=%s after rejecting assessment %s", player_id,
                        competition_id, season_id, assessment_id)
 
 
