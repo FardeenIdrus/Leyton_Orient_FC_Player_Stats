@@ -61,6 +61,47 @@ class Player(Base):
     tm_player_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
+class PlayerPositionShare(Base):
+    """How a player's minutes split across position groups, in one league season.
+
+    Impect reports one row per player per position, so the split is a fact we already
+    hold and were discarding at aggregation. It matters because the platform assigns ONE
+    position group per player-season (the group he played most) and scores him against
+    that group's peers -- true for most players, thin for a utility player. Measured on
+    the live files, 668 of 6,575 rankable player-seasons (10.2%) are assigned a group
+    holding under half their minutes, and 219 (3.3%) under 40%.
+
+    Storing the split lets a report say so instead of presenting one label as the whole
+    truth. It is DISPLAY data: nothing here feeds scoring or the ranking.
+    """
+
+    __tablename__ = "player_position_shares"
+    __table_args__ = (
+        UniqueConstraint("player_id", "competition_id", "season_id", "position_group",
+                         name="uq_position_share"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("players.player_id"),
+                                           index=True)
+    competition_id: Mapped[int] = mapped_column(Integer, index=True)
+    season_id: Mapped[int] = mapped_column(Integer, index=True)
+    position_group: Mapped[str] = mapped_column(String)
+    minutes: Mapped[float] = mapped_column(Float)
+    # Fraction of the player's minutes in this league season, 0-1. Sums to 1 per player.
+    share: Mapped[float] = mapped_column(Float)
+    # Goals and assists earned WHILE IN THIS POSITION. Nullable because an older load, or
+    # a source without them, leaves them unknown rather than zero -- 0 would read as "he
+    # scored none here", which is a different claim from "we do not know".
+    #
+    # These do NOT change any score. A player's metrics stay whole-season across every
+    # position he played; splitting them was considered and rejected (it would have
+    # stripped 23% of all goals and assists out of players' profiles). They exist so the
+    # report can say WHERE the output came from while the profile stays whole.
+    goals: Mapped[float | None] = mapped_column(Float, nullable=True)
+    assists: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
 class PlayerSeasonMetric(Base):
     """One row per player per league season (the Phase 2 output, in the database)."""
 
@@ -498,6 +539,14 @@ class ScoutAssessment(Base):
     approved_by: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     approved_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # The player report's narrative, written by the assessor and NEVER generated -- see
+    # docs/superpowers/specs/2026-08-28-player-report-design.md section 4. All three are
+    # optional: a scout assessing a player before a fixture may record bands with no prose,
+    # and the report then says no narrative was recorded rather than inventing one.
+    summary: Mapped[str | None] = mapped_column(String, nullable=True)
+    why_sign: Mapped[str | None] = mapped_column(String, nullable=True)
+    considerations: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now(),
                                                           onupdate=func.now())

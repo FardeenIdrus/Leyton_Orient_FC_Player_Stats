@@ -26,9 +26,51 @@ import pandas as pd
 
 from lofc.config import ImpectTarget
 from lofc.ingest import impect as impect_landing
-from lofc.ingest.impect_map import IMPECT_MAP, impect_columns_used
+from lofc.ingest.impect_map import (IMPECT_MAP, IMPECT_POSITION_GROUPS,
+                                    impect_columns_used)
 
 MINUTES_FLOOR = 450  # matches aggregate.player_season rankable cut
+
+
+def dominant_position(frame: pd.DataFrame) -> pd.Index:
+    """Index of each player's representative position row, chosen by GROUP total.
+
+    Impect reports one row per player per position, and splits two of our groups across
+    sides: WINGER (LEFT_/RIGHT_) and WINGBACK_DEFENDER (LEFT_/RIGHT_). Taking the single
+    longest single position ROW therefore systematically under-counts exactly those two -- a
+    player with 3.0 at centre forward and 2.0 + 2.0 on the two wings reads as a centre
+    forward, though he spent more time as a winger than as anything else.
+
+    So: sum MINUTES per group, take the winning group, and within it take the side he
+    actually played more (a left winger who also filled in on the right is a LEFT_WINGER).
+
+    Minutes, not matchShare, deliberately. The two are near-identical (matchShare is
+    minutes / ~100, Impect counting a full match as ~100 minutes of real elapsed time) and
+    they disagree for only 7 of 6,575 player-seasons -- but the position SPLIT shown on the
+    report is measured in minutes, so choosing on matchShare made those 7 reports
+    self-contradictory: "Scored as Winger" above a split led by Attacking Mid.
+    Measured on the live files this moves 29 of 1,999 Impect-spined rankable
+    player-seasons, almost all of them INTO Winger or Full Back.
+
+    Positions with no group mapping (a future Impect enum) are grouped under themselves,
+    so they can still win on their own merit and can never raise a KeyError.
+
+    Returns an index into `frame` with exactly one row per playerId.
+    """
+    grouped = frame[["playerId", "position", "playDuration"]].copy()
+    grouped["_group"] = (grouped["position"].map(IMPECT_POSITION_GROUPS)
+                         .fillna(grouped["position"]))
+    # merge() returns a fresh RangeIndex, so carry frame's own labels through as a
+    # COLUMN. Returning the merged frame's index would silently point at the wrong rows.
+    grouped["_row"] = frame.index
+    # Winning group per player: the group holding the most of his matchShare.
+    per_group = grouped.groupby(["playerId", "_group"], as_index=False)["playDuration"].sum()
+    winner = per_group.loc[per_group.groupby("playerId")["playDuration"].idxmax(),
+                           ["playerId", "_group"]]
+    # Representative row: the largest single row INSIDE the winning group.
+    in_winner = grouped.merge(winner, on=["playerId", "_group"], how="inner")
+    picked = in_winner.loc[in_winner.groupby("playerId")["playDuration"].idxmax(), "_row"]
+    return pd.Index(picked.to_numpy())
 
 
 def translate_frame(frame: pd.DataFrame, competition_id: int | None = None,
@@ -52,11 +94,10 @@ def translate_frame(frame: pd.DataFrame, competition_id: int | None = None,
     agg.update({f"_t_{c}": "sum" for c in used})
     totals = frame.groupby("playerId", as_index=False).agg(agg)
 
-    # Dominant identity (name/birthdate/position) = the position row with the most
-    # matchShare. Kept exactly as before: position feeds position_group, which feeds
-    # scoring, so it must not move.
-    dom_idx = frame.groupby("playerId")["matchShare"].idxmax()
-    ident = frame.loc[dom_idx, ["playerId", "playerName", "birthdate", "position"]]
+    # Dominant identity (name/birthdate/position) = the row returned by
+    # dominant_position, which sums matchShare per position GROUP before choosing.
+    ident = frame.loc[dominant_position(frame),
+                      ["playerId", "playerName", "birthdate", "position"]]
 
     # Club shown = the squad the player accumulated the most MINUTES for this season.
     # matchShare is a per-position share and doesn't respect a mid-season move: a

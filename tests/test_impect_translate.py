@@ -9,7 +9,8 @@ minimal frame is enough.
 import numpy as np
 import pandas as pd
 
-from lofc.ingest.impect_map import IMPECT_MAP, gaps, impect_columns_used, mappable
+from lofc.ingest.impect_map import (IMPECT_MAP, IMPECT_POSITION_GROUPS, gaps,
+                                    impect_columns_used, mappable)
 from lofc.ingest.impect_translate import translate_frame
 
 
@@ -104,3 +105,65 @@ def test_map_has_no_duplicate_names():
 def pytest_approx(x, tol=1e-6):
     import pytest
     return pytest.approx(x, abs=tol)
+
+
+# --- dominant position: aggregate by GROUP, not by raw position row -------------------
+# Winger and Full Back are the only groups Impect splits across two sides (LEFT_/RIGHT_).
+# Picking the single highest-matchShare ROW therefore under-counts exactly those two, and
+# a player who was mostly a winger is filed as whatever his largest single row happened to
+# be. Measured on the live files: 29 of 1,999 Impect-spined rankable player-seasons, and
+# the misdirection is overwhelmingly *into* Centre Forward / Attacking Mid / Centre Back
+# and *away from* Winger / Full Back.
+
+def test_dominant_position_sums_the_two_sided_groups():
+    """3.0 at centre forward loses to 2.0 + 2.0 across the two winger slots."""
+    frame = pd.DataFrame([
+        _row(playerId=9, matchShare=3.0, playDuration=18000.0, position="CENTER_FORWARD"),
+        _row(playerId=9, matchShare=2.0, playDuration=12000.0, position="LEFT_WINGER"),
+        _row(playerId=9, matchShare=2.0, playDuration=12000.0, position="RIGHT_WINGER"),
+    ])
+    out = translate_frame(frame)
+    assert IMPECT_POSITION_GROUPS[out.at[0, "position"]] == "Winger"
+
+
+def test_dominant_position_prefers_the_bigger_side_within_the_winning_group():
+    """Having chosen Winger, the representative row is the side he actually played more."""
+    frame = pd.DataFrame([
+        _row(playerId=9, matchShare=1.0, playDuration=6000.0, position="LEFT_WINGER"),
+        _row(playerId=9, matchShare=4.0, playDuration=24000.0, position="RIGHT_WINGER"),
+    ])
+    out = translate_frame(frame)
+    assert out.at[0, "position"] == "RIGHT_WINGER"
+
+
+def test_an_unambiguous_player_is_unaffected():
+    """The overwhelming majority of players have one position; nothing may move for them."""
+    frame = pd.DataFrame([
+        _row(playerId=9, matchShare=30.0, playDuration=180000.0, position="CENTRAL_DEFENDER"),
+        _row(playerId=9, matchShare=1.0, playDuration=6000.0, position="LEFT_WINGBACK_DEFENDER"),
+    ])
+    out = translate_frame(frame)
+    assert out.at[0, "position"] == "CENTRAL_DEFENDER"
+
+
+def test_an_unmapped_position_does_not_crash_the_selection():
+    """A new Impect enum must not raise; it simply cannot win a group it has no group for."""
+    frame = pd.DataFrame([
+        _row(playerId=9, matchShare=5.0, playDuration=30000.0, position="SOMETHING_NEW"),
+        _row(playerId=9, matchShare=1.0, playDuration=6000.0, position="CENTRAL_MIDFIELD"),
+    ])
+    out = translate_frame(frame)
+    assert len(out) == 1
+
+
+def test_dominant_position_chooses_on_minutes_not_matchshare():
+    """The position SPLIT on the report is measured in minutes. Choosing the label on
+    matchShare made 7 reports contradict themselves -- "Scored as Winger" above a split
+    led by Attacking Mid. Here matchShare favours the winger row and minutes favour the
+    midfield one; minutes must win."""
+    frame = pd.DataFrame([
+        _row(playerId=9, matchShare=5.0, playDuration=24000.0, position="LEFT_WINGER"),
+        _row(playerId=9, matchShare=4.0, playDuration=30000.0, position="ATTACKING_MIDFIELD"),
+    ])
+    out = translate_frame(frame)
+    assert out.at[0, "position"] == "ATTACKING_MIDFIELD"
