@@ -1,0 +1,341 @@
+/* Player report — print-first stylesheet.
+ *
+ * The document is a CLUB DOCUMENT, not a data dashboard: the register a football club
+ * actually produces — team sheets, matchday programmes — rather than a magazine spread or a
+ * business-intelligence page. That choice drives everything below.
+ *
+ * Constraints this is built against:
+ *   - It is printed, and read in black and white. No meaning is carried by colour alone.
+ *   - It is opened offline from an email attachment. System fonts only; no web font can
+ *     be fetched, so the personality comes from TREATMENT — weight, tracking, scale —
+ *     rather than from a typeface nobody will have.
+ *   - It is one A4 landscape page. Nothing scrolls, nothing reflows onto a second sheet.
+ */
+
+@page {
+  size: A4 landscape;
+  /* 7mm, not 8: the masthead is a full-bleed bar so the margin carries no
+     design weight, and the extra 2mm of height is the difference between one
+     page and two on the longest metric lists. */
+  margin: 7mm;
+}
+
+:root {
+  --red: #C8102E;          /* the club's own red, from dashboard/theme.py */
+  --ink: #14161A;
+  --ink-soft: #5A6068;
+  --rule: #D9DCE0;
+  --rule-soft: #EDEFF2;
+  --paper: #FFFFFF;
+  --panel: #F7F8F9;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 8.2pt;
+  line-height: 1.34;
+  -webkit-font-smoothing: antialiased;
+}
+
+.sheet {
+  width: 283mm;
+  min-height: 196mm;
+  margin: 0 auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- masthead ---------------------------------------------------------------------- */
+/* A solid red bar, the way a club document announces itself. The red is structural here,
+   not an accent: it is the only large area of colour on the page. */
+.masthead {
+  background: var(--red);
+  color: #fff;
+  padding: 3.4mm 5mm;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.masthead .club {
+  font-size: 10pt;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.masthead .doc {
+  font-size: 7.4pt;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  opacity: 0.88;
+}
+.masthead .context { font-size: 7.4pt; letter-spacing: 0.06em; }
+
+/* The stamp states in WORDS whether this is data alone, one person's view, or the
+   department's position. Never colour alone — it survives a black-and-white printer. */
+.stamp {
+  border: 1px solid rgba(255,255,255,0.7);
+  padding: 0.9mm 2.4mm;
+  font-size: 6.8pt;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  margin-left: 4mm;
+}
+
+/* --- band 1: the decision ------------------------------------------------------------ */
+.decision {
+  display: grid;
+  grid-template-columns: 62mm 1fr 58mm;
+  gap: 5mm;
+  /* Trimmed from 3.2/2.8: the position split added ~6mm to the identity column, which is
+     the tallest of the three and therefore sets this band's height. The page is a fixed
+     194mm with no slack, so the space had to come from somewhere measurable. */
+  padding: 2.4mm 5mm 2.2mm;
+  border-bottom: 1.6pt solid var(--ink);
+}
+
+.identity .name {
+  /* Sized so a long name ("Ilmari Niskanen", "Tyrelle Newton") still sets on one or two
+     tight lines. A name that wraps to a third line pushes the whole decision band past its
+     budget and the report prints as two pages. */
+  font-size: 18pt;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 0.94;
+  text-transform: uppercase;
+  overflow-wrap: break-word;
+}
+.identity .role {
+  margin-top: 1.2mm;
+  font-size: 8pt;
+  font-weight: 600;
+  color: var(--red);
+  letter-spacing: 0.05em;
+}
+.identity .club-name { font-size: 8pt; color: var(--ink-soft); }
+
+/* --- position split ------------------------------------------------------------------
+ * Set INLINE and small. This is context for the name above it, not a chart, and the
+ * identity column is frequently the tallest of the three in a band with no spare height. */
+.splits {
+  margin-top: 2.2mm;
+  font-size: 6.2pt;
+  line-height: 1.32;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+.splits .g { color: var(--ink); font-weight: 600; }
+.split-note {
+  margin-top: 0.6mm;
+  font-size: 5.9pt;
+  line-height: 1.22;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+/* The bio reads as a form register: label left in wide-tracked caps, value right. */
+.bio { margin-top: 3mm; border-top: 1px solid var(--rule); }
+.bio div {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.6mm 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.bio dt {
+  font-size: 6.4pt;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.bio dd { margin: 0; font-size: 7.6pt; font-weight: 600; }
+.bio .absent { font-weight: 400; color: var(--ink-soft); font-style: italic; }
+
+h2 {
+  font-size: 6.6pt;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--red);
+  margin: 0 0 1.6mm;
+}
+.narrative p { margin: 0 0 2mm; font-size: 7.8pt; }
+.narrative ul { margin: 0 0 2.5mm; padding-left: 3.6mm; }
+.narrative li { margin-bottom: 0.7mm; font-size: 7.6pt; }
+.narrative .absent {
+  font-size: 7.6pt;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+.byline {
+  margin-top: 1mm;
+  font-size: 6.6pt;
+  color: var(--ink-soft);
+  letter-spacing: 0.04em;
+}
+
+/* --- the verdict: the page's signature ------------------------------------------------ */
+/* One number, set large. The chairman's eye goes here first; everything else on the page
+   explains it. This is the thing the reference report has no equivalent of. */
+.verdict { border-left: 1.6pt solid var(--ink); padding-left: 4mm; }
+.verdict .figure {
+  font-size: 33pt;
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 0.84;
+  color: var(--red);
+}
+.verdict .of { font-size: 7pt; color: var(--ink-soft); margin-top: 1.4mm; }
+.verdict .bands { margin-top: 1.8mm; border-top: 1px solid var(--rule); }
+.verdict .bands div {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.55mm 0;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.verdict .bands dt {
+  font-size: 6.4pt;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.verdict .bands dd { margin: 0; font-size: 7.6pt; font-weight: 700; }
+.verdict .bands .absent { font-weight: 400; font-style: italic; color: var(--ink-soft); }
+
+.flags { margin-top: 1.6mm; }
+.flags .flag {
+  font-size: 6pt;
+  line-height: 1.22;
+  margin-bottom: 0.5mm;
+  padding-left: 3mm;
+  text-indent: -3mm;
+}
+
+/* --- band 2: the evidence ------------------------------------------------------------- */
+.evidence {
+  display: grid;
+  grid-template-columns: 1fr 80mm 64mm;
+  gap: 5mm;
+  padding: 3.5mm 5mm 0;
+  flex: 1;
+}
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 3mm;
+  margin-bottom: 1.6mm;
+}
+.panel-head .sub {
+  font-size: 6.2pt;
+  color: var(--ink-soft);
+  text-align: right;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.counts { display: flex; gap: 5mm; margin-bottom: 2.4mm; }
+.counts div { }
+.counts dt {
+  font-size: 6pt;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.counts dd { margin: 0; font-size: 11pt; font-weight: 800; letter-spacing: -0.02em; }
+
+.strips {
+  margin-top: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(30mm, 1fr));
+  gap: 2mm 4mm;
+  padding: 2.5mm 5mm 0;
+}
+
+.availability {
+  margin-top: 2.5mm;
+  max-width: 100%;
+  padding: 2.2mm 3mm;
+  background: var(--panel);
+  border-left: 2pt solid var(--rule);
+}
+.availability .figure { font-size: 12pt; font-weight: 800; letter-spacing: -0.02em; }
+.availability .note { font-size: 6pt; line-height: 1.25; color: var(--ink-soft); }
+
+/* --- physical band key + "where the output came from" -------------------------------
+ * The band key is ONE inline run in the footer. Stacked beside the radar it cost ~15mm
+ * in a 64mm column and pushed six of the eight positions onto a second page. */
+.bandkey { letter-spacing: 0; }
+.bk { margin-right: 2.2mm; white-space: nowrap; }
+.bk-sw {
+  display: inline-block;
+  width: 2.2mm;
+  height: 1.3mm;
+  margin-right: 0.7mm;
+  border: 0.3pt solid rgba(0,0,0,0.18);
+}
+
+.whence {
+  margin: -1.2mm 0 2.2mm;
+  font-size: 6pt;
+  line-height: 1.28;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+/* --- footer ---------------------------------------------------------------------------- */
+/* The footer now carries the provenance notes a reader needs but cannot ask for: what
+ * Impect counts as an assist, whether the named position is most of the player's season,
+ * and whether the club benchmark is on the same league's scale. Set small and tight --
+ * it is the cheapest vertical space on a page with none to spare. */
+.footer {
+  margin-top: auto;
+  padding: 1.8mm 5mm 0;
+  border-top: 1px solid var(--rule);
+  display: flex;
+  justify-content: space-between;
+  gap: 6mm;
+  font-size: 5.5pt;
+  line-height: 1.2;
+  color: var(--ink-soft);
+  letter-spacing: 0.03em;
+}
+.footer > span:last-child { white-space: nowrap; }
+
+svg { display: block; max-width: 100%; }
+/* Nothing may push past the sheet edge: the page is a fixed physical size. */
+.evidence > div { min-width: 0; overflow: hidden; }
+
+/* On screen the sheet floats on grey so the page edge is visible; in print it is the page. */
+@media screen {
+  body { background: #E9EBEE; padding: 6mm 0; }
+  .sheet {
+    background: var(--paper);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.14);
+  }
+}
+
+@media print {
+  body { background: var(--paper); padding: 0; }
+  .sheet {
+    box-shadow: none;
+    width: auto;
+    min-height: auto;
+    /* One sheet of paper, always. A report that prints as two pages is not the document
+       this was designed to be, and the second page is always a stray footer. */
+    max-height: 196mm;
+    page-break-after: avoid;
+  }
+  .decision, .evidence, .strips, .footer { page-break-inside: avoid; }
+  /* The masthead's red is structural — without it the page loses its identity entirely,
+     so it is one of the few places colour is forced through. Every figure on the page
+     remains legible without it. */
+  .masthead { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

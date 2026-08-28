@@ -1,0 +1,199 @@
+{#
+  Player report — one A4 landscape page.
+
+  Two bands, deliberately: the DECISION above the EVIDENCE. A chairman reads the top band
+  and stops; a manager reads on to the shape; a scout reads the whole page. Each is served
+  without any of them being sent to a different document.
+
+  Autoescaping is on. The chart SVGs are marked |safe because they are generated markup
+  whose own text was escaped inside report/svg.py.
+#}<div class="sheet">
+
+  <header class="masthead">
+    <div>
+      <span class="club">Leyton Orient FC</span>
+      <span class="doc">&nbsp;&nbsp;Recruitment Report</span>
+    </div>
+    <div>
+      <span class="context">{{ d.season_label }} · {{ d.league }}</span>
+      <span class="stamp">{{ d.stamp }}</span>
+    </div>
+  </header>
+
+  <section class="decision">
+
+    <div class="identity">
+      <div class="name">{{ d.player_name }}</div>
+      <div class="role">{{ d.position }}</div>
+      <div class="club-name">{{ d.club or "Club not recorded" }}</div>
+
+      {# The page names ONE position and scores him against that group's peers. Where
+         that label covers less than half his minutes it is a partial description, so the
+         split is shown. Set INLINE, not as stacked rows: this column has no spare
+         vertical space (the page is a fixed 194mm and the identity column is often the
+         tallest of the three), and six stacked rows pushed every position to a second
+         page. At most three are named; the tail is counted, not listed. #}
+      {% if d.position_shares|length > 1 %}
+      <div class="splits">
+        {% for group, mins, share, goals, assists in d.position_shares[:3] %}
+        {%- if not loop.first %} · {% endif -%}
+        <span class="g">{{ group }}</span> {{ "%.0f"|format(share * 100) }}%
+        {%- endfor %}
+        {%- if d.position_shares|length > 3 %} · +{{ d.position_shares|length - 3 }} more{% endif %}
+      </div>
+      {% endif %}
+
+      <dl class="bio">
+        <div><dt>Age</dt>
+          {% if d.age %}<dd>{{ "%.1f"|format(d.age) }}</dd>
+          {% else %}<dd class="absent">not recorded</dd>{% endif %}</div>
+        <div><dt>Foot</dt>
+          {% if d.foot %}<dd>{{ d.foot|capitalize }}</dd>
+          {% else %}<dd class="absent">not recorded</dd>{% endif %}</div>
+        <div><dt>Height</dt>
+          {% if d.height_cm %}<dd>{{ d.height_cm }}cm</dd>
+          {% else %}<dd class="absent">not recorded</dd>{% endif %}</div>
+        <div><dt>Nationality</dt>
+          {% if d.nationality %}<dd>{{ d.nationality }}</dd>
+          {% else %}<dd class="absent">not recorded</dd>{% endif %}</div>
+        <div><dt>Contract to</dt>
+          {% if d.contract_until %}<dd>{{ d.contract_until }}</dd>
+          {% else %}<dd class="absent">not recorded</dd>{% endif %}</div>
+      </dl>
+    </div>
+
+    <div class="narrative">
+      <h2>Summary</h2>
+      {% if d.narrative and d.narrative.summary %}
+        {% for para in d.narrative.summary.split("\n") if para.strip() %}
+        <p>{{ para }}</p>
+        {% endfor %}
+      {% else %}
+        <p class="absent">No scout assessment recorded — this report presents data only.</p>
+      {% endif %}
+
+      {% if d.narrative and d.narrative.why_sign %}
+      <h2>Why sign</h2>
+      <ul>{% for line in d.narrative.why_sign.split("\n") if line.strip() %}
+        <li>{{ line }}</li>{% endfor %}</ul>
+      {% endif %}
+
+      {% if d.narrative and d.narrative.considerations %}
+      <h2>Considerations</h2>
+      <ul>{% for line in d.narrative.considerations.split("\n") if line.strip() %}
+        <li>{{ line }}</li>{% endfor %}</ul>
+      {% endif %}
+
+      {% if d.narrative and d.narrative.assessor %}
+      <div class="byline">
+        Assessed by {{ d.narrative.assessor }}{% if d.narrative.assessor_role %}
+        ({{ d.narrative.assessor_role }}){% endif %}{% if d.narrative.approver %} ·
+        signed off by {{ d.narrative.approver }}{% endif %}
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="verdict">
+      <h2>Club composite</h2>
+      {% if d.composite is not none %}
+      <div class="figure">{{ "%.2f"|format(d.composite) }}</div>
+      {% else %}
+      <div class="figure">&mdash;</div>
+      {% endif %}
+      {% if d.rank %}
+      <div class="of">{{ d.rank }}{{ d.rank|ordinal }} of {{ d.peer_count }}
+        {{ d.league }} {{ d.position }}s</div>
+      {% endif %}
+
+      <dl class="bands">
+        {% for name, band in d.dimension_bands.items() %}
+        <div><dt>{{ name }}</dt>
+          {% if band is not none %}<dd>{{ "%.2f"|format(band) }}</dd>
+          {% else %}<dd class="absent">not assessed</dd>{% endif %}</div>
+        {% endfor %}
+      </dl>
+
+      {% if d.flags %}
+      {# One compact line per flag, no heading and no list: in a 58mm column a heading plus
+         a bulleted list wrapped to five lines and pushed the whole decision band 15mm past
+         its budget, which printed the report as two pages. The reassurance that a flag
+         never excludes a player is stated once, in the footer. #}
+      <div class="flags">
+        {% for flag in d.flags %}<div class="flag">⚠ {{ flag }}</div>{% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+  </section>
+
+  <section class="evidence">
+
+    <div>
+      <div class="panel-head"><h2>Technical</h2>
+        {% if d.benchmark_n %}
+        <span class="sub">Leyton Orient median, n={{ d.benchmark_n }}</span>
+        {% endif %}
+      </div>
+      <dl class="counts">
+        <div><dt>Minutes</dt><dd>{{ "{:,.0f}".format(d.minutes) if d.minutes else "—" }}</dd></div>
+        <div><dt>Goals</dt><dd>{{ "%.0f"|format(d.goals) if d.goals is not none else "—" }}</dd></div>
+        <div><dt>Assists</dt><dd>{{ "%.0f"|format(d.assists) if d.assists is not none else "—" }}</dd></div>
+        <div><dt>Chances created</dt>
+          <dd>{{ "%.0f"|format(d.chances_created) if d.chances_created is not none else "—" }}</dd></div>
+      </dl>
+      {# WHERE the output came from. Nothing is removed from his profile -- these are
+         the same goals, attributed to the position he was playing at the time. It matters
+         because the percentiles below compare him with ONE position's peers. #}
+      {% if whence %}
+      <div class="whence">{{ whence|join(" · ") }}</div>
+      {% endif %}
+      {{ bars|safe }}
+    </div>
+
+    <div>
+      <div class="panel-head"><h2>Style</h2>
+        <span class="sub">{{ d.peer_count }} peers</span></div>
+      {{ scatter|safe }}
+    </div>
+
+    <div>
+      <div class="panel-head"><h2>Physical</h2>
+        <span class="sub">percentile vs {{ d.position }}s in {{ d.league }}</span></div>
+      {{ radar|safe }}
+
+      <div class="availability">
+        <h2>Availability</h2>
+        {% if d.availability is not none %}
+        <div class="figure">{{ "%.0f"|format(d.availability * 100) }}%</div>
+        <div class="note">{{ d.matches_missed }} matches missed through injury,
+          last two seasons.</div>
+        {% else %}
+        <div class="figure">Not known</div>
+        <div class="note">No injury record, and minutes do not confirm availability
+          either way. This is a gap in the data, not a clean record.</div>
+        {% endif %}
+      </div>
+    </div>
+
+  </section>
+
+  <section class="strips">
+    {% for strip in strips %}{{ strip|safe }}{% endfor %}
+  </section>
+
+  <footer class="footer">
+    <span>{{ d.comparison_text }} · flags are advisory and never exclude a player<br/>
+        {% if d.position_shares and d.position_shares[0][2] < 0.5 %}
+        Scored as {{ d.position }}, his largest position, though under half his minutes.
+        {% endif %}
+        {{ assist_definition }}
+        {% if band_key %}<br/>{{ band_key|safe }}{% endif %}
+        {% if d.benchmark_n and d.benchmark_league and d.benchmark_league != d.league %}
+        Percentiles are within a league: the Leyton Orient median is the squad's standing
+        in {{ d.benchmark_league }}, his is his standing in {{ d.league }}.
+        {% endif %}
+      </span>
+    <span>Data as at {{ d.snapshot_date }} · {{ d.stamp }}</span>
+  </footer>
+
+</div>
