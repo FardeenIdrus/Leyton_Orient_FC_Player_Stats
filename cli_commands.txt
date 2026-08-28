@@ -373,3 +373,24 @@ docker compose exec app python -m lofc.admin deactivate-user --username fi
 
 # Restore a deactivated account's ability to sign in.
 docker compose exec app python -m lofc.admin reactivate-user --username fi
+
+# ----- Player report -------------------------------------------------------------------
+# The report is built in the dashboard (Scouting -> Report), where it can be downloaded as a
+# self-contained .html file. To turn that file into a print-ready landscape PDF:
+#   RUNS ON THE HOST, NOT IN DOCKER -- it drives headless Chromium via Playwright, which is
+#   installed on the machine rather than in the container, so the image gains no rendering
+#   dependency and the PDF comes out of the same engine a person gets by printing the page.
+python3 scripts/report_to_pdf.py ~/Downloads/owen_bailey_25_26_report.html
+
+# How each player's minutes split across position groups, per league season. Runs inside
+# the pipeline (after build_neutral); this is the standalone form. DISPLAY ONLY -- it
+# feeds the player report's position split and touches no score.
+docker compose exec app python -m lofc.model.position_shares
+
+# Apply a change to how a player's position group is chosen (impect_translate), end to end.
+# Order matters: the neutral table carries position_group, the shares mirror it, the
+# scorecards percentile WITHIN it, and the shortlist ranks on the result.
+docker compose exec app python -m lofc.model.build_neutral --write
+docker compose exec app python -m lofc.model.position_shares
+docker compose exec app python -m lofc.model.scorecard_run
+docker compose exec app python -m lofc.constrain.run

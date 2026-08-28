@@ -43,7 +43,175 @@ model), not a reporting dashboard. It runs end to end via `docker compose up` +
 
 ---
 
-## Current state (2026-08-24)
+## Current state (2026-08-25)
+
+> **2026-08-25 — security-and-correctness audit, the last pass before recruitment staff get
+> real access.** The platform was reachable over a public tunnel while carrying real
+> vulnerabilities; this pass closed them, fixed a scoring-adjacent data bug, and cleaned up
+> a round of display and identity defects found while reviewing the whole branch.
+>
+> **Security.** Streamlit's default (`showErrorDetails = "full"`) printed a complete Python
+> traceback — file paths, SQL text, local variables — into a visitor's browser on any
+> uncaught exception, including on the pre-login cookie-restore path; `.streamlit/config.toml`
+> now sets `showErrorDetails = "none"` (the error is still logged server-side, only the
+> browser echo is suppressed). A signed-in user's full name reached the top-right identity
+> chrome and a status badge unescaped via `unsafe_allow_html=True` — an admin sets other
+> users' names, and the session cookie cannot be `HttpOnly`, so a name containing `<script>`
+> was a stored-XSS path to stealing another admin's session; `session.py`'s `_identity_html`
+> and `badges.py`'s `_badge_html` now run every interpolated value through `html.escape()`,
+> and every `unsafe_allow_html` call site in the app was swept and confirmed to be
+> static/escaped content only. The dashboard's own SQLAlchemy engine
+> (`dashboard/loaders.get_engine`, `admin.py`'s engine) now sets `hide_parameters=True` —
+> without it, an `IntegrityError` from a racing duplicate-username INSERT would print the
+> failing statement's bound parameters, including the new account's password salt and hash,
+> into the error text; `store/users.create_user` also now catches that race's `IntegrityError`
+> and turns it into the same plain "user already exists" `ValueError` the ordinary pre-check
+> raises, rather than letting it propagate. A **behaviour-based login throttle**
+> (`dashboard/login_throttle.py`) was added against password-spraying across many different
+> usernames — the existing per-account lockout (5 failures) never fires against a spray,
+> since no single account reaches it. **Deliberately not IP-based**: the app is reached
+> through a bare `cloudflared` tunnel and a Caddy `reverse_proxy` with no forwarded-address
+> normalisation, so there is no non-spoofable client address available to key a limiter on
+> in either deployment; the throttle instead tracks distinct failing usernames within a
+> rolling 5-minute window (8 is a genuine-office ceiling) and adds a 3-second delay to
+> further failures once that signature is seen — a slowdown, never a lockout, so a real
+> multi-person mistyping spree is inconvenienced, not locked out.
+>
+> **Percentiles were pooling two seasons.** Four functions grouped by competition and
+> position but omitted season — `model/normalise.py::compute_percentiles_wide`,
+> `model/score.py::compute_scores`, `model/wage_check.py::build_squad_estimates` and
+> `constrain/filters.py::build_candidates` — so a 2024/25 player and a 2025/26 player in the
+> same league/position were ranked against each other. All four now group by
+> `competition_id, season_id, position_group`. **Verified on this database:**
+> `objective_composite` — the club composite, the default ranking, computed by
+> `model/scorecard.py`/`metric_percentiles`, which already grouped by season correctly — is
+> **unaffected**: still 6,573 rows in the `'All Metrics'` archetype, average **3.029285**,
+> identical to every earlier check. The bug lived in the *screening* layer (wage tiers,
+> shortlist affordability), not the composite. `player_percentiles` holds 144,606 rows
+> post-fix; the `shortlists` table now holds **909** rows (both re-verified directly against
+> this database). The reported before/after deltas (734 players / 11.2% changing wage tier,
+> 1,053 → 909 shortlist rows, 224 affordability flips, 141,104 of 144,606 percentile values
+> changed) come from the recompute itself, which this pass did not re-run — the row counts
+> above are the only figures independently re-checked here.
+>
+> **76 split player identities merged.** Two provider-matching paths (Impect matching and
+> the Transfermarkt/valuation matcher) each minted their own internal player id on a match
+> failure, so one real footballer could end up with his performance metrics under one id and
+> his Transfermarkt link — and therefore contract, foot, height and injury history — under
+> another. Reported as merged with no rows deleted and no orphans left; one pair (both already
+> holding scored rows) was deliberately left unmerged for a human decision. **Verified
+> directly against this database:** contract dates **1,412** (was 1,400), foot **1,660** (was
+> 1,651), height **1,689** (was 1,679) — all three exactly match the reported after-figures.
+> **No script or migration implements this merge** — unlike every other fix in this entry, it
+> has no corresponding code in the diff, so treat it as a one-off manual database repair (the
+> same pattern as R7's four-duplicate-id fix below) rather than a repeatable, reviewable
+> process. **The root cause — the two matchers minting independent ids on failure — is
+> unfixed**, so the split can recur on the next identity refresh.
+>
+> Separately, **three players had shared Transfermarkt ids** (twins and same-day namesakes),
+> so one carried another's contract date; reported as cleared. **Not fully reconciled here:**
+> this database currently holds **15** `tm_player_id` values each claimed by two different
+> `players` rows, not zero. Some or all of these are plausibly the *expected* result of the
+> 76-identity merge above (which explicitly does not delete either row, so a merged pair can
+> legitimately share one Transfermarkt id going forward) rather than genuine unresolved
+> duplicates — but there is no merge log or "canonical id" column to tell the two apart, so
+> this could not be confirmed either way. **Recorded as an open item below** (register row
+> R11) rather than asserted as done.
+>
+> **Injury loader rewritten to merge, not replace** (`store/injuries.py`). The old loader
+> deleted every `source = 'transfermarkt'` row and reinserted the scrape — safe only because
+> the scraper always covers every player. It does not: a squad-page scrape only visits
+> *current* squads, so every summer transfer window drops hundreds of players who have left
+> the four English leagues out of the file, and the old loader would have deleted their
+> injury history along with them (411 such players reported, 375 still ranked in the data).
+> `merge_transfermarkt_rows` now deletes and reinserts only the players actually present in
+> the incoming file; every other player's rows, and every `source = 'manual'` row regardless
+> of player, are untouched. The volume guard (`MIN_ROW_RATIO`) is rescoped to match — it now
+> compares incoming vs. stored rows **for the players visited**, not the whole table, so it
+> can no longer be fooled by ordinary squad turnover into treating a normal refresh as a
+> shrink, or fail to catch one because the untouched leavers padded the denominator.
+> **Verified on this database:** 3,772 transfermarkt-sourced injury rows for 1,176 players
+> (the player count matches the last reported load exactly).
+>
+> **Goalkeeper metrics were computed for every position.** Impect's conceded-xG/shot-stopping
+> columns (`gk_shot_stopping_pct`, `gk_gsaa_p90`, `gk_conceded_p90`, `gk_catches_p90`,
+> `defensive_touches_outside_box_p90`, plus the retired `gk_saves_p90`/`save_pct`/
+> `gk_claims_pct`/`gk_aggressive_distance`) are genuinely populated for every player, not just
+> goalkeepers, because they are team defensive context ("conceded while this player was on
+> the pitch"), not an individual save-quality figure. `dashboard/loaders.py`'s new
+> `GOALKEEPER_ONLY_METRICS`/`_mask_goalkeeper_only_metrics` now null them out for every
+> non-Goalkeeper row **at display only** — the underlying data is untouched (it is correct,
+> just mislabelled for an outfielder), and scoring was never affected, since
+> `club_framework.PERFORMANCE_METRICS` never listed these for an outfield position. An
+> extreme goalkeeper reading in this data (very low minutes, small denominator) was
+> investigated and reported as a real, correctly-computed figure, deliberately not clamped
+> — the 450-minute rankable floor already excludes it from scoring.
+>
+> **Twelve retired StatsBomb metrics removed from the display vocabulary**
+> (`dashboard/labels.py::LABELS`): `progressive_passes_p90`, `passes_into_final_third_p90`,
+> `dribbles_p90`, `dribbles_completed_p90`, `carries_p90`, `progressive_carries_p90`,
+> `tackles_p90`, `interceptions_p90`, `ball_recoveries_p90`, `gk_saves_p90`,
+> `dribble_success_pct`, `save_pct` — confirmed zero non-null rows for each across
+> `player_metrics_neutral`. They no longer appear in the glossary, full-stats table or
+> charts, so a profile no longer shows an empty card for a stat nothing populates any more.
+> The Player profile's raw goalkeeper/defender output tiles (Save %, Saves, Tackles,
+> Interceptions) now self-check via `_output_tile_plan` and hide instead of showing "—"
+> forever, with a pointer to the live Impect figures in the scorecard metrics below.
+>
+> **The advisory flag now names the dimension.** `veto` used to render as one generic line
+> ("below the club minimum on a dimension"); `tabs/players.py::_veto_reasons` now names every
+> dimension that tripped it and by how much — e.g. *"Resale Potential 1.58 is below the club
+> minimum of 2.00"* — reading whichever of the six dimension bands (Performance, Physical,
+> Financial, Resale, Psychological, Medical) are present on the row. Reported that 975
+> players carried the unexplained version and over half of those tripped on a dimension not
+> otherwise shown on screen (Financial/Resale, hidden unless "Show affordability" is on).
+>
+> **Interface.** Cookie-persisted logins (`dashboard/cookie_auth.py`): an HMAC-SHA256-signed
+> token (`config.settings.session_secret`, stdlib `hmac`, never a password/hash) lets a
+> browser refresh re-establish the session instead of bouncing back to the sign-in form —
+> Streamlit's session state lives in server memory keyed to the websocket connection, which a
+> refresh always reconnects fresh. Role, name and lock/must-change-password state are re-read
+> from the live `users` row on every restore, never trusted from the token, so a deactivation
+> takes effect immediately regardless of an outstanding cookie; an unset `SESSION_SECRET`
+> simply disables cookie persistence rather than falling back to an insecure default. The
+> Players table's per-row pandas `Styler` (zebra/affordability tint) was removed — a `Styler`
+> emits inline CSS per cell, and on a ~50-column, several-hundred-row table rebuilt on every
+> rerun (every filter change, every keystroke) that is a purely cosmetic cost; the one
+> meaningful tint (affordability) is stated in words via the existing "Fee in budget"/"Wages
+> in budget" checkbox columns instead. A **global player search** (`dashboard/search.py`) now
+> spans every position and league for the season, built from the pre-filter candidate pool so
+> it never depends on what the sidebar currently shows, with accent/case/punctuation-folded
+> matching (`fold`/`filter_labels`) so "Mendez", "mendez" and "Méndez" all find the same
+> player. The **Watchlist** gained current-season form (reusing the profile's own
+> `_current_form_summary`, so the two can't disagree), a most-recent-injury-spell column, a
+> contract-months-left countdown, and a "what needs a look" strip (contract ≤ 6 months,
+> currently injured, not yet assessed) — and its "Quality" column (the retired
+> `player_scores.performance_score`, a superseded 0–100 figure) was replaced with the real
+> `objective_composite`/Performance/Physical bands. **Roughly two dozen sites** across the
+> Players and Watchlist tables where a missing value reached the screen as the literal text
+> "None" or "nan" (confirmed directly: `st.column_config.NumberColumn`/`LinkColumn` do not
+> leave a missing cell blank for a `NaN`, `None` or `pd.NA` input — all three render as text)
+> are fixed via a shared `dashboard/formatting.py` (`value_or_dash`/`numeric_or_dash`/
+> `link_or_blank`), pre-formatting every such column to text with an em dash for "unknown"
+> before it reaches the column config.
+>
+> **`scout_assessments` is no longer empty.** This database now holds **2** assessment rows
+> (one Psychological `signed_off`, one Psychological `rejected`, same author, no Medical
+> entries) — the first real use of the interface since it was built. `assessed_composite`
+> remains **0 of 6,573** rows non-null (verified): neither player has a Medical entry yet, so
+> `assessed_weight_covered` stays below the threshold needed to compute a composite. This is
+> expected behaviour, not a defect, and does not change the "no scout has used the platform
+> unprompted" caution in gap G3 below — but the "0 assessments" figure quoted in the
+> 2026-08-24 entry above no longer holds and should not be repeated.
+>
+> **694 tests pass** (was 604; 511 before that; 365 before that) — collected and run directly
+> against this checkout (`pytest -q` → `694 passed, 12 warnings`).
+>
+> **Data refreshed:** Transfermarkt squads and injuries were re-scraped and playing-style
+> archetypes rebuilt, per the audit's own account — this pass did not re-run either and could
+> not independently confirm them beyond the injury/bio row counts verified above.
+>
+> **Still not done:** the player-report export (R3c) and the final whole-branch review.
 
 > **2026-08-24 — reject, admin user management, regrouped navigation, and the 2026/27
 > season now loaded (not scored).** Recruitment staff are about to get real access, so this
@@ -347,22 +515,180 @@ only to seed player identity — stable IDs, birth dates, league names — durin
   question was answered by *Months left ≤ 6* on a summer horizon — unaffected by the incident.
   **B1 — Transfermarkt contract/market-value refresh: ✅ DONE (11 Aug 2026).** The 11 Aug 2026
   scrape initially destroyed contract/foot/height data via a parsing bug; the bug was fixed and a
-  recovery scrape ran successfully the same day. The database now holds **1,363** contract dates,
-  **1,606** feet and **1,635** heights, against 5,626 players. Market values were unaffected
-  throughout (**2,526** present — that field is located by CSS selector, not by column position).
-  Full incident record and recovery outcome in the Pending work register below.
-- **604 tests pass** (was 511, before that 365). The dashboard renders clean. The scout-assessment
-  foundation (schema, scoring resolution, injury data) **and its interface** (login, assessment
-  form, evidence panel, badges, sign-off queue **with reject**, watchlist integration, admin
-  user management) are both built — see the 2026-08-24 and 2026-08-17 notes above and register
-  items R3a-2/R3a-3.
+  recovery scrape ran successfully the same day. The database held **1,363** contract dates,
+  **1,606** feet and **1,635** heights immediately after recovery, against 5,626 players. Market
+  values were unaffected throughout (**2,526** present — that field is located by CSS selector,
+  not by column position). **Superseded 2026-08-25** (register row R11 below): after the
+  76-split-identity merge these stand at **1,412** contract dates, **1,660** feet and **1,689**
+  heights. Full incident record and recovery outcome in the Pending work register below.
+- **694 tests pass** (was 604, before that 511, before that 365). The dashboard renders clean.
+  The scout-assessment foundation (schema, scoring resolution, injury data) **and its interface**
+  (login, assessment form, evidence panel, badges, sign-off queue **with reject**, watchlist
+  integration, admin user management) are both built — see the 2026-08-25, 2026-08-24 and
+  2026-08-17 notes above and register items R3a-2/R3a-3/R11.
 
 Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
 `docs/DATA_ARCHITECTURE.md`.
 
 ---
 
+### 2026-08-28 — data-quality fixes found by staff use (R3d)
+
+Two defects reported from live use, both traced to source and fixed or documented.
+
+**Luka Lynch filed as a Full Back** (Impect and Transfermarkt both call him an
+offensive mid / right winger). Two separate causes:
+
+1. *A real bug.* `impect_translate` chose a player's position by taking the single
+   highest-`matchShare` ROW. Impect splits two of our groups across sides
+   (`LEFT_`/`RIGHT_WINGER`, `LEFT_`/`RIGHT_WINGBACK_DEFENDER`), so those two were
+   systematically under-counted — a player with 3.0 at centre forward and 2.0 + 2.0 on
+   the wings read as a centre forward. Now summed per GROUP first
+   (`impect_translate.dominant_position`). **Moves 29 of 1,999 Impect-spined rankable
+   player-seasons (1.45%)**, overwhelmingly INTO Winger and Full Back. Affects
+   Impect-spined leagues only — EFL positions come from the StatsBomb spine.
+   **Takes effect on the next `build_neutral` run; the stored data is still pre-fix.**
+2. *Not a bug.* Full Back genuinely is Lynch's largest group at 38.6%; his other 61.4%
+   splits four ways. Platform-wide, **668 of 6,575 rankable player-seasons (10.2%)** are
+   assigned a group holding under half their minutes, **219 (3.3%)** under 40%. Handled by
+   disclosure: the new `player_position_shares` table (migration `a1c4e77b9d20`, 26,981
+   rows) records the split and the report prints it.
+   Scoring him in each position he played was prototyped and **rejected as not worth
+   building**: his composite is 3.91–4.00 across Full Back / Attacking Mid / Winger /
+   Centre Forward, so the label barely moves the number.
+
+**Lyall Cameron showing 5 assists against Transfermarkt's 0.** Our arithmetic is exactly
+right — `value × matchShare` recovers integer counts and the phase components sum to 5.0 —
+and the club (Aberdeen) is right too; Transfermarkt confirms he played for both Rangers and
+Aberdeen in 25/26. The gap is **definitional**: Impect's `ASSISTS` (glossary KPI 77) counts
+four things — the final pass, deflected or blocked actions, fouls won leading to a converted
+penalty or free kick, and forced own goals — where Transfermarkt counts only the first.
+Systematic, not isolated: our assists run ~1.5× Transfermarkt's across the Scottish
+Premiership and 1.35× StatsBomb's in League One, at correlation 0.90–0.92.
+**No narrower KPI exists** — all 38 assist-family fields partition by zone/lane/phase, not
+by assist type — so the fix is disclosure, not substitution: the definition is now printed
+on the report, and "Chances created" (`SHOT_ASSISTS`, already mapped) sits beside Assists.
+
+**Also added:** a Leyton Orient squad-median benchmark on every percentile bar and the
+physical radar, with `n` always shown (the club has 1–6 rankable players per position) and
+an explicit caveat when the club's league differs from the player's, because percentiles
+are league-relative.
+
+**Verified:** 763 tests pass (was 739). `objective_composite` unchanged at 10,533 rows /
+3.027036. All 8 positions print as ONE page against the most position-fragmented player in
+each — Centre Forward, which already spilled at 194.5mm BEFORE this work, now fits at
+193.3mm.
+
+**Still open:** the assist-definition gap is disclosed, not closed — it cannot be closed
+from this feed. Height and contract expiry remain Transfermarkt-only (register R6). The
+Impect bio backfill is specced but not built.
+
+
+### 2026-08-28 (later) — report evidence: bands, per-position output, position fix applied
+
+Four tasks, all verified end to end.
+
+**1. Position group now chosen on MINUTES, and summed per group.** Two changes to
+`impect_translate.dominant_position`: sum per position GROUP before choosing (Impect splits
+Winger and Full Back across LEFT_/RIGHT_, so they were systematically under-counted), and
+choose on minutes rather than matchShare (the two are the same measure — matchShare is
+minutes / ~100 — but the report's split is in minutes, so 7 reports contradicted themselves).
+**Label now agrees with the split for all 6,575 player-seasons; previously 7 did not.**
+
+**2. Goals and assists per position** (`player_position_shares.goals/assists`, migration
+`b6e2a91f4c73`). The report prints "2 goals as attacking mid · 2 goals as winger" beside the
+season totals. **No score changes**: metrics stay whole-season across every position a player
+filled. Splitting them was considered and REJECTED — 23% of all goals and assists in the
+platform are earned outside the assigned position (1,233 players affected, 469 of whom earned
+most of their output elsewhere), so splitting would gut real profiles and give a player two
+different stat lines. Reconciled: per-position counts sum to the season total for all 3,345
+rankable players, 0 mismatches.
+
+**3. Physical radar rebuilt.** The percentile is now PRINTED under each axis label (it was a
+polygon to eyeball). Six named bands — Elite (80-100), Very Good (65-80), Good (55-65), Above
+Average (50-55), Below Average (25-50), Subpar (0-25) — drawn as rings, keyed in the footer
+with their ranges in brackets. The Leyton Orient squad median is drawn as a second series.
+The old "League average" ring was REMOVED: it was `[50] * 8`, a perfect octagon for every
+player in every league by construction (measured: the real median is 50.5 on all eight axes),
+so it looked like data and was a gridline. The band boundary between Above and Below Average
+IS the 50th percentile, so the rings already carry what it pretended to.
+
+**4. The position fix applied to the data.** `build_neutral --write` → `position_shares` →
+`scorecard_run` → `constrain.run`. **25 position groups moved** (4 Centre Back→Full Back,
+3 Winger→Attacking Mid, 3 Attacking Mid→Centre Forward, …). Row counts identical (11,222
+neutral, 6,573 All Metrics scorecards); `objective_composite` mean 3.029393 → **3.029381**,
+a shift of 0.000012 — the scale expected from 25 players changing peer group.
+
+**Verified:** 778 tests pass (was 739). All 8 positions print as ONE page, measured against
+the most position-fragmented player in each. Label-vs-split mismatches: 0. Composites outside
+1-5: 0.
+
+**Page budget note:** the additions cost real height, reclaimed by measurement rather than
+guesswork — bars ceiling 320→250, radar 228→202, scatter 330→280, `@page` margin 8→7mm, and
+the band key moved from beside the radar (6 stacked rows, ~15mm in a 64mm column) to one
+inline row in the footer. `.evidence` is `flex:1`, so shrinking a chart does NOT shorten the
+page; it only buys slack inside a fixed box. That is why the page grew despite smaller charts
+until the decision band and footer were addressed directly.
+
 ## Pending work register (nothing here is dropped)
+
+**Player report — BUILT 2026-08-28 (register item P7).** A one-page A4-landscape scouting
+report for any player in any of the eight position groups, rendered in the dashboard
+(Scouting → Report) and downloadable as a self-contained HTML file that prints to a
+single-page PDF via `scripts/report_to_pdf.py`. Verified: all 8 positions produce a genuine
+one-page PDF. 736 tests; `objective_composite` unchanged at 3.029285 / 6,573.
+
+- **One report, narrative optional.** Four states — no assessment (*Data only*), submitted
+  (*Provisional*), signed off (*Final*), and conflicting (Decision 17 — no band shown). The
+  club needs reports for fixtures it is about to attend, where no scout has assessed the
+  player yet; building a separate "data report" would have duplicated the layout, the charts
+  and the export, and two exports drift.
+- **The narrative is written by a scout, never generated.** Three optional free-text fields
+  (`summary`, `why_sign`, `considerations`) on the assessment form, migration
+  `174d3fc1a80c`. Templated prose from percentiles would read as filler to a chairman and
+  would repeat the mistake that retired the invented Style-fit.
+- **Categories derived from the club's own per-position metrics** (`model/report_categories.py`)
+  — Central Mid gets Progression, Creation, Retention, Pressing, Duels. Each is the mean of
+  its members' percentiles, renormalised over those present, with lower-is-better metrics
+  inverted. A test asserts every member is a metric the scoring layer actually resolves.
+- **Percentiles come from `scorecard.metric_percentiles`, not `player_percentiles`.** That
+  table holds only 22 legacy metrics and is missing duels, turnovers, pass value and
+  counterpressures — two of the five Central Mid categories cannot be computed from it. Using
+  the composite's own function means the report's percentiles and the player's bands come
+  from one computation and cannot disagree.
+- **Charts are hand-built inline SVG** (`report/svg.py`) — self-contained, vector, printing
+  sharp, needing no JavaScript and adding no container dependency.
+- **Export is HTML + print CSS, converted by headless Chromium on the host.** Whichever engine
+  produces the PDF the document is the same HTML and CSS, so this is not a lower-quality path
+  — it is the same document from a more capable engine, with automation deferred rather than
+  fidelity. `weasyprint` would have required cairo/pango in the image for a worse CSS engine.
+- **Honesty rules on the page:** every figure states its comparison set *including the peer
+  count* (Central Mid in League One has only 13 rankable peers — a 92nd percentile out of 13
+  and out of 117 are different claims); absent data reads as "not recorded" or "not assessed",
+  never zero; colour never carries meaning alone; the stamp and the data snapshot date appear
+  on the page; advisory flags name the dimension and its band.
+
+**Deliberately NOT built, versus the supplied reference** (`docs/Samson Tovide - Data
+Report.pdf`): appearances and starts (the platform holds minutes only); the availability
+donut (needs squad involvement, unused-sub, suspensions — register item **P8**); parent club
+versus loan club (no loan status anywhere); agency, first academy, birth place, achievements,
+last international recognition (held in no ingested source); the cut-out player photograph
+(no image pipeline). Where a field is absent the report says so rather than leaving a gap.
+
+
+**Logged 2026-08-28 — open items from the audit session and new requests:**
+
+| # | Item | Status |
+|---|---|---|
+| P1 | **Identity-split root cause unfixed.** Two provider-matching paths each mint a new `player_id` when matching fails, so one footballer gets metrics under one id and his Transfermarkt link under another. 76 pairs were merged 2026-08-25; **15 duplicate `tm_player_id` pairs remain** and the split recurs on every pipeline run. In all 15 only one half is scored, and that half holds the contract/injury data, so nothing user-visible is wrong today — but it regenerates. | Open, degrades over time |
+| P2 | **One identity pair awaits a decision** — merging it would move two already-scored `player_scorecards` rows between ids. | Needs a human ruling |
+| P3 | **Clustering reads the wrong table.** `model/archetypes.py` reads `player_season_metrics` (legacy, four English leagues only) instead of `player_metrics_neutral` (all seven). This — not any methodology objection — is why the Scottish leagues and PL2 have **0% archetype coverage** against 96–100% in the EFL. One-line fix. Data checked: Scottish Premiership 92% physical-complete, PL2 77%, Scottish Championship 0% (that one is a genuine gap). | Open, one line |
+| P4 | **The clustering model is weak.** Every position resolves to k=2 with silhouettes 0.16–0.31, and four positions produce the same "pressing vs passing" split — one latent axis rediscovered per position, not a playing-style taxonomy. Feature set is the Performance metrics, which measure *quality*; style clustering needs tendency/proportion features normalised for volume. Only Centre Forward yields three genuinely distinct groups. | Open, needs redesign not a re-run |
+| P5 | **Injury panel heading is wrong for current-season spells.** The panel groups "In the scored window" vs "Earlier seasons", but the window is the last two *completed* seasons, so the 20 spells from 26/27 — the current season — are labelled "Earlier". Heading should read "Outside the scored window". | Open, small |
+| P6 | **The legacy `player_season_metrics` table has now caused three separate defects** (watchlist blanks, clustering coverage, cross-table disagreement). Frozen, incomplete, still read in several places. Retiring it properly is its own task. | Open |
+| P7 | **Player report feature** — a per-player report for the Head of Recruitment, chairman and manager, modelled on the supplied reference. See the spec. | Requested 2026-08-28 |
+| P8 | **Availability report** (per the supplied Kabia reference) — games available, squad involvement, apps/starts/sub/unused-sub, injured, suspended, not-in-squad. **Not currently possible**: the platform holds injury spells and minutes but no squad-involvement, suspension or appearance breakdown. Needs a Transfermarkt appearance scrape, previously assessed as brittle. | Blocked on new data |
+
 
 **Gaps recorded honestly ahead of real staff access (2026-08-24) — none of these block
 using the platform, but recruitment staff and whoever signs off deployment should see them
@@ -371,8 +697,10 @@ stated plainly, not discovered:**
 | # | Gap | Detail |
 |---|---|---|
 | G1 | **Deployment has not happened.** | The platform has only ever run locally via `docker compose up`. A hosting-requirements document exists (`data/exports/LOFC_Platform_Hosting_Requirements.pdf`) but is gitignored, not in the repo, and not yet acted on. The platform needs to be reachable from anywhere, i.e. a public HTTPS endpoint — `DEPLOY.md` sketches a Caddy-based setup, but nobody has stood one up |
-| G2 | **This branch is ~60 commits ahead of `main`, and `main` has no login gate at all** (`main`'s `app.py` still uses `st.tabs`, no `require_login`). | A real risk, not a formality: anything deployed straight from `main` today would be completely unauthenticated. `r3a0-injury-scrape` must be merged (or deployed directly) before any public endpoint goes up — deploying `main` as-is would expose the whole platform, including the scout-assessment data, to anyone with the URL |
-| G3 | **No real scout has used the platform end to end yet.** | `scout_assessments` holds 0 rows and `assessed_composite` is NULL for every player on this database — every check so far has been automated tests and scripted browser walkthroughs (Streamlit's `AppTest`), never a recruitment-staff member working the interface unprompted. Treat the interface as unvalidated by its actual users until that happens |
+| G2 | ✅ **RESOLVED (merged to `main`).** | `r3a0-injury-scrape` was merged into `main`; both are level at `1dcba41` with nothing unpushed. `main`'s `app.py` now carries the same login gate (`require_login`, checked before `st.navigation(...)` is even constructed) as the branch did — verified directly against `main`. The earlier risk (anything deployed straight from `main` would have been unauthenticated) no longer applies; a deployer cloning `main` today gets the authenticated app. **Still open, separately:** no public endpoint actually exists yet — see G1 |
+| G3 | **No real scout has used the platform end to end yet.** | **Updated 2026-08-25:** `scout_assessments` now holds 2 rows (one signed-off, one rejected Psychological entry, same author) rather than 0, but `assessed_composite` is still NULL for every player — neither entry has a paired Medical score, so weight coverage never clears the threshold. Still true: every check beyond those 2 rows has been automated tests and scripted browser walkthroughs (Streamlit's `AppTest`), not sustained use by recruitment staff. Treat the interface as effectively unvalidated by its actual users until that happens |
+| G4 | **15 `tm_player_id` values are each claimed by two different `players` rows on this database.** | Found 2026-08-25 while checking the "76 split identities merged" / "3 shared Transfermarkt ids cleared" claims (register row R11). Contract/foot/height totals matched the reported merge exactly, so the merge itself is credible, but there is no merge log or canonical-id column to say whether these 15 pairs are the *expected*, harmless result of a no-delete merge (both rows legitimately pointing at one real person) or genuine unresolved duplicates like the ones R7 fixed by hand. Needs a human with Transfermarkt access to check, the same way R7 was resolved |
+| G5 | **The weekly-refresh scheduler exists but is not installed anywhere.** | `scripts/weekly_refresh.sh` (locking, rotated logs, success/failure markers) and `scripts/test_weekly_refresh.sh` are written and documented (`cli_commands.txt`, `DEPLOY.md`), but the crontab line that would actually run it has not been added to any server — there is no server yet (see G1). Refresh is still manual (S1 below) until deployment happens |
 
 Two further gaps already tracked below, restated here for visibility: **no loan status is
 captured anywhere** (R3a-gap1 — a loanee's parent-club contract is not the club he is playing
@@ -529,7 +857,7 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
 
 | # | Pending in-season item | Note |
 |---|---|---|
-| S1 | **Weekly refresh** — manual for now | a cron container in `docker-compose` is the unattended option |
+| S1 | **Weekly refresh** — script written, not installed | `scripts/weekly_refresh.sh` wraps `python -m lofc.pipeline` with a lock, rotated logs and success/failure markers (`data/ops/`); it is not scheduled anywhere because there is no server to schedule it on yet (G1/G5). Manual for now |
 | S2 | ✅ **DONE (by 2026-08-24) — season 319 built into the DB** | six leagues now have data (Premier League 2 is the one hold-out — not yet started): **1,771 players, average 85 minutes, nobody near the 450-minute rankable threshold**. Shown on the profile as "Current form" (plain facts, not a rating) — no 2026/27 composite exists or should until the threshold is cleared, realistically once more of the season has been played |
 | S3 | ✅ **SkillCorner 2026/27 editions (DONE 2026-08-10)** | six editions added (Championship 1569, League One 1574, League Two 1575, National League 1576, PL2 1578, Scottish Premiership **1683** — SkillCorner labels it just "Premiership"). The **Scottish Championship is deliberately excluded**: the competition exists but holds **zero** physical data (0 rows for 24/25 and 25/26 vs 358 for the Scottish Prem), so configuring it would emit a false "no data" warning every week. The live-season rule now covers **both** providers off one `LIVE_SEASON_ID`. Verified live: Scottish Prem 26/27 already returning **146 players**; the English leagues skipped cleanly (they would have **crashed** the run before this fix) |
 | S4 | **Show "current club" — deferred until after the interface (owner's decision, 2026-08-14)** | the Players list shows the club a player played for *in that season* (by design). Why it matters now: contract dates come from Transfermarkt's 2026/27 squad pages and are current, but the **club name displayed comes from `player_metrics_neutral.team_name`, which is Impect 2025/26 data** — so a player who moved this summer shows his old club beside a current contract date. Transfermarkt's scrape already carries the correct current club in `efl_values.csv`'s `club_name` column, and **nothing reads it**. The fix is to join that column through and display it as "Current club" alongside the season club |
@@ -554,6 +882,9 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
 | R7 | ✅ **DONE (11 Aug 2026) — four duplicate Transfermarkt ids resolved** | Each of `118779`, `390687`, `948958`, `967296` was claimed by two players. Resolved against Transfermarkt's own profile pages: 118779 = **Marlon Pack** (not Scott Malone), 390687 = **Alex Newby** (not Elliot), 948958 = **Kyreece Lisbie** (not Kyrell), 967296 = **Josh Ayres** (not Joe Bauress). Two pairs were twins, two were birth-date coincidences the fuzzy name match let through. **No contamination had occurred** — every injury record was already on the correct player. The incorrect link was cleared from the four wrong claimants; zero duplicate ids remain. **Still open:** the matcher can create new duplicates — it needs an exact first-name requirement when birth dates collide (twins), and a stricter name-similarity bar (`Malone`/`Pack` should never have matched) |
 | R8 | ✅ **DONE (14 Aug 2026) — "never injured" vs "never checked" now distinguishable in `model/medical.py`** | a player with no injury rows used to read as a clean record. Fixed with `availability_with_evidence()`, which returns an explicit `AvailabilityStatus` (`MEASURED` / `CONFIRMED_BY_MINUTES` / `UNKNOWN`) alongside the value — `UNKNOWN` returns `None`, never a false `1.0`. `CONFIRMED_BY_MINUTES` uses `MINUTES_CONFIRM_AVAILABILITY_PER_SEASON = 2000` (a player with 2,000+ minutes in a season was demonstrably available whatever Transfermarkt says), which resolves ~37% of blank records at a rate consistent across leagues (34/39/37/36%). The old `availability()` is unchanged (still no non-test caller) and its docstring now warns not to use it directly for anything shown to a human. **Still open:** `model/medical.py` has no production caller yet — wiring this into the evidence panel is the scout-assessment plan's job, not done here |
 | R9 | ✅ **DONE (14 Aug 2026) — overlapping injury spells merged in `model/medical.py`** | Transfermarkt lists concurrent diagnoses as separate rows. Charlie Wyke carried "Ankle injury" **and** "Broken leg", both 26 Oct 2024 → 30 Jan 2026, 462 days and 64 matches **each** — so he read as **128 matches missed against an actual 64**. Affected **73 spells across 54 players (5% of those with an injury record)**, concentrated in the severe cases where the evidence matters most. Fixed: `games_missed_in_window()` now merges overlapping/touching date ranges via `_merge_overlapping_spells()` and takes the **max** `games_missed` per merged group (not the sum) — deliberately conservative on genuine partial overlaps, since this feeds a human judgement, not a score. A NULL `date_until` (ongoing injury) extends the merge indefinitely rather than crashing or being dropped; see the sentinel's comment in `model/medical.py` for the one known limitation (a NULL from missing/unscraped data, rather than a genuinely open injury, would also absorb — and understate — a real later absence). Verified against the real Wyke case: 64, not 128 |
+
+| R10 | ✅ **DONE (25 Aug 2026) — security-and-correctness audit** | Traceback suppression (`showErrorDetails = "none"`), an XSS sweep of every `unsafe_allow_html` site (`html.escape` on the identity chrome and status badges), `hide_parameters=True` on both dashboard engines plus a caught username-race `IntegrityError`, and a behaviour-based (not IP-based) login-spray throttle (`dashboard/login_throttle.py`). The season-pooling percentile bug in four functions (`normalise.compute_percentiles_wide`, `score.compute_scores`, `wage_check.build_squad_estimates`, `constrain/filters.build_candidates`) is fixed; `objective_composite` verified unaffected (6,573 rows, 3.029285, unchanged), `shortlists` re-verified at 909 rows. Goalkeeper-only metrics masked for outfield rows at display (`loaders.GOALKEEPER_ONLY_METRICS`); 12 dead StatsBomb metrics removed from `labels.LABELS`; the veto advisory now names the tripped dimension (`tabs/players._veto_reasons`). Injury loader rewritten to merge, not replace (`store/injuries.py::merge_transfermarkt_rows`) — verified 3,772 rows / 1,176 players. Interface: cookie-persisted logins (`dashboard/cookie_auth.py`), per-cell table styling removed, a global player search (`dashboard/search.py`), watchlist enrichment (current form, injury status, contract countdown, real composite replacing the retired "Quality" column), and a shared `dashboard/formatting.py` fixing roughly two dozen sites where a missing value rendered as literal "None"/"nan". **694 tests pass** (was 604) — collected and run directly against this checkout. Full detail: the 2026-08-25 note in Current state above |
+| R11 | **REPORTED, PARTLY UNVERIFIABLE (25 Aug 2026) — 76 split player identities merged; 3 shared Transfermarkt ids cleared** | Reported: two provider-matchers minting independent ids on failure had split some players' data across two rows; merged with no deletions, one pair left for a human decision. Separately, 3 players sharing a Transfermarkt id (twins/namesakes) had it cleared. **Verified:** contract/foot/height totals (1,412/1,660/1,689) match the reported after-figures exactly. **Not verifiable from the repo:** no script, migration or log implements either fix — both are one-off manual database repairs, same pattern as R7. **Contradiction found:** this database currently holds 15 `tm_player_id` values shared by two `players` rows each, not zero — see gap G4 above. Root cause (independent id-minting on match failure) is **unfixed**, so new splits can recur on the next identity refresh |
 
 **Small leftovers (cheap, opportunistic):**
 
@@ -595,6 +926,14 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
   `st.navigation` grouped into Scouting/Assessment/Analysis/Reference/Admin, top-right signed-in
   identity, 60s scorecard caches, 2026/27 loaded (not scored) with a "Current form" profile
   section, five UI bugs fixed — see register R3a-3
+- ✅ Security-and-correctness audit, R10 (same branch, 2026-08-25): traceback suppression, an
+  XSS sweep, engine `hide_parameters`, a behaviour-based login-spray throttle, the season-
+  pooling percentile bug fixed in four functions (composite ranking verified unaffected),
+  goalkeeper-metric masking, 12 dead metrics removed, the veto advisory naming its dimension,
+  the injury loader rewritten to merge instead of replace, cookie-persisted logins, a global
+  player search, watchlist enrichment, and a formatting fix for ~24 "None"/"nan" display
+  defects — see register R10. Also reported (not independently verifiable from the repo): 76
+  split player identities merged — see register R11 and gap G4
 
 **Next** (in rough priority order):
 
