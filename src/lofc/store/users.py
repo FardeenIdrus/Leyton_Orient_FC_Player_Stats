@@ -14,6 +14,7 @@ import secrets
 from dataclasses import dataclass
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lofc.dashboard.auth import (ROLES, hash_password, lockout_state, needs_rehash,
@@ -97,6 +98,34 @@ def authenticate(engine, username: str, password: str,
                           must_change_password=user.must_change_password)
 
 
+@dataclass(frozen=True)
+class ActiveUserRow:
+    """The current state of one account, re-checked on every cookie-restored session
+    (`dashboard.cookie_auth.resolve_cookie_restore`) rather than trusted from anything baked
+    into the cookie -- the cookie itself carries only a user id and an issue time. Deliberately
+    holds no `password_hash`, same as `UserRow`."""
+
+    id: int
+    full_name: str
+    role: str
+    is_active: bool
+    must_change_password: bool
+
+
+def get_user(engine, user_id: int) -> ActiveUserRow | None:
+    """The live row for `user_id`, or None if it no longer exists. The one read a cookie
+    restore needs: is the account still active, does it still need a forced password change,
+    and what name/role should the restored session show -- all as of RIGHT NOW, not as of
+    whenever the cookie was issued."""
+    with Session(engine) as session:
+        user = session.scalar(select(User).where(User.id == user_id))
+        if user is None:
+            return None
+        return ActiveUserRow(id=user.id, full_name=user.full_name, role=user.role,
+                             is_active=user.is_active,
+                             must_change_password=user.must_change_password)
+
+
 def change_password(engine, user_id: int, new_password: str) -> None:
     """Set a user's own password. Raises ValueError if it fails the strength rules."""
     problems = password_problems(new_password)
@@ -177,7 +206,19 @@ def create_user(engine, username: str, full_name: str, role: str, password: str)
         user = User(username=username, full_name=full_name.strip(), role=role,
                     password_hash=hash_password(password), must_change_password=True)
         session.add(user)
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError:
+            # TOCTOU: the pre-check above and this INSERT are not atomic -- two admins (or
+            # one admin double-submitting) creating the same username at the same moment can
+            # both pass the check above and race on the table's UNIQUE constraint. Without
+            # this, the loser's IntegrityError -- which carries the failing INSERT's bound
+            # parameters (the new account's password salt and hash) -- would propagate
+            # uncaught past this module. Converting it to the same ValueError the pre-check
+            # raises means the caller (tabs/users.py, admin.py) sees one clear, expected
+            # error either way, not an exception type they have to know to also catch.
+            session.rollback()
+            raise ValueError(f"user {username!r} already exists") from None
         return user.id
 
 

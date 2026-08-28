@@ -302,13 +302,25 @@ def test_reject_does_not_delete_the_assessment(engine):
     assert frame.iloc[0]["author_name"] == "Scout One"
 
 
-def test_reject_requires_a_non_blank_reason(engine):
+def test_reject_allows_a_blank_or_missing_reason(engine):
+    """A reviewer must be able to reject without being forced to type an explanation --
+    a whitespace-only or missing reason is accepted and stored as NULL, never as an empty
+    string, so the display layer's single "no reason recorded" check covers both."""
     assessment_id = _save(engine)
-    with pytest.raises(ValueError):
-        store_assess.reject(engine, assessment_id, approver_id=2, reason="   ", now=NOW)
+    store_assess.reject(engine, assessment_id, approver_id=2, reason="   ", now=NOW)
     with Session(engine) as session:
         row = session.get(ScoutAssessment, assessment_id)
-        assert row.status == "submitted"  # the refused call must not have changed anything
+        assert row.status == "rejected"
+        assert row.rejection_reason is None
+
+
+def test_reject_allows_reason_none(engine):
+    assessment_id = _save(engine)
+    store_assess.reject(engine, assessment_id, approver_id=2, reason=None, now=NOW)
+    with Session(engine) as session:
+        row = session.get(ScoutAssessment, assessment_id)
+        assert row.status == "rejected"
+        assert row.rejection_reason is None
 
 
 def test_reject_refuses_a_draft(engine):

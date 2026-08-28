@@ -1,10 +1,11 @@
-# Caddy serves the dashboard publicly with automatic HTTPS and a login.
-# DASHBOARD_DOMAIN must be a real domain pointing at this server's IP (Caddy then gets a
-# free Let's Encrypt certificate automatically). The password is a bcrypt hash; generate it
-# with:  docker run --rm caddy:2.8-alpine caddy hash-password --plaintext 'yourpassword'
+# Caddy serves the dashboard publicly with automatic HTTPS. DASHBOARD_DOMAIN must be a real
+# domain pointing at this server's IP (Caddy then gets a free Let's Encrypt certificate
+# automatically). Access control is the platform's OWN login (dashboard/session.py: real
+# accounts, scrypt-hashed passwords, lockout, 12-hour sessions) -- there is deliberately no
+# Caddy basic_auth here on top of it. A shared basic-auth password was the only protection
+# before the platform had accounts of its own; keeping it once real per-user login exists
+# would just be a second, club-wide password everyone has to be told, on top of their own
+# account -- friction with no security upside. See DEPLOY.md, "Why no Caddy basic-auth".
 {$DASHBOARD_DOMAIN} {
-	basic_auth {
-		{$DASHBOARD_USER} {$DASHBOARD_PASSWORD_HASH}
-	}
 	reverse_proxy dashboard:8501
 }

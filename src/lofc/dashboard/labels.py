@@ -24,6 +24,19 @@ SOURCE_LABEL = {
 # Recruiter-facing names. Impect successors and Impect-native metrics are labelled by what
 # they TRULY are (Impect's own concept), never dressed up as the StatsBomb stat they stand in
 # for — that lineage lives in SUCCESSOR_LINEAGE below.
+#
+# This is the dashboard's DISPLAY vocabulary only. Retired StatsBomb columns with no live
+# successor (empty for every player, in every league, since Impect became the spine) are
+# deliberately absent: `progressive_passes_p90`, `passes_into_final_third_p90`, `dribbles_p90`,
+# `dribbles_completed_p90`, `carries_p90`, `progressive_carries_p90`, `tackles_p90`,
+# `interceptions_p90`, `ball_recoveries_p90`, `gk_saves_p90`, `dribble_success_pct`,
+# `save_pct` (confirmed via `player_metrics_neutral`, zero non-null rows for each, whole
+# table). Leaving a dead metric in here is how a profile ends up showing an empty "Tackles"
+# card forever — every reader of this dict (glossary, full-stats table, charts) treats
+# membership as "this can be shown", so a name earns a place here only once real data backs
+# it. `club_framework.py` still names these metrics by their ORIGINAL StatsBomb identity for
+# SCORING — `resolve_metric()` maps them to live Impect successors there — this dict has no
+# bearing on that and must not be read as though it did.
 LABELS = {'np_xg_p90': 'Non-pen xG',
  'np_goals_p90': 'Non-pen goals',
  'goals_p90': 'Goals',
@@ -34,23 +47,11 @@ LABELS = {'np_xg_p90': 'Non-pen xG',
  'key_passes_p90': 'Key passes',
  'passes_p90': 'Passes',
  'passes_completed_p90': 'Completed passes',
- 'progressive_passes_p90': 'Progressive passes',
- 'passes_into_final_third_p90': 'Passes into final third',
  'passes_into_box_p90': 'Passes into box',
- 'dribbles_p90': 'Dribbles',
- 'dribbles_completed_p90': 'Dribbles completed',
- 'carries_p90': 'Carries',
- 'progressive_carries_p90': 'Progressive carries',
  'pressures_p90': 'Pressures',
- 'tackles_p90': 'Tackles',
- 'interceptions_p90': 'Interceptions',
  'blocks_p90': 'Blocks',
  'clearances_p90': 'Clearances',
- 'ball_recoveries_p90': 'Ball recoveries',
- 'gk_saves_p90': 'Saves',
  'pass_completion_pct': 'Pass accuracy',
- 'dribble_success_pct': 'Dribble success',
- 'save_pct': 'Save %',
  'ground_duels_won_p90': 'Ground duels won',
  'ball_wins_p90': 'Ball wins',
  'packing_bypassed_opponents_p90': 'Bypassed opponents (packing)',

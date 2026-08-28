@@ -1,14 +1,19 @@
 # Architecture
 
-> **STATUS (2026-08-17): current.** Scoring runs on **Impect + SkillCorner** (91
+> **STATUS (2026-08-24): current.** Scoring runs on **Impect + SkillCorner** (91
 > metrics/player, 7 leagues); StatsBomb is retired from scoring and now only seeds player
 > identity for the historical EFL seasons. Players are ranked on the club's **1–5 composite**,
 > computed by a pipeline stage and stored in `player_scorecards`. The Streamlit app has been
 > split from one 2,560-line file into focused modules (see Code layout) and now sits behind a
-> **login gate**, with a scout-assessment form, evidence panel, sign-off queue and an opt-in
-> assessed-ranking mode (see the `dashboard/` bullet in Code layout and the `users` /
-> `scout_assessments` rows in Data model). `objective_composite` — the default ranking — is
-> unaffected by any of it. For the full metric layer and per-metric provenance see
+> **login gate**, with a scout-assessment form, evidence panel, a sign-off queue (sign off,
+> reject with an optional reason, or enter and sign off your own), an opt-in assessed-ranking
+> mode, and an admin **Users** page for account management (see the `dashboard/` bullet in
+> Code layout and the `users` / `scout_assessments` rows in Data model). Ten `st.navigation`
+> pages are grouped into Scouting/Assessment/Analysis/Reference, plus Admin for administrators
+> only. 2026/27 (season_id 319) is loaded — 1,771 players, 6 leagues — but deliberately not
+> scored (nobody near the 450-minute threshold yet); the profile shows it as plain-fact
+> "Current form" beside the last scored season. `objective_composite` — the default ranking —
+> is unaffected by any of it. For the full metric layer and per-metric provenance see
 > **`docs/DATA_ARCHITECTURE.md`**; for the scoring method, `docs/methodology.md` §3b; for the
 > scout-assessment design, `docs/superpowers/specs/2026-08-10-scout-assessment-design.md`.
 
@@ -97,11 +102,13 @@ after editing it.
   tests), `reference_data.py` (builds the wage/identity stand-ins with provenance),
   `injuries.py` (Transfermarkt injury CSV → `player_injuries`, clear-then-insert on
   `source='transfermarkt'` only, so hand-entered rows survive a re-scrape), `users.py`
-  (account creation/authentication reads used by the dashboard and `lofc.admin`;
-  password rules and hashing live in `dashboard/auth.py`, not here), `assessments.py`
+  (account creation/authentication reads used by the dashboard and `lofc.admin` — also
+  `set_active`, `reset_password`, `clear_lockout`, called identically by the CLI and the
+  admin Users page so the two never enforce different rules), `assessments.py`
   (reads and writes `scout_assessments`/`scout_criterion_scores` — one submitted or
   signed-off row per assessor per player-season-dimension; drafts and prior submissions
-  are never overwritten, only superseded per Decision 17).
+  are never overwritten, only superseded per Decision 17; also `reject()`, which sets
+  `status='rejected'` and an optional `rejection_reason`, never deletes the row).
 - `model/` — `normalise.py` (percentiles), `score.py` (Quality + Fit),
   `archetypes.py` (style clustering), `valuation.py` (dual-era fair value + bio
   backfill), `wage_check.py` (squad-bill reconciliation vs published payrolls),
@@ -121,7 +128,9 @@ after editing it.
   sign-off` / `Assessments conflict` / `Signed off`) per player-season for the watchlist and
   Players list, so the two can never disagree by reading different sources.
   `model/assessed_refresh.py` — recomputes `assessed_composite` on `player_scorecards` after an
-  assessment is saved or signed off.
+  assessment is saved, signed off, **or rejected**. `model/user_admin.py` — the rules shared by
+  `lofc.admin` and the Users page: `guard_deactivate()` (an admin may never deactivate their own
+  account), account-status/lockout label text.
 - `constrain/` — `filters.py` (fee/wage/profile gates, ranking, near-misses),
   `run.py`.
 - `model/scorecard_run.py` — the pipeline stage that **persists** the composite to
@@ -141,26 +150,41 @@ after editing it.
   role permissions via `can(role, action)`, login-throttle and session-expiry logic — pure
   functions, unit-tested without Streamlit) · `session.py` (the login gate `require_login`, the
   logged-in `CurrentUser`, and the `CarriedPlayer` handoff that lets "Assess this player"
-  navigate to the Assess page with the player already selected) · `badges.py` (one status-badge
+  navigate to the Assess page with the player already selected — `get_assess_target`/
+  `resolve_assess_target` give that selection its own persistent session-state slot, so a
+  widget interaction on the form no longer drops it; `topbar_identity` renders the signed-in
+  user's name/role/sign-out in the header's top-right, replacing the old sidebar identity
+  block) · `badges.py` (one status-badge
   renderer used everywhere an assessment's state appears, so a watchlist row and a profile row
   can never disagree) · `evidence.py` (the injury/availability evidence panel, rendered
-  identically on the player profile and the assessment form) · `transparency.py` (the
+  identically on the player profile and the assessment form; `SOURCE_LABELS` names the
+  Transfermarkt provenance by source, not the internal-jargon "Scraped") ·
+  `assessment_detail.py` (the pure-logic half of rendering one assessment's flags/criterion
+  detail — reject status included — shared by the profile and the sign-off queue) ·
+  `transparency.py` (the
   "what this covers, and what it doesn't" disclosure panel, spec §10) · `tabs/` (one module per
   page: players, compare, watchlist, assess, signoff, player_types, physical, glossary,
-  methodology).
+  methodology, **users** — the last visible only to `manage_users`).
   **Dependencies run one way** — theme/labels → charts → loaders → controls → session → tabs →
   app (documented in `app.py`'s module docstring) — so the layers cannot form import cycles;
   `st.switch_page` needs a live `st.Page`, which only `app.py` builds, so `session.py` exposes
   `register_pages`/`switch_to` for a tabs/ module to navigate without importing `app.py` back.
   Navigation runs on **`st.navigation` pages, not `st.tabs`** — the login gate returns before
   `st.navigation(...)` is even constructed, so an unauthenticated visitor sees the sign-in form
-  and nothing else. The pages are **Players**, Compare, Watchlist, **Assess**, **Sign-off**,
-  Player types, Physical, **Glossary**, Methodology. **Assess** is the scout-assessment form
+  and nothing else. **Ten pages, grouped into four sidebar sections plus a fifth, admin-only
+  one:** **Scouting** (Players, Compare, Watchlist), **Assessment** (**Assess**, **Sign-off**),
+  **Analysis** (Player types, Physical), **Reference** (**Glossary**, Methodology), and
+  **Admin** (**Users** — registered only when `can(role, "manage_users")`, checked again
+  inside the page itself as a second gate). **Assess** is the scout-assessment form
   (the club's per-position criteria, Psychological scored 1–5 per criterion, Medical entered as
   a band with the evidence panel beside it); **Sign-off** is the approval queue, which also
   surfaces and resolves conflicts (Decision 17) — any user with `sign_off` permission
-  (`head_of_recruitment`/`admin`) can sign off one of two disagreeing assessments, enter and
-  sign off their own, or leave it contested. **Compare** charts players on the club's Performance metrics
+  (`head_of_recruitment`/`admin`) can sign off one of two disagreeing assessments, **reject**
+  one (an optional reason; the row stays on record, attributed, leaves the queue, and neither
+  scores nor conflicts), enter and sign off their own, or leave it contested. **Users**
+  (admin only) lists every account and opens a per-row dialog to reset a password, clear a
+  lockout, or deactivate/reactivate — accounts are never deleted, since `scout_assessments`
+  rows reference `users.id` for attribution. **Compare** charts players on the club's Performance metrics
   (archetype-aware, from the scorecard percentiles) — the same stats as the composite, not the
   retired role metrics — plus a **raw physical output table** (SkillCorner per-90) that, being
   raw, is directly comparable across leagues (unlike the within-league percentile radar). Age is
@@ -179,6 +203,14 @@ after editing it.
   layer** (off by default). Players also carries an opt-in **"Rank on assessed composite"**
   toggle (off by default): switches the ranking column to `assessed_composite`, filtered to
   players with both scout dimensions assessed, with the status badge shown beside every row.
+  `loaders.py` shortens the cache TTL to 60s for everything that carries `assessed_composite`
+  (`load_scorecards`, `_stored_scorecards`, `load_scorecards_archetype`) so a saved assessment
+  shows up in the assessed ranking promptly, rather than the 600s used for pipeline-only
+  output. The profile also shows a **"Current form"** section (`load_current_form`,
+  `tabs/players.py::_current_form`) — the live season's minutes/goals/assists as plain facts,
+  explicitly labelled "not a rating", beside the dimension scores from the player's most
+  recent *scored* season. The players/leagues/season strip is a quiet **info bar**
+  (`.lofc-infobar` in `theme.py`), not a KPI block competing with the page beneath it.
   The **Glossary** tab is the single searchable home for metric
   definitions (each with its exact definition and, for a substitute, the StatsBomb stat it
   stands in for); definitions no longer sit on the player card.
@@ -202,9 +234,9 @@ after editing it.
 | `skillcorner_team_season` | club × season | skillcorner | all 24 League One clubs, physical per-90s |
 | `skillcorner_player_season` | player × season | skillcorner | LOFC squad only (21 players, DOB+name matched to StatsBomb ids) |
 | `watchlist` | player × league × season | **the user** | status, free-text note, timestamps. USER DATA — see below |
-| `users` | one per account | `lofc.admin` CLI only (`create-user`/`set-password`) | username, full_name, role, scrypt `password_hash`, `is_active`, failed-login/lockout state. No email column — there is no self-service or email password reset by design |
+| `users` | one per account | `lofc.admin` CLI (`create-user`/`set-password`/`deactivate-user`/`reactivate-user`/`list-users`) or the admin **Users** page — both call the same `store/users.py` functions | username, full_name, role, scrypt `password_hash`, `is_active`, failed-login/lockout state. No email column — there is no self-service or email password reset by design. Accounts are **never deleted** — `scout_assessments` references `users.id`, so deleting one would break attribution; `is_active=False` (deactivate) is the only removal path |
 | `player_injuries` | one per injury spell | `store/injuries.py` (Transfermarkt scrape) or entered by hand via the evidence panel | `source` (`transfermarkt`/`manual`), `entered_by` (null when scraped), category, dates, days out, matches missed. Feeds `model/medical.py`'s availability evidence — never a score on its own |
-| `scout_assessments` | player × league × season × dimension × **assessor** | `store/assessments.py`, written by the Assess page | not unique on that key — several assessors may hold `submitted` rows for the same player-dimension; at most one may be `signed_off`. `status` (`draft`/`submitted`/`signed_off`), `band`, `approved_by`, `approved_at`. Resolved by `model/scout_scores.resolve_bands()` (Decision 17) into what actually scores |
+| `scout_assessments` | player × league × season × dimension × **assessor** | `store/assessments.py`, written by the Assess page | not unique on that key — several assessors may hold `submitted` rows for the same player-dimension; at most one may be `signed_off`. `status` (`draft`/`submitted`/`signed_off`/**`rejected`**), `band`, `approved_by`, `approved_at`, **`rejection_reason`** (nullable — the reason is optional, migration `19ac464d556d`). Resolved by `model/scout_scores.resolve_bands()` (Decision 17, which covers reject the same way as sign-off) into what actually scores |
 | `scout_criterion_scores` | one per assessment × criterion | `store/assessments.py` | the per-criterion 1–5 score (Psychological) or pass/fail (Medical screening) behind each assessment's band |
 
 Schema lives in `store/models.py`; every change goes through an Alembic migration.
@@ -268,7 +300,7 @@ conditions that would justify adding them are documented in `scaling.md`.
 
 ## Verification approach
 
-- **60 pytest tests**, no network, sqlite standing in where a DB is needed.
+- **604 pytest tests**, no network, sqlite standing in where a DB is needed.
 - The dashboard is verified headlessly with Streamlit's **AppTest** (the full script
   must run with zero exceptions) after every UI change — there is no browser in the
   automated loop.

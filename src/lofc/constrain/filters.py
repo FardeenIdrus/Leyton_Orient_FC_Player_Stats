@@ -158,9 +158,11 @@ def build_candidates(engine, wage_ceiling_multiplier: float = 1.0,
         names, on=keys, how="left")
 
     cand["age_band"] = cand["age"].map(age_band)
-    # Tier within league as well as position: a League One "Top" tercile must not be
-    # decided by Championship players sharing the pool.
-    cand["performance_tier"] = (cand.groupby(["competition_id", "position_group"])
+    # Tier within league, season and position: a League One "Top" tercile must not be
+    # decided by Championship players sharing the pool, and a 2024/25 tercile must not be
+    # decided by 2025/26 players sharing the pool (season is part of the group for the
+    # same reason scorecard.py::metric_percentiles includes it).
+    cand["performance_tier"] = (cand.groupby(["competition_id", "season_id", "position_group"])
                                 ["performance_score"].transform(_tiers))
 
     cand = cand.merge(wage_est, on=["competition_id", "position_group", "age_band",

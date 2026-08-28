@@ -33,6 +33,21 @@ def test_percentiles_rank_within_group():
     assert sorted(wide["np_xg_p90"].tolist()) == [25.0, 50.0, 75.0, 100.0]
 
 
+def test_percentiles_do_not_pool_across_seasons():
+    """Regression: season_id must be part of the groupby. Two seasons of the same
+    competition/position must be ranked independently, never pooled into one group --
+    otherwise a player appearing in both seasons ends up competing against himself, and
+    the group size (hence the percentile spacing) silently doubles."""
+    season_a = [_metric_row(i, "Centre Forward", np_xg_p90=float(i), season_id=317) for i in range(4)]
+    season_b = [_metric_row(i, "Centre Forward", np_xg_p90=float(i), season_id=318) for i in range(4)]
+    wide = compute_percentiles_wide(pd.DataFrame(season_a + season_b))
+    # If pooled, group size would be 8 and the spacing would be 12.5-point steps, not 25.
+    season_a_pcts = wide.xs(317, level="season_id")["np_xg_p90"]
+    season_b_pcts = wide.xs(318, level="season_id")["np_xg_p90"]
+    assert sorted(season_a_pcts.tolist()) == [25.0, 50.0, 75.0, 100.0]
+    assert sorted(season_b_pcts.tolist()) == [25.0, 50.0, 75.0, 100.0]
+
+
 def test_only_rankable_players_are_ranked():
     df = pd.DataFrame([
         _metric_row(1, "Centre Forward", np_xg_p90=1.0),

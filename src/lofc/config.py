@@ -344,6 +344,15 @@ class Settings(BaseSettings):
     skillcorner_password: str | None = Field(default=None)
     skillcorner_editions: str | None = Field(default=None)
 
+    # --- Scout-assessment session cookie ---------------------------------------------
+    # HMAC secret (dashboard/cookie_auth.py) for signing the "remembered session" cookie, so
+    # a browser refresh does not bounce recruitment staff back to the sign-in form (Streamlit
+    # keeps session state in server memory, keyed to the websocket connection, which a
+    # refresh reconnects). Set via .env (SESSION_SECRET), never committed and never
+    # hard-coded here. Unset means cookie persistence is simply not offered -- the app falls
+    # back to today's per-connection-only session, not to an insecure default secret.
+    session_secret: str | None = Field(default=None)
+
     # --- Scoring source (Phase A of the Impect migration) --------------------
     # Which metric table the scorer reads. "neutral" = the provider-neutral
     # player_metrics_neutral (87 metrics, Impect-primary where it supplies a metric);

@@ -189,7 +189,7 @@ def sign_off(engine, assessment_id: int, approver_id: int,
                        competition_id, season_id, assessment_id)
 
 
-def reject(engine, assessment_id: int, approver_id: int, reason: str,
+def reject(engine, assessment_id: int, approver_id: int, reason: str | None,
           now: datetime.datetime) -> None:
     """Decline one submitted assessment (Problem 3). Nothing is deleted: the row and its
     criterion scores stay on the record, attributed to their author, exactly as `sign_off`
@@ -197,10 +197,11 @@ def reject(engine, assessment_id: int, approver_id: int, reason: str,
 
     Refuses a draft or an already-decided assessment (signed off or already rejected) for the
     same reason `sign_off` refuses a draft: rejecting is a review action on something that was
-    offered for review, not a way to retract someone else's earlier decision. A mandatory,
-    non-blank `reason` is enforced here as well as by the calling form, since the form is not
-    the only path into this function and an unusable, reason-less rejection must be impossible
-    however it is reached.
+    offered for review, not a way to retract someone else's earlier decision. `reason` is
+    OPTIONAL (a reviewer must be able to reject without being forced to type an explanation) --
+    a blank or missing one is stored as NULL, not an empty string, so the display layer's
+    "no reason recorded" branch (`dashboard/assessment_detail.py::render_flags`) is the only
+    place that has to know blank means blank.
 
     Decision 17 / Rule 4 applies to rejection exactly as it does to sign-off: declining an
     assessment changes what scores for this player-season (a rejected row can no longer be
@@ -208,8 +209,7 @@ def reject(engine, assessment_id: int, approver_id: int, reason: str,
     recomputes the stored composite the same way `sign_off` does. The rejection itself commits
     first; a refresh failure below is logged and never allowed to undo it.
     """
-    if not (reason or "").strip():
-        raise ValueError("a rejection reason is required")
+    clean_reason = (reason or "").strip() or None
     with engine.begin() as conn:
         current = conn.execute(
             select(_A.c.status, _A.c.player_id, _A.c.competition_id, _A.c.season_id)
@@ -221,7 +221,7 @@ def reject(engine, assessment_id: int, approver_id: int, reason: str,
             raise ValueError(f"assessment {assessment_id} is {status!r}, not 'submitted'")
         conn.execute(_A.update().where(_A.c.id == assessment_id)
                      .values(status="rejected", approved_by=approver_id, approved_at=now,
-                             rejection_reason=reason.strip()))
+                             rejection_reason=clean_reason))
 
     # Local import: see the matching comment in `sign_off` -- the same import-cycle reason.
     from lofc.model import assessed_refresh

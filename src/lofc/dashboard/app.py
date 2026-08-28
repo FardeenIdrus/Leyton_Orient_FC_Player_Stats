@@ -47,7 +47,8 @@ from lofc.dashboard.loaders import (
 from lofc.dashboard.seasons import (
     CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_mask, season_name_for)
 from lofc.dashboard.session import (
-    force_reload_after_logout, register_pages, require_login, restore_user, topbar_identity)
+    force_reload_after_logout, peek_carry, register_pages, require_login, restore_from_cookie,
+    restore_user, topbar_identity)
 from lofc.dashboard.tabs import assess as assess_page_mod
 from lofc.dashboard.tabs.compare import _compare
 from lofc.dashboard.tabs.glossary import _glossary
@@ -56,6 +57,7 @@ from lofc.dashboard.tabs.physical import _physical
 from lofc.dashboard.tabs.player_types import _player_types
 from lofc.dashboard.tabs.players import _kpi_strip, _players
 from lofc.dashboard.tabs.signoff import render as _signoff
+from lofc.dashboard.search import build_search_index
 from lofc.dashboard.tabs.users import render as _users_render
 from lofc.dashboard.tabs.watchlist import _watchlist
 from lofc.dashboard.theme import LOGO, header, style
@@ -81,6 +83,12 @@ def main() -> None:
     if force_reload_after_logout():
         return          # a hard reload is already on its way; nothing else should render
 
+    # Try a cookie restore BEFORE the peek below, so a returning browser's identity shows up
+    # on the very first paint after a refresh rather than one render behind (require_login
+    # also calls this -- it is idempotent -- so this is purely so the peek two lines down sees
+    # an already-restored session, not a correctness requirement of the gate itself).
+    restore_from_cookie(get_engine(), datetime.datetime.now())
+
     # Peek at the session to know whether to draw the top-right identity in this same header
     # row -- but this is only a peek: it does NOT gate anything. `require_login` below is
     # still the sole gate, and it is what actually decides whether the rest of the page (the
@@ -96,13 +104,35 @@ def main() -> None:
 
     st.sidebar.header("Filters")
     seasons = available_seasons()
+    # I5 (audit-dashboard.md): `st.switch_page` (the "Assess this player" -> go_to_assess ->
+    # switch_to("assess") path, and ONLY that path -- ordinary sidebar navigation is unaffected)
+    # was confirmed directly to reset every widget-backed session_state key below on the run it
+    # lands on, even though the sidebar code that creates them runs unconditionally before
+    # `st.navigation(...).run()` ever dispatches to a specific page. A plain session_state entry
+    # never bound to a widget's own `key=` -- like the CarriedPlayer `go_to_assess` stashes --
+    # survives that same navigation untouched, so `peek_carry()` (session.py; a non-destructive
+    # read -- `get_assess_target` still consumes it later, when the Assess page itself renders
+    # this same run) is used to reseed Season/Position with the CARRIED player's own values
+    # rather than each widget's ordinary hardcoded default, on exactly the run this matters.
+    # Leagues resets too, but its default (every league) is always a superset that still
+    # includes the carried player's league, so it needs no equivalent fix.
+    carry = peek_carry(st.session_state)
+    st.session_state.setdefault("sidebar_season", carry.season_id if carry else seasons[0])
     season_id = st.sidebar.selectbox(
-        "Season", seasons, format_func=season_name_for,
+        "Season", seasons, format_func=season_name_for, key="sidebar_season",
         help="Players are scored and ranked within one season. The latest season is the "
              "default; earlier seasons stay fully available here (and power the trajectory "
              "chart). SkillCorner physical data exists for 2025/26 only.")
-    position = st.sidebar.selectbox("Position", POSITION_ORDER,
-                                    index=POSITION_ORDER.index("Centre Forward"))
+    # key="sidebar_position": the global player search (tabs/players.py) sets this session
+    # key from an on_change callback when a searched player is in a different position, so
+    # picking a search result switches this widget too. `setdefault` (not `index=`) supplies
+    # the first-ever default -- passing BOTH `index=` and `key=` to the same widget makes
+    # Streamlit warn ("created with a default value but also set via Session State") on every
+    # run after the key is first written, even though it behaves correctly either way; this
+    # is the same pattern `controls.py`'s synced sliders already use, for the same reason.
+    st.session_state.setdefault(
+        "sidebar_position", carry.position_group if carry and carry.position_group else "Centre Forward")
+    position = st.sidebar.selectbox("Position", POSITION_ORDER, key="sidebar_position")
     # Archetype lens (Full Back / Winger only): rank players AS a specific type. Default
     # "All Metrics" leaves the all-round composite as the ranking; the all-round score stays
     # visible alongside whichever archetype is chosen.
@@ -121,7 +151,12 @@ def main() -> None:
              "of current output (little resale value, short horizon), so their output looks underpriced. "
              "Cap the age to match the signing horizon — e.g. 28 if resale value matters.")
     league_options = league_names()
-    chosen_leagues = st.sidebar.multiselect("Leagues", league_options, default=league_options)
+    # key="sidebar_leagues": same reasoning as sidebar_position above -- the global search
+    # can add a found player's league back in if it had been filtered out, so the switch
+    # actually reveals him rather than just changing Position underneath a still-empty list.
+    # `setdefault`, not `default=`, for the same reason as sidebar_position just above.
+    st.session_state.setdefault("sidebar_leagues", league_options)
+    chosen_leagues = st.sidebar.multiselect("Leagues", league_options, key="sidebar_leagues")
     contract_horizon = st.sidebar.selectbox(
         "Contract expiry", list(CONTRACT_HORIZONS),
         index=list(CONTRACT_HORIZONS).index(DEFAULT_CONTRACT_HORIZON),
@@ -163,6 +198,11 @@ def main() -> None:
         wage_multiplier = 1.0
 
     candidates = load_candidates(wage_multiplier, season_id)
+    # The global player search's universe: every position, every league, for this season --
+    # built BEFORE any sidebar filter (age/league/contract/foot/position) narrows `candidates`
+    # below, so the search a recruiter types into never depends on what the sidebar currently
+    # shows. Reuses this same query rather than issuing a second one.
+    search_index = build_search_index(candidates)
     percentiles = load_percentiles(season_id)
     metric_values = load_metric_values(season_id)
 
@@ -188,8 +228,15 @@ def main() -> None:
     # Phase 2: the club's objective composite (Performance + Physical, real data) is the
     # primary ranking — the invented Style-fit is retired. Merge the live scorecard in.
     keys3 = ["player_id", "competition_id", "season_id"]
+    # All six dimension bands travel with the pool, not just Performance/Physical: the
+    # `veto` flag can trip on any of the six (scorecard.py's dim_bands), and the profile's
+    # advisory needs the actual band values to name which dimension and by how much — see
+    # tabs/players.py's flags block. Without Financial/Resale/Psychological/Medical here,
+    # the advisory could say a player is flagged but never say why for anyone tripped on a
+    # dimension not already on screen.
     sc_cols = keys3 + ["objective_composite", "full_composite", "objective_weight_covered",
-                       "performance_band", "physical_band", "veto", "below_min_composite"]
+                       "performance_band", "physical_band", "financial_band", "resale_band",
+                       "psychological_band", "medical_band", "veto", "below_min_composite"]
     # When an archetype lens is selected, rank by that archetype's composite but keep the
     # all-round composite visible alongside (the guardrail). "All Metrics" -> they are equal.
     all_round = load_scorecards(season_id)[keys3 + ["objective_composite"]].rename(
@@ -205,12 +252,19 @@ def main() -> None:
 
     # A season that has player data but no scorecards yet (e.g. the current season, freshly
     # under way) must not read as a blank/broken page -- `ranking` degrades to a well-formed
-    # empty frame (see `loaders._attach_scorecard_meta`) rather than raising, so say why here,
-    # above every page, rather than leaving the recruiter looking at blank composite columns.
-    if ranking.empty:
-        st.info(f"**{season_name_for(season_id)} is under way, but no player has yet reached "
-                "the 450-minute minimum needed to be ranked.** Scores will appear here once "
-                "enough of the season has been played — try an earlier season in the meantime.")
+    # empty frame (see `loaders._attach_scorecard_meta`) rather than raising. Say why, but only
+    # on the pages where the season selection actually drives what is on screen (Players,
+    # Compare, Assess, Player types -- everything built from `pool`/`ranking`): the banner used
+    # to render above `st.navigation` itself, so it appeared on EVERY page including Sign-off,
+    # Glossary and Methodology, where the season selector changes nothing they show. A closure
+    # over this run's `ranking`/`season_id`, called from inside the page functions below rather
+    # than unconditionally here.
+    def _season_banner() -> None:
+        if ranking.empty:
+            st.info(f"**{season_name_for(season_id)} is under way, but no player has yet "
+                    "reached the 450-minute minimum needed to be ranked.** Scores will appear "
+                    "here once enough of the season has been played — try an earlier season "
+                    "in the meantime.")
 
     _kpi_strip(pool, season_name_for(season_id), season_id, show_money)
 
@@ -223,16 +277,19 @@ def main() -> None:
     engine = get_engine()
 
     def _players_page():
+        _season_banner()
         _players(st.container(), pool, position, percentiles, metrics, metric_values,
-                 archetype, show_money, contract_horizon, contract_unknown)
+                 search_index, archetype, show_money, contract_horizon, contract_unknown)
 
     def _compare_page():
+        _season_banner()
         _compare(st.container(), pool, position, archetype, season_id, show_money, metric_values)
 
     def _watchlist_page():
         _watchlist(st.container())
 
     def _assess_page():
+        _season_banner()
         assess_page_mod.page(engine, user, pool)
 
     def _signoff_page():
@@ -240,6 +297,7 @@ def main() -> None:
             _signoff(engine, user, player_names(), player_context_lookup())
 
     def _player_types_page():
+        _season_banner()
         _player_types(st.container(), pool, percentiles, metrics, position)
 
     def _physical_page():

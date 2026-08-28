@@ -1,4 +1,10 @@
-"""The injury CSV -> DB join. The frame builder is pure; no database needed."""
+"""The injury CSV -> DB join, the volume guard, and the merge itself.
+
+The frame builder and the guard's ratio test are pure functions -- no database needed.
+The merge (F3, near the bottom) does need one, to prove the DELETE/INSERT is actually
+scoped to the players in the incoming file; it uses an in-memory sqlite engine, same
+as `test_store_injuries.py`.
+"""
 
 import pandas as pd
 
@@ -48,9 +54,13 @@ def test_frame_columns_match_the_table(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# F1 -- the loader deletes every stored transfermarkt row before appending, so a
-# shrunken CSV must not be allowed to reach the DELETE. No database needed: the
-# decision is a pure function of the two row counts.
+# F1 -- the loader deletes and reinserts only the stored transfermarkt rows of the
+# players PRESENT IN THE INCOMING FILE, so a shrunken CSV must not be allowed to reach
+# that DELETE. `incoming`/`existing` here are already scoped to the same set of
+# visited players (see `merge_transfermarkt_rows`) -- a departing player is outside
+# this comparison on both sides, so an ordinary transfer-window shrink never appears
+# here at all. This section is a pure function of the two (scoped) row counts, no
+# database needed; the scoping itself is exercised below with a real engine.
 # --------------------------------------------------------------------------
 
 import pytest
@@ -58,8 +68,8 @@ import pytest
 from lofc.store.injuries import MIN_ROW_RATIO, guard_volume, volume_problem
 
 
-def test_a_normal_refresh_is_not_a_problem():
-    # Injury histories only grow, but a few players leaving the leagues is normal.
+def test_a_normal_refresh_of_the_visited_players_is_not_a_problem():
+    # Ordinary re-scrape noise among the SAME visited players is fine.
     assert volume_problem(3900, 3930) is None
     assert volume_problem(4200, 3930) is None
     assert volume_problem(2800, 3930) is None          # exactly 71%
@@ -134,3 +144,122 @@ def test_an_ambiguous_id_does_not_block_the_unambiguous_ones(tmp_path):
     ])
     frame = injury_frame(path, players)
     assert list(frame["player_id"]) == [900]
+
+
+# --------------------------------------------------------------------------
+# F3 -- the merge itself. A departing player must keep his rows untouched; a player
+# present in the file gets refreshed; a manual row survives regardless of player; and
+# the guard fires on a genuinely truncated file for the players it DID cover, but not
+# on an ordinary transfer-window shrink (a departed player is simply absent from the
+# comparison, not counted as a loss). Real sqlite engine -- this is the DELETE/INSERT
+# path, not the pure functions above.
+# --------------------------------------------------------------------------
+
+import datetime as dt
+
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
+
+from lofc.store.injuries import COLUMNS, merge_transfermarkt_rows, stored_transfermarkt_rows
+from lofc.store.models import Base, Player, PlayerInjury
+
+
+def injury_columns():
+    return COLUMNS
+
+
+def _seeded_engine(rows):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        seen_players = set()
+        for row in rows:
+            if row["player_id"] not in seen_players:
+                session.add(Player(player_id=row["player_id"], player_name=f"P{row['player_id']}"))
+                seen_players.add(row["player_id"])
+            session.add(PlayerInjury(**row))
+        session.commit()
+    return engine
+
+
+def _injury(player_id, source="transfermarkt", games_missed=1, date_from=dt.date(2024, 9, 1)):
+    return dict(player_id=player_id, season_label="24/25", injury_type_raw="Knock",
+                injury_category="other", date_from=date_from,
+                date_until=date_from + dt.timedelta(days=7),
+                days_out=7, games_missed=games_missed, source=source)
+
+
+def _stored_rows(engine, player_id=None, source=None):
+    with Session(engine) as session:
+        query = select(PlayerInjury)
+        if player_id is not None:
+            query = query.where(PlayerInjury.player_id == player_id)
+        if source is not None:
+            query = query.where(PlayerInjury.source == source)
+        return session.execute(query).scalars().all()
+
+
+def test_a_player_absent_from_the_incoming_file_keeps_his_rows():
+    # Simulates the transfer-window case: player 2 has left the leagues and is not in
+    # today's scrape at all.
+    engine = _seeded_engine([_injury(1), _injury(2), _injury(2, games_missed=3)])
+    incoming = pd.DataFrame([_injury(1, games_missed=9)]).reindex(columns=injury_columns())
+
+    touched = merge_transfermarkt_rows(engine, incoming)
+
+    assert touched == 1
+    assert len(_stored_rows(engine, player_id=2)) == 2      # untouched, both rows survive
+    assert [r.games_missed for r in _stored_rows(engine, player_id=1)] == [9]
+
+
+def test_a_player_present_in_the_file_is_refreshed():
+    # Same number of spells stored as scraped -- a routine refresh, values just updated.
+    engine = _seeded_engine([_injury(1, games_missed=1)])
+    incoming = pd.DataFrame([_injury(1, games_missed=9)]).reindex(columns=injury_columns())
+
+    merge_transfermarkt_rows(engine, incoming)
+
+    rows = _stored_rows(engine, player_id=1)
+    assert [r.games_missed for r in rows] == [9]             # old row gone, new one in
+
+
+def test_manual_rows_survive_a_transfermarkt_merge():
+    engine = _seeded_engine([
+        _injury(1, source="manual", games_missed=5),
+        _injury(1, source="transfermarkt", games_missed=1),
+    ])
+    incoming = pd.DataFrame([_injury(1, games_missed=9)]).reindex(columns=injury_columns())
+
+    merge_transfermarkt_rows(engine, incoming)
+
+    manual = _stored_rows(engine, player_id=1, source="manual")
+    assert len(manual) == 1 and manual[0].games_missed == 5
+    tm = _stored_rows(engine, player_id=1, source="transfermarkt")
+    assert [r.games_missed for r in tm] == [9]
+
+
+def test_the_guard_fires_on_a_genuinely_truncated_file_for_the_visited_players():
+    # Player 1 is visited by both loads, but today's file returns far fewer of his rows
+    # than are already stored for him -- a truncated CSV or a broken identity join, not
+    # squad churn (he is IN the file, just under-represented).
+    engine = _seeded_engine([_injury(1, date_from=dt.date(2020 + i, 1, 1)) for i in range(6)])
+    incoming = pd.DataFrame([_injury(1)]).reindex(columns=injury_columns())
+
+    with pytest.raises(SystemExit):
+        merge_transfermarkt_rows(engine, incoming)
+
+    # Nothing was deleted: the refusal happened before the DELETE.
+    assert len(_stored_rows(engine, player_id=1)) == 6
+
+
+def test_the_guard_does_not_fire_on_an_ordinary_transfer_window_shrink():
+    # Hundreds of players leave the leagues and drop out of the file entirely -- that
+    # must never look like a shrink to the guard, because it is scoped to the players
+    # actually present in the file.
+    engine = _seeded_engine([_injury(pid) for pid in range(1, 401)])   # 400 stored players
+    incoming = pd.DataFrame([_injury(1, games_missed=9)]).reindex(columns=injury_columns())
+
+    touched = merge_transfermarkt_rows(engine, incoming)   # must not raise
+
+    assert touched == 1
+    assert stored_transfermarkt_rows(engine) == 400          # 399 departed players untouched

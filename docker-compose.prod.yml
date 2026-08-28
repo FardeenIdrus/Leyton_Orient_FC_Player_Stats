@@ -3,9 +3,13 @@
 #   docker compose -f docker-compose.prod.yml up -d --build
 #   docker compose -f docker-compose.prod.yml exec app python -m lofc.pipeline
 #
-# Only the dashboard is public, via Caddy (automatic HTTPS + a login). The database, the
-# app container and the admin tools are NOT published to the internet. Set the required
-# values in a .env file next to this one first (see DEPLOY.md).
+# Only the dashboard is public, via Caddy (automatic HTTPS). Access control is the
+# platform's OWN login (real accounts, scrypt-hashed passwords, lockout, 12-hour
+# sessions) -- there is no separate Caddy basic-auth layer; see DEPLOY.md, "Why no
+# Caddy basic-auth". The database, the app container and the admin tools are NOT
+# published to the internet. Set the required values in a .env file next to this one
+# first (see DEPLOY.md), including SESSION_SECRET -- without it, login does not persist
+# across a browser refresh.
 services:
   db:
     image: postgres:16
@@ -60,8 +64,6 @@ services:
       - "443:443"
     environment:
       DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN:?set DASHBOARD_DOMAIN in .env}
-      DASHBOARD_USER: ${DASHBOARD_USER:-recruiter}
-      DASHBOARD_PASSWORD_HASH: ${DASHBOARD_PASSWORD_HASH:?set DASHBOARD_PASSWORD_HASH in .env, see DEPLOY.md}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

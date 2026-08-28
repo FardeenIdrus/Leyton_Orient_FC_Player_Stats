@@ -24,8 +24,9 @@ or ordinary-pending dimension, all gated on `auth.can(role, "sign_off")`:
 
   1. Sign off one of the competing assessments -- that band scores; the others stay on the
      record, unsigned, attributed.
-  2. Reject one (Problem 3) -- a mandatory reason, gated the same way; the assessment stays
-     on the record, stops scoring, and leaves the queue. The scout sees why on the profile.
+  2. Reject one (Problem 3) -- an optional reason, gated the same way; the assessment stays
+     on the record, stops scoring, and leaves the queue. The scout sees why on the profile
+     (or sees a plain "no reason recorded" note when none was given).
   3. Enter your own, pre-filled from either competing assessment or blank -- a NEW, separate
      assessment under the approver's own name, signed off in the same action.
   4. Leave it. The player keeps reading "assessments conflict -- not scored".
@@ -223,21 +224,22 @@ def _enter_own_form(engine, user: CurrentUser, player_id: int, competition_id: i
 
 
 def _reject_control(engine, user: CurrentUser, entry) -> None:
-    """Problem 3: reject with a mandatory reason, gated the same way sign-off is. Nothing is
-    deleted -- the assessment stays on the record, attributed, and just stops scoring and
-    leaves this queue. The reason is required here (not only by the disabled-button UI) since
-    `store.assessments.reject` itself refuses a blank one."""
+    """Problem 3: reject, gated the same way sign-off is. The reason is OPTIONAL -- a
+    reviewer must be able to decline an assessment without being forced to type an
+    explanation -- but the field stays prominent because a reason is still the more useful
+    outcome. Nothing is deleted -- the assessment stays on the record, attributed, and just
+    stops scoring and leaves this queue. `store.assessments.reject` accepts a blank reason
+    too, so this is not the only thing standing between a reviewer and a reason-less reject."""
     with st.expander(f"Reject {entry.author_name}'s assessment"):
         st.caption("Stays on the record, attributed — it stops scoring and leaves this "
-                   "queue. The scout sees the reason on the player's profile and can submit "
-                   "a fresh assessment.")
-        reason = st.text_area("Reason for rejecting (required)",
+                   "queue. The scout sees the reason on the player's profile (or sees a "
+                   "plain note that none was given) and can submit a fresh assessment.")
+        reason = st.text_area("Reason for rejecting (optional)",
                               key=f"reject_reason_{entry.id}")
-        if st.button("Confirm reject", key=f"reject_confirm_{entry.id}",
-                     disabled=not (reason or "").strip()):
+        if st.button("Confirm reject", key=f"reject_confirm_{entry.id}"):
             try:
                 store_assess.reject(engine, entry.id, approver_id=user.id,
-                                    reason=reason.strip(), now=datetime.datetime.now())
+                                    reason=reason.strip() or None, now=datetime.datetime.now())
             except ValueError:
                 # Someone else acted on it (signed it off, or rejected it) since the page
                 # loaded -- not a bug, just a race on a shared queue. Stashed for `render` to

@@ -159,6 +159,40 @@ def test_a_stale_hash_is_upgraded_on_a_successful_login(engine):
         assert not auth.needs_rehash(user.password_hash)
 
 
+def test_get_user_returns_the_live_row(engine):
+    """The read a cookie restore uses (dashboard.cookie_auth.resolve_cookie_restore) --
+    confirms it carries the fields that matter (is_active, must_change_password) and no
+    password_hash. must_change_password is pinned explicitly (not relying on the column's
+    server_default, which -- like `test_clear_lockout_...` below -- sqlite in tests does not
+    reliably coerce to a Python bool the way Postgres does in production)."""
+    with Session(engine) as session:
+        user = session.scalar(select(User).where(User.username == "jsmith"))
+        user.must_change_password = False
+        session.commit()
+        user_id = user.id
+
+    row = store_users.get_user(engine, user_id)
+    assert row.id == user_id
+    assert row.full_name == "J. Smith"
+    assert row.role == "scout"
+    assert row.is_active is True
+    assert row.must_change_password is False
+    assert not hasattr(row, "password_hash")
+
+
+def test_get_user_reflects_a_deactivation(engine):
+    """A cookie restore must see TODAY's is_active, not whatever it was when the cookie was
+    issued -- get_user is the read that makes that possible."""
+    with Session(engine) as session:
+        user_id = session.scalar(select(User).where(User.username == "jsmith")).id
+    store_users.set_active(engine, user_id, False)
+    assert store_users.get_user(engine, user_id).is_active is False
+
+
+def test_get_user_returns_none_for_an_unknown_id(engine):
+    assert store_users.get_user(engine, 999999) is None
+
+
 def test_change_password_stores_a_new_hash_and_clears_the_must_change_flag(engine):
     with Session(engine) as session:
         user = session.scalar(select(User).where(User.username == "jsmith"))
@@ -254,6 +288,35 @@ def test_create_user_rejects_an_unknown_role(engine):
 def test_create_user_rejects_a_duplicate_username(engine):
     with pytest.raises(ValueError):
         store_users.create_user(engine, "jsmith", "Someone Else", "scout", GOOD)
+
+
+def test_create_user_converts_a_racing_integrityerror_into_a_valueerror(engine, monkeypatch):
+    """TOCTOU: the pre-check (a `select` for an existing username) and the `INSERT` are not
+    atomic -- two admins (or one admin double-submitting) creating the same username at the
+    same moment can both pass the pre-check and race on the table's real UNIQUE constraint.
+    Simulate the loser's `IntegrityError` directly (rather than an actual thread race) by
+    making `Session.commit` raise it -- this is exactly the exception `create_user` must now
+    catch and convert, since letting it propagate would otherwise reach the caller as a raw
+    `IntegrityError` carrying the failing INSERT's bound parameters (the new account's
+    password salt and hash), not the `ValueError` every caller (the Users page, `admin.py`)
+    already knows to catch."""
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.orm import Session as OrmSession
+
+    def failing_commit(self):
+        raise IntegrityError(
+            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+            {"username": "newscout", "password_hash": "scrypt$...should-never-leak..."},
+            Exception("UNIQUE constraint failed: users.username"))
+
+    monkeypatch.setattr(OrmSession, "commit", failing_commit)
+    with pytest.raises(ValueError, match="already exists"):
+        store_users.create_user(engine, "newscout", "New Scout", "scout", GOOD)
+
+    monkeypatch.undo()
+    with Session(engine) as session:
+        # The failed attempt left no half-written row behind.
+        assert session.scalar(select(User).where(User.username == "newscout")) is None
 
 
 def test_create_user_forces_a_password_change_at_first_login(engine):

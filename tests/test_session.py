@@ -39,6 +39,28 @@ def test_lockout_message_rounds_a_part_minute_up():
     assert "1 minute" in sess.lockout_message(30)
 
 
+def test_a_full_name_with_angle_brackets_does_not_emit_raw_markup():
+    """`full_name` is admin-entered and not validated as plain text (mirrors
+    `test_badges.test_a_name_with_angle_brackets_does_not_emit_raw_markup`, same underlying
+    `users.full_name` field). Rendered with `unsafe_allow_html=True`, an unescaped '<' or '>'
+    would inject markup into every page for every session -- and since the session cookie
+    cannot be HttpOnly, that markup could steal a session via document.cookie."""
+    user = sess.CurrentUser(
+        id=1, full_name="<img src=x onerror=alert(1)>", role="admin")
+    markup = sess._identity_html(user)
+    assert "<img" not in markup
+    assert "&lt;img" in markup
+
+
+def test_a_role_with_angle_brackets_does_not_emit_raw_markup():
+    """`role` is drawn from a fixed internal set today, but is escaped for defence in depth --
+    this locks that in."""
+    user = sess.CurrentUser(id=1, full_name="J. Smith", role="<script>alert(1)</script>")
+    markup = sess._identity_html(user)
+    assert "<script>" not in markup
+    assert "&lt;script&gt;" in markup
+
+
 PLAYER_A = sess.CarriedPlayer(
     player_id=1, player_name="A. Player", competition_id=10, season_id=100,
     position_group="CB", minutes=900)
@@ -82,3 +104,25 @@ def test_resolve_assess_target_clear_always_empties_the_selection():
     assert sess.resolve_assess_target(state, None, clear=True) is None
     assert sess.resolve_assess_target(state, PLAYER_B, clear=True) is None
     assert sess.resolve_assess_target(state, None, selected=PLAYER_B, clear=True) is None
+
+
+# --- peek_carry: I5 (audit-dashboard.md) -- the sidebar Season/Position reseed after ---------
+# `st.switch_page` fix. `app.py` reads this BEFORE `get_assess_target` (assess.py) pops the
+# same key later in the same run, so the read here must never consume it.
+
+def test_peek_carry_reads_a_fresh_carry():
+    state = {sess._CARRY_KEY: PLAYER_A}
+    assert sess.peek_carry(state) == PLAYER_A
+
+
+def test_peek_carry_does_not_consume_the_carry():
+    """The whole point: `get_assess_target`'s own pop, later in the same run, must still see
+    the carry -- a peek that consumed it would silently break the Assess page it was meant
+    for."""
+    state = {sess._CARRY_KEY: PLAYER_A}
+    sess.peek_carry(state)
+    assert state[sess._CARRY_KEY] == PLAYER_A
+
+
+def test_peek_carry_is_none_with_no_carry():
+    assert sess.peek_carry({}) is None

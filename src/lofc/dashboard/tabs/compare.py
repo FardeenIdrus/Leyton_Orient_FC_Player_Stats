@@ -10,6 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from lofc.dashboard.charts import PLOTLY_CONFIG, radar_chart
+from lofc.dashboard.formatting import value_or_dash
 from lofc.dashboard.labels import PHYS_COMPARE_LABEL, metric_label
 from lofc.dashboard.loaders import _competition_name_by_id, load_scorecard_percentiles
 from lofc.dashboard.tabs.players import _club_metrics_for, _player_options, _sc_pct_series
@@ -51,12 +52,19 @@ def _compare(tab, pool: pd.DataFrame, position: str, archetype: str,
             r = pool.loc[by_label[label]]
             series_by_label[label] = _sc_pct_series(
                 sc_pcts, int(r["player_id"]), int(r["competition_id"]), int(r["season_id"]))
-            row = {"Player": r["player_name"], "Club": r["team_name"], "Age": round(r["age"], 1),
-                   "Composite": (round(r["objective_composite"], 2) if pd.notna(r.get("objective_composite")) else None),
-                   "Performance": (round(r["performance_band"], 2) if pd.notna(r.get("performance_band")) else None)}
+            # A bare st.dataframe below (no column_config -- this is a tiny 2-3 row table,
+            # not worth one) still prints the literal text "None" for a missing cell rather
+            # than leaving it blank (confirmed directly; see formatting.py's docstring), so
+            # every value here is pre-formatted text with an em-dash fallback, not a raw
+            # number-or-None.
+            row = {"Player": r["player_name"], "Club": r["team_name"],
+                   "Age": value_or_dash(r.get("age"), "{:.1f}"),
+                   "Composite": value_or_dash(r.get("objective_composite"), "{:.2f}"),
+                   "Performance": value_or_dash(r.get("performance_band"), "{:.2f}")}
             if show_money:
-                row["Market (€m)"] = (round(r["market_value_eur"] / 1e6, 1)
-                                      if pd.notna(r.get("market_value_eur")) else None)
+                market_eur = r.get("market_value_eur")
+                row["Market (€m)"] = value_or_dash(
+                    market_eur / 1e6 if pd.notna(market_eur) else market_eur, "{:.1f}")
             rows.append(row)
 
         # Shared axes = the club metrics present (non-null) for EVERY chosen player, so no axis
@@ -98,7 +106,7 @@ def _compare(tab, pool: pd.DataFrame, position: str, archetype: str,
                     mv = metric_values[(metric_values["player_id"] == int(r["player_id"]))
                                        & (metric_values["competition_id"] == int(r["competition_id"]))]
                     val = mv.iloc[0].get(m) if not mv.empty else None
-                    rec[r["player_name"]] = round(float(val), 1) if pd.notna(val) else None
+                    rec[r["player_name"]] = value_or_dash(val, "{:.1f}")
                     any_val = any_val or pd.notna(val)
                 if any_val:
                     recs.append(rec)

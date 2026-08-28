@@ -56,7 +56,9 @@ def build_squad_estimates(engine) -> pd.DataFrame:
     df["age_band"] = age.map(age_band)
     # No birth date (rare on the paid feed): assume prime age rather than dropping.
     df["age_band"] = df["age_band"].fillna("25-29")
-    df["performance_tier"] = (df.groupby(["competition_id", "position_group"])
+    # Same lookup key as the Phase 7 gate (constrain/filters.py::build_candidates):
+    # season is part of the group so this reconciliation never pools two seasons together.
+    df["performance_tier"] = (df.groupby(["competition_id", "season_id", "position_group"])
                               ["performance_score"].transform(_tiers))
     return df.merge(wage_est, on=["competition_id", "position_group", "age_band",
                                   "performance_tier"], how="left")

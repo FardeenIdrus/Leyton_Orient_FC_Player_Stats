@@ -146,8 +146,9 @@ def compute_scores(wide: pd.DataFrame, identity: pd.DataFrame) -> pd.DataFrame:
 
     scores = pd.DataFrame(records)
 
-    # Rank best-to-worst within each competition + position group.
-    by_group = scores.groupby(["competition_id", "position_group"])
+    # Rank best-to-worst within each competition + season + position group (a season
+    # missing from the group would pool two seasons of the same league into one rank).
+    by_group = scores.groupby(["competition_id", "season_id", "position_group"])
     scores["performance_rank"] = by_group["performance_score"].rank(ascending=False, method="min").astype("Int64")
     scores["fit_rank"] = by_group["fit_score"].rank(ascending=False, method="min").astype("Int64")
     return scores

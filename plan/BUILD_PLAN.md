@@ -9,7 +9,7 @@
 >   read only when you need the *why* behind something).
 > - **Technical deep-dives** are in `docs/` (see the Documentation map below).
 >
-> _Last updated: 2026-08-17._
+> _Last updated: 2026-08-25._
 
 ---
 
@@ -43,7 +43,98 @@ model), not a reporting dashboard. It runs end to end via `docker compose up` +
 
 ---
 
-## Current state (2026-08-17)
+## Current state (2026-08-24)
+
+> **2026-08-24 — reject, admin user management, regrouped navigation, and the 2026/27
+> season now loaded (not scored).** Recruitment staff are about to get real access, so this
+> pass closed the remaining rough edges found in review rather than adding a new feature.
+>
+> **Reject (the third outcome on the sign-off queue, alongside sign-off and "enter your
+> own").** A reviewer can now decline a submitted assessment. **The reason is optional** —
+> earlier it was mandatory; forcing an explanation turned out to be the wrong bar for a
+> reviewer who simply disagrees and wants it off the queue. Migration `19ac464d556d` adds a
+> nullable `rejection_reason` column. A rejected assessment stays on the record, attributed,
+> leaves the sign-off queue, never scores, and is never counted as a conflict; the scout sees
+> it (and the reason, or a plain "no reason recorded" note) on the player's profile and can
+> submit a fresh one. This is Decision 17 / Rule 4 applied to rejection exactly as it already
+> applied to sign-off, not a new decision.
+>
+> **Admin Users page (`dashboard/tabs/users.py`), visible only to `admin`.** List every
+> account, create one, reset a password, clear a lockout, deactivate and reactivate — all
+> from the browser, gated on the `manage_users` permission (checked twice: once in `app.py`'s
+> page registration, which is what actually keeps the page out of a non-admin's sidebar, and
+> again at the top of the page itself). **`deactivate-user` and `reactivate-user` were also
+> added to the `lofc.admin` CLI**, calling the exact same `store.users` functions the browser
+> page does. **Users are never deleted** — `scout_assessments` rows reference `users.id` via
+> `author_id`/`approved_by`, so deleting an account that has ever assessed or approved
+> anything would break that foreign key and erase the attribution the whole system depends
+> on. An admin cannot deactivate their own account (`model/user_admin.py::guard_deactivate`),
+> so there is always at least one administrator left who can sign back in. **This closes the
+> "no command to deactivate a user" gap noted below on 2026-08-17.**
+>
+> **Navigation regrouped.** The nine `st.navigation` pages (unchanged individually) are now
+> grouped into section headers — **Scouting** (Players, Compare, Watchlist), **Assessment**
+> (Assess, Sign-off), **Analysis** (Player types, Physical), **Reference** (Glossary,
+> Methodology) — plus a tenth page, **Users**, in its own **Admin** section, present only for
+> an administrator.
+>
+> **Chrome.** The players/leagues/season strip is now a slim, quiet info bar (`.lofc-infobar`
+> in `theme.py`) rather than a KPI block competing with the page beneath it; the signed-in
+> user's name, role and a sign-out control now sit top-right in the header (`theme.header`'s
+> new `identity_slot`, rendered by `session.topbar_identity`) instead of in the sidebar.
+>
+> **Caches shortened to 60s** for every loader that carries `assessed_composite`
+> (`load_scorecards`, `_stored_scorecards`, `load_scorecards_archetype` in
+> `dashboard/loaders.py`) — at the old 600s TTL a scout who saved an assessment and switched
+> to the assessed ranking could wait up to ten minutes for it to appear and reasonably
+> conclude the save had failed. Loaders that only carry pipeline output (e.g.
+> `load_current_form`, below) are unaffected and stay at 600s.
+>
+> **2026/27 (season_id 319) is now loaded — six leagues, not yet scored.** Both providers'
+> live-season ingest has run: **1,771 players across 6 leagues** (Premier League 2 has not
+> started), averaging **85 minutes played** each, nobody within reach of the 450-minute
+> rankable threshold (max ~207). There is deliberately **no 2026/27 composite** — a player's
+> profile now shows a **"Current form"** section (`loaders.load_current_form`,
+> `tabs/players.py::_current_form`) with 2026/27 minutes/goals/assists as **plain facts,
+> explicitly labelled "not a rating"**, alongside the dimension scores from his most recent
+> **scored** season (2025/26). Realistically this stays unscored until enough of the season
+> has been played — **expect that around October** (see the in-season model below).
+>
+> **Fixes made along the way, worth recording as resolved:**
+> - The **Assess page lost its selected player on every keystroke** — any widget interaction
+>   (e.g. picking a band) triggered a rerun that dropped the selection. Fixed by giving the
+>   "currently assessing" player its own persistent session-state slot
+>   (`dashboard/session.py::get_assess_target`/`resolve_assess_target`), separate from the
+>   one-shot handoff used by "Assess this player" on the profile/watchlist.
+> - The **watchlist showed blank club/position/age for any Scottish Premiership/Championship
+>   or Premier League 2 player** — `store/watchlist.py::load` joined only the EFL-only
+>   `player_season_metrics` table. It now joins `player_metrics_neutral` (the combined
+>   7-league table the profile itself reads) first, via COALESCE, and derives age from
+>   `players.birth_date` the same way the profile does, falling back to the valuation's age
+>   only when no birth date is on file.
+> - The **injury evidence panel's source column read "Scraped"** — internally accurate,
+>   meaningless to a reader outside the building. Now labelled **"Transfermarkt"**
+>   (`dashboard/evidence.py::SOURCE_LABELS`).
+> - **Mid-season transfers could show the wrong club.** `ingest/impect_translate.py` picked
+>   the "dominant" identity row (name, position, **and club**) by highest per-position
+>   `matchShare` — but a player whose minutes at his new club were split across two or three
+>   positions could show a lower matchShare there than his single settled position at the
+>   old club, so the club shown was wrong for exactly the players a recruiter most needs it
+>   right for. Club is now picked separately, by **total minutes per squad**, while
+>   name/position/birthdate still come from the highest-matchShare row (unchanged).
+> - The **"season under way, not yet rankable" banner used to render above every page**,
+>   including Sign-off, Glossary and Methodology, where the season selector changes nothing
+>   they show. It now renders only on the pages the season selection actually drives
+>   (Players, Compare, Assess, Player types).
+>
+> **604 tests pass** (was 511; 365 before that; 301 before that). **`objective_composite`
+> (the default ranking) is verified unchanged: 6,573 rows in the `'All Metrics'` archetype,
+> average 3.029285** — identical to the 2026-08-14 figure below. `assessed_composite` and
+> `scout_assessments` remain empty on this database (0 assessments recorded) — no scout input
+> has touched the ranking, because no scout has used the interface yet (see the gaps register
+> below).
+>
+> **Still not done:** the player-report export (R3c) and the final whole-branch review.
 
 > **2026-08-17 — the scout-assessment interface is built, on the same branch
 > (`r3a0-injury-scrape`, not pushed).** Login, the assessment form, the injury/availability
@@ -75,8 +166,10 @@ model), not a reporting dashboard. It runs end to end via `docker compose up` +
 > **Auth gaps closed alongside the login screen:** passwords are scrypt-hashed (Python stdlib
 > only, no new dependency), minimum 12 characters — length is deliberately the only rule, per
 > NIST SP 800-63B — 5 failed logins locks an account for 15 minutes, and a session expires after
-> 12 hours. **Still open: no command to deactivate a user account** — the `is_active` column
-> exists and login honours it, but flipping it today means editing the database by hand.
+> 12 hours. **Still open (at the time): no command to deactivate a user account** — the
+> `is_active` column exists and login honours it, but flipping it meant editing the database
+> by hand. **Superseded 2026-08-24 above: both a CLI command and a full admin Users page now
+> exist.**
 >
 > **Verified: `objective_composite` (the default ranking) is unchanged — 6,573 rows, average
 > 3.029285 — and no scout input touches it;** the resolution machinery only ever writes
@@ -208,9 +301,11 @@ only to seed player identity — stable IDs, birth dates, league names — durin
   sign-off queue (`dashboard/{session,badges,evidence,transparency}.py`,
   `dashboard/tabs/{assess,signoff}.py`) all write through `model/scout_scores.py`'s
   `resolve_bands()` (Decision 17: a signed-off assessment always wins; two or more unsigned
-  assessments that disagree score nothing until someone decides). `assessed_composite` starts
-  NULL on a fresh database and fills in as staff assess players; it never feeds
-  `objective_composite`, the default ranking.
+  assessments that disagree score nothing until someone decides; a reviewer may also
+  **reject** an assessment outright, with an optional reason, added 2026-08-24). `assessed_composite`
+  starts NULL on a fresh database and fills in as staff assess players; it never feeds
+  `objective_composite`, the default ranking. As of 2026-08-24 it is still all NULL — no
+  scout has used the interface on this database yet.
 - **The old invented "Style-fit" is retired** from every live surface. The Shortlist, Player
   profile, Compare, Player-types and Watchlist all rank/show the club composite.
 - **Nobody is excluded automatically.** The club's "< 3.0 = do not proceed" / "< 2.0 = veto"
@@ -231,8 +326,9 @@ only to seed player identity — stable IDs, birth dates, league names — durin
   Per-90 · Percentile · 1–5 Band) + charts on the club per-position (archetype) metrics.
   **Money is an opt-in secondary layer** (off by default — the default ranking is 100% real
   football data; market value/wages/affordability appear only when "Show affordability
-  (modelled)" is ticked). Tabs now: Players · Compare · Watchlist · Player types · Physical ·
-  Glossary · Methodology.
+  (modelled)" is ticked). **Ten pages now**, grouped in the sidebar (2026-08-24): Scouting
+  (Players · Compare · Watchlist), Assessment (Assess · Sign-off), Analysis (Player types ·
+  Physical), Reference (Glossary · Methodology), and — administrators only — Admin (Users).
 - **The composite is persisted** to `player_scorecards` (a pipeline stage), so the dashboard, the
   offline `shortlists` table and the BI layer all read the *same* numbers. The `shortlists` table
   now ranks on `objective_composite` — **the retired Style-fit no longer orders anything anywhere.**
@@ -255,10 +351,11 @@ only to seed player identity — stable IDs, birth dates, league names — durin
   **1,606** feet and **1,635** heights, against 5,626 players. Market values were unaffected
   throughout (**2,526** present — that field is located by CSS selector, not by column position).
   Full incident record and recovery outcome in the Pending work register below.
-- **511 tests pass** (was 365 before R3a-2). The dashboard renders clean. The scout-assessment
+- **604 tests pass** (was 511, before that 365). The dashboard renders clean. The scout-assessment
   foundation (schema, scoring resolution, injury data) **and its interface** (login, assessment
-  form, evidence panel, badges, sign-off queue, watchlist integration) are both built — see the
-  2026-08-17 note above and register item R3a-2.
+  form, evidence panel, badges, sign-off queue **with reject**, watchlist integration, admin
+  user management) are both built — see the 2026-08-24 and 2026-08-17 notes above and register
+  items R3a-2/R3a-3.
 
 Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
 `docs/DATA_ARCHITECTURE.md`.
@@ -266,6 +363,24 @@ Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
 ---
 
 ## Pending work register (nothing here is dropped)
+
+**Gaps recorded honestly ahead of real staff access (2026-08-24) — none of these block
+using the platform, but recruitment staff and whoever signs off deployment should see them
+stated plainly, not discovered:**
+
+| # | Gap | Detail |
+|---|---|---|
+| G1 | **Deployment has not happened.** | The platform has only ever run locally via `docker compose up`. A hosting-requirements document exists (`data/exports/LOFC_Platform_Hosting_Requirements.pdf`) but is gitignored, not in the repo, and not yet acted on. The platform needs to be reachable from anywhere, i.e. a public HTTPS endpoint — `DEPLOY.md` sketches a Caddy-based setup, but nobody has stood one up |
+| G2 | **This branch is ~60 commits ahead of `main`, and `main` has no login gate at all** (`main`'s `app.py` still uses `st.tabs`, no `require_login`). | A real risk, not a formality: anything deployed straight from `main` today would be completely unauthenticated. `r3a0-injury-scrape` must be merged (or deployed directly) before any public endpoint goes up — deploying `main` as-is would expose the whole platform, including the scout-assessment data, to anyone with the URL |
+| G3 | **No real scout has used the platform end to end yet.** | `scout_assessments` holds 0 rows and `assessed_composite` is NULL for every player on this database — every check so far has been automated tests and scripted browser walkthroughs (Streamlit's `AppTest`), never a recruitment-staff member working the interface unprompted. Treat the interface as unvalidated by its actual users until that happens |
+
+Two further gaps already tracked below, restated here for visibility: **no loan status is
+captured anywhere** (R3a-gap1 — a loanee's parent-club contract is not the club he is playing
+for, and no table models the distinction), and **Transfermarkt contract-date coverage is thin
+outside the top three English tiers** — roughly 55% in the Championship/League One/League
+Two, 28% in the National League, 2–5% in the Scottish leagues and Premier League 2 (see the
+2026-08-14 note above and R6 below); Transfermarkt is the only source, so extending the squad
+scrape to the Scottish leagues and PL2 is the only fix.
 
 **Blocked on an outside party — recheck, do not forget:**
 
@@ -415,7 +530,7 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
 | # | Pending in-season item | Note |
 |---|---|---|
 | S1 | **Weekly refresh** — manual for now | a cron container in `docker-compose` is the unattended option |
-| S2 | **Build season 319 into the DB** | deliberately NOT done yet: only the two Scottish leagues have data, so a 2026/27 view would be Scotland-only. Run `build_neutral --write` once the English leagues kick off |
+| S2 | ✅ **DONE (by 2026-08-24) — season 319 built into the DB** | six leagues now have data (Premier League 2 is the one hold-out — not yet started): **1,771 players, average 85 minutes, nobody near the 450-minute rankable threshold**. Shown on the profile as "Current form" (plain facts, not a rating) — no 2026/27 composite exists or should until the threshold is cleared, realistically once more of the season has been played |
 | S3 | ✅ **SkillCorner 2026/27 editions (DONE 2026-08-10)** | six editions added (Championship 1569, League One 1574, League Two 1575, National League 1576, PL2 1578, Scottish Premiership **1683** — SkillCorner labels it just "Premiership"). The **Scottish Championship is deliberately excluded**: the competition exists but holds **zero** physical data (0 rows for 24/25 and 25/26 vs 358 for the Scottish Prem), so configuring it would emit a false "no data" warning every week. The live-season rule now covers **both** providers off one `LIVE_SEASON_ID`. Verified live: Scottish Prem 26/27 already returning **146 players**; the English leagues skipped cleanly (they would have **crashed** the run before this fix) |
 | S4 | **Show "current club" — deferred until after the interface (owner's decision, 2026-08-14)** | the Players list shows the club a player played for *in that season* (by design). Why it matters now: contract dates come from Transfermarkt's 2026/27 squad pages and are current, but the **club name displayed comes from `player_metrics_neutral.team_name`, which is Impect 2025/26 data** — so a player who moved this summer shows his old club beside a current contract date. Transfermarkt's scrape already carries the correct current club in `efl_values.csv`'s `club_name` column, and **nothing reads it**. The fix is to join that column through and display it as "Current club" alongside the season club |
 
@@ -427,7 +542,8 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
 | R2 | ✅ **Refactor `dashboard/app.py` (DONE 2026-08-10)** | 2,560 lines → **191**, split into 15 focused modules (`theme` · `labels` · `charts` · `seasons` · `loaders` · `controls` + `tabs/` one per tab), dependencies strictly one-way so there are no import cycles. **337 lines of dead code deleted** (`_club_scorecard`, `_scorecard_player_detail`, `_profile`, `_render_score_composition`, `percentile_vector`, `_dimension_metric_labels`) plus the retired Style-fit helpers `score_composition`/`load_fit_profiles` and their 3 tests. Done in verified phases against a captured behaviour snapshot: **the final output is byte-for-byte identical to before the refactor**; 191 tests passed at the time — that had grown to 301 by the 2026-08-03 audit, and stands at **365 now** (2026-08-14), after the scout-assessment branch added tests |
 | R3a-0 | ✅ **DONE (branch `r3a0-injury-scrape`, not pushed) — Transfermarkt injury data** | scraper (`ingest/transfermarkt_injuries.py`), loader (`store/injuries.py`), `player_injuries` table, `model/medical.py` availability with honest `MEASURED`/`CONFIRMED_BY_MINUTES`/`UNKNOWN` states (never a confident 1.0 for an unknown record). **3,766 injury rows for 1,176 players** loaded. See R8/R9 above for the two evidence-quality fixes made on top of this |
 | R3a-1 | ✅ **DONE (same branch) — scout-assessment foundation, 5 tasks** | `model/club_criteria.py` (club's per-position Psychological/Medical criteria, transcribed verbatim), `users`/`scout_assessments`/`scout_criterion_scores` tables (migration `a3fd42bcb2c2`), `dashboard/auth.py` (scrypt hashing) + `admin.py` (`create-user` CLI, at `src/lofc/admin.py`), `model/scout_scores.py` (`resolve_bands()`), `assessed_composite`/`assessed_weight_covered`/`psychological_band`/`medical_band` on `player_scorecards` (migration `5e80ab6fe191`). Design settled at the time: `docs/superpowers/specs/2026-08-10-scout-assessment-design.md` (up to Decision 16; Decision 17 followed with R3a-2). **At this point `assessed_composite` was NULL for every player and `scout_assessments` was empty — no UI existed yet to create one. Superseded by R3a-2 below, which built that UI.** |
-| R3a-2 | ✅ **DONE (2026-08-17) — the scout-assessment user interface** | login gate (`dashboard/session.py`), assessment form (`dashboard/tabs/assess.py`), evidence panel (`dashboard/evidence.py` — injury data + screening-criteria warnings, which warn but never override per Decision 13), status badges (`dashboard/badges.py`: 🟠 assessed / 🟢 signed off / ⚪ conflict — colour **and** words), a sign-off queue (`dashboard/tabs/signoff.py`) that also resolves conflicts (Decision 17, new — replaced the earlier "most recent submitted wins" tiebreak: a signed-off assessment is never in conflict, two or more unsigned ones score nothing until someone decides), watchlist integration, and an opt-in "Rank on assessed composite" toggle on the Players list. Navigation rebuilt from `st.tabs` to `st.navigation` so "Assess this player" carries the player across pages. Auth gaps closed alongside it: password strength (12-char minimum, length-only), login throttling (5 attempts / 15-minute lock), session expiry (12 hours); `set-password`/`list-users` added to `lofc.admin`. **Still no self-service or email password reset** (`users` holds no email — an admin resets in person) **and no command to deactivate a user account** (`is_active` exists and is honoured, but flipping it means editing the database by hand) |
+| R3a-2 | ✅ **DONE (2026-08-17) — the scout-assessment user interface** | login gate (`dashboard/session.py`), assessment form (`dashboard/tabs/assess.py`), evidence panel (`dashboard/evidence.py` — injury data + screening-criteria warnings, which warn but never override per Decision 13), status badges (`dashboard/badges.py`: 🟠 assessed / 🟢 signed off / ⚪ conflict — colour **and** words), a sign-off queue (`dashboard/tabs/signoff.py`) that also resolves conflicts (Decision 17, new — replaced the earlier "most recent submitted wins" tiebreak: a signed-off assessment is never in conflict, two or more unsigned ones score nothing until someone decides), watchlist integration, and an opt-in "Rank on assessed composite" toggle on the Players list. Navigation rebuilt from `st.tabs` to `st.navigation` so "Assess this player" carries the player across pages. Auth gaps closed alongside it: password strength (12-char minimum, length-only), login throttling (5 attempts / 15-minute lock), session expiry (12 hours); `set-password`/`list-users` added to `lofc.admin`. **Still no self-service or email password reset** (`users` holds no email — an admin resets in person) — **superseded 2026-08-24 below (R3a-3): deactivate/reactivate is now built** |
+| R3a-3 | ✅ **DONE (2026-08-24) — reject, admin user management, regrouped navigation, live-but-unscored 2026/27** | Sign-off queue gained **reject** (`store/assessments.py::reject`, migration `19ac464d556d` — nullable `rejection_reason`, the reason is optional). New **Users admin page** (`dashboard/tabs/users.py`, gated on `manage_users`) plus `deactivate-user`/`reactivate-user` on the `lofc.admin` CLI (`model/user_admin.py::guard_deactivate` stops an admin locking themselves out); accounts are never deleted (assessments reference `users.id`). Navigation regrouped into Scouting/Assessment/Analysis/Reference + Admin section headers. Chrome: slim info bar + top-right signed-in identity/sign-out (`theme.py`, `session.py::topbar_identity`), replacing the sidebar identity block. Scorecard-reading caches shortened to 60s so a saved assessment appears in the assessed ranking promptly. **2026/27 (season 319) is loaded — 1,771 players, 6 leagues (PL2 not started), 85 min average — and deliberately not scored**; the profile shows it as a "Current form" plain-facts section (`loaders.load_current_form`) beside the 2025/26 scored season. Five bugs fixed: Assess page losing its selected player on every widget interaction; watchlist blank club/position/age for Scottish/PL2 players; injury source reading "Scraped" instead of "Transfermarkt"; mid-season transfers showing the wrong club (now picked by total minutes per squad, not per-position match share); the "not yet rankable" banner appearing on every page instead of only the ones the season selector drives. **604 tests pass** (was 511) |
 | R3c | **NOT STARTED — player report export** | export gated on sign-off (Decision 14: sign-off is non-blocking for scoring, but gates what may be exported as final) |
 | R3a-review | **NOT RUN — final whole-branch review** | each commit on `r3a0-injury-scrape` (including R3a-2) was reviewed individually as it landed; the cross-cutting review across the whole branch has not happened |
 | R3a-gap1 | **No loan status captured anywhere** | affects how a contract date should be read (a loanee's parent-club contract is not the club he is playing for); not modelled by any table today |
@@ -474,6 +590,11 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
 - ✅ Scout-assessment interface, R3a-2 (same branch, 2026-08-17): login gate, assessment form,
   evidence panel, status badges, sign-off queue (with Decision 17 conflict resolution),
   watchlist integration, opt-in assessed-composite ranking — see register R3a-2
+- ✅ Reject, admin user management, regrouped navigation, R3a-3 (same branch, 2026-08-24):
+  sign-off reject with an optional reason, an admin Users page + CLI deactivate/reactivate,
+  `st.navigation` grouped into Scouting/Assessment/Analysis/Reference/Admin, top-right signed-in
+  identity, 60s scorecard caches, 2026/27 loaded (not scored) with a "Current form" profile
+  section, five UI bugs fixed — see register R3a-3
 
 **Next** (in rough priority order):
 

@@ -123,5 +123,12 @@ def load(engine) -> pd.DataFrame:
     ref_date = frame["season_id"].map(SEASON_REF_DATE)
     dob_age = ((ref_date - frame["birth_date"]).dt.days / 365.25).round(1)
     dob_age = dob_age.where(dob_age.between(14, 50))          # drop nonsense before using
-    frame["age"] = dob_age.where(dob_age.notna(), frame["valuation_age"])
+    # pd.to_numeric, not a bare fallback: `valuation_age` can hold a Python None (object
+    # dtype) rather than a real NaN for a player with no valuation row -- `.where()`
+    # against an object-dtype column upcasts the whole result to object, mixing float NaN
+    # with Python None, and a table column built from that later renders the None as the
+    # literal text "None" instead of leaving the cell blank. See
+    # `dashboard/loaders.py::load_candidates` for the identical fix, same reasoning.
+    fallback_age = pd.to_numeric(frame["valuation_age"], errors="coerce")
+    frame["age"] = dob_age.where(dob_age.notna(), fallback_age)
     return frame.drop(columns=["birth_date", "valuation_age"])

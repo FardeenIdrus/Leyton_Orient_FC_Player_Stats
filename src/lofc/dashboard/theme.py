@@ -29,7 +29,10 @@ def style() -> None:
           #MainMenu, footer {{visibility: hidden;}}
           [data-testid="stAppDeployButton"] {{display: none;}}
           [data-testid="stSidebarCollapsedControl"] {{visibility: visible !important; opacity: 1 !important;}}
-          .block-container {{padding-top: 4rem; max-width: 1180px;}}
+          /* 1400px, not the previous 1180px: the ranked player table is the platform's
+             primary display and was previously squeezed by a page width tuned for prose,
+             wasting real width on anything but the smallest laptop screens. */
+          .block-container {{padding-top: 4rem; max-width: 1400px;}}
           .lofc-title {{font-size: 2.1rem; font-weight: 800; color: {RED}; line-height: 1.1; margin-bottom: .15rem;}}
           .lofc-sub {{font-size: .9rem; color: #6b6b6b; letter-spacing: .1em; text-transform: uppercase;}}
           .brand-rule {{border: none; border-top: 3px solid {RED}; margin: .6rem 0 1.2rem 0;}}
@@ -76,6 +79,17 @@ def style() -> None:
           [data-testid="stSidebarNav"] [data-testid="stSidebarNavLink"][aria-current="page"] {{
             background: #FCE8EB; font-weight: 700; color: {RED};
             border-left: 3px solid {RED};
+          }}
+
+          /* The ranked table is the primary display: give it a defined document edge (a
+             thin border + soft shadow) rather than letting it float loose in the page, and
+             keep the header row unmistakable while scrolling a long list. */
+          [data-testid="stDataFrame"] {{
+            border: 1px solid #E6E6E6; border-radius: 8px; overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,.05);
+          }}
+          [data-testid="stDataFrame"] [role="columnheader"] {{
+            background: #FAFAFA; font-weight: 700; color: {DARK};
           }}
         </style>
         """,

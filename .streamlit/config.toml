@@ -13,3 +13,14 @@ fileWatcherType = "poll"
 
 [browser]
 gatherUsageStats = false
+
+[client]
+# The app is reachable over a public tunnel. Streamlit's default ("full") prints a complete
+# Python traceback -- file paths, SQL text, local variables -- into the VISITOR'S browser on
+# any uncaught exception, including on the pre-login cookie-restore path (session.py's
+# restore_from_cookie runs a DB lookup before require_login renders the sign-in form). "none"
+# is the least-revealing setting Streamlit supports: no exception type, no message, no trace
+# shown client-side. This does not stop the error being logged -- Streamlit still logs the
+# full exception server-side (stderr / `docker compose logs dashboard`) exactly as before;
+# this setting only controls what is echoed back to the browser that triggered it.
+showErrorDetails = "none"

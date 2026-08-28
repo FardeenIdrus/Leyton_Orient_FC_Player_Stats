@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from lofc.constrain.filters import age_band, compute_on_profile, rank_position
+from lofc.constrain.filters import _tiers, age_band, compute_on_profile, rank_position
 
 
 def test_age_band_boundaries():
@@ -50,6 +50,29 @@ def test_on_profile_judges_each_season_row_alone():
     assert (1, 4, 318) in on and (1, 5, 317) in on
     assert (2, 4, 318) in on
     assert (2, 65, 318) not in on
+
+
+def test_performance_tier_does_not_pool_across_seasons():
+    """Regression: build_candidates' performance_tier groupby must include season_id, exactly
+    mirroring the groupby().transform(_tiers) call in constrain/filters.py::build_candidates.
+    Without season_id, a weak 2024/25 group and a strong 2025/26 group get pooled into one
+    tercile, so a season's own top scorer can be misclassified below 'Top'."""
+    season_a = pd.DataFrame([
+        {"competition_id": 4, "season_id": 317, "position_group": "Centre Forward",
+         "performance_score": s} for s in [10, 20, 30, 40, 50, 60]
+    ])
+    season_b = pd.DataFrame([
+        {"competition_id": 4, "season_id": 318, "position_group": "Centre Forward",
+         "performance_score": s} for s in [1000, 2000, 3000, 4000, 5000, 6000]
+    ])
+    cand = pd.concat([season_a, season_b], ignore_index=True)
+    cand["performance_tier"] = (cand.groupby(["competition_id", "season_id", "position_group"])
+                                ["performance_score"].transform(_tiers))
+
+    tier_317 = cand[cand["season_id"] == 317].set_index("performance_score")["performance_tier"]
+    # Season 317's own best and worst scorer, judged only against his own season's five peers.
+    assert tier_317.loc[60] == "Top"
+    assert tier_317.loc[10] == "Squad"
 
 
 def _candidate(pid, value, wage, ceiling, on_profile, composite):

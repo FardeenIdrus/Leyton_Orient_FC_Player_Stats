@@ -275,6 +275,28 @@ docker compose exec app python -m lofc.ingest.skillcorner_api
 docker compose exec app python -m lofc.model.build_neutral --write
 docker compose exec app python -m lofc.pipeline
 
+# ----- WEEKLY REFRESH, unattended (scripts/weekly_refresh.sh) -----
+# The scheduled version of the block above: runs `python -m lofc.pipeline` unmodified
+# inside the app container (same command the pipeline already sequences: ingest ->
+# aggregate -> neutral table -> Transfermarkt -> scoring -> shortlists), wrapped with a
+# lock (refuses to overlap a still-running previous week), per-run timestamped + rotated
+# logs, and a last_success/last_failure marker pair in data/ops/ for staleness checks.
+# Never passes --force/--allow-degraded/--allow-shrink -- a degraded pull fails the run
+# loudly rather than overwriting good data. Monday early morning: Impect returns
+# season-to-date aggregates rather than per-match deltas, so a per-match trigger would
+# just re-download the same cumulative totals several times a week; one run after the
+# weekend (and any midweek round) is enough. NOT installed anywhere yet -- add this line
+# to the deployment server's crontab (`crontab -e`) once the platform is actually live:
+# 15 4 * * 1 /path/to/Leyton_Orient_FC_Player_Stats/scripts/weekly_refresh.sh >> /path/to/Leyton_Orient_FC_Player_Stats/data/ops/cron.out 2>&1
+
+# Check whether the last scheduled refresh worked, and when data was last good
+cat data/ops/last_success 2>/dev/null || echo "no successful refresh recorded yet"
+test -f data/ops/last_failure && cat data/ops/last_failure
+
+# Exercise the wrapper's own logic (locking, logging, failure handling, exit codes)
+# without touching Docker, the pipeline, or any scraper
+bash scripts/test_weekly_refresh.sh
+
 # Validation gate (read-only, no DB writes): match Impect players to ours (TM id,
 # then birth date + name) and compare per-player goal totals + xG against the
 # StatsBomb data we already validated. Must look healthy for the EFL before any
@@ -344,3 +366,10 @@ docker compose exec app python -m lofc.admin set-password --username fi
 
 # List every account: role, active/inactive, and current lock state. No password hashes shown.
 docker compose exec app python -m lofc.admin list-users
+
+# Block an account from signing in. Never deletes the row (scout_assessments references
+# users.id for attribution) -- only flips is_active. Same rule the admin Users page uses.
+docker compose exec app python -m lofc.admin deactivate-user --username fi
+
+# Restore a deactivated account's ability to sign in.
+docker compose exec app python -m lofc.admin reactivate-user --username fi

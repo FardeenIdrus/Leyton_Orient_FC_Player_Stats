@@ -3,12 +3,28 @@
 Joins on players.tm_player_id, which the valuation stage populates. A Transfermarkt
 player we hold no metrics for is dropped rather than guessed at.
 
-The load is a REPLACE -- every stored `source = 'transfermarkt'` row is deleted before
-the frame is appended -- so a shrunken CSV would silently destroy the injury history
-(and with it the Medical dimension of the club composite). That has happened once, when
-a 5-player smoke test left 16 rows in the table. A load carrying materially fewer rows
-than the table already holds therefore ABORTS before the DELETE, and --allow-shrink is
-the deliberate human override.
+The load is a MERGE, not a replace: only `source = 'transfermarkt'` rows for players
+PRESENT IN THE INCOMING FILE are deleted before being reinserted; every other player's
+rows -- and every `source = 'manual'` row regardless of player -- are left exactly as
+they are. This is the same principle as the COALESCE-guarded bio update in
+`model/identity.py`: absent data must never overwrite known data. The scraper only
+visits players in CURRENT squads, so a summer transfer window routinely drops hundreds
+of players who have left the four English leagues out of the file -- the scraper not
+visiting a player is not evidence he was never injured. A delete-then-insert keyed on
+`source` alone would erase that player's entire injury history (and with it the
+Medical dimension of the club composite) every August.
+
+Because the delete is scoped to the players actually in the file, the volume guard is
+scoped the same way: it compares, for the players the scraper DID visit, how many rows
+came back against how many were already stored for those SAME players. A player who
+has left the leagues contributes to neither side of that comparison, so an ordinary
+transfer-window shrink is invisible to it. A load carrying materially fewer rows than
+that for the players it DID cover ABORTS before the DELETE -- that is what a truncated
+file or a broken tm_player_id join looks like, and is what this guard is actually for.
+--allow-shrink is the deliberate human override. (The row-count check used to compare
+against the whole table -- correct for the single incident that motivated it, a
+5-player smoke test that left 16 rows and would have replaced the lot, but wrong every
+August once squad turnover became the normal case rather than the exception.)
 
 Run:  python -m lofc.store.injuries
 
@@ -23,7 +39,7 @@ import argparse
 from pathlib import Path
 
 import pandas as pd
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import bindparam, create_engine, select, text
 
 from lofc.config import settings
 from lofc.ingest.transfermarkt_injuries import output_path
@@ -32,9 +48,11 @@ from lofc.store.models import PlayerInjury
 COLUMNS = ["player_id", "tm_player_id", "season_label", "injury_type_raw",
            "injury_category", "date_from", "date_until", "days_out", "games_missed",
            "source"]
-# An incoming load must keep at least this share of the rows already stored. Injury
-# histories only grow, so the floor is loose purely to absorb squad churn (players
-# leaving the four EFL divisions take their history out of the join with them).
+# An incoming load must keep at least this share of the rows already stored FOR THE
+# PLAYERS IT VISITED (see module docstring -- the comparison is scoped, not global).
+# Injury histories only grow, so the floor is loose purely to absorb ordinary re-scrape
+# noise (a spell dropping off Transfermarkt's own page, a date correction) -- not squad
+# churn, which a scoped comparison never sees in the first place.
 MIN_ROW_RATIO = 0.70
 
 _TABLE = PlayerInjury.__table__
@@ -105,51 +123,106 @@ def injury_frame(csv_path: Path, players: pd.DataFrame) -> pd.DataFrame:
     return merged.reindex(columns=COLUMNS)
 
 
+def visited_player_ids(frame: pd.DataFrame) -> list[int]:
+    """Distinct player_id values this load actually covers -- the only players whose
+    stored transfermarkt rows are eligible to be touched."""
+    if frame.empty:
+        return []
+    return sorted(int(pid) for pid in frame["player_id"].unique())
+
+
 def volume_problem(incoming: int, existing: int,
                    minimum_ratio: float = MIN_ROW_RATIO) -> str | None:
-    """Why this load must not replace the stored rows, or None when it is safe.
+    """Why this load must not replace the stored rows for the players it covers, or
+    None when it is safe.
 
-    `existing == 0` is always safe: a first load, or a table that is already empty,
-    has nothing to lose. Otherwise zero incoming rows is the worst case, not an
-    exemption -- it is caught by the same ratio.
+    `incoming` and `existing` must already be scoped to the SAME set of players -- the
+    ones present in the incoming file -- not the whole table. A player absent from the
+    file is outside this comparison entirely, on both sides of it.
+
+    `existing == 0` is always safe: none of the visited players had any rows stored
+    (a first load, or every one of them is new), so there is nothing to lose. Otherwise
+    zero incoming rows is the worst case, not an exemption -- it is caught by the same
+    ratio.
     """
     if existing and incoming < existing * minimum_ratio:
-        return (f"only {incoming} injury rows to load against {existing} already stored "
+        return (f"only {incoming} injury rows came back for the players this scrape "
+                f"visited, against {existing} already stored for those same players "
                 f"({incoming / existing:.0%}, minimum {minimum_ratio:.0%})")
     return None
 
 
 def guard_volume(incoming: int, existing: int, allow_shrink: bool = False) -> None:
-    """Abort the load unless it is safe to delete the stored transfermarkt rows."""
+    """Abort the load unless it is safe to delete the stored rows of the visited players."""
     problem = volume_problem(incoming, existing)
     if problem is None:
         return
     print(f"{'WARNING' if allow_shrink else 'ERROR'}: {problem}")
     if not allow_shrink:
         raise SystemExit(
-            f"Refusing to replace {existing} stored injury rows: nothing has been "
-            "deleted. This usually means injuries.csv is truncated (a --limit smoke "
-            "test writes injuries.sample.csv, not this file) or the identity link has "
-            "collapsed. Check the CSV and players.tm_player_id, then re-run. Pass "
-            "--allow-shrink to load it anyway.")
+            f"Refusing to replace those {existing} stored injury rows: nothing has "
+            "been deleted. Players who have left the leagues are excluded from this "
+            "comparison entirely, so this is not an ordinary transfer-window shrink -- "
+            "it means either injuries.csv is truncated (a --limit smoke test writes "
+            "injuries.sample.csv, not this file) or the tm_player_id join is matching "
+            "fewer of the visited players than it should. Check the CSV and "
+            "players.tm_player_id, then re-run. Pass --allow-shrink to load it anyway.")
     print("--allow-shrink was passed: replacing the stored rows anyway")
 
 
-def stored_transfermarkt_rows(engine) -> int:
-    """Injury rows currently in the table from the scrape -- the ones about to go."""
+def stored_transfermarkt_rows(engine, player_ids: list[int] | None = None) -> int:
+    """Transfermarkt-sourced injury rows currently in the table.
+
+    With `player_ids` given, counts only rows belonging to those players -- the scope
+    the merge and its guard actually operate on. Without it, counts every transfermarkt
+    row in the table, which is a global figure useful for before/after reporting but is
+    NOT what the guard compares against (see module docstring).
+    """
+    query = "SELECT count(*) FROM player_injuries WHERE source = 'transfermarkt'"
+    stmt: text
+    params: dict = {}
+    if player_ids is not None:
+        stmt = text(query + " AND player_id IN :player_ids").bindparams(
+            bindparam("player_ids", expanding=True))
+        params["player_ids"] = list(player_ids)
+    else:
+        stmt = text(query)
     with engine.connect() as conn:
-        return int(conn.execute(text(
-            "SELECT count(*) FROM player_injuries WHERE source = 'transfermarkt'"
-        )).scalar_one())
+        return int(conn.execute(stmt, params).scalar_one())
+
+
+def merge_transfermarkt_rows(engine, frame: pd.DataFrame, allow_shrink: bool = False) -> int:
+    """Delete-then-reinsert the transfermarkt rows of only the players in `frame`.
+
+    Every player NOT present in `frame` -- including every player who has left the
+    leagues since the last scrape, and every `source = 'manual'` row regardless of
+    player -- is left untouched. Raises SystemExit via `guard_volume` if the players
+    `frame` covers came back with materially fewer rows than they already had stored.
+
+    Returns the number of players touched (0 for an empty frame: nothing is deleted
+    and nothing is inserted, since there is nothing to merge).
+    """
+    ids = visited_player_ids(frame)
+    existing = stored_transfermarkt_rows(engine, ids)
+    guard_volume(len(frame), existing, allow_shrink)
+    with engine.begin() as conn:
+        if ids:
+            delete_stmt = text(
+                "DELETE FROM player_injuries WHERE source = 'transfermarkt' "
+                "AND player_id IN :player_ids"
+            ).bindparams(bindparam("player_ids", expanding=True))
+            conn.execute(delete_stmt, {"player_ids": ids})
+            frame.to_sql("player_injuries", conn, if_exists="append", index=False)
+    return len(ids)
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Load the scraped Transfermarkt injury history into Postgres")
     parser.add_argument("--allow-shrink", action="store_true",
-                        help="load even when it carries far fewer rows than the table "
-                             "already holds (only when a human has decided the smaller "
-                             "history is correct)")
+                        help="load even when the players this scrape visited carry far "
+                             "fewer rows than they already had stored (only when a human "
+                             "has decided the smaller history is correct)")
     args = parser.parse_args(argv)
 
     path = output_path()
@@ -163,16 +236,10 @@ def main(argv: list[str] | None = None) -> None:
         engine)
     frame = injury_frame(path, players)
 
-    # Checked BEFORE the transaction opens, so a refusal cannot even reach the DELETE.
-    guard_volume(len(frame), stored_transfermarkt_rows(engine), args.allow_shrink)
-
-    with engine.begin() as conn:
-        # Replace only what we scraped. Manually entered rows are never touched.
-        conn.execute(text("DELETE FROM player_injuries WHERE source = 'transfermarkt'"))
-        if not frame.empty:
-            frame.to_sql("player_injuries", conn, if_exists="append", index=False)
-    print(f"Loaded {len(frame)} injury rows for "
-          f"{frame['player_id'].nunique() if not frame.empty else 0} players")
+    # Checked (and the delete/insert scoped) BEFORE the transaction opens, so a
+    # refusal cannot even reach the DELETE.
+    touched = merge_transfermarkt_rows(engine, frame, args.allow_shrink)
+    print(f"Loaded {len(frame)} injury rows for {touched} players")
 
 
 if __name__ == "__main__":

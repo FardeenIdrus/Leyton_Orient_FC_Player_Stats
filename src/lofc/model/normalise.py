@@ -30,14 +30,20 @@ KEY_COLUMNS = ["player_id", "competition_id", "season_id", "position_group"]
 
 
 def compute_percentiles_wide(metrics: pd.DataFrame) -> pd.DataFrame:
-    """Percentile (0-100) per metric, ranked within competition + position group.
+    """Percentile (0-100) per metric, ranked within competition + season + position group.
+
+    Season is part of the grouping so a call on an unfiltered multi-season frame still
+    ranks each player within his own season -- otherwise two seasons of the same
+    competition pool into one comparison group (and a player who appears in both seasons
+    ends up competing against himself). See scorecard.py::metric_percentiles, which
+    applies the same rule to the club composite.
 
     Returns one row per rankable player, indexed by the key columns, with one column
     per metric. A metric that is undefined for a position (e.g. save_pct for outfield
     players) comes back as NaN and is dropped downstream.
     """
     df = metrics[metrics["rankable"]].copy()
-    group = df.groupby(["competition_id", "position_group"])
+    group = df.groupby(["competition_id", "season_id", "position_group"])
 
     out = df[KEY_COLUMNS].copy()
     for metric in RANKED_METRICS:

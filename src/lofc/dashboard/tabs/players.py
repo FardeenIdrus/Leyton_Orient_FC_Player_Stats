@@ -11,15 +11,20 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from lofc.config import settings
 from lofc.constrain.filters import RANK_COLUMN
 from lofc.dashboard import assessment_detail, badges, evidence
 from lofc.dashboard.charts import PLOTLY_CONFIG, bar_chart, radar_chart
+from lofc.dashboard.formatting import numeric_or_dash
 from lofc.dashboard.labels import LABELS, _metric_source, metric_label
 from lofc.dashboard.loaders import (
-    get_engine, headline, league_names, load_assessment_status, load_scorecard_percentiles,
-    load_scorecards, load_scorecards_archetype, load_trajectory, season_label)
+    get_engine, headline, league_names, load_assessment_status, load_current_form,
+    load_scorecard_percentiles, load_scorecards, load_scorecards_archetype, load_trajectory,
+    season_label)
+from lofc.dashboard.search import filter_labels, search_options
 from lofc.dashboard.seasons import (
-    CONTRACT_EXPIRED, CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_data_date)
+    CONTRACT_EXPIRED, CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_data_date,
+    season_name_for)
 from lofc.dashboard.session import CarriedPlayer, go_to_assess
 from lofc.model import assessment_status
 from lofc.model import club_framework as cf
@@ -28,6 +33,29 @@ from lofc.model import scorecard as scorecard_mod
 from lofc.model import scout_scores
 from lofc.store import assessments as store_assess
 from lofc.store import watchlist
+
+# The six dimensions `veto` can trip on (scorecard.py's dim_bands), in the order the club's
+# framework lists them, paired with the column each dimension's band lives in on a scored
+# row. Used to name which dimension(s) tripped the advisory rather than saying "a dimension".
+_VETO_DIMENSIONS = [
+    (cf.PERFORMANCE, "performance_band"),
+    (cf.PHYSICAL, "physical_band"),
+    (cf.FINANCIAL, "financial_band"),
+    (cf.RESALE, "resale_band"),
+    (cf.PSYCHOLOGICAL, "psychological_band"),
+    (cf.MEDICAL, "medical_band"),
+]
+
+
+def _veto_reasons(row: pd.Series) -> list[str]:
+    """Which dimension(s) tripped the veto flag, and by how much — e.g. 'Resale Potential
+    1.58 is below the club minimum of 2.00'. Reads whichever band columns are on `row`; a
+    dimension whose band is absent from this row (not scored, or not merged onto this
+    particular view) is silently skipped rather than guessed at, same rule as everywhere
+    else in the app: absent data never renders as a value."""
+    return [f"{label} {value:.2f} is below the club minimum of {cf.VETO_BAND:.2f}"
+            for label, col in _VETO_DIMENSIONS
+            for value in [row.get(col)] if pd.notna(value) and value < cf.VETO_BAND]
 
 
 def _trajectory(player_id: int, role: str, key_prefix: str) -> None:
@@ -62,6 +90,66 @@ def _trajectory(player_id: int, role: str, key_prefix: str) -> None:
                "are relative to each league).")
 
 
+def _current_form_summary(rows: pd.DataFrame, player_id: int) -> dict[str, int] | None:
+    """Plain-fact aggregate for one player's rows in the live-season frame -- `minutes` summed
+    across any competition rows (a mid-season move has one row per league), and `goals`/
+    `assists` totals derived from the per-90 rate the same way `_full_stats_table`/
+    `_season_total` above already derive a season total for a non-EFL league with no raw
+    total column. Returns `None` if he has no row at all this season.
+
+    Pure and Streamlit-free so the "has he played this season" decision is directly testable,
+    matching the project convention (`_metrics_held_by_anyone`, `_full_stats_table` above) of
+    keeping data decisions out of the rendering function that displays them. Deliberately
+    carries no "appearances" figure: `player_metrics_neutral` (the only table holding
+    season_id 319) has no match-played count for the Impect-sourced leagues, and this
+    platform does not invent a fact the data does not hold. Never a rating -- the caller's
+    job, not this function's, is to say so in words; this only decides what the honest facts
+    are.
+    """
+    mine = rows[rows["player_id"] == player_id]
+    if mine.empty:
+        return None
+    minutes = float(mine["minutes"].fillna(0).sum())
+
+    def _total(per90_col: str) -> int:
+        # Sum each row's own total (rate x that row's minutes / 90), not the rate averaged
+        # across rows -- correct even for the rare mid-season mover with two competition rows.
+        per_row = mine[per90_col].fillna(0) * mine["minutes"].fillna(0) / 90
+        return round(float(per_row.sum()))
+
+    return {
+        "minutes": int(round(minutes)),
+        "goals": _total("goals_p90"),
+        "assists": _total("assists_p90"),
+    }
+
+
+def _current_form(player_id: int) -> None:
+    """Current-season form as plain facts, alongside the (older) scored season shown by the
+    rest of the profile -- NOT a rating. 2026/27 has real data but nobody is near the 450-
+    minute rankable threshold yet (see `loaders.load_current_form`), so a composite for it
+    would be a small sample dressed as a score; this shows what the data actually supports
+    instead, clearly labelled as current form.
+    """
+    live = settings.live_season_id
+    if live is None:
+        return
+    summary = _current_form_summary(load_current_form(), player_id)
+    st.markdown(f"**Current form — {season_name_for(live)}**")
+    if summary is None:
+        st.caption("No 2026/27 appearances recorded — he has not featured yet, or his "
+                   "league has not started. Not scored: this is plain facts, not a rating.")
+        return
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Minutes", f"{summary['minutes']:,}", border=True)
+    c2.metric("Goals", summary["goals"], border=True)
+    c3.metric("Assists", summary["assists"], border=True)
+    st.caption("Plain facts, not a rating — too little of the season has been played for a "
+               "composite (well under the 450-minute rankable minimum). Match-played counts "
+               "are not tracked for this season's data. The scored dimension tiles below are "
+               "for his most recent full season.")
+
+
 def _strengths_weaknesses(percentiles: pd.DataFrame, player_id: int, comp_id: int,
                           metrics: list[str]) -> str:
     """A one-line plain-English read of a player: top-3 and bottom-3 percentiles."""
@@ -82,15 +170,39 @@ def _metrics_held_by_anyone(metric_values: pd.DataFrame, metric_names) -> set[st
     population (one season, every league).
 
     Retired StatsBomb columns Impect has no successor for (`tackles_p90`, `save_pct`, ...)
-    are NULL for every player once StatsBomb is out of scoring -- they still live in `LABELS`
-    (the full club-framework name list) and in `metric_values`'s columns, but showing them as
-    an empty row on every profile reads as the platform being broken. This decides membership
-    from the data actually held, not a hard-coded list of retired names, so it stays correct
-    as sources are added or retired. Pure (no Streamlit, no per-player state) so it is directly
-    testable.
+    are NULL for every player once StatsBomb is out of scoring -- `LABELS` (labels.py) no
+    longer names them at all, precisely so nothing reads them as displayable, but a caller
+    can still be handed one of their raw column names (e.g. by another table's own fixed
+    metric list) and needs the same protection. This decides membership from the data
+    actually held, not a hard-coded list of retired names, so it stays correct as sources are
+    added or retired. Pure (no Streamlit, no per-player state) so it is directly testable.
     """
     return {m for m in metric_names
            if m in metric_values.columns and metric_values[m].notna().any()}
+
+
+# The two raw season-output tiles per role that are known to have gone fully dead once
+# StatsBomb left scoring -- goalkeeper Save%/Saves, defender Tackles/Interceptions. Kept as
+# a role -> candidate-columns map (not a single flat list) so `_output_tile_plan` only ever
+# checks the metrics relevant to the role being rendered.
+_ROLE_OUTPUT_METRICS = {
+    "goalkeeper": ["save_pct", "gk_saves_p90"],
+    "defender": ["tackles_p90", "interceptions_p90"],
+}
+
+
+def _output_tile_plan(role: str, metric_values: pd.DataFrame) -> dict[str, bool]:
+    """Which of a role's raw season-output tiles (the small cards above the trajectory
+    chart) have real data behind them ANYWHERE in the loaded population -- so the caller can
+    skip a tile entirely rather than render an empty "Tackles —" / "Save % —" card on every
+    single profile forever. `{}` for a role with no such tiles (midfielder/attacker use
+    goals/assists, which are live). Pure and testable without a Streamlit runtime, same
+    reasoning as `_metrics_held_by_anyone` (which this delegates to)."""
+    keys = _ROLE_OUTPUT_METRICS.get(role)
+    if not keys:
+        return {}
+    held = _metrics_held_by_anyone(metric_values, keys)
+    return {k: k in held for k in keys}
 
 
 def _full_stats_table(row: pd.Series, percentiles: pd.DataFrame, metric_values: pd.DataFrame) -> pd.DataFrame | None:
@@ -222,7 +334,8 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
         bio_bits.append(f"{int(row['height_cm'])} cm")
     if pd.notna(row.get("contract_until")):
         bio_bits.append(f"contract to {row['contract_until']:%b %Y}")
-    bio_bits.append(f"playing style: {row.get('cluster_label', 'n/a')}")
+    if pd.notna(row.get("cluster_label")):
+        bio_bits.append(f"playing style: {row['cluster_label']}")
     st.caption(" · ".join(b for b in bio_bits if b))
 
     # Watch toggle. Key carries the render site AND the row identity, so the two
@@ -257,12 +370,32 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
 
     o1, o2, o3 = st.columns(3)
     if role == "goalkeeper":
-        save_pct = mv.get("save_pct")  # stored 0-1
-        o1.metric("Save %", f"{float(save_pct) * 100:.0f}%" if pd.notna(save_pct) else "—", border=True)
-        o2.metric("Saves", total("gk_saves_p90"), border=True)
+        # save_pct/gk_saves_p90 are retired StatsBomb columns, NULL for every goalkeeper in
+        # every league now Impect is the spine (see labels.py LABELS) -- an unconditional
+        # tile here would read "Save % —" / "Saves —" on every single profile forever, which
+        # is exactly the empty-card bug this checks for. `_output_tile_plan` self-heals if
+        # the data ever returns.
+        plan = _output_tile_plan(role, metric_values)
+        if plan.get("save_pct"):
+            save_pct = mv.get("save_pct")  # stored 0-1
+            o1.metric("Save %", f"{float(save_pct) * 100:.0f}%" if pd.notna(save_pct) else "—", border=True)
+        if plan.get("gk_saves_p90"):
+            o2.metric("Saves", total("gk_saves_p90"), border=True)
+        if not any(plan.values()):
+            o1.caption("Save % / Saves: retired StatsBomb stats, no longer populated — see "
+                       "**Scorecard metrics** below for the live Impect shot-stopping figures.")
     elif role == "defender":
-        o1.metric("Tackles", total("tackles_p90"), border=True)
-        o2.metric("Interceptions", total("interceptions_p90"), border=True)
+        # tackles_p90/interceptions_p90: same retired-column situation as above, NULL for
+        # every defender now.
+        plan = _output_tile_plan(role, metric_values)
+        if plan.get("tackles_p90"):
+            o1.metric("Tackles", total("tackles_p90"), border=True)
+        if plan.get("interceptions_p90"):
+            o2.metric("Interceptions", total("interceptions_p90"), border=True)
+        if not any(plan.values()):
+            o1.caption("Tackles / Interceptions: retired StatsBomb stats, no longer populated "
+                       "— see **Scorecard metrics** below for the live Impect defensive-action "
+                       "figures.")
     else:
         # EFL rows carry raw season totals; scouting rows (all leagues) don't, so fall back
         # to the per-90-derived total, which the combined table supplies for every league.
@@ -273,7 +406,7 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
             return round(float(v) * minutes / 90) if pd.notna(v) and minutes else 0
         o1.metric("Goals", f"{_season_total('goals', 'goals_p90'):,}", border=True)
         o2.metric("Assists", f"{_season_total('assists', 'assists_p90'):,}", border=True)
-    o3.metric("Minutes", f"{int(row['minutes']):,}", border=True)
+    o3.metric("Minutes", f"{int(row['minutes']):,}" if pd.notna(row.get("minutes")) else "—", border=True)
 
     npxg, xa = row.get("np_xg_p90"), row.get("xa_p90")
     if role in ("midfielder", "attacker") and pd.notna(npxg) and pd.notna(xa):
@@ -281,6 +414,7 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
                    "goals/assists) drive the scores, because they're steadier season to season.")
 
     _trajectory(int(row["player_id"]), role, key_prefix)
+    _current_form(int(row["player_id"]))
 
     # Dimension score tiles (1-5). Money tiles only when the affordability layer is on.
     composite, performance, physical = (row.get("objective_composite"), row.get("performance_band"),
@@ -310,11 +444,19 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
         st.caption("No market-value or wage data for this league (Scottish / PL2 aren't priced) — this "
                    "is a quality view.")
     # Advisory flags (never exclusions) — an amber callout, so it reads as guidance, not a block.
+    # Named per dimension (e.g. "Resale Potential 1.58 is below the club minimum of 2.00"),
+    # not just "a dimension" — half of all flagged players trip on Financial or Resale, which
+    # aren't otherwise on screen unless money display is switched on, so a generic message
+    # was unexplainable from what the user could see.
     flags = []
     if row.get("veto"):
-        flags.append("below the club minimum (band &lt; 2.0) on a dimension")
+        reasons = _veto_reasons(row)
+        flags.extend(reasons if reasons else ["below the club minimum (band &lt; 2.0) on a "
+                                              "dimension — detail unavailable on this view"])
     if row.get("below_min_composite"):
-        flags.append("composite below the club's 3.0 minimum standard")
+        flags.append(f"Composite {composite:.2f} is below the club's {cf.MIN_COMPOSITE:.2f} "
+                     "minimum standard" if pd.notna(composite)
+                     else f"composite below the club's {cf.MIN_COMPOSITE:.2f} minimum standard")
     if flags:
         items = "".join(f"<li style='margin:2px 0;'>{f}</li>" for f in flags)
         st.markdown(
@@ -384,40 +526,136 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
 
 
 def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, metrics: list[str],
-             metric_values: pd.DataFrame, archetype: str = cf.DEFAULT_ARCHETYPE,
+             metric_values: pd.DataFrame, search_index: pd.DataFrame,
+             archetype: str = cf.DEFAULT_ARCHETYPE,
              show_money: bool = False, contract_horizon: str = DEFAULT_CONTRACT_HORIZON,
              contract_unknown: int = 0) -> None:
     """The one workspace: a composite-ranked list of players (master) with a full player
     detail (detail) opened by clicking a row or searching. Money is an opt-in layer."""
     with tab:
         lens = archetype != cf.DEFAULT_ARCHETYPE
+        full_pool = pool.copy()   # the position-filtered pool; search can still reach anyone
+                                   # outside it (search_index spans every position/league)
+
+        # --- Find a player: searches every position and every league in this season, not
+        # just whatever is currently selected in the sidebar. Picking a result switches the
+        # sidebar Position filter (and adds the player's league back in if it had been
+        # filtered out) automatically, so nobody has to already know a player's position to
+        # find him -- that was the whole complaint this replaces.
+        st.markdown("##### Find a player")
+        labels, by_label = search_options(search_index)
+
+        # The dropdown widget below does its own live filtering as you type, but that
+        # filtering happens entirely in the browser against the literal displayed text --
+        # it has no idea "Mendez" and "Méndez" are the same name, and (worse) can fall back
+        # to an unrelated fuzzy guess rather than finding nobody. So the actual narrowing
+        # happens here in Python instead, via `filter_labels` (accent-, case- and
+        # punctuation-insensitive, see `search.py::fold`) against a plain text box; the
+        # dropdown below is only ever offered the pre-matched subset. A blank query leaves
+        # every player browsable, same as before this existed.
+        query = st.text_input(
+            "Search any player — every position and league, this season",
+            key="global_player_search_query", placeholder="Type a player's name…",
+            help="Not limited to the current Position filter. Matches ignore accents, case, "
+                 "hyphens and apostrophes, so \"Mendez\" finds \"Méndez-Laing\" and "
+                 "\"OConnor\" finds \"O'Connor\". Choosing a result switches the sidebar to "
+                 "his position and opens his profile below.")
+        filtered_labels = filter_labels(labels, query)
+
+        def _on_search_pick() -> None:
+            # An on_change callback, NOT body code: the sidebar's Position/Leagues widgets
+            # (app.py::main, keys "sidebar_position"/"sidebar_leagues") already instantiated
+            # earlier in THIS run by the time this function's body executes, and Streamlit
+            # forbids writing to a widget's session_state key after that point in the same
+            # run. A callback runs in the pre-render phase BEFORE the next rerun's widgets are
+            # instantiated, which is exactly the pattern `controls.py`'s synced sliders use
+            # (`on_change=from_slider` etc.) -- so the switch belongs here, not below.
+            picked_now = st.session_state.get("global_player_search")
+            if not picked_now or picked_now not in by_label:
+                return
+            trow = search_index.iloc[by_label[picked_now]]
+            target_position = str(trow["position_group"])
+            if target_position != position:
+                st.session_state["sidebar_position"] = target_position
+                # Guard against "—" (load_candidates' fallback for a competition_id the league
+                # map has no name for): that string is never one of the sidebar's own League
+                # options, and inserting it into sidebar_leagues would make the multiselect
+                # widget raise on the next render rather than just fail to include him.
+                current_leagues = list(st.session_state.get("sidebar_leagues", []))
+                if trow["league"] not in current_leagues and trow["league"] != "—":
+                    st.session_state["sidebar_leagues"] = current_leagues + [trow["league"]]
+
+        sc1, sc2 = st.columns([6, 1], vertical_alignment="bottom")
+        picked = sc1.selectbox(
+            (f"{len(filtered_labels)} matching player(s) — pick one" if query.strip()
+             else "Or browse every player"),
+            filtered_labels, index=None, placeholder="Choose a player…",
+            key="global_player_search", on_change=_on_search_pick,
+            help="Choosing a result switches the sidebar to his position and opens his "
+                 "profile below.")
+        sc2.button("✕ Clear", key="global_player_search_clear", width="stretch",
+                   on_click=lambda: st.session_state.update(
+                       {"global_player_search": None, "global_player_search_query": ""}),
+                   disabled=not (st.session_state.get("global_player_search")
+                                 or st.session_state.get("global_player_search_query")))
+        if query.strip() and not filtered_labels:
+            st.caption(f"No player matches “{query.strip()}”. The search already ignores "
+                       "accents, case, hyphens and apostrophes — check the spelling.")
+
+        search_detail_row, search_notice = None, None
+        if picked and picked in by_label:
+            trow = search_index.iloc[by_label[picked]]
+            target_position = str(trow["position_group"])
+            if target_position == position:
+                pid, cid, sid = int(trow["player_id"]), int(trow["competition_id"]), int(trow["season_id"])
+                match = full_pool[(full_pool["player_id"] == pid) & (full_pool["competition_id"] == cid)
+                                  & (full_pool["season_id"] == sid)]
+                if not match.empty:
+                    search_detail_row = match.iloc[0]
+                else:
+                    search_notice = (
+                        f"**{trow['player_name']}** ({target_position}, {trow['league']}) isn't in "
+                        "this list under the current filters — check the maximum age, contract-"
+                        "expiry horizon, preferred foot or the 450-minute minimum in the sidebar.")
+            # else: a mismatch here means the pick hasn't gone through _on_search_pick yet on
+            # this exact run (Streamlit runs on_change callbacks BEFORE the script body, so in
+            # the ordinary case `position` already matches by the time this line runs) -- doing
+            # nothing is safe either way, since the very next run resolves it.
+        st.divider()
+
         st.caption("Ranked by the club's **objective composite** (Performance + Physical, real data), "
-                   "within the selected season and position. Click a player — or search below — for their "
-                   "full detail. Money is off by default; turn on **Affordability (modelled)** in the sidebar.")
-        # The contract filter hides anyone with no known expiry date, so say so plainly: contract
-        # data is largely EFL-only and silence would read as "nobody else is expiring".
+                   "within the selected season and position. Money is off by default; turn on "
+                   "**Affordability (modelled)** in the sidebar.")
+        # The contract filter hides anyone with no known expiry date -- said plainly, but as
+        # one compact line rather than a bordered callout, so the filter chrome above the
+        # table stays out of the ranked list's way. Full provenance (scrape date etc.) moves
+        # into the expander below, one click away rather than always on screen.
         if CONTRACT_HORIZONS.get(contract_horizon):
             if contract_horizon == CONTRACT_EXPIRED:
-                msg = (f"**Contract filter: {contract_horizon}.** Showing {len(pool)} {position}s "
-                       f"whose contract has already run out.")
+                line = (f"Contract filter: **{contract_horizon}** — {len(pool)} {position}s shown "
+                       "whose contract has already run out.")
             else:
-                msg = (f"**Contract filter: {contract_horizon}.** Showing {len(pool)} {position}s "
-                       f"still under contract today whose deal ends by "
-                       f"{CONTRACT_HORIZONS[contract_horizon]}.")
+                line = (f"Contract filter: **{contract_horizon}** — {len(pool)} {position}s shown, "
+                       f"still under contract today, expiring by {CONTRACT_HORIZONS[contract_horizon]}.")
             if contract_unknown:
-                msg += (f" **{contract_unknown} {position}s are hidden** because we hold no contract "
-                        f"date for them — contract data comes from the Transfermarkt scrape and is "
-                        f"largely EFL-only, so this is *unknown*, not *not expiring*.")
+                line += f" **{contract_unknown} hidden** (no known contract date)."
+            st.caption(line)
+        if lens:
+            st.caption(f"Archetype lens: ranking as **{archetype}** — the Composite is scored on this "
+                       "archetype's metrics; **All-round** shows the full-profile composite for context.")
+        with st.expander("About this list — contract data, archetype lens, minutes threshold"):
             as_of = contract_data_date()
             if as_of:
-                msg += (f"\n\n_Contract data as of **{as_of}** — it is a scraped snapshot, not live, "
-                        f"so recent extensions or new signings may not be reflected._")
-            st.info(msg)
-        if lens:
-            st.info(f"**Archetype lens: ranking {position}s as _{archetype}_.** The Composite is scored on "
-                    f"this archetype's metrics; the **All-round** column is the full-profile composite for "
-                    f"context. Change the **Archetype** in the sidebar.")
-        full_pool = pool.copy()   # keep the unfiltered pool so search can reach any player
+                st.caption(f"Contract data as of **{as_of}** — a scraped snapshot, not live, so a "
+                           "recent extension or new signing may not be reflected yet. Contract "
+                           "dates are largely EFL-only; the number hidden for having none known "
+                           "is shown above when a contract-expiry filter is active.")
+            st.caption("The **Archetype** lens (Full Back / Winger only, sidebar) reranks on that "
+                       "archetype's Performance metrics; the all-round composite stays visible "
+                       "alongside as the guardrail against overfitting to one lens.")
+            st.caption("Nobody appears below **450 minutes** played this season — per-90 rates on a "
+                       "smaller sample are noise, not signal. Raise or lower the minutes floor in "
+                       "the sidebar; it never goes below 450.")
 
         # Assessed ranking mode: opt-in, off by default. The `else` branch below leaves the
         # default ranking (RANK_COLUMN = objective_composite) byte-for-byte unchanged.
@@ -519,15 +757,30 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
         # Contract expiry is REAL scraped data (not modelled), and the free-transfer market is a
         # first-class recruitment question — so it shows by default, not only under the money layer.
         view["Contract"] = view["contract_until"].dt.strftime("%m/%Y").fillna("—")
+        # A TextColumn does not save a raw NaN either -- confirmed directly, same as
+        # NumberColumn (see the block below) -- so a player from a league this platform
+        # doesn't cluster into playing styles (Scottish Prem/Champ, PL2) needs the same
+        # "—" fallback "Contract" above already gets, not a bare `.rename()` of the NaN.
+        view["cluster_label"] = view["cluster_label"].fillna("—")
         months_left = (view["contract_until"] - pd.Timestamp.now().normalize()).dt.days / 30.44
-        view["Months left"] = months_left.round(0)
+        # Age/Months left/Market value/Est. wage/Below fair value render as pre-formatted
+        # text (numeric_or_dash, dashboard/formatting.py), not raw numbers fed to
+        # NumberColumn: confirmed directly against the running app that a missing
+        # NumberColumn cell renders the literal text "None"/"nan" here rather than a blank
+        # cell, for every missing-value representation tried (numpy NaN, Python None,
+        # pandas' own pd.NA) -- the same gap "Contract" above has always avoided by being
+        # pre-formatted text with a "—" fallback rather than a raw value handed to a
+        # number-typed column. Minutes/Measured stay NumberColumn: both are guaranteed
+        # non-null for a ranked row (the 450-minute filter drops anyone without one).
+        view["Age"] = numeric_or_dash(view["age"], "{:.1f}")
+        view["Months left"] = numeric_or_dash(months_left, "{:.0f}")
         if show_money:
-            view["Market value"] = (view["market_value_eur"] / 1e6).round(1)
-            view["Est. wage"] = (view["estimated_weekly_wage_gbp"] / 1000).round(1)
-            view["Below fair value"] = (view["undervaluation_pct"] * 100).round(0)
+            view["Market value"] = numeric_or_dash(view["market_value_eur"] / 1e6, "€{:.1f}m")
+            view["Est. wage"] = numeric_or_dash(view["estimated_weekly_wage_gbp"] / 1000, "£{:.1f}k")
+            view["Below fair value"] = numeric_or_dash(view["undervaluation_pct"] * 100, "{:.0f}%")
 
         table = view.rename(columns={
-            "player_name": "Player", "team_name": "Club", "league": "League", "age": "Age",
+            "player_name": "Player", "team_name": "Club", "league": "League",
             rank_column: "Composite", "performance_band": "Performance",
             "physical_band": "Physical", "cluster_label": "Player type",
             "affordable_fee": "Fee in budget", "affordable_wage": "Wages in budget"})
@@ -547,7 +800,7 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
                           "assessed ranking, opt-in.") if assessed_mode else \
                          "The club's objective composite (1-5) — the ranking."
         col_cfg = {
-            "Age": st.column_config.NumberColumn("Age", format="%.1f"),
+            "Age": st.column_config.TextColumn("Age", help="'—' = no known birth date or valuation."),
             "Minutes": st.column_config.NumberColumn("Minutes", format="%d"),
             "Composite": band(composite_label, composite_help),
             "All-round": band("All-round", "Full-profile composite (All Metrics), for context."),
@@ -559,33 +812,44 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             "Contract": st.column_config.TextColumn(
                 "Contract", help="Contract expiry (MM/YYYY) from Transfermarkt. '—' = not known "
                                  "(contract data is largely EFL-only)."),
-            "Months left": st.column_config.NumberColumn(
+            "Months left": st.column_config.TextColumn(
                 "Months left", help="Months from today until the contract expires. Under 6 = he can "
-                                    "sign a pre-contract elsewhere. Negative = already expired.",
-                format="%d"),
+                                    "sign a pre-contract elsewhere. Negative = already expired. "
+                                    "'—' = no known contract date."),
         }
-        style = table
+        # No per-row styling here (no zebra stripe, no affordability tint): a pandas Styler
+        # emits an inline CSS string PER CELL, and `st.dataframe` renders to a canvas-based
+        # grid that can't be striped with page-level CSS the way a plain HTML table can -- so
+        # a Styler on a ~50-column, several-hundred-row table costs tens of thousands of
+        # styled cells rebuilt on every rerun (every filter change, every keystroke) for a
+        # purely cosmetic stripe. Affordability was the one tint that carried meaning (green
+        # = affordable, amber = not) -- that meaning is stated in words below via the "Fee in
+        # budget" / "Wages in budget" checkbox columns already on the table, so nothing is
+        # lost by dropping the colour (colour never carries meaning alone here anyway).
         if show_money:
             col_cfg |= {
-                "Market value": st.column_config.NumberColumn("Market value", help="Transfermarkt (modelled context).", format="€%.1fm"),
-                "Est. wage": st.column_config.NumberColumn("Est. wage", help="Modelled weekly wage (£ thousands).", format="£%.1fk"),
+                "Market value": st.column_config.TextColumn("Market value", help="Transfermarkt (modelled context). '—' = no known valuation."),
+                "Est. wage": st.column_config.TextColumn("Est. wage", help="Modelled weekly wage (£ thousands). '—' = no known valuation."),
                 "Contract": st.column_config.TextColumn("Contract", help="Contract end (Transfermarkt)."),
-                "Below fair value": st.column_config.NumberColumn("Below fair value", help="How far under fair value the market prices them.", format="%d%%"),
+                "Below fair value": st.column_config.TextColumn("Below fair value", help="How far under fair value the market prices them. '—' = no known valuation."),
                 "Fee in budget": st.column_config.CheckboxColumn("Fee in budget", help="Transfer fee fits the budget."),
                 "Wages in budget": st.column_config.CheckboxColumn("Wages in budget", help="Modelled wage fits the ceiling."),
             }
-            def _tint(r):
-                return [f"background-color: {'#E9F7EE' if r['qualifies'] else '#FFF6EA'}"] * len(r)
-            style = table.style.apply(_tint, axis=1)
-            st.caption("🟢 affordable (fee + wage in budget) · 🟠 outside budget.")
+            st.caption("Affordable = both **Fee in budget** and **Wages in budget** are checked below.")
 
         # Byte-for-byte identical to the pre-existing key when assessed_mode is off (Rule A):
         # the suffix only appears once the opt-in ranking mode is engaged.
         mode_suffix = f"_{assessed_mode}_{signed_only}" if assessed_mode else ""
         base_key = (f"players_{position}_{archetype}_{show_money}_{only_qualifying}_"
                    f"{group_by_type}_{'|'.join(chosen)}{mode_suffix}")
+        # The ranked list is the platform's primary display -- it should dominate the page and
+        # be comfortable to scan, not a small pane squeezed by everything around it. Height
+        # scales with how many rows there are (capped, since st.dataframe scrolls internally
+        # past that) rather than a fixed 560px that left a short list swimming in white space
+        # and a long one cramped.
+        table_height = max(360, min(720, 96 + 35 * len(view)))
         selection = st.dataframe(
-            style, column_order=display_cols, hide_index=True, width="stretch", height=560,
+            table, column_order=display_cols, hide_index=True, width="stretch", height=table_height,
             on_select="rerun", selection_mode="single-row", key=_selectable_key(base_key), column_config=col_cfg)
 
         export = table[[c for c in display_cols if c != "Rank"]].copy()
@@ -594,21 +858,13 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
                            file_name=f"lofc_players_{position.lower().replace(' ', '_')}.csv", mime="text/csv",
                            help="Saves exactly what is on screen.")
 
-        # --- detail: a clicked row, else a searched player -----------------------------
+        # --- detail: a clicked row takes priority over a searched player ----------------
         rows = list(selection.selection.rows) if selection and selection.selection else []
-        labels, by_label = _player_options(full_pool)
         detail_row = None
         if rows and rows[0] < len(view):
             detail_row = view.iloc[rows[0]]
-        else:
-            sc1, sc2 = st.columns([6, 1], vertical_alignment="bottom")
-            picked = sc1.selectbox("Or search any player for their full detail", labels, index=None,
-                                   placeholder="Search for a player…", key=f"players_search_{position}")
-            sc2.button("✕ Clear", key=f"players_search_clear_{position}", width="stretch",
-                       on_click=lambda: st.session_state.update({f"players_search_{position}": None}),
-                       disabled=not st.session_state.get(f"players_search_{position}"))
-            if picked and picked in by_label:
-                detail_row = full_pool.loc[by_label[picked]]
+        elif search_detail_row is not None:
+            detail_row = search_detail_row
 
         if detail_row is not None:
             st.divider()
@@ -619,6 +875,8 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             _render_profile_body(detail_row, percentiles, metrics, metric_values, key_prefix="detail",
                                  archetype=archetype, show_money=show_money)
         else:
+            if search_notice:
+                st.warning(search_notice)
             st.caption("⬆️ Click a player in the table, or search above, to open their full detail.")
 
 

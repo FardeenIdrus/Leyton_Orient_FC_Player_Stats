@@ -25,7 +25,14 @@ from lofc.store import assessments as store_assess
 
 @st.cache_resource
 def get_engine():
-    return create_engine(settings.database_url)
+    # hide_parameters: every auth/user-management call in store/users.py goes through this
+    # engine. An IntegrityError (e.g. the create_user username race -- see store/users.py)
+    # would otherwise print the failing statement's bound parameters -- including a fresh
+    # account's password salt and hash -- into whatever renders the exception. Combined with
+    # Streamlit's default showErrorDetails="full" (see .streamlit/config.toml, now "none"),
+    # that reached the browser. admin.py's CLI engine already sets this for the same reason;
+    # the dashboard's engine did not.
+    return create_engine(settings.database_url, hide_parameters=True)
 
 
 # --- season selection --------------------------------------------------------------
@@ -91,19 +98,30 @@ def load_candidates(wage_ceiling_multiplier: float, season_id: int | None = None
     ref = out["season_id"].map(SEASON_REF_DATE)
     dob_age = ((ref - out["birth_date"]).dt.days / 365.25).round(1)
     dob_age = dob_age.where(dob_age.between(14, 50))          # drop nonsense before using
-    out["age"] = dob_age.where(dob_age.notna(), out["age"])
+    # pd.to_numeric (not a bare fallback): the EFL-only valuations "age" being replaced here
+    # can hold a Python None (object dtype) rather than a real NaN for a player it has no
+    # value for. `.where()` against an object-dtype column upcasts the whole result to
+    # object, mixing float NaN with Python None -- and a NumberColumn later renders that None
+    # as the literal text "None" instead of a blank cell. Coercing first keeps "age" a clean
+    # float64 column, so "missing" is always NaN, never a stray object.
+    fallback_age = pd.to_numeric(out["age"], errors="coerce")
+    out["age"] = dob_age.where(dob_age.notna(), fallback_age)
     if season_id is not None:                       # rank within one season only
         out = out[out["season_id"] == season_id].reset_index(drop=True)
     return out
 
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=60)
 def load_scorecards(season_id: int | None = None) -> pd.DataFrame:
     """The club's 1-5 composite scorecard per player for one season, read from the persisted
     `player_scorecards` table (computed live as a fallback if it has not been built yet).
     Scored WITHIN the season (percentiles and coverage are that season's), so a player appears
     once. Two composites: objective (Performance + Physical) and full (adds the modelled
-    Financial + Resale). Nobody is excluded by the advisory veto/gate flags."""
+    Financial + Resale). Nobody is excluded by the advisory veto/gate flags.
+
+    60s, matching `_stored_scorecards` below (which this reads through) -- see its docstring:
+    `assessed_composite` on this frame updates live as scouts work.
+    """
     return _build_scorecard_frame(season_id=season_id)
 
 
@@ -141,10 +159,19 @@ def _attach_scorecard_meta(sc: pd.DataFrame, neutral: pd.DataFrame) -> pd.DataFr
     return sc
 
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=60)
 def _stored_scorecards(season_id: int | None = None) -> pd.DataFrame:
     """The persisted club scorecards (`player_scorecards`, written by model/scorecard_run).
-    Empty frame if the table has not been built yet — the caller then computes live."""
+    Empty frame if the table has not been built yet — the caller then computes live.
+
+    60s, matching `load_assessment_status`, not the 600s used elsewhere: this table carries
+    `assessed_composite`, which `model/assessed_refresh` recomputes and writes immediately on
+    every assessment save/sign-off/reject. At 600s a scout who saves an assessment, switches
+    to the assessed ranking and does not see their player for up to ten minutes reasonably
+    concludes the save failed. `objective_composite`/`performance_band`/etc on this same row
+    only change on a pipeline rebuild, so shortening the TTL costs an extra query on a cache
+    miss, not correctness.
+    """
     where = f"WHERE season_id = {int(season_id)}" if season_id is not None else ""
     try:
         return pd.read_sql(f"SELECT * FROM player_scorecards {where}", get_engine())
@@ -186,10 +213,14 @@ def _build_scorecard_frame(archetype_by_position: dict[str, str] | None = None,
     return _attach_scorecard_meta(sc, neutral)
 
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=60)
 def load_scorecards_archetype(position: str, archetype: str, season_id: int | None = None) -> pd.DataFrame:
     """Scorecards with one position's Performance dimension scored on a chosen archetype's
-    metric subset (the archetype lens). Only that position's rows differ from the default."""
+    metric subset (the archetype lens). Only that position's rows differ from the default.
+
+    60s -- see `load_scorecards`; the same `assessed_composite` freshness concern applies to
+    the archetype-lens rows used by the Players tab's assessed-ranking toggle.
+    """
     return _build_scorecard_frame(archetype_by_position={position: archetype}, season_id=season_id)
 
 
@@ -215,11 +246,53 @@ def load_percentiles(season_id: int | None = None) -> pd.DataFrame:
         f"WHERE {where}", get_engine())
 
 
+# Metrics the club framework treats as goalkeeper-only: the stored metric a GK club-metric
+# resolves to (club_framework.CLUB_SUCCESSOR) that appears in NO outfield position's
+# PERFORMANCE_METRICS/PHYSICAL_METRICS list, plus gk_conceded_p90 (not itself scored, but
+# unambiguously a goalkeeper concept by name). `player_metrics_neutral` carries a real,
+# non-null value for these on every position, not just Goalkeeper: the underlying Impect
+# columns (e.g. CONCEDED_POSTSHOT_XG, CONCEDED_GOALS) are populated per player-position-row
+# as team defensive context ("conceded while this player was on the pitch"), not an
+# individual save-quality figure -- confirmed non-zero for outfield rows in the landed data.
+# Deriving the metric is correct in general; only the "goalkeeper" framing is wrong for a
+# player whose season position is not Goalkeeper. Nulling it here (not at derivation) keeps
+# the neutral table's raw numbers intact for reuse, and masks only where the goalkeeper
+# label is actually asserted -- the profile's tracked-metrics view. Scoring is unaffected:
+# club_framework.PERFORMANCE_METRICS never lists these for an outfield position, so they
+# never fed a percentile/band for one regardless of this table's contents.
+GOALKEEPER_ONLY_METRICS = [
+    "gk_shot_stopping_pct", "gk_gsaa_p90", "gk_conceded_p90", "gk_catches_p90",
+    "defensive_touches_outside_box_p90", "gk_saves_p90", "save_pct",
+    # Their retired StatsBomb-advanced-endpoint namesakes (superseded by the Impect stand-ins
+    # two lines up via CLUB_SUCCESSOR, but the raw columns still exist in the registry --
+    # currently NULL for every position in the data checked, so no live symptom today, but
+    # the same defect class would reappear silently if that source is ever repopulated).
+    "gk_claims_pct", "gk_aggressive_distance",
+]
+
+
+def _mask_goalkeeper_only_metrics(frame: pd.DataFrame) -> pd.DataFrame:
+    """NaN out goalkeeper-only metrics for every row whose position_group is not
+    Goalkeeper. Never turns a missing value into 0 -- a metric a source never populated is
+    already NaN; this only adds NaN for the position-mismatch case, on top of that."""
+    if "position_group" not in frame.columns:
+        return frame
+    frame = frame.copy()
+    not_gk = frame["position_group"] != "Goalkeeper"
+    for col in GOALKEEPER_ONLY_METRICS:
+        if col in frame.columns:
+            frame.loc[not_gk, col] = pd.NA
+    return frame
+
+
 @st.cache_data(ttl=600)
 def load_metric_values(season_id: int | None = None) -> pd.DataFrame:
     """Raw per-90 (and rate) values for every metric, for the profile's full-stats table,
     for one season. Reads the combined table so it covers ALL leagues (including the
-    Impect-spined Scottish/PL2 ones) and matches exactly the values scoring uses."""
+    Impect-spined Scottish/PL2 ones) and matches exactly the values scoring uses -- except
+    the goalkeeper-only metrics (see `GOALKEEPER_ONLY_METRICS`), which are masked to NaN for
+    every non-Goalkeeper row before this returns; scoring already never reads them for an
+    outfield position, so nothing scored changes."""
     engine = get_engine()
     available = pd.read_sql("SELECT * FROM player_metrics_neutral LIMIT 0", engine).columns
     # Every registry metric (incl. physical + club-framework metrics), so the unified detail's
@@ -228,9 +301,11 @@ def load_metric_values(season_id: int | None = None) -> pd.DataFrame:
     cols = [c for c in dict.fromkeys(list(LABELS) + metric_names) if c in available]
     where = (f"season_id = {int(season_id)}" if season_id is not None
              else "season_id = (SELECT MAX(season_id) FROM player_metrics_neutral)")
-    return pd.read_sql(
-        f"SELECT player_id, competition_id, {', '.join(cols)} FROM player_metrics_neutral "
+    select_cols = ["player_id", "competition_id", "position_group"] + [c for c in cols if c != "position_group"]
+    frame = pd.read_sql(
+        f"SELECT {', '.join(select_cols)} FROM player_metrics_neutral "
         f"WHERE {where}", engine)
+    return _mask_goalkeeper_only_metrics(frame).drop(columns=["position_group"])
 
 
 @st.cache_data(ttl=60)
@@ -257,6 +332,34 @@ def player_context_lookup() -> pd.DataFrame:
     return pd.read_sql(
         "SELECT player_id, competition_id, season_id, position_group, minutes "
         "FROM player_metrics_neutral", get_engine())
+
+
+_INJURY_COLUMNS = ["player_id", "date_from", "date_until", "injury_category",
+                   "injury_type_raw", "days_out", "games_missed"]
+
+
+@st.cache_data(ttl=600)
+def load_injuries_for_players(player_ids: tuple[int, ...]) -> pd.DataFrame:
+    """Every recorded Transfermarkt injury spell for a set of players, for the watchlist's
+    injury-record column.
+
+    `store/injuries.py::load_for_player` is one-player-at-a-time -- exactly right for the
+    evidence panel (one player), wrong for a table of watched players (would be N queries).
+    This is the same table, read in bulk instead. `player_ids` is a tuple (not a list) so
+    it is hashable and can be an `st.cache_data` key. A well-formed empty frame (the full
+    column set) on an empty request or a database that has not been migrated yet, matching
+    the "empty but well-formed" convention already used by `_stored_scorecards`,
+    `load_sc_teams`/`load_sc_players` and `store/injuries.py::load_for_player`.
+    """
+    if not player_ids:
+        return pd.DataFrame(columns=_INJURY_COLUMNS)
+    ids = ",".join(str(int(p)) for p in player_ids)
+    try:
+        return pd.read_sql(
+            f"SELECT {', '.join(_INJURY_COLUMNS)} FROM player_injuries "
+            f"WHERE player_id IN ({ids})", get_engine())
+    except Exception:                                # table not migrated yet
+        return pd.DataFrame(columns=_INJURY_COLUMNS)
 
 
 @st.cache_data(ttl=600)
@@ -324,6 +427,45 @@ def load_trajectory() -> pd.DataFrame:
         "save_pct, gk_saves_p90, tackles_p90, interceptions_p90, pass_completion_pct "
         "FROM player_season_metrics ORDER BY season_id", get_engine())
 
+
+
+_CURRENT_FORM_COLUMNS = ["player_id", "competition_id", "season_id", "minutes",
+                         "goals_p90", "assists_p90"]
+
+
+@st.cache_data(ttl=600)
+def load_current_form() -> pd.DataFrame:
+    """Every player's row(s) for the LIVE season (`settings.live_season_id`) -- minutes and
+    the rates the counting stats are derived from -- for the profile's "current form" section.
+
+    Reads `player_metrics_neutral` (the Impect-spined COMBINED table, all leagues), not
+    `player_season_metrics`: the latter is the StatsBomb-era EFL-only spine and holds no
+    season_id 319 rows at all (every 2026/27 league, EFL included, is Impect-sourced --
+    `config.DEFAULT_IMPECT_TARGETS`). `player_metrics_neutral` has no raw season totals or a
+    match-played count for the Impect-sourced leagues, only per-90 rates and minutes;
+    `tabs/players.py::_current_form_summary` derives goals/assists totals from the rate the
+    same way `_full_stats_table`/`_season_total` already do for non-EFL leagues elsewhere on
+    this page, and does not invent an appearances count the data does not hold.
+
+    This is never scored: 2026/27 has real data -- 1,771 players, 6 leagues -- but 85 minutes
+    average and 207 top, nowhere near the 450-minute rankable threshold, so no composite
+    exists here and none is invented. A player absent from this frame has no 2026/27 row at
+    all (he has not appeared, or his league has not started), which the caller states plainly
+    rather than showing zeros.
+
+    600s (not the 60s used for assessment-derived caches): this reads pipeline output, which
+    changes only when the live-season ingest runs, not while a scout is working.
+
+    A well-formed empty frame (not a bare `pd.DataFrame()`) when no live season is configured
+    (`LIVE_SEASON_ID` set to `None` out of season) so callers can filter/select columns on it
+    unconditionally.
+    """
+    live = settings.live_season_id
+    if live is None:
+        return pd.DataFrame(columns=_CURRENT_FORM_COLUMNS)
+    return pd.read_sql(
+        f"SELECT {', '.join(_CURRENT_FORM_COLUMNS)} FROM player_metrics_neutral "
+        f"WHERE season_id = {int(live)}", get_engine())
 
 
 @st.cache_data(ttl=600)
