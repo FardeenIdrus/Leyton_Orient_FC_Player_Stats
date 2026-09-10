@@ -26,21 +26,13 @@ from __future__ import annotations
 import pandas as pd
 
 from lofc.ingest.impect_map import IMPECT_MAP
+from lofc.ingest.impect_map import IMPECT_POSITION_GROUPS as _IMPECT_POSITION_GROUPS
 from lofc.model.impect_check import load_overrides, match_to_ours, unique_league_name_index
 
 # Impect's 10 position codes -> our 8 position groups (dominant position by matchShare).
-IMPECT_POSITION_GROUPS: dict[str, str] = {
-    "GOALKEEPER": "Goalkeeper",
-    "CENTRAL_DEFENDER": "Centre Back",
-    "LEFT_WINGBACK_DEFENDER": "Full Back",
-    "RIGHT_WINGBACK_DEFENDER": "Full Back",
-    "DEFENSE_MIDFIELD": "Defensive Mid",
-    "CENTRAL_MIDFIELD": "Central Mid",
-    "ATTACKING_MIDFIELD": "Attacking Mid",
-    "LEFT_WINGER": "Winger",
-    "RIGHT_WINGER": "Winger",
-    "CENTER_FORWARD": "Centre Forward",
-}
+# Re-exported from the leaf module so existing importers keep working; the map moved
+# there because impect_translate needs it too and cannot import this module.
+IMPECT_POSITION_GROUPS = _IMPECT_POSITION_GROUPS
 
 # Reserved id range for players we hold ONLY via Impect (no StatsBomb identity).
 IMPECT_ID_OFFSET = 2_000_000_000

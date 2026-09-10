@@ -23,7 +23,6 @@ nulled 1,381 stored contract dates downstream):
 
 Run with:  python -m lofc.ingest.transfermarkt_efl
 """
-
 from __future__ import annotations
 
 import argparse
@@ -45,6 +44,15 @@ LEAGUES = {
     "GB3": ("league-one", 4),
     "GB4": ("league-two", 5),
     "CNAT": ("national-league", 65),
+    # Added 2026-09-07. Contract, height and foot for these three sat at 2-6% purely
+    # because nothing scraped them -- Impect carries no contract or height at all, so
+    # Transfermarkt is the only source and it was never asked. Header layout verified
+    # identical to the English four on a live club page in each (Contract, Height, Foot,
+    # Joined, Signed from), for the CURRENT season only: an ended season swaps Contract
+    # for "Current club", which is what header_index refuses to parse.
+    "SC1": ("scottish-premiership", 901),
+    "SC2": ("scottish-championship", 902),
+    "GB21": ("premier-league-2", 903),
 }
 # Squad-page columns we must find by name. Transfermarkt drops `Contract` (and adds
 # `Current club`) once a season has ended, so its absence means we are on the wrong

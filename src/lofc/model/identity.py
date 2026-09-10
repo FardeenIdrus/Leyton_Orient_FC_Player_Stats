@@ -55,23 +55,47 @@ def match_identity(ours: pd.DataFrame, squad: pd.DataFrame) -> pd.DataFrame:
     """Link our players to their Transfermarkt row on exact birth date + name,
     within the same league.
 
-    `ours` needs columns: player_id, player_name, birth_date, competition_id.
-    Birth date is required on both sides -- a name-only match is not safe enough to
-    write an identity, as the 54-namesake audit showed.
+    `ours` needs columns: player_id, player_name, birth_date, competition_id, and
+    optionally tm_player_id. Birth date is required for the name path -- a name-only
+    match is not safe enough to write an identity, as the 54-namesake audit showed.
+
+    TWO ROUTES, id first:
+
+    1. `tm_player_id` we already hold, found in the scrape. This is a STRONGER link than
+       name + birth date: it was established by an earlier match and does not care how
+       the squad page spells him this week, or which league he is in now.
+    2. Exact birth date + name, WITHIN the same league, for everyone else.
+
+    Route 1 exists because route 2 alone silently lost data. Measured on the live scrape,
+    128 already-linked players had a contract date sitting in the CSV and NULL in the
+    database, and every one of them failed the name+DOB re-match -- a different spelling,
+    or a mid-season move to another league, which the league-scoped lookup cannot bridge.
     """
     by_dob: dict[tuple[int, object], list[int]] = defaultdict(list)
     for i, row in enumerate(squad.itertuples()):
         by_dob[(row.competition_id, row.birth_date.date())].append(i)
+    by_tm: dict[int, int] = {}
+    for i, row in enumerate(squad.itertuples()):
+        by_tm.setdefault(int(row.tm_player_id), i)
 
+    has_tm = "tm_player_id" in ours.columns
     rows = []
     for r in ours.itertuples():
-        if pd.isna(r.birth_date):
-            continue
-        dob = pd.to_datetime(r.birth_date).date()
-        i = _dob_name_match(_norm(r.player_name),
-                            by_dob.get((r.competition_id, dob), []), squad)
+        i = None
+        if has_tm:
+            stored = getattr(r, "tm_player_id", None)
+            if pd.notna(stored):
+                i = by_tm.get(int(stored))
+        dob = pd.to_datetime(r.birth_date).date() if pd.notna(r.birth_date) else None
+        if i is None:
+            if dob is None:
+                continue
+            i = _dob_name_match(_norm(r.player_name),
+                                by_dob.get((r.competition_id, dob), []), squad)
         if i is None:
             continue
+        if dob is None:
+            dob = squad.at[i, "birth_date"].date()
 
         def cell(name, cast=None):
             if name not in squad.columns:
@@ -148,11 +172,24 @@ def main() -> None:
         return
 
     engine = create_engine(settings.database_url)
+    # tm_player_id is selected so match_identity can use the id-first route: a player we
+    # already linked keeps his link even when the squad page spells him differently or he
+    # has moved league since. Without it, 128 already-linked players kept a NULL contract
+    # date while the value sat in the scraped CSV.
+    #
+    # The league filter is deliberately NOT applied to id-matched players -- a mid-season
+    # move to another league is exactly the case the id route exists to cover -- so the
+    # query spans every league we hold, not only the EFL four.
+    # EVERY season we hold, not just EFL_SEASON_ID. The scrape is a CURRENT squad
+    # snapshot and `players.contract_until` is a fact about the person, not about a
+    # season -- so there is no season to mix. Restricting the match to 25/26 meant the
+    # 293 players who appear ONLY in 26/27 (new signings, players who did not feature
+    # last season) could never receive a contract date, which is precisely the cohort a
+    # January window is about.
     ours = pd.read_sql(
-        "SELECT DISTINCT n.player_id, p.player_name, p.birth_date, n.competition_id "
-        "FROM player_metrics_neutral n JOIN players p ON p.player_id = n.player_id "
-        f"WHERE n.season_id = {EFL_SEASON_ID} "
-        f"AND n.competition_id IN ({','.join(str(c) for c in sorted(EFL_LEAGUE_IDS))})",
+        "SELECT DISTINCT n.player_id, p.player_name, p.birth_date, p.tm_player_id, "
+        "       n.competition_id "
+        "FROM player_metrics_neutral n JOIN players p ON p.player_id = n.player_id",
         engine)
 
     matched = match_identity(ours, load_efl_identity(path))

@@ -26,7 +26,7 @@ import pandas as pd
 
 from lofc.config import ImpectTarget
 from lofc.ingest import impect as impect_landing
-from lofc.ingest.impect_map import (IMPECT_MAP, IMPECT_POSITION_GROUPS,
+from lofc.ingest.impect_map import (IMPECT_FOOT, IMPECT_MAP, IMPECT_POSITION_GROUPS,
                                     impect_columns_used)
 
 MINUTES_FLOOR = 450  # matches aggregate.player_season rankable cut
@@ -96,8 +96,11 @@ def translate_frame(frame: pd.DataFrame, competition_id: int | None = None,
 
     # Dominant identity (name/birthdate/position) = the row returned by
     # dominant_position, which sums matchShare per position GROUP before choosing.
+    # Bio travels on the dominant-position row alongside name/birthdate/position. Guarded
+    # on presence: an older landed parquet may predate these columns.
+    bio_cols = [c for c in ("leg", "playerCountry") if c in frame.columns]
     ident = frame.loc[dominant_position(frame),
-                      ["playerId", "playerName", "birthdate", "position"]]
+                      ["playerId", "playerName", "birthdate", "position"] + bio_cols]
 
     # Club shown = the squad the player accumulated the most MINUTES for this season.
     # matchShare is a per-position share and doesn't respect a mid-season move: a
@@ -127,7 +130,19 @@ def translate_frame(frame: pd.DataFrame, competition_id: int | None = None,
 
     result = out.rename(columns={"playerName": "player_name",
                                  "squadName": "team_name",
-                                 "birthdate": "birth_date"})
+                                 "birthdate": "birth_date",
+                                 "playerCountry": "nationality"})
+    # Impect ships LEG as an upper-case enum. The stored convention is lowercase, and
+    # dashboard/app.py filters foot with .isin([choice.lower(), "both"]) -- an upper-case
+    # value would silently exclude every Impect-sourced player from that filter. An
+    # unrecognised value becomes None rather than passing through, so a future enum change
+    # cannot poison the column.
+    result["foot"] = (result["leg"].map(IMPECT_FOOT) if "leg" in result.columns else None)
+    result = result.drop(columns=["leg"], errors="ignore")
+    if "nationality" not in result.columns:
+        result["nationality"] = None
+    for c in ("foot", "nationality"):
+        result[c] = result[c].where(result[c].notna(), None)
     result["birth_date"] = pd.to_datetime(result["birth_date"], errors="coerce")
     result["minutes"] = out["_minutes"]
     result["rankable"] = result["minutes"] >= MINUTES_FLOOR
@@ -135,7 +150,11 @@ def translate_frame(frame: pd.DataFrame, competition_id: int | None = None,
     result["season_id"] = season_id
 
     metric_cols = [m.name for m in IMPECT_MAP if m.kind != "none"]
+    # foot/nationality ride along for the bio backfill. They are NOT metrics and cannot
+    # reach player_metrics_neutral: build_neutral.combine() ends with `out[ordered]`,
+    # a registry-driven selection, so anything not in the registry is dropped there.
     keep = (["playerId", "player_name", "team_name", "birth_date", "position",
+             "foot", "nationality",
              "minutes", "rankable", "competition_id", "season_id"] + metric_cols)
     return result[keep]
 

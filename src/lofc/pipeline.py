@@ -63,14 +63,25 @@ def build_steps() -> list[tuple[str, list[str]]]:
     # 4. Build the combined neutral metric table (needs the spine + the provider pulls).
     steps.append(("Build the combined neutral metric table (87 metrics/player)",
                   [sys.executable, "-m", "lofc.model.build_neutral", "--write"]))
+    # How each player's minutes split across position groups. Must run AFTER
+    # build_neutral: it reuses that module's linkage, and its rows carry a foreign key to
+    # `players`, where build_neutral registers the Impect-only (minted) identities.
+    # DISPLAY ONLY -- the assigned position group and every score are untouched.
+    steps.append(("Position shares: minutes per position group (display only)",
+                  [sys.executable, "-m", "lofc.model.position_shares"]))
 
     # 5. Transfermarkt market values (the valuation target).
     if comp_ids & set(LEAGUE_CODE):
         steps.append(("Download Transfermarkt market values",
                       [sys.executable, "-m", "lofc.ingest.transfermarkt"]))
     if comp_ids & EFL_LEAGUE_IDS:
-        steps.append(("Pull EFL market values from Transfermarkt",
+        steps.append(("Pull squad bio + market values from Transfermarkt (7 leagues)",
                       [sys.executable, "-m", "lofc.ingest.transfermarkt_efl"]))
+        # Who is on loan at each club, from whom, until when. Transfermarkt is the ONLY
+        # source: Impect carries no registration data at all. Reads a different page per
+        # club than the squad scrape, so it is its own stage; ~6 min for 147 clubs.
+        steps.append(("Pull loan players from Transfermarkt (parent club + loan end)",
+                      [sys.executable, "-m", "lofc.ingest.transfermarkt_loans"]))
 
     # 6. Model outputs — read the metric table per SCORING_SOURCE (neutral by default).
     steps += [
@@ -86,6 +97,12 @@ def build_steps() -> list[tuple[str, list[str]]]:
         # lofc.ingest.transfermarkt_injuries.
         ("Injuries: load the Transfermarkt injury history (skipped if not scraped)",
          [sys.executable, "-m", "lofc.store.injuries"]),
+        # foot + nationality, each from its own declared source order (foot: Transfermarkt
+        # then Impect; nationality: Impect then Transfermarkt). Gap-fill only -- a stored
+        # value is never overwritten. Must run AFTER Identity, which establishes the
+        # tm_player_id the Transfermarkt side keys on.
+        ("Player bio: fill foot + nationality from the best source for each",
+         [sys.executable, "-m", "lofc.model.player_bio"]),
         # The club 1-5 composite (the live ranking). Must run AFTER valuation and the wage
         # reference data, because the Financial/Resale dimensions read them; and BEFORE the
         # shortlist, which now ranks on the stored objective composite.

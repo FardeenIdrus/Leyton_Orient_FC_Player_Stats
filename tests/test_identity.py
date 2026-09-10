@@ -2,6 +2,7 @@
 
 import pandas as pd
 
+from lofc.model.valuation import _norm
 from lofc.model.identity import load_efl_identity, match_identity
 
 SQUAD_CSV_ROWS = [
@@ -134,3 +135,67 @@ def test_a_clean_match_reports_nothing_dropped(tmp_path):
     matched = match_identity(ours, squad)
     assert len(matched) == 1
     assert matched.attrs["dropped_ambiguous"] == 0
+
+
+# --- already-linked players: match on the Transfermarkt id we already hold -------------
+# match_identity linked ONLY on name + birth date within one league. A player whose
+# tm_player_id we already stored, but whose name spelling differs from the squad page or
+# who changed league mid-season, failed that re-match and so never received the contract
+# date sitting in the scrape. Measured on the live data: 128 already-linked players had a
+# scraped contract and a NULL contract_until, and ALL 128 failed the name+DOB re-match.
+#
+# An id we already hold is a STRONGER link than name+DOB, so it is tried first.
+
+def _squad_row(tm_id=555, name="Alan Smith", dob="1998-05-14", comp=4,
+               contract="2028-06-30", foot="right", height=182):
+    import pandas as pd
+    return pd.DataFrame([{
+        "tm_player_id": tm_id, "player_name": name, "nname": _norm(name),
+        "birth_date": pd.Timestamp(dob), "competition_id": comp,
+        "contract_until": contract, "foot": foot, "height_cm": height}])
+
+
+def _ours_row(player_id=1, name="Alan Smith", dob="1998-05-14", comp=4, tm_id=None):
+    import pandas as pd
+    row = {"player_id": player_id, "player_name": name,
+           "birth_date": pd.Timestamp(dob), "competition_id": comp}
+    if tm_id is not None:
+        row["tm_player_id"] = tm_id
+    return pd.DataFrame([row])
+
+
+def test_a_known_tm_id_matches_even_when_the_name_differs():
+    """The squad page spells him differently. We already know his Transfermarkt id, so
+    the contract must still land."""
+    out = match_identity(_ours_row(name="Alan J. Smith", tm_id=555), _squad_row())
+    assert len(out) == 1
+    assert out.iloc[0]["contract_until"] == "2028-06-30"
+
+
+def test_a_known_tm_id_matches_across_a_league_change():
+    """He moved League One -> Championship mid-season, so the league-scoped name+DOB
+    match cannot find him. The id still can."""
+    out = match_identity(_ours_row(comp=3, tm_id=555), _squad_row(comp=4))
+    assert len(out) == 1
+    assert out.iloc[0]["tm_player_id"] == 555
+
+
+def test_name_and_dob_still_match_a_player_with_no_stored_id():
+    """The existing path must keep working for players we have never linked."""
+    out = match_identity(_ours_row(tm_id=None), _squad_row())
+    assert len(out) == 1
+    assert out.iloc[0]["tm_player_id"] == 555
+
+
+def test_a_stored_id_absent_from_the_scrape_falls_back_to_name_and_dob():
+    out = match_identity(_ours_row(tm_id=999), _squad_row(tm_id=555))
+    assert len(out) == 1
+    assert out.iloc[0]["tm_player_id"] == 555
+
+
+def test_two_players_claiming_one_id_are_still_dropped():
+    """The ambiguity guard protects the injury join and must survive this change."""
+    import pandas as pd
+    ours = pd.concat([_ours_row(player_id=1, tm_id=555),
+                      _ours_row(player_id=2, name="Alan Smyth", tm_id=555)])
+    assert match_identity(ours, _squad_row()).empty

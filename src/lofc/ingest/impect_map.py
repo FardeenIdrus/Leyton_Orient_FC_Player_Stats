@@ -234,3 +234,32 @@ def mappable() -> list[MetricMap]:
 
 def gaps() -> list[MetricMap]:
     return [m for m in IMPECT_MAP if m.kind == "none"]
+
+
+# --- Impect position -> our position group -------------------------------------------
+# Lives here, in the leaf module, rather than in model/impect_spine.py: both the
+# translator (which must pick a player's dominant position) and the spine (which maps
+# that position to a group) need it, and impect_map imports nothing from lofc, so
+# neither of them can create an import cycle by reaching for it.
+#
+# Note the two groups Impect splits across sides -- WINGER and WINGBACK_DEFENDER. They
+# are the reason a dominant position must be chosen by GROUP total rather than by the
+# single largest position row; see impect_translate.dominant_position.
+IMPECT_POSITION_GROUPS: dict[str, str] = {
+    "GOALKEEPER": "Goalkeeper",
+    "CENTRAL_DEFENDER": "Centre Back",
+    "LEFT_WINGBACK_DEFENDER": "Full Back",
+    "RIGHT_WINGBACK_DEFENDER": "Full Back",
+    "DEFENSE_MIDFIELD": "Defensive Mid",
+    "CENTRAL_MIDFIELD": "Central Mid",
+    "ATTACKING_MIDFIELD": "Attacking Mid",
+    "LEFT_WINGER": "Winger",
+    "RIGHT_WINGER": "Winger",
+    "CENTER_FORWARD": "Centre Forward",
+}
+
+
+# Impect's LEG enum -> our stored convention (lowercase). Kept here, in the leaf module,
+# beside IMPECT_POSITION_GROUPS and for the same reason: the translator needs it and
+# cannot import from model/ without a cycle.
+IMPECT_FOOT: dict[str, str] = {"LEFT": "left", "RIGHT": "right", "BOTH": "both"}

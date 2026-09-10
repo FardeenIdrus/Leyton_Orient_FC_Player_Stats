@@ -61,6 +61,43 @@ class Player(Base):
     tm_player_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
+class PlayerLoan(Base):
+    """A player at a club ON LOAN, with his parent club and when the loan ends.
+
+    Scraped from Transfermarkt's per-club loan page, which is the only source that has
+    it: Impect is an event-data provider and carries no registration data at all (25 API
+    endpoints, none about contracts or transfers). Impect CAN say a player turned out for
+    two clubs in one season -- 196 did in 25/26 -- but cannot distinguish a loan from a
+    permanent transfer, and misses a season-long loan entirely.
+
+    Rows are loans IN, read per club. Within the leagues we cover that also yields loans
+    OUT by inference: a player loaned from A to B appears on B's page naming A. A player
+    loaned to a league we do not scrape is not captured.
+
+    `loan_ends` is the January window's whole point: it separates a player who is
+    returning to his parent club in the summer from one who is available now.
+    """
+
+    __tablename__ = "player_loans"
+    __table_args__ = (
+        UniqueConstraint("tm_player_id", "club_name", "season_id", name="uq_player_loan"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Nullable: the loan page is scraped BEFORE identity matching, so the row is kept on
+    # its Transfermarkt id and linked to our player_id afterwards. A loan we cannot yet
+    # match is still a true fact about the club.
+    player_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    tm_player_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    player_name: Mapped[str] = mapped_column(String)
+    club_name: Mapped[str] = mapped_column(String, index=True)
+    parent_club: Mapped[str | None] = mapped_column(String, nullable=True)
+    competition_id: Mapped[int] = mapped_column(Integer, index=True)
+    season_id: Mapped[int] = mapped_column(Integer, index=True)
+    loan_ends: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    scraped_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.now)
+
+
 class PlayerPositionShare(Base):
     """How a player's minutes split across position groups, in one league season.
 
