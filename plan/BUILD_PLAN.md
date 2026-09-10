@@ -842,6 +842,30 @@ player has not featured — 80% filled against 38% before.
 no duplicates, contracts agree with stored values, no rating without its league, no zero
 ratings, export free of raw floats.
 
+### 2026-09-10 — loans read from the squad page; Transfermarkt's loans page is incomplete
+
+**Somto Boniface is on loan at Leyton Orient from Ipswich Town, and the platform said he
+was not.** Traced to source: Transfermarkt's dedicated loans page
+(`leihspielerhistorie`) listed FOUR loanees for Leyton Orient and omitted him. The SQUAD
+page carries the loan explicitly, as a title on a club link inside the player cell:
+`On loan from Ipswich Town until 31/05/2027`.
+
+`transfermarkt_loans` now reads the SQUAD page — already fetched for every club to get
+contracts, so it costs no extra requests — and unions the loans page for the few it adds.
+**398 loans across 114 clubs (was 392/112), 100% with parent club and end date, 293 linked
+to one of our players.** Parsed by matching the phrase in the title attribute, never by
+cell position.
+
+**His height is genuinely absent, from every source.** Impect ships NO height column at
+all: the `_CM` columns in the feed are "Centre Midfield" packing zones, not centimetres.
+The Impect WEB PLATFORM shows height that the licensed `getPlayerIterationAverages`
+endpoint does not — worth asking Impect whether another endpoint carries it. Transfermarkt
+has no height for him either, in the live scrape or the static dump. Squad-scrape height
+coverage overall is 82%.
+
+**Verified:** 891 tests pass. Squad view: 3,783 rows matching the scrape exactly, zero
+duplicate player-club pairs, 293 loans displayed.
+
 ## Pending work register (nothing here is dropped)
 
 **Player report — BUILT 2026-08-28 (register item P7).** A one-page A4-landscape scouting
