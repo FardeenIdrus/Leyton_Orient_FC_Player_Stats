@@ -114,3 +114,24 @@ def resolve_bands(assessments: pd.DataFrame) -> pd.DataFrame:
             record[f"{prefix}_status"] = row["status"]
 
     return pd.DataFrame(list(records.values())).reindex(columns=OUTPUT_COLUMNS)
+
+
+def missing_dimensions(resolved_status: dict) -> list[str]:
+    """Which scout dimensions still have no SCORING band for this player-season.
+
+    Decision 9 is "both, or neither": a player enters the scout-verified rating only when
+    Psychological AND Medical Risk both resolve to a band. One alone contributes nothing.
+
+    This exists because the badges are PER DIMENSION, so a player with only Psychological
+    signed off shows a green "Signed off" badge and still scores nothing -- the interface
+    reported success while the system recorded an incomplete assessment. Observed live:
+    of four assessed players, two had a single dimension and neither scout could tell why
+    the rating never appeared.
+
+    `resolved_status` maps dimension -> status string, as produced by resolve_bands. A
+    dimension is missing when it is absent, or present but not in a state that scores
+    (draft, rejected, or an unresolved conflict).
+    """
+    scoring = {"submitted", "signed_off"}
+    return [d for d in (PSYCHOLOGICAL, MEDICAL)
+            if resolved_status.get(d) not in scoring]

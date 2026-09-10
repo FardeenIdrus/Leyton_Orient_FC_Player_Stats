@@ -30,13 +30,16 @@ _U = User.__table__
 
 _LOAD_COLUMNS = ["id", "player_id", "competition_id", "season_id", "dimension", "band",
                  "band_note", "screening_failed", "notes", "status", "author_id",
-                 "approved_by", "approved_at", "rejection_reason", "created_at", "updated_at"]
+                 "approved_by", "approved_at", "rejection_reason", "created_at", "updated_at",
+                 "summary", "why_sign", "considerations"]
 
 
 def save(engine, *, player_id: int, competition_id: int, season_id: int, dimension: str,
          author_id: int, band: float | None, notes: str | None,
          criterion_scores: dict[str, int], criterion_passes: dict[str, bool],
-         screening_failed: bool, status: str) -> int:
+         screening_failed: bool, status: str,
+         summary: str | None = None, why_sign: str | None = None,
+         considerations: str | None = None) -> int:
     """Insert one assessment and its criterion rows. Returns the new assessment id.
 
     Always an INSERT, never an update: a re-assessment is a new judgement, and the old one
@@ -46,7 +49,8 @@ def save(engine, *, player_id: int, competition_id: int, season_id: int, dimensi
         result = conn.execute(_A.insert().values(
             player_id=player_id, competition_id=competition_id, season_id=season_id,
             dimension=dimension, author_id=author_id, band=band, notes=notes,
-            screening_failed=screening_failed, status=status))
+            screening_failed=screening_failed, status=status,
+            summary=summary, why_sign=why_sign, considerations=considerations))
         assessment_id = int(result.inserted_primary_key[0])
 
         rows = [{"assessment_id": assessment_id, "criterion_key": key,

@@ -13,19 +13,22 @@ import streamlit as st
 
 from lofc.config import settings
 from lofc.constrain.filters import RANK_COLUMN
-from lofc.dashboard import assessment_detail, badges, evidence
+from lofc.dashboard import assessment_detail, badges, evidence, player_header
 from lofc.dashboard.charts import PLOTLY_CONFIG, bar_chart, radar_chart
 from lofc.dashboard.formatting import numeric_or_dash
 from lofc.dashboard.labels import LABELS, _metric_source, metric_label
 from lofc.dashboard.loaders import (
     get_engine, headline, league_names, load_assessment_status, load_current_form,
-    load_scorecard_percentiles, load_scorecards, load_scorecards_archetype, load_trajectory,
-    season_label)
+    competition_name_by_id, load_loan_for_player, load_other_league_seasons,
+    load_position_shares,
+    load_scorecard_percentiles,
+    load_scorecards, load_scorecards_archetype, load_trajectory, season_label)
 from lofc.dashboard.search import filter_labels, search_options
 from lofc.dashboard.seasons import (
     CONTRACT_EXPIRED, CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_data_date,
     season_name_for)
-from lofc.dashboard.session import CarriedPlayer, go_to_assess
+from lofc.dashboard.session import (CarriedPlayer, go_to_assess,
+                                    resolve_open_player, take_open_player)
 from lofc.model import assessment_status
 from lofc.model import club_framework as cf
 from lofc.model.score import POSITION_ROLE
@@ -47,14 +50,28 @@ _VETO_DIMENSIONS = [
 ]
 
 
-def _veto_reasons(row: pd.Series) -> list[str]:
+# Financial Fit and Resale Potential are MODELLED from market value and wage estimates,
+# not measured. The sidebar can switch that modelling off, and when it is off neither band
+# is anywhere on screen.
+_MODELLED_DIMENSIONS = {cf.FINANCIAL, cf.RESALE}
+
+
+def _veto_reasons(row: pd.Series, include_modelled: bool = True) -> list[str]:
     """Which dimension(s) tripped the veto flag, and by how much — e.g. 'Resale Potential
     1.58 is below the club minimum of 2.00'. Reads whichever band columns are on `row`; a
     dimension whose band is absent from this row (not scored, or not merged onto this
     particular view) is silently skipped rather than guessed at, same rule as everywhere
-    else in the app: absent data never renders as a value."""
+    else in the app: absent data never renders as a value.
+
+    `include_modelled` follows the sidebar's affordability-modelling switch. With it off,
+    Financial Fit and Resale Potential are not shown anywhere on the page, so citing them
+    in an advisory was unexplainable from what the user could see. Measured on season
+    25/26: 965 players carry the flag and 390 of them (40%) trip ONLY on those two, so
+    with modelling off two in five advisories pointed at a number the reader had
+    deliberately hidden."""
     return [f"{label} {value:.2f} is below the club minimum of {cf.VETO_BAND:.2f}"
             for label, col in _VETO_DIMENSIONS
+            if include_modelled or label not in _MODELLED_DIMENSIONS
             for value in [row.get(col)] if pd.notna(value) and value < cf.VETO_BAND]
 
 
@@ -323,25 +340,48 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
     'all tracked metrics' expander. Shared by the Players list (click + search); key_prefix
     keeps the instances' widgets distinct. Money columns/tiles show only when show_money.
     """
-    st.subheader(f"{row['player_name']}  ·  {row['team_name']}")
-    bio_bits = [f"{row['position_group']}"]
-    if pd.notna(row.get("age")):
-        bio_bits.append(f"age {row['age']:.1f}")
-    bio_bits.append(str(row.get("league", "")))
-    if pd.notna(row.get("foot")):
-        bio_bits.append(f"{row['foot']}-footed")
-    if pd.notna(row.get("height_cm")):
-        bio_bits.append(f"{int(row['height_cm'])} cm")
-    if pd.notna(row.get("contract_until")):
-        bio_bits.append(f"contract to {row['contract_until']:%b %Y}")
+    pid, cid, sid = int(row["player_id"]), int(row["competition_id"]), int(row["season_id"])
+
+    # Identity, bio and the minutes split, as one register. This replaced a single grey
+    # run-on caption ("Winger · age 20.7 · League Two · left-footed · 183 cm · contract
+    # to Jun 2028") in which a scout scanning twenty players could not find the contract
+    # date. The red segment of the bar is the position he is SCORED as, so the colour
+    # says which comparison every percentile below rests on.
+    shares = load_position_shares(pid, cid, sid)
+    # Loan status is deliberately NOT scoped to the season being viewed: whether he is
+    # on loan today is what a January decision turns on, whichever season's numbers
+    # are on screen.
+    player_header.render(row, shares, load_loan_for_player(pid))
+
     if pd.notna(row.get("cluster_label")):
-        bio_bits.append(f"playing style: {row['cluster_label']}")
-    st.caption(" · ".join(b for b in bio_bits if b))
+        st.caption(f"Playing style: {row['cluster_label']}")
+
+    # The label names ONE position. For roughly one player in ten it covers under half his
+    # season, and every percentile below is against that group's peers -- said plainly
+    # rather than left for the reader to infer from the bar.
+    if len(shares) > 1 and shares.iloc[0]["share"] < 0.5:
+        st.info(f"Scored as **{shares.iloc[0]['position_group']}** — his largest position, "
+                f"but only {shares.iloc[0]['share'] * 100:.0f}% of his minutes. Every "
+                f"percentile below compares him with players in that position.")
+
+    # --- the same player, elsewhere this season -------------------------------------
+    # A loanee gets a row and a score in each league he appeared in, because a percentile
+    # is only meaningful inside one league. Unlabelled that reads as a duplicate; labelled
+    # it is a level-step signal -- 3.96 against U21 peers and 2.63 in senior League Two is
+    # exactly what a loan is meant to answer.
+    others = load_other_league_seasons(pid, cid, sid)
+    for o in others.itertuples():
+        league = competition_name_by_id().get(int(o.competition_id),
+                                              f"competition {o.competition_id}")
+        comp = (f" — rated **{o.objective_composite:.2f}** there"
+                if pd.notna(o.objective_composite) else "")
+        st.caption(f"Also played {o.minutes:,.0f} min for {o.team_name} in "
+                   f"**{league}** this season{comp}. Same player, scored separately "
+                   f"because percentiles are league-relative.")
 
     # Watch toggle. Key carries the render site AND the row identity, so the two
     # render sites never collide and a click can't land on a different player
     # after the selection changes.
-    pid, cid, sid = int(row["player_id"]), int(row["competition_id"]), int(row["season_id"])
     wkey = f"{key_prefix}_watch_{pid}_{cid}_{sid}"
     if watchlist.is_watched(get_engine(), pid, cid, sid):
         wc1, wc2 = st.columns([1, 5])
@@ -450,9 +490,16 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
     # was unexplainable from what the user could see.
     flags = []
     if row.get("veto"):
-        reasons = _veto_reasons(row)
-        flags.extend(reasons if reasons else ["below the club minimum (band &lt; 2.0) on a "
-                                              "dimension — detail unavailable on this view"])
+        reasons = _veto_reasons(row, include_modelled=bool(show_money))
+        # With affordability modelling off, a flag that trips ONLY on Financial or Resale
+        # now yields no reasons. Say nothing rather than fall through to the generic
+        # "detail unavailable" line: the player is not below any standard the reader can
+        # see, and an unexplainable warning is worse than no warning.
+        if reasons:
+            flags.extend(reasons)
+        elif show_money:
+            flags.append("below the club minimum (band &lt; 2.0) on a dimension — "
+                         "detail unavailable on this view")
     if row.get("below_min_composite"):
         flags.append(f"Composite {composite:.2f} is below the club's {cf.MIN_COMPOSITE:.2f} "
                      "minimum standard" if pd.notna(composite)
@@ -506,6 +553,17 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
             )
             st.caption("What each metric means — and, for a substitute, the StatsBomb stat it stands "
                        "in for — is on the **Glossary** tab (searchable).")
+            # Every metric the platform holds for this player, as a file. Asked for
+            # directly by recruiters: the table existed but there was no way to take it
+            # into a meeting, and re-keying 90 numbers is where errors come from.
+            st.download_button(
+                "⬇ Download this player's full metrics (CSV)",
+                data=stats_table.to_csv(index=False).encode("utf-8"),
+                file_name=(f"{str(row['player_name']).replace(' ', '_')}_"
+                           f"{int(row['season_id'])}_metrics.csv"),
+                mime="text/csv", key=f"{key_prefix}_fullstats_dl",
+                help="Every metric held for this player: season total, per 90 and "
+                     "percentile against his position and league.")
 
     # Chart the CLUB Performance metrics (position + archetype) so the picture matches the
     # composite — one bar/axis per stat that builds the Performance dimension.
@@ -544,6 +602,26 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
         # find him -- that was the whole complaint this replaces.
         st.markdown("##### Find a player")
         labels, by_label = search_options(search_index)
+
+        # A player clicked on Squads & loans. Resolved from his ID against this season's
+        # index -- never from a reconstructed label, which would break silently if the
+        # label format changed and could resolve to a different row. If he has no row in
+        # the ranked season (293 players appear only in the current one), we say so rather
+        # than open somebody else.
+        carried_open = take_open_player(st.session_state)
+        if carried_open is not None:
+            resolved = resolve_open_player(search_index, carried_open)
+            if resolved is None:
+                st.warning("That player has no ranked row in this season — he has not "
+                           "reached the 450-minute minimum, or did not play in it. His "
+                           "squad, contract and loan details are on **Squads & loans**.")
+            else:
+                label, _target_position, _target_league = resolved
+                # ONLY the search key here. Position and Leagues are widget-backed keys
+                # already instantiated by app.py's sidebar, and Streamlit refuses a write
+                # after instantiation -- app.py seeds those from the same carry, before
+                # its widgets exist.
+                st.session_state["global_player_search"] = label
 
         # The dropdown widget below does its own live filtering as you type, but that
         # filtering happens entirely in the browser against the literal displayed text --
@@ -661,10 +739,11 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
         # default ranking (RANK_COLUMN = objective_composite) byte-for-byte unchanged.
         mode_col, check_col = st.columns([2, 2])
         assessed_mode = mode_col.toggle(
-            "Rank on assessed composite", value=False,
-            help="Ranks on Performance + Physical + Psychological + Medical (86% of the "
-                 "framework's weight), and shows only players where a person has completed "
-                 "both human dimensions. Off by default — the standard ranking is unchanged.")
+            "Rank on scout-verified rating", value=False,
+            help="Ranks on Performance + Physical + Psychological + Medical Risk — 86% of "
+                 "the framework's weight, against 64% for the data-only rating. Shows ONLY "
+                 "players where a scout has completed BOTH human dimensions; one alone "
+                 "scores nothing. Off by default, and the standard ranking is unchanged.")
         if assessed_mode:
             # A single season is passed into _players via `pool` already scoped to it (app.py
             # scores/ranks within one season); read it back rather than adding a parameter.
@@ -784,7 +863,7 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             rank_column: "Composite", "performance_band": "Performance",
             "physical_band": "Physical", "cluster_label": "Player type",
             "affordable_fee": "Fee in budget", "affordable_wage": "Wages in budget"})
-        composite_label = ("Assessed composite" if assessed_mode
+        composite_label = ("Scout-verified rating" if assessed_mode
                            else f"Composite ({archetype})" if lens else "Composite")
         display_cols = ["Rank", "Player", "Club", "League", "Age", "Minutes", "Composite"]
         if lens:
@@ -848,15 +927,26 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
         # past that) rather than a fixed 560px that left a short list swimming in white space
         # and a long one cramped.
         table_height = max(360, min(720, 96 + 35 * len(view)))
-        selection = st.dataframe(
-            table, column_order=display_cols, hide_index=True, width="stretch", height=table_height,
-            on_select="rerun", selection_mode="single-row", key=_selectable_key(base_key), column_config=col_cfg)
 
-        export = table[[c for c in display_cols if c != "Rank"]].copy()
-        export.insert(0, "Rank", table["Rank"])
-        st.download_button("⬇ Download this list (CSV)", data=export.to_csv(index=False).encode("utf-8"),
-                           file_name=f"lofc_players_{position.lower().replace(' ', '_')}.csv", mime="text/csv",
-                           help="Saves exactly what is on screen.")
+        # When the user asked for ONE player -- searched him, or clicked him on Squads &
+        # loans -- the ranked list is not what they came for, and leaving it expanded put
+        # his profile hundreds of pixels below the fold. Streamlit has no scroll-to API, so
+        # the list collapses instead and the profile sits directly under it. Browsing the
+        # list is unaffected: it stays open unless a specific player was requested.
+        opened_directly = search_detail_row is not None
+        list_box = (st.expander(f"Ranked list — {len(view)} {position}s", expanded=False)
+                    if opened_directly else st.container())
+        with list_box:
+            selection = st.dataframe(
+                table, column_order=display_cols, hide_index=True, width="stretch",
+                height=table_height, on_select="rerun", selection_mode="single-row",
+                key=_selectable_key(base_key), column_config=col_cfg)
+
+            export = table[[c for c in display_cols if c != "Rank"]].copy()
+            export.insert(0, "Rank", table["Rank"])
+            st.download_button("⬇ Download this list (CSV)", data=export.to_csv(index=False).encode("utf-8"),
+                               file_name=f"lofc_players_{position.lower().replace(' ', '_')}.csv", mime="text/csv",
+                               help="Saves exactly what is on screen.")
 
         # --- detail: a clicked row takes priority over a searched player ----------------
         rows = list(selection.selection.rows) if selection and selection.selection else []
@@ -907,6 +997,22 @@ def _scout_section(engine, row) -> None:
     frame = store_assess.load_for_player(engine, int(row["player_id"]),
                                          int(row["competition_id"]), int(row["season_id"]))
     position = row.get("position_group")
+
+    # Decision 9 made visible. The badges below are PER DIMENSION, so a player with only
+    # Psychological signed off shows a green "Signed off" and still scores nothing -- the
+    # interface reported success while the system recorded an incomplete assessment. Two
+    # of the first four assessed players hit exactly this and nobody could tell why the
+    # rating never appeared. So the gap is stated here, once, above the per-dimension
+    # detail, and it names WHICH dimension is outstanding.
+    if not frame.empty:
+        statuses = {d: _dimension_status(frame, d)
+                    for d in (scout_scores.PSYCHOLOGICAL, scout_scores.MEDICAL)}
+        outstanding = scout_scores.missing_dimensions(statuses)
+        if outstanding and len(outstanding) < 2:
+            st.warning(
+                f"**{outstanding[0]} is still outstanding**, so this player has no "
+                f"scout-verified rating yet. Both dimensions are needed before scout "
+                f"input scores \u2014 one alone is not a partial assessment.")
     if frame.empty:
         badges.render(badges.for_status(None))
         st.caption("No psychological or medical assessment has been recorded for this "

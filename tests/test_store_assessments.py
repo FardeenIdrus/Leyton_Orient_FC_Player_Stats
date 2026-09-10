@@ -393,3 +393,29 @@ def test_reject_refresh_failure_never_undoes_the_rejection(engine, monkeypatch):
     with Session(engine) as session:
         row = session.get(ScoutAssessment, assessment_id)
         assert row.status == "rejected"
+
+
+# --- the player report's narrative (spec 2026-08-28, section 4) ---------------------
+
+def test_save_stores_the_narrative_fields(engine):
+    """The report's prose is written by a scout, never generated. It lives on the assessment
+    so completing one produces the report's narrative as a side effect."""
+    aid = _save(engine, summary="Progresses well under pressure.",
+                why_sign="Elite ball retention for the level.",
+                considerations="Limited aerial presence.")
+    frame = store_assess.load_for_player(engine, 1, 4, 318)
+    row = frame[frame["id"] == aid].iloc[0]
+    assert row["summary"] == "Progresses well under pressure."
+    assert row["why_sign"] == "Elite ball retention for the level."
+    assert row["considerations"] == "Limited aerial presence."
+
+
+def test_narrative_fields_default_to_none(engine):
+    """A scout assessing before a fixture may write nothing. That must be an ordinary
+    assessment, not a blocked one -- the report simply says no narrative was recorded."""
+    aid = _save(engine)
+    frame = store_assess.load_for_player(engine, 1, 4, 318)
+    row = frame[frame["id"] == aid].iloc[0]
+    assert row["summary"] is None
+    assert row["why_sign"] is None
+    assert row["considerations"] is None

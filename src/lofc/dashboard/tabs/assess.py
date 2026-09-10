@@ -96,6 +96,24 @@ def _psychological_form(engine, user: CurrentUser, player_id: int, competition_i
     status = rules.psychological_status(scores, position)
     notes = st.text_area("Notes (optional)", key=f"psych_notes_{player_id}")
 
+    # The player report's narrative. Written here, never generated -- see
+    # docs/superpowers/specs/2026-08-28-player-report-design.md section 4. All optional:
+    # a scout assessing before a fixture may record bands with no prose, and the report
+    # then says no narrative was recorded rather than inventing one.
+    with st.expander("Player report narrative (optional)", expanded=False):
+        st.caption("These appear on the player report shared with the Head of Recruitment, "
+                   "the manager and the chairman. Leave blank if you are only recording "
+                   "bands for now.")
+        summary = st.text_area(
+            "Summary", key=f"psych_summary_{player_id}",
+            help="How this player profiles, in your words. A few short paragraphs.")
+        why_sign = st.text_area(
+            "Why sign?", key=f"psych_whysign_{player_id}",
+            help="One point per line. The case for him.")
+        considerations = st.text_area(
+            "Considerations", key=f"psych_considerations_{player_id}",
+            help="One point per line. What gives you pause.")
+
     if band is None:
         st.info(f"Scored {len(scores)} of {len(cc.PSYCHOLOGICAL_CRITERIA[position])} "
                 "criteria. Saving now keeps this as a **draft**, which does not score.")
@@ -118,7 +136,9 @@ def _psychological_form(engine, user: CurrentUser, player_id: int, competition_i
                 season_id=season_id, dimension=scout_scores.PSYCHOLOGICAL,
                 author_id=user.id, band=band, notes=notes or None,
                 criterion_scores=scores, criterion_passes={},
-                screening_failed=False, status=status)
+                screening_failed=False, status=status,
+                summary=summary or None, why_sign=why_sign or None,
+                considerations=considerations or None)
             if status == "submitted" and sign_off_now:
                 store_assess.sign_off(engine, assessment_id, approver_id=user.id,
                                       now=datetime.datetime.now())

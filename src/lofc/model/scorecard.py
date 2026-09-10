@@ -206,3 +206,30 @@ def _composite(dim_bands: dict[str, float], weights: dict[str, float],
         return None, 0.0
     val = sum(present[d] * weights[d] for d in present if d in weights) / present_w
     return round(val, 2), round(present_w, 2)
+
+
+# A percentile is a rank within a peer group, so it is only as meaningful as that group is
+# large. Early in a season the pools are tiny: on 2026-09-07, five matches in, 13 of the
+# 36 position-league pools held FEWER THAN FIVE rankable players and 34 players sat in
+# one. A composite built on three peers is not a weak signal, it is an arbitrary one --
+# whoever happens to be present decides the ranking.
+#
+# This is the floor below which a composite must not be presented as a ranking. It does
+# not stop the number being computed or stored; it tells the interface to say so.
+MIN_PEERS_FOR_RANKING = 10
+
+
+def peer_pool_sizes(scorecards):
+    """(competition_id, season_id, position_group) -> how many players share that pool."""
+    if scorecards is None or len(scorecards) == 0:
+        return {}
+    counts = (scorecards.groupby(["competition_id", "season_id", "position_group"])
+                        .size().to_dict())
+    return counts
+
+
+def pool_is_thin(pool_size) -> bool:
+    """True when a composite from this pool should not be read as a ranking."""
+    if pool_size is None:
+        return True
+    return int(pool_size) < MIN_PEERS_FOR_RANKING

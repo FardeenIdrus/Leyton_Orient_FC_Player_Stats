@@ -418,3 +418,52 @@ def topbar_identity(user: CurrentUser) -> None:
     with st.container(key="topbar_identity"):
         st.markdown(_identity_html(user), unsafe_allow_html=True)
         st.button("Sign out", on_click=logout)
+
+
+_OPEN_KEY = "_open_player"         # a (player_id, competition_id, season_id) tuple
+
+
+def go_to_player(player_id: int, competition_id: int, season_id: int) -> None:
+    """Carry a player to the Players page and navigate there.
+
+    Carries the ID, never the search LABEL. The label is a formatted string built in
+    search.build_search_index ("Name — Club · Position · League"); reconstructing it at the
+    call site would break silently the moment that format changed, and a label that fails
+    to match resolves to NOBODY or, worse, a different row. The same class of bug already
+    opened the wrong player's report once. An id cannot mis-resolve.
+    """
+    st.session_state[_OPEN_KEY] = (int(player_id), int(competition_id), int(season_id))
+    switch_to("players")
+
+
+def peek_open_player(state):
+    """The player carried by `go_to_player`, without consuming it."""
+    return state.get(_OPEN_KEY)
+
+
+def take_open_player(state):
+    """The carried player, consumed so a later rerun does not reopen him and fight the
+    user's next click."""
+    return state.pop(_OPEN_KEY, None)
+
+
+def resolve_open_player(index, carried):
+    """(label, position, league) for a carried player, or None if he is not in `index`.
+
+    Pure, so the lookup is unit-tested without Streamlit. Returning None rather than a
+    guess matters: the Players page is season-scoped, and a player carried from the
+    current-season squad view may have no row in the ranked season's index at all. Saying
+    nothing is correct; opening somebody else is not.
+    """
+    if carried is None or index is None or len(index) == 0:
+        return None
+    player_id, competition_id, season_id = carried
+    match = index[(index["player_id"] == player_id)
+                  & (index["competition_id"] == competition_id)
+                  & (index["season_id"] == season_id)]
+    if match.empty:                       # same player, any league he DID play in
+        match = index[index["player_id"] == player_id]
+    if match.empty:
+        return None
+    row = match.iloc[0]
+    return str(row["label"]), str(row["position_group"]), str(row.get("league", ""))

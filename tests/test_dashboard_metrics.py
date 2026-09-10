@@ -49,3 +49,44 @@ def test_metric_label_falls_back_readably():
     assert labels.metric_label("some_new_metric_p90") == "Some New Metric"  # humanised fallback
 
 
+
+
+# --- advisory flags follow the affordability-modelling switch --------------------------
+# Financial Fit and Resale Potential are MODELLED, and the sidebar can hide them. Citing
+# them in an advisory while they are hidden is unexplainable from what the user can see:
+# of 965 flagged players in 25/26, 390 (40%) trip ONLY on those two.
+
+def _veto_row(**bands):
+    import pandas as pd
+    base = {"performance_band": 3.5, "physical_band": 3.5, "financial_band": 3.5,
+            "resale_band": 3.5, "psychological_band": None, "medical_band": None}
+    base.update(bands)
+    return pd.Series(base)
+
+
+def test_a_real_dimension_is_always_named():
+    from lofc.dashboard.tabs.players import _veto_reasons
+    row = _veto_row(performance_band=1.6)
+    assert any("Performance" in r for r in _veto_reasons(row, include_modelled=False))
+
+
+def test_modelled_dimensions_are_dropped_when_affordability_is_off():
+    from lofc.dashboard.tabs.players import _veto_reasons
+    row = _veto_row(financial_band=1.5, resale_band=1.4)
+    assert _veto_reasons(row, include_modelled=True) != []
+    assert _veto_reasons(row, include_modelled=False) == []
+
+
+def test_modelled_dimensions_are_named_when_affordability_is_on():
+    from lofc.dashboard.tabs.players import _veto_reasons
+    row = _veto_row(financial_band=1.5)
+    reasons = _veto_reasons(row, include_modelled=True)
+    assert any("Financial" in r for r in reasons)
+
+
+def test_a_real_dimension_still_shows_with_modelled_ones_hidden():
+    """Hiding money must not hide a genuine Performance or Physical shortfall."""
+    from lofc.dashboard.tabs.players import _veto_reasons
+    row = _veto_row(physical_band=1.2, financial_band=1.5)
+    reasons = _veto_reasons(row, include_modelled=False)
+    assert len(reasons) == 1 and "Physical" in reasons[0]

@@ -43,21 +43,23 @@ from lofc.dashboard.controls import synced_budget, synced_min_minutes, synced_wa
 from lofc.dashboard.loaders import (
     available_seasons, get_engine, league_names, load_candidates, load_metric_values,
     load_percentiles, load_scorecards, load_scorecards_archetype, load_wage_framework,
-    max_minutes, player_context_lookup, player_names)
+    max_minutes, player_context_lookup, player_names, position_and_league_for)
 from lofc.dashboard.seasons import (
     CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_mask, season_name_for)
 from lofc.dashboard.session import (
     force_reload_after_logout, peek_carry, register_pages, require_login, restore_from_cookie,
-    restore_user, topbar_identity)
+    restore_user, topbar_identity, peek_open_player)
 from lofc.dashboard.tabs import assess as assess_page_mod
 from lofc.dashboard.tabs.compare import _compare
 from lofc.dashboard.tabs.glossary import _glossary
 from lofc.dashboard.tabs.methodology import _methodology
 from lofc.dashboard.tabs.physical import _physical
+from lofc.dashboard.tabs.report import render as _report_render
 from lofc.dashboard.tabs.player_types import _player_types
 from lofc.dashboard.tabs.players import _kpi_strip, _players
 from lofc.dashboard.tabs.signoff import render as _signoff
 from lofc.dashboard.search import build_search_index
+from lofc.model.scorecard import pool_is_thin
 from lofc.dashboard.tabs.users import render as _users_render
 from lofc.dashboard.tabs.watchlist import _watchlist
 from lofc.dashboard.theme import LOGO, header, style
@@ -117,6 +119,29 @@ def main() -> None:
     # Leagues resets too, but its default (every league) is always a superset that still
     # includes the carried player's league, so it needs no equivalent fix.
     carry = peek_carry(st.session_state)
+    # A player carried from Squads & loans (go_to_player). Same reasoning as the assess
+    # carry above: st.switch_page resets widget-backed keys on the run it lands on, so the
+    # Season/Position seeding has to happen HERE, before those widgets are instantiated.
+    # The Squads view is CURRENT-season; the Players page ranks the last COMPLETE one, so
+    # the season seeded is the one the player is actually indexed in, not the one he was
+    # clicked from -- otherwise he would open on a season with no ranked row.
+    open_carry = peek_open_player(st.session_state)
+    if open_carry is not None:
+        st.session_state.setdefault("sidebar_season", open_carry[2])
+        # Position and Leagues MUST be seeded here, before their widgets exist a few lines
+        # below. Writing them from the Players page body instead raised
+        # "st.session_state.sidebar_position cannot be modified after the widget with key
+        # sidebar_position is instantiated" and broke the page outright for any carried
+        # player -- the same constraint the search's on_change callback already works
+        # around. Looked up from the database rather than from search_index, which is not
+        # built until well after these widgets.
+        _pos, _league = position_and_league_for(open_carry[0], open_carry[2])
+        if _pos:
+            st.session_state["sidebar_position"] = _pos
+        if _league and _league != "\u2014":
+            _current = list(st.session_state.get("sidebar_leagues", []))
+            if _current and _league not in _current:
+                st.session_state["sidebar_leagues"] = _current + [_league]
     st.session_state.setdefault("sidebar_season", carry.season_id if carry else seasons[0])
     season_id = st.sidebar.selectbox(
         "Season", seasons, format_func=season_name_for, key="sidebar_season",
@@ -260,6 +285,20 @@ def main() -> None:
     # over this run's `ranking`/`season_id`, called from inside the page functions below rather
     # than unconditionally here.
     def _season_banner() -> None:
+        # A composite is a rank within a peer group, so early in a season it can be
+        # arbitrary rather than merely uncertain: on 2026-09-07, five matches in, 13 of 36
+        # position-league pools held under five players. Say so where the ranking is read,
+        # rather than let a number built on three peers look like one built on 105.
+        if not ranking.empty and "position_group" in ranking.columns:
+            pool = len(ranking)
+            if pool_is_thin(pool):
+                st.warning(
+                    f"**Only {pool} {position}s in {season_name_for(season_id)} have "
+                    f"reached 450 minutes.** A percentile ranks a player against his "
+                    f"peers, so with a pool this small the order is close to arbitrary — "
+                    f"read these as early indications, not as a ranking. "
+                    f"{season_name_for(max((x for x in seasons if x < season_id), default=season_id))} "
+                    "is complete and ranks on a full pool.")
         if ranking.empty:
             st.info(f"**{season_name_for(season_id)} is under way, but no player has yet "
                     "reached the 450-minute minimum needed to be ranked.** Scores will appear "
@@ -313,10 +352,28 @@ def main() -> None:
         with st.container():
             _users_render(engine, user)
 
+    def _report_page():
+        with st.container():
+            _report_render(engine, user, search_index, season_id)
+
+    def _squads_page():
+        # Deliberately NOT tied to the sidebar season. This page answers "who is at each
+        # club NOW, on what contract, on loan from whom" -- all current facts -- and
+        # carries the LAST COMPLETE season's composite across as the rating, labelled as
+        # such. Setting the sidebar to 26/27 previously produced an empty screen, because
+        # a composite needs 450 minutes and nobody has them two months in.
+        from lofc.dashboard.tabs import squads as _squads
+        cur = max(seasons) if seasons else season_id
+        prev = max((s for s in seasons if s < cur), default=cur)
+        with st.container():
+            _squads.render(cur, prev, season_name_for(cur), season_name_for(prev))
+
     pages = {
         "players": st.Page(_players_page, title="Players", url_path="players", default=True),
+        "squads": st.Page(_squads_page, title="Squads & loans", url_path="squads"),
         "compare": st.Page(_compare_page, title="Compare", url_path="compare"),
         "watchlist": st.Page(_watchlist_page, title="Watchlist", url_path="watchlist"),
+        "report": st.Page(_report_page, title="Report", url_path="report"),
         "assess": st.Page(_assess_page, title="Assess", url_path="assess"),
         "signoff": st.Page(_signoff_page, title="Sign-off", url_path="sign-off"),
         "player_types": st.Page(_player_types_page, title="Player types", url_path="player-types"),
@@ -345,7 +402,8 @@ def main() -> None:
     # unchanged page order (Players, Compare, Watchlist, Assess, Sign-off, Player types,
     # Physical, Glossary, Methodology); only the grouping and the section labels are new.
     nav_sections = {
-        "Scouting": [pages["players"], pages["compare"], pages["watchlist"]],
+        "Scouting": [pages["players"], pages["squads"], pages["compare"],
+                     pages["watchlist"], pages["report"]],
         "Assessment": [pages["assess"], pages["signoff"]],
         "Analysis": [pages["player_types"], pages["physical"]],
         "Reference": [pages["glossary"], pages["methodology"]],

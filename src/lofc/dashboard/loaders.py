@@ -84,13 +84,16 @@ def load_candidates(wage_ceiling_multiplier: float, season_id: int | None = None
     # Season goals/assists totals + underlying rates, from the combined table (all leagues).
     totals = pd.read_sql("SELECT player_id, competition_id, season_id, np_goals_p90, "
                          "assists_p90, np_xg_p90, xa_p90 FROM player_metrics_neutral", engine)
-    bio = pd.read_sql("SELECT player_id, birth_date, foot, contract_until, height_cm, tm_player_id "
-                      "FROM players", engine)
+    # nationality is selected here or it reaches nothing: the player card, the report and
+    # the squad view all read this frame. It sat at 97% coverage in `players` while every
+    # card printed "not recorded", because the column was never in the SELECT.
+    bio = pd.read_sql("SELECT player_id, birth_date, foot, contract_until, height_cm, "
+                      "nationality, tm_player_id FROM players", engine)
     out = (candidates.merge(archetypes, on=keys, how="left")
            .merge(totals, on=keys, how="left")
            .merge(bio, on="player_id", how="left"))
     out["contract_until"] = pd.to_datetime(out["contract_until"], errors="coerce")
-    out["league"] = out["competition_id"].map(_competition_name_by_id()).fillna("—")
+    out["league"] = out["competition_id"].map(competition_name_by_id()).fillna("—")
     # Age from birth_date (present for ~99% of players in every league) at the season midpoint,
     # so age is not limited to valued EFL players. The valuations age (EFL only) is the fallback
     # for the rare player with no birth date. Implausible results are ignored, not shown.
@@ -155,7 +158,7 @@ def _attach_scorecard_meta(sc: pd.DataFrame, neutral: pd.DataFrame) -> pd.DataFr
     keys = ["player_id", "competition_id", "season_id"]
     meta = neutral[keys + ["player_name", "team_name"]].drop_duplicates(keys)
     sc = sc.merge(meta, on=keys, how="left")
-    sc["league"] = sc["competition_id"].map(_competition_name_by_id()).fillna("—")
+    sc["league"] = sc["competition_id"].map(competition_name_by_id()).fillna("—")
     return sc
 
 
@@ -488,7 +491,7 @@ def max_minutes() -> int:
     return int(value) if pd.notna(value) else 3500
 
 
-def _competition_name_by_id() -> dict[int, str]:
+def competition_name_by_id() -> dict[int, str]:
     """competition_id -> clean league name, across BOTH StatsBomb-spined (EFL) and
     Impect-spined (Scottish/PL2) leagues, so every league in the combined table names."""
     names = {c.competition_id: c.label.rsplit(" ", 1)[0] for c in settings.competitions}
@@ -503,5 +506,114 @@ def league_names() -> list[str]:
     spans every league; players with no market value simply can't pass the money gates."""
     ids = pd.read_sql("SELECT DISTINCT competition_id FROM player_metrics_neutral",
                       get_engine())["competition_id"]
-    name_by_id = _competition_name_by_id()
+    name_by_id = competition_name_by_id()
     return [name_by_id.get(int(i), f"League {int(i)}") for i in sorted(ids)]
+
+
+@st.cache_data(ttl=600)
+def load_position_shares(player_id: int, competition_id: int, season_id: int):
+    """How this player's minutes split across position groups, largest first.
+
+    The platform names ONE position and scores him against that group's peers. For roughly
+    one player in ten that label covers under half his season, so the split belongs beside
+    the label rather than only on the exported report.
+
+    Display only: nothing here feeds a score.
+    """
+    import pandas as pd
+    return pd.read_sql(
+        "SELECT position_group, minutes, share, goals, assists "
+        "FROM player_position_shares "
+        "WHERE player_id = %(p)s AND competition_id = %(c)s AND season_id = %(s)s "
+        "ORDER BY share DESC",
+        get_engine(), params={"p": int(player_id), "c": int(competition_id),
+                              "s": int(season_id)})
+
+
+@st.cache_data(ttl=600)
+def load_other_league_seasons(player_id: int, competition_id: int, season_id: int):
+    """The SAME player's other league-seasons in this season, with their composites.
+
+    A player on loan can appear twice in one season -- a Spurs U21 winger with 783 minutes
+    in PL2 and 1,074 in League Two gets a row and a score in each, because a percentile is
+    only meaningful inside one league. Scanning a list, that reads as a duplicate.
+
+    It is the opposite: the pair is one of the most useful signals the platform holds.
+    Aaron Loupalo-Bi rates 3.96 against PL2 peers and 2.63 in senior League Two -- exactly
+    the "does it hold up a level up?" question a loan is meant to answer. 116 players in
+    25/26 have such a pair.
+    """
+    import pandas as pd
+    return pd.read_sql(
+        "SELECT s.competition_id, n.team_name, n.minutes, n.position_group, "
+        "       s.objective_composite "
+        "FROM player_scorecards s "
+        "JOIN player_metrics_neutral n ON n.player_id = s.player_id "
+        " AND n.competition_id = s.competition_id AND n.season_id = s.season_id "
+        "WHERE s.player_id = %(p)s AND s.season_id = %(s)s "
+        "  AND s.archetype = 'All Metrics' AND s.competition_id <> %(c)s "
+        "ORDER BY n.minutes DESC",
+        get_engine(), params={"p": int(player_id), "c": int(competition_id),
+                              "s": int(season_id)})
+
+
+# Kept as an alias: the function was private and is imported under the old name
+# by tests and by dashboard modules written before the player card needed it.
+_competition_name_by_id = competition_name_by_id
+
+
+@st.cache_data(ttl=600)
+def load_loans(season_id: int | None = None):
+    """Every loan we hold, club by club, with parent club and loan end date.
+
+    The January-window view: `loan_ends` is what separates a player going back to his
+    parent club in the summer from one who is actually gettable now.
+    """
+    where = "WHERE season_id = %(s)s" if season_id else ""
+    return pd.read_sql(
+        "SELECT club_name, player_name, parent_club, loan_ends, competition_id, "
+        "       player_id, tm_player_id, season_id "
+        f"FROM player_loans {where} ORDER BY club_name, loan_ends NULLS LAST, player_name",
+        get_engine(), params={"s": season_id} if season_id else None)
+
+
+@st.cache_data(ttl=600)
+def load_loan_for_player(player_id: int):
+    """This player's CURRENT loan, or None.
+
+    Not scoped to the season being VIEWED: "is he on loan right now" is a fact about
+    today, exactly like his contract date, and it is what a January decision turns on. A
+    recruiter looking at last season's performance still needs to know the player is
+    currently on loan somewhere.
+    """
+    d = pd.read_sql(
+        "SELECT club_name, parent_club, loan_ends, season_id FROM player_loans "
+        "WHERE player_id = %(p)s ORDER BY season_id DESC LIMIT 1",
+        get_engine(), params={"p": int(player_id)})
+    return None if d.empty else d.iloc[0]
+
+
+@st.cache_data(ttl=600)
+def position_and_league_for(player_id: int, season_id: int):
+    """(position_group, league) for a carried player in the RANKED season, or (None, None).
+
+    Queried from the database rather than resolved against `search_index`, purely because
+    of ordering: the sidebar's Position widget is instantiated long before search_index is
+    built, and Streamlit forbids writing a widget's session_state key after the widget
+    exists. Seeding Position from the page body raised
+    "st.session_state.sidebar_position cannot be modified after the widget ... is
+    instantiated" and broke the whole page for any carried player.
+
+    Falls back to any league the player appeared in that season, because the squad view is
+    current-season and he may since have moved.
+    """
+    d = pd.read_sql(
+        "SELECT position_group, competition_id, minutes FROM player_metrics_neutral "
+        "WHERE player_id = %(p)s AND season_id = %(s)s "
+        "ORDER BY minutes DESC NULLS LAST LIMIT 1",
+        get_engine(), params={"p": int(player_id), "s": int(season_id)})
+    if d.empty:
+        return None, None
+    row = d.iloc[0]
+    return str(row["position_group"]), competition_name_by_id().get(
+        int(row["competition_id"]))
