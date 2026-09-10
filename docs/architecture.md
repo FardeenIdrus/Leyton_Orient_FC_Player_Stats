@@ -1,6 +1,6 @@
 # Architecture
 
-> **STATUS (2026-08-24): current.** Scoring runs on **Impect + SkillCorner** (91
+> **STATUS (2026-08-25): current.** Scoring runs on **Impect + SkillCorner** (91
 > metrics/player, 7 leagues); StatsBomb is retired from scoring and now only seeds player
 > identity for the historical EFL seasons. Players are ranked on the club's **1–5 composite**,
 > computed by a pipeline stage and stored in `player_scorecards`. The Streamlit app has been
@@ -13,22 +13,56 @@
 > only. 2026/27 (season_id 319) is loaded — 1,771 players, 6 leagues — but deliberately not
 > scored (nobody near the 450-minute threshold yet); the profile shows it as plain-fact
 > "Current form" beside the last scored season. `objective_composite` — the default ranking —
-> is unaffected by any of it. For the full metric layer and per-metric provenance see
+> is unaffected by any of it. **A 2026-08-25 audit** fixed a season-pooling bug in four
+> screening functions (the composite ranking itself was already season-safe and is verified
+> unchanged), closed several security gaps (traceback suppression, an XSS sweep, engine
+> parameter hiding, a behaviour-based login-spray throttle, cookie-persisted sessions), masked
+> goalkeeper-only metrics for outfield players at display, removed 12 dead StatsBomb metrics
+> from the display vocabulary, added a global player search and watchlist enrichment (current
+> form, injury status, contract countdown), and rewrote the injury loader to merge rather than
+> replace on every scrape — see `plan/BUILD_PLAN.md`'s 2026-08-25 note and register row R10 for
+> the full account. For the full metric layer and per-metric provenance see
 > **`docs/DATA_ARCHITECTURE.md`**; for the scoring method, `docs/methodology.md` §3b; for the
 > scout-assessment design, `docs/superpowers/specs/2026-08-10-scout-assessment-design.md`.
 
 ## What this system is
 
-A decision intelligence platform: it turns raw StatsBomb match data into a ranked
-shortlist of affordable, on-profile, undervalued signings for Leyton Orient FC. The
-core deliverable is the valuation and ranking model, not the infrastructure. The
-infrastructure exists only to make that model reproducible and to put it in front of
-a non-technical recruiter.
+A decision intelligence platform: it turns Impect event data and SkillCorner physical
+tracking data into a ranked shortlist of affordable, undervalued signings, scored on
+Leyton Orient FC's own recruitment framework. The core deliverable is the scoring and
+ranking model, not the infrastructure. The infrastructure exists only to make that
+model reproducible and to put it in front of a non-technical recruiter.
 
-It currently runs on the real paid StatsBomb feed: Championship, League One, League
-Two and National League, seasons 2024/25 and 2025/26 (8 league-seasons, 4,456
-matches), enriched with scraped Transfermarkt market values and bio data, a modelled
-league-aware wage grid, and the club's SkillCorner tracking export.
+It runs on **Impect (event) + SkillCorner (physical)**, 100% of scoring — StatsBomb is
+retired from scoring and now only seeds player identity (stable ids, birth dates,
+league names) for the historical EFL seasons it originally covered. Coverage is **91
+metrics per player across 7 leagues** — the EFL (Championship, League One, League Two,
+National League), the Scottish Premiership & Championship, and Premier League 2 — over
+14 league-seasons (2024/25 + 2025/26), enriched with scraped Transfermarkt market
+values, bio data and injury history, a modelled league-aware wage grid, and — since the
+scout-assessment interface — human-entered Psychological and Medical judgement from
+recruitment staff, behind a login gate.
+
+## The report layer (`src/lofc/report/`)
+
+A one-page player report, rendered in the dashboard and exported as a print-ready PDF. It
+computes no new score: everything on it is read from the scoring layer or from the scout
+assessment, so a figure on the report and the same figure in the dashboard cannot disagree.
+
+| Module | Responsibility |
+|---|---|
+| `model/report_categories.py` | Category membership per position and the category score. Pure, no I/O. Every member is one of the club's own resolved Performance metrics — a test enforces it. |
+| `report/data.py` | Assembles one `ReportData`: bio, composite, bands, percentiles, categories, peers, availability, narrative, stamp. Percentiles come from `scorecard.metric_percentiles`, the composite's own function. |
+| `report/svg.py` | Percentile bars, radar, scatter and category strips as inline SVG strings. Pure — values in, markup out. |
+| `report/render.py` | Binds data, charts and the Jinja2 template into one self-contained HTML document with the stylesheet inlined. |
+| `report/templates/` | `report.html.j2` (the layout) and `report.css` (print CSS: A4 landscape, black-and-white safe). |
+| `dashboard/tabs/report.py` | The dashboard page and the download button. A thin render layer. |
+| `scripts/report_to_pdf.py` | HTML → PDF via headless Chromium. **Runs on the host, not in Docker.** |
+
+Dependency direction: `report_categories` → `report/data` → `report/svg` → `report/render`
+→ `dashboard/tabs/report`. No cycles, and nothing in `report/` is imported by the scoring
+layer.
+
 
 ## The pipeline
 
@@ -100,8 +134,10 @@ after editing it.
   (idempotent loaders; derived tables are clear-then-insert), `watchlist.py`
   (user-data persistence, plain Core so it runs on Postgres and the sqlite used in
   tests), `reference_data.py` (builds the wage/identity stand-ins with provenance),
-  `injuries.py` (Transfermarkt injury CSV → `player_injuries`, clear-then-insert on
-  `source='transfermarkt'` only, so hand-entered rows survive a re-scrape), `users.py`
+  `injuries.py` (Transfermarkt injury CSV → `player_injuries`; a **scoped merge**, not a
+  clear-then-insert — only `source='transfermarkt'` rows for players present in the incoming
+  file are deleted and reinserted, so a player who has left the leagues since the last scrape
+  keeps his injury history, and `source='manual'` rows always survive a re-scrape), `users.py`
   (account creation/authentication reads used by the dashboard and `lofc.admin` — also
   `set_active`, `reset_password`, `clear_lockout`, called identically by the CLI and the
   admin Users page so the two never enforce different rules), `assessments.py`
@@ -112,7 +148,12 @@ after editing it.
 - `model/` — `normalise.py` (percentiles), `score.py` (Quality + Fit),
   `archetypes.py` (style clustering), `valuation.py` (dual-era fair value + bio
   backfill), `wage_check.py` (squad-bill reconciliation vs published payrolls),
-  `run.py`.
+  `run.py`. Every within-league ranking here (`normalise.compute_percentiles_wide`,
+  `score.compute_scores`, `wage_check.build_squad_estimates`, and
+  `constrain/filters.build_candidates`) groups by **competition, season and position** —
+  a 2026-08-25 fix; the earlier grouping omitted season, so two seasons of the same
+  competition briefly pooled into one comparison group. The club composite
+  (`scorecard.py::metric_percentiles`) already grouped by season correctly throughout.
 - `model/medical.py` — injury-evidence math for the Medical dimension: `availability_with_evidence()`
   returns an explicit `MEASURED` / `CONFIRMED_BY_MINUTES` / `UNKNOWN` status alongside the value
   (an unknown record is never a confident 1.0), `games_missed_in_window()` merges overlapping
@@ -144,19 +185,35 @@ after editing it.
   `docs/methodology.md` §3b.
 - `dashboard/` — the Streamlit app, split into focused modules (was one 2,560-line file):
   `app.py` (entry point: page setup, sidebar, page wiring) · `theme.py` (brand colours, CSS,
-  header) · `labels.py` (metric names, provenance, glossary text) · `charts.py` (Plotly
-  builders) · `seasons.py` (season identity + contract horizons) · `loaders.py` (every cached
-  DB read) · `controls.py` (synced sidebar widgets) · `auth.py` (password hashing/verification,
+  header) · `labels.py` (metric names, provenance, glossary text — 12 dead StatsBomb-only
+  metrics with no live successor were removed from here 2026-08-25, confirmed zero non-null
+  rows for each across `player_metrics_neutral`) · `charts.py` (Plotly builders) ·
+  `seasons.py` (season identity + contract horizons) · `loaders.py` (every cached DB read;
+  `GOALKEEPER_ONLY_METRICS`/`_mask_goalkeeper_only_metrics` null out goalkeeper-specific
+  columns for non-Goalkeeper rows at display, since the underlying Impect columns are genuine
+  team-defensive context populated for every position, not individual save-quality) ·
+  `formatting.py` (`value_or_dash`/`numeric_or_dash`/`link_or_blank` — pre-formats any
+  table column that can be missing to text with an em dash, because `NumberColumn`/
+  `LinkColumn` render a missing `NaN`/`None`/`pd.NA` as the literal text "None"/"nan" rather
+  than a blank cell) · `search.py` (the global player-search index — every position and
+  league for the season, folded for accent/case/punctuation-insensitive matching) ·
+  `controls.py` (synced sidebar widgets) · `auth.py` (password hashing/verification,
   role permissions via `can(role, action)`, login-throttle and session-expiry logic — pure
-  functions, unit-tested without Streamlit) · `session.py` (the login gate `require_login`, the
-  logged-in `CurrentUser`, and the `CarriedPlayer` handoff that lets "Assess this player"
-  navigate to the Assess page with the player already selected — `get_assess_target`/
-  `resolve_assess_target` give that selection its own persistent session-state slot, so a
-  widget interaction on the form no longer drops it; `topbar_identity` renders the signed-in
-  user's name/role/sign-out in the header's top-right, replacing the old sidebar identity
-  block) · `badges.py` (one status-badge
+  functions, unit-tested without Streamlit) · `login_throttle.py` (a behaviour-based
+  password-spray throttle — distinct failing usernames in a rolling window, not source IP,
+  since no non-spoofable client address is available behind either deployment's tunnel/proxy)
+  · `cookie_auth.py` (an HMAC-SHA256-signed "remembered session" token so a browser refresh
+  doesn't sign staff out; carries only a user id and issue time, never a password, and every
+  restore re-reads role/active state from the live `users` row) · `session.py` (the login
+  gate `require_login`, the logged-in `CurrentUser`, and the `CarriedPlayer` handoff that lets
+  "Assess this player" navigate to the Assess page with the player already selected —
+  `get_assess_target`/`resolve_assess_target` give that selection its own persistent
+  session-state slot, so a widget interaction on the form no longer drops it; `topbar_identity`
+  renders the signed-in user's name/role/sign-out in the header's top-right, escaped via
+  `html.escape` since a user's full name is admin-settable free text rendered with
+  `unsafe_allow_html=True`) · `badges.py` (one status-badge
   renderer used everywhere an assessment's state appears, so a watchlist row and a profile row
-  can never disagree) · `evidence.py` (the injury/availability evidence panel, rendered
+  can never disagree; also escaped) · `evidence.py` (the injury/availability evidence panel, rendered
   identically on the player profile and the assessment form; `SOURCE_LABELS` names the
   Transfermarkt provenance by source, not the internal-jargon "Scraped") ·
   `assessment_detail.py` (the pure-logic half of rendering one assessment's flags/criterion
@@ -211,6 +268,20 @@ after editing it.
   explicitly labelled "not a rating", beside the dimension scores from the player's most
   recent *scored* season. The players/leagues/season strip is a quiet **info bar**
   (`.lofc-infobar` in `theme.py`), not a KPI block competing with the page beneath it.
+  The advisory veto flag now names which of the six dimensions tripped it and by how much
+  (`tabs/players.py::_veto_reasons`, e.g. "Resale Potential 1.58 is below the club minimum of
+  2.00") instead of one unexplained line — over half of flagged players were tripping on
+  Financial or Resale, dimensions not otherwise on screen unless "Show affordability" is on.
+  The ranked table's per-row pandas `Styler` (zebra/affordability tint) was removed — a
+  `Styler` costs a per-cell inline CSS string on a ~50-column, several-hundred-row table
+  rebuilt every rerun for a purely cosmetic stripe; the one meaningful tint (affordability) is
+  already stated in words via the "Fee in budget"/"Wages in budget" checkbox columns. A
+  **global player search** (`search.py`, `_players`'s `search_index`) spans every position and
+  league for the season, built before any sidebar filter narrows the pool. The **Watchlist**
+  gained current-season form, a most-recent-injury-spell column, a contract-months-left
+  countdown, and a "what needs a look" alert strip (contract ≤ 6 months, currently injured,
+  not yet assessed); its old "Quality" column (the retired `player_scores.performance_score`)
+  is now the real `objective_composite`/Performance/Physical bands.
   The **Glossary** tab is the single searchable home for metric
   definitions (each with its exact definition and, for a substitute, the StatsBomb stat it
   stands in for); definitions no longer sit on the player card.
@@ -300,7 +371,7 @@ conditions that would justify adding them are documented in `scaling.md`.
 
 ## Verification approach
 
-- **604 pytest tests**, no network, sqlite standing in where a DB is needed.
+- **694 pytest tests**, no network, sqlite standing in where a DB is needed.
 - The dashboard is verified headlessly with Streamlit's **AppTest** (the full script
   must run with zero exceptions) after every UI change — there is no browser in the
   automated loop.

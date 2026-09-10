@@ -66,3 +66,19 @@ cli_commands.txt
 # Weekly refresh wrapper (scripts/weekly_refresh.sh) runtime state: lock, dated logs,
 # last-success/last-failure markers. Local to whichever machine runs the cron job.
 data/ops/
+docs/Jaze Kabia - Availability.xlsx
+docs/Samson Tovide - Data Report.key
+.gitignore
+
+# Club-supplied reference reports and source artwork: confidential, internal use only.
+# The DESIGN they informed lives in docs/superpowers/specs/, which is tracked; the source
+# files themselves never are.
+docs/*.key
+docs/*.jpg
+docs/*Data Report*
+docs/*Availability*
+Greg Docherty — Recruitment Report.pdf
+Josh Campbell — Recruitment Report.pdf
+Luka Lynch — Recruitment Report.pdf
+Luke Berry — Recruitment Report.pdf
+Lyall Cameron — Recruitment Report.pdf

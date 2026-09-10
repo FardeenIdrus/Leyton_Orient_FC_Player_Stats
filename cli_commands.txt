@@ -394,3 +394,13 @@ docker compose exec app python -m lofc.model.build_neutral --write
 docker compose exec app python -m lofc.model.position_shares
 docker compose exec app python -m lofc.model.scorecard_run
 docker compose exec app python -m lofc.constrain.run
+
+# Who is on loan at each club (parent club + loan end date), all 7 leagues. Transfermarkt
+# is the only source -- Impect carries no registration data. ~6 minutes for 147 clubs.
+docker compose exec app python -m lofc.ingest.transfermarkt_loans
+# A past season, for loan history:
+docker compose exec app python -m lofc.ingest.transfermarkt_loans --season 2025
+
+# Fill foot + nationality, each from its own source order (foot: Transfermarkt -> Impect;
+# nationality: Impect -> Transfermarkt). Gap-fill only; a stored value is never overwritten.
+docker compose exec app python -m lofc.model.player_bio

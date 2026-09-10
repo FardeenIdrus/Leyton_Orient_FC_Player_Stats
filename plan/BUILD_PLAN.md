@@ -630,6 +630,218 @@ inline row in the footer. `.evidence` is `flex:1`, so shrinking a chart does NOT
 page; it only buys slack inside a fixed box. That is why the page grew despite smaller charts
 until the decision band and footer were addressed directly.
 
+### 2026-09-02 — the assessed-rating gap, advisory gating, player-card depth
+
+**The "assessed composite never updates" report was a UI defect, not a scoring bug.**
+Traced to source: of six assessments, Luke Berry and Daizen Maeda have BOTH scout dimensions
+signed off and both correctly carry a rating (2.29 and 4.06). Jaze Kabia has Psychological
+signed off and no Medical Risk row at all; Fletcher Holman's only assessment was rejected.
+Decision 9 is "both, or neither" — so those two score nothing, correctly.
+
+The problem is that badges are PER DIMENSION. Kabia's page shows a green "Signed off" while
+the system holds an incomplete assessment, so the interface reported success and the rating
+never appeared. Fixed by `scout_scores.missing_dimensions`, surfaced as a banner naming the
+outstanding dimension. **Two of the first four assessed players hit this.**
+
+**Renamed for the people using it:** "Assessed composite" is now **"Scout-verified rating"**
+throughout the interface (the column name is unchanged). The toggle's help now states the
+64% / 86% weight split and that one dimension alone scores nothing.
+
+**Advisory flags now follow the affordability switch.** `_veto_reasons` takes
+`include_modelled`; with money modelling off, Financial Fit and Resale Potential are dropped
+rather than cited. Measured on 25/26: **965 players carry the flag and 390 (40%) trip ONLY on
+those two**, so two in five advisories pointed at a number the reader had deliberately hidden.
+A flag with no remaining visible reason now says nothing at all, rather than falling through
+to "detail unavailable".
+
+**Player card gained the report's context** (display only, no score moves):
+- minutes by position, and goals by position, from `player_position_shares`
+- a callout when the assigned position holds under half the player's minutes
+- **the same player's other league-season this season, paired with its composite.** A loanee
+  gets a row and a score per league because percentiles are league-relative; unlabelled that
+  reads as a duplicate. Labelled it is a level-step signal — Aaron Loupalo-Bi rates **3.96**
+  against PL2 peers and **2.63** in senior League Two. **116 players in 25/26 have such a
+  pair.**
+
+**Verified:** 789 tests pass (was 778). Dashboard restarts clean, 0 import errors.
+
+### 2026-09-07 — archetype audit against the club workbook; open-issue register refreshed
+
+**Archetypes, checked line by line against `docs/Impect Data - Positional Metrics.xlsx`:**
+
+| club archetype (workbook) | implemented? |
+|---|---|
+| Right/Left Back — All Metrics / **Attacking** / **Progressive Build & Recovery** | ✅ faithful (RB sheet, row 1) |
+| Wingers — All Metrics / **Direct & 1v1 Specialist** / **Crossing & Creative Threat** | ✅ faithful (WINGER sheet, row 0) |
+| Centre Back / Centre Forward / Goalkeeper — All Metrics only | ✅ faithful (single column by design) |
+| Midfield — **Defensive** / **Box to Box** / **Attacking Midfielder** | ⚠️ **partial** |
+
+**The midfield gap, precisely.** The workbook holds midfield in two different places and
+they do not agree in granularity:
+- the **MF sheet** names three archetypes as *capability prose* (33 / 36 / 34 entries,
+  27 shared, genuinely different — Box-to-Box adds dribbling, shots, box availability and
+  crossing; Defensive adds aerial duels and influence on allowed chances);
+- the **Input sheet** — which is what `PERFORMANCE_METRICS` was actually built from — has
+  only **"Centre Midfield"** and **"Attacking Midfield"** rows. There is no Defensive
+  Midfield row and no Box-to-Box row.
+
+So the platform has `Defensive Mid`, `Central Mid` and `Attacking Mid` as position GROUPS,
+and **Defensive Mid and Central Mid carry byte-identical metric lists** (both the Input
+sheet's Centre Midfield row). Attacking Mid has its own. Net effect: **Attacking Midfielder
+is reflected; Box-to-Box is not** — a box-to-box player is scored on the defensive
+midfielder's list. Affects **102 Central Mid player-seasons** in 25/26.
+
+**Register item B2 is more tractable than it has been recorded as.** It is filed as
+"needs the club's per-archetype metric lists", but the MF sheet DOES specify three distinct
+lists — as capabilities rather than metric names. The Full Back and Winger archetypes were
+themselves derived by exactly this comparison (a clean include/exclude against the base
+list), so the same technique is available here. It is a judgement call to be made WITH the
+club, not a missing input. **Re-scope B2 from "blocked" to "needs a decision".**
+
+**Documentation:** `CLAUDE.md` was stale (claimed 694 tests; actual 800) and has been
+rewritten with a dated STATUS block and a read-order for the next session.
+
+**2026/27 (season 319) is not scorable yet.** 1,771 players loaded across 6 leagues; highest
+minutes in any league is **207** (National League) against a 450 threshold, and **zero**
+players qualify anywhere. On current accumulation that is roughly **late October**, not
+September as previously estimated.
+
+### 2026-09-07 — January window: contracts, loans, and a squad view
+
+Driven by the Head of Recruitment: contract coverage was far below what Transfermarkt
+actually publishes, and there was no loan data at all.
+
+**Impect cannot supply either, and this is structural.** 25 API endpoints, all match and
+event data; zero contract or transfer fields across 1,482 parquet columns. Impect is an
+event-data provider — registration facts are Transfermarkt's domain. Impect CAN say a
+player turned out for two clubs (196 did in 25/26) but cannot tell a loan from a transfer.
+
+**Three separate causes of the contract gap, all fixed:**
+
+1. **`identity.match_identity` linked ONLY on name + birth date within one league.** A
+   player whose `tm_player_id` we already held, but whose squad-page spelling differed or
+   who had moved league, failed the re-match — so a contract sitting in the CSV never
+   reached the database. All **128** affected players failed for exactly this reason.
+   Now tries the stored id FIRST (a stronger link, established by an earlier match).
+2. **The scraper covered four leagues.** Scottish Prem, Scottish Championship and PL2 were
+   never scraped, which is the whole explanation for their 2–6%. Added `SC1`, `SC2`,
+   `GB21` after verifying a live club page in each carries the full header layout.
+   **2,471 → 3,783 scraped rows.**
+3. **Identity matched only season 318.** The **293 players who appear ONLY in 26/27** —
+   new signings, precisely the January cohort — could never receive a contract date; zero
+   had one. Bio is a fact about the person, not a season, so the match now spans every
+   season held.
+
+**Result:** contract dates **1,416 → 2,487**; linked players **1,346 → 4,335**;
+foot **2,749 → 4,919**; nationality **0 → 5,651**. Scottish Prem contract coverage
+**3% → 87%** on the current squad.
+
+**Loans (`player_loans`, migration `c8f1d20a4e65`):** 392 loans, 112 clubs, **100% with
+parent club and loan end date**, 290 linked to our players. 53 loans end by Feb 2027;
+694 current-squad players are inside 12 months of contract expiry.
+
+**Two bugs found and fixed during the build, both worth recording:**
+- The first parser mapped header columns to cell positions and stored every player's
+  POSITION as his parent club (392 rows). The page has 6 headers and 9 cells per row.
+  Now anchored on the club link's `title`. Same class as the 11 Aug incident.
+- The loader DELETEd `season_id 319` while INSERTing Transfermarkt's `2026`, so the delete
+  matched nothing and the insert collided on `uq_player_loan`. The transaction rolled back
+  and 392 stale rows survived, looking like a successful scrape. Both now pinned by tests.
+
+**New "Squads & loans" page.** The ranked view legitimately shows nothing for 26/27 — a
+composite needs 450 minutes and the average player has 69–119 — so it told recruiters to
+"try an earlier season". That is the wrong answer to "who is at this club and can I sign
+him". The new page answers it with facts that ARE current: 1,822 players, 1,399 contracts,
+166 on loan, and each player's **25/26 composite carried across and labelled as such**.
+Nothing on it is scored, and the 450 rule is untouched.
+
+**Player card** now shows contract runway ("Contract to Jun 2027 · 9m left", red inside 12
+months) and loan status with parent club and end date. Loan status is deliberately NOT
+scoped to the season being viewed — whether a player is on loan today is what a January
+decision turns on.
+
+**Verified:** 846 tests pass (was 826).
+
+**Known ceiling:** Transfermarkt leaves the contract field blank for ~22% of squad members
+— verified as the source's own gap, not a parse failure (those rows carry height 83%, foot
+84%, DOB 97%). No engineering gets past it.
+
+### 2026-09-07 (later) — Squads & loans made accurate and usable
+
+**A duplicate that was not the loans.** Yusuf Akhamrich appeared twice under Leyton
+Orient. Cause: **116 players hold two 25/26 scorecards** (they played in two leagues), so
+the rating join fanned out — 51 duplicated player-club pairs. Fixed by keeping the league
+with the most minutes and carrying the other as `alt_rating` rather than discarding it:
+3.42 in League Two beside 4.00 in PL2 is the level-step reading, not noise. **1,822 → 1,771
+rows, zero duplicates.**
+
+**The loan list was incomplete, and the squad frame could not fix it.** It was built from
+`player_metrics_neutral`, which only holds players who have PLAYED — so **135 of 290
+linked loanees were missing** (injured, unselected, or not yet in an Impect file). "On loan
+only" now reads `player_loans` directly: **all 392 loans, 100% with parent club and end
+date**, including those with no appearance yet and those we cannot match to one of our
+players (listed with blank details rather than hidden).
+
+**Row click → player profile.** New `session.go_to_player` carries the **player_id**, never
+the search label — the label is a formatted string and reconstructing it at a call site
+would break silently and could resolve to a different row, which is the class of bug that
+opened the wrong player's report once. `resolve_open_player` is pure and unit-tested;
+a player with no ranked row (293 appear only this season) produces a message, never
+somebody else's profile.
+
+**CSV download** exports exactly the filtered view, so file and screen cannot disagree.
+
+**Every rating names the league it was earned in.** A 3.42 in League Two and a 3.42 in
+Premier League 2 are not the same claim, and the table previously showed the number alone.
+
+**UI guidance** came from Streamlit's own bundled skill (`developing-with-streamlit`,
+installed from the registry after Node was added): `st.dataframe(on_select=...)` for row
+selection, `column_config` for all value formatting, Styler reserved for colour.
+
+**Verified:** 858 tests pass. Row count matches source exactly (1771 = 1771); zero
+duplicate player-club pairs; months-left never present without a date; every alternate
+rating names its league.
+
+### 2026-09-07 (evening) — stale Impect data found; squad view rebuilt from the scrape
+
+**The 2026/27 data was three weeks old.** The Head of Recruitment observed that League One
+clubs had played five matches while the platform showed one. Verified: the 26/27 Impect
+files were pulled **17 August** and every League One player showed a maximum `matchShare`
+of 1.0. `lofc.ingest.impect` re-pulls the live season correctly on every run — it simply
+had not been run. **Nothing runs it automatically; this is the scheduler gap made
+concrete.** (Deployment and a server-side scheduler are scheduled for the following week.)
+
+After re-pulling: League One **334 → 491 players, max 5 matches, 514 minutes**. All seven
+26/27 iterations refreshed, PL2 gained data it previously had none of.
+
+**2026/27 is now partly scorable: 378 players** cleared 450 minutes (73 Championship,
+87 League One, 86 League Two, 111 National League, 21 Scottish Prem).
+
+**A percentile is only as good as its pool, so a guard was added.** Of the 36
+position-league pools, **13 hold under five players and 34 players sit in one**. A
+composite over three peers is arbitrary, not merely uncertain. `scorecard.pool_is_thin`
+(floor of 10) now drives a warning wherever the ranking is read, naming the pool size and
+pointing at the completed season.
+
+**The squad view was showing half of each squad.** It was built from
+`player_metrics_neutral` — who has PLAYED — so Leyton Orient showed **16 of 33**; Aaron
+Connolly, Alex Gilbert and 15 others were registered, their contracts scraped that morning,
+and invisible. Impect cannot supply a squad list (it knows a player only once he appears);
+Transfermarkt publishes the registered squad. Rebuilt on the scrape with appearances joined
+on: **3,783 rows, exactly matching the scrape, zero duplicates.**
+
+Two fan-outs found while rebuilding, both silently listing squad members twice: 36 players
+turned out in two leagues this season, and 15 Transfermarkt ids are claimed by two of our
+players. The first is deduped by minutes; the second is DROPPED rather than guessed, the
+same rule `identity.drop_ambiguous_matches` applies.
+
+**Position falls back to last season, labelled** ("Goalkeeper (last season)") where a
+player has not featured — 80% filled against 38% before.
+
+**Verified:** 882 tests pass. 11-point audit clean: row count matches the scrape exactly,
+no duplicates, contracts agree with stored values, no rating without its league, no zero
+ratings, export free of raw floats.
+
 ## Pending work register (nothing here is dropped)
 
 **Player report — BUILT 2026-08-28 (register item P7).** A one-page A4-landscape scouting
@@ -715,7 +927,7 @@ scrape to the Scottish leagues and PL2 is the only fix.
 | # | Item | Blocked by | What to do when unblocked |
 |---|---|---|---|
 | B1 | ✅ **DONE (11 Aug 2026)** — recovery scrape completed; contract/foot/height data restored | — (resolved) | Database now holds 1,363 contract dates, 1,606 feet, 1,635 heights (was 20 / 23 / 24 immediately after the incident). Full incident record and recovery outcome directly below. |
-| B2 | **Midfield archetypes** (DM / Box-to-Box / AM) | needs the club's per-archetype metric lists | encode into `ARCHETYPE_DROPS`; deliberately not fabricated |
+| B2 | **Midfield archetypes** (DM / Box-to-Box / AM) — RE-SCOPED 2026-09-07: **not blocked, needs a decision.** The MF sheet DOES give three distinct capability lists; the Input sheet gives only Centre Midfield + Attacking Midfield, so `Defensive Mid` and `Central Mid` currently share one list and Box-to-Box is unreflected (102 player-seasons). | a mapping decision with the club, same include/exclude technique already used for Full Back and Winger | encode into `ARCHETYPE_DROPS` |
 | B3 | **Real financial models** | needs the club's real wage framework CSV | drop-in replaces the modelled wage grid; makes the money layer decision-grade |
 
 **B1 incident — contract/foot/height data destroyed, 11 Aug 2026 — RESOLVED, recovered the same day:**

@@ -39,7 +39,12 @@ Then open the dashboard at **http://localhost:8501**.
 
 ## Signing in
 
-The dashboard sits behind a login gate. Accounts are created by an administrator:
+The dashboard sits behind a login gate: scrypt-hashed passwords, a 12-character minimum, an
+account lockout after 5 failed attempts, 12-hour sessions, and a behaviour-based throttle
+against password-spraying across many usernames (not IP-based — behind a tunnel there is no
+trustworthy client address). With `SESSION_SECRET` set in `.env`, a signed session cookie lets
+a browser refresh keep you signed in instead of bouncing back to the sign-in form. Accounts
+are created by an administrator:
 
 ```bash
 docker compose exec app python -m lofc.admin create-user --username fi --name "..." --role scout
@@ -73,18 +78,24 @@ same numbers. You can run any stage on its own (see `cli_commands.txt`).
 The sidebar groups the ten pages into **Scouting**, **Assessment**, **Analysis**,
 **Reference**, and — for administrators only — **Admin**.
 
-- **Players** — the one decision workspace: a composite-ranked list and, on click or search,
-  the full player detail (bio, dimension scores, the club-framework grand table of
+- **Players** — the one decision workspace: a composite-ranked list — searchable by name
+  across every position and league in the season, accent/case-insensitive — and, on click or
+  search, the full player detail (bio, dimension scores, the club-framework grand table of
   metric → percentile → 1–5 band, charts on the club's own metrics, and a **"Current form"**
   section showing the live season's minutes/goals/assists as plain facts once it exists, never
   as a rating). Merged from the former Shortlist + Club scorecard + Player profile tabs.
   **Money is opt-in** — market value, modelled wages and the affordability gates appear only
   when "Show affordability" is ticked, and never reorder the default ranking. An opt-in
   **"Rank on assessed composite"** toggle (off by default) switches the ranking to the
-  scout-assessed composite for players who have one.
+  scout-assessed composite for players who have one. An advisory flag below the club minimum
+  on any dimension names that dimension and by how much, rather than a generic warning.
 - **Compare** — two or three players head-to-head on the club's Performance metrics, plus a
   raw physical table (raw because physical output *is* comparable across leagues).
-- **Watchlist · Player types · Physical** — saved targets, playing-style groups, tracking data.
+- **Watchlist** — tracked targets enriched with current-season form, most recent recorded
+  injury, contract months remaining, and the real club composite (replacing an old, retired
+  0–100 "Quality" figure) — plus an at-a-glance strip of what needs attention (contracts
+  expiring within 6 months, players currently injured, players not yet assessed).
+- **Player types · Physical** — playing-style groups, tracking data.
 - **Assess** — the scout-assessment form: the club's own criteria for that player's position,
   Psychological scored 1–5 per criterion, Medical entered as a band with an injury and
   availability evidence panel beside it. Injury data informs the judgement; it never becomes
@@ -129,8 +140,9 @@ Key deep-dives:
 [`DEPLOY.md`](DEPLOY.md) for a production setup (Caddy for HTTPS, database and admin tools
 kept internal — the dashboard's own login gate handles authentication) and a quick tunnel
 option for a demo link. **Deployment has not happened yet** — the platform has only run
-locally so far. This branch (with the login gate) is well ahead of `main`, which has none; do
-not deploy `main` as-is.
+locally so far. The scout-assessment work (including the login gate) has been merged into
+`main`, so cloning `main` today gets the authenticated app — what's missing is a server to
+put it on, not a merge.
 
 ## Tech stack
 
@@ -153,3 +165,21 @@ for real club data via drop-in CSVs in `data/reference/`.
 docker compose exec app python -m pytest -q
 docker compose exec app python -m pytest --cov=lofc --cov-report=term-missing
 ```
+
+## Player reports
+
+A one-page report for any player, for the Head of Recruitment, the manager and the chairman —
+none of whom need an account to read it.
+
+Open **Scouting → Report** in the dashboard, search for a player, and download the report. It
+is a self-contained HTML file: open it and print to PDF, or convert it in one command:
+
+```bash
+python3 scripts/report_to_pdf.py ~/Downloads/<player>_report.html
+```
+
+The report shows the club composite and its dimension bands, the player's percentile profile
+against his own league, season and position, a style scatter, a physical radar and his
+availability record. Where a scout has written an assessment their summary appears and the
+page is stamped *Provisional* or *Final*; where none exists it is stamped *Data only* and says
+so, which is what makes it usable for a fixture you are about to attend.
