@@ -123,3 +123,23 @@ def test_the_squad_page_announces_the_fallback_instead_of_rendering_it_silently(
     assert "squad_source_warning" in source, (
         "Squads & loans falls back to appearance data when the Transfermarkt scrape is "
         "absent (3,783 rows -> 2,966) but never says so — the 2026-09-07 half-squad bug")
+
+
+def test_the_dashboard_reads_the_squad_table_not_the_csv():
+    """`efl_values.csv` is the scraper's handoff to the PIPELINE, which runs beside it.
+    The dashboard is a separate process and may be a separate host, so it must read
+    `transfermarkt_squads`. Reading the file made Squads & loans silently degrade to 2,966
+    of 3,783 players anywhere the scrape had not run."""
+    import inspect
+    from lofc.dashboard.tabs import squads
+    source = inspect.getsource(squads.scraped_squads)
+    assert "read_csv" not in source, "the dashboard is reading the scrape CSV directly again"
+    assert "efl_values" not in source, "the dashboard still depends on the CSV's path"
+
+
+def test_the_contract_snapshot_date_comes_from_the_data_not_a_file_mtime():
+    """File mtime moves on any touch/copy/checkout without the data changing."""
+    import inspect
+    from lofc.dashboard import seasons
+    source = inspect.getsource(seasons.contract_data_date)
+    assert "st_mtime" not in source, "contract_data_date is back on the file's mtime"

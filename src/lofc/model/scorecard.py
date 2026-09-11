@@ -256,3 +256,35 @@ def with_peer_counts(frame, pool_sizes):
     out["peer_count"] = pd.Series([pool_sizes.get(k) for k in keys], index=out.index,
                                   dtype="float64")
     return out
+
+
+def rank_in_pool(scorecards, player_id: int, competition_id: int, season_id: int,
+                 position_group: str,
+                 column: str = "objective_composite") -> tuple[int | None, int]:
+    """(rank, pool size) for one player among his real peers -- same league, same season,
+    same position group -- ranked on `column`, best first.
+
+    WHY THE POOL IS SCOPED THIS WAY. A composite is a percentile within exactly this group
+    (`metric_percentiles` groups by the same three keys), so it is the only group a rank can
+    honestly be quoted against. Ranking across leagues would imply a cross-league comparison
+    the model never makes: on 25/26, stacking every league into one centre-forward list put
+    Wakeling 2nd and Burrowes 3rd when each is FIRST in his own division.
+
+    TIES SHARE A RANK ('min' method). Two identical composites are not first and second --
+    nothing in the data separates them, and ordering them would be an artefact of row order.
+
+    Returns `(None, n)` for a player with no scored row in that pool: the pool size is still
+    a fact worth reporting, and None is not zero.
+    """
+    if scorecards is None or len(scorecards) == 0:
+        return None, 0
+    pool = scorecards[(scorecards["competition_id"] == competition_id)
+                      & (scorecards["season_id"] == season_id)
+                      & (scorecards["position_group"] == position_group)]
+    pool = pool[pool[column].notna()]
+    if pool.empty:
+        return None, 0
+    ranks = pool[column].rank(ascending=False, method="min")
+    mine = pool["player_id"] == player_id
+    rank = int(ranks[mine].iloc[0]) if mine.any() else None
+    return rank, len(pool)

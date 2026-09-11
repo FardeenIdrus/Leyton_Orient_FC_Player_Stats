@@ -57,10 +57,19 @@ def contract_mask(contract_until: pd.Series, horizon: str,
 @st.cache_data(ttl=600)
 def contract_data_date() -> str | None:
     """When the Transfermarkt scrape (our only contract-date source) last ran, so the UI can
-    show its age instead of implying the data is live. None if the file is unreadable."""
+    show its age instead of implying the data is live. None when no snapshot is stored.
+
+    Reads `MAX(transfermarkt_squads.scraped_at)`. This used to stat the scrape CSV's mtime,
+    which was a proxy for the same fact and a poor one: any `touch`, copy or checkout moved
+    it without the data changing, and on a host where the dashboard does not share a disk
+    with the scraper the file is absent entirely, so the date silently vanished. The stamp
+    is written by the loader at load time, so it is the real thing.
+    """
     try:
-        path = Path(settings.reference_data_dir) / "transfermarkt" / "efl_values.csv"
-        return datetime.date.fromtimestamp(path.stat().st_mtime).strftime("%d %b %Y")
+        from lofc.dashboard.loaders import get_engine
+        from lofc.store import squads as store_squads
+        stamp = store_squads.scraped_at(get_engine())
+        return stamp.strftime("%d %b %Y") if stamp is not None else None
     except Exception:
         return None
 

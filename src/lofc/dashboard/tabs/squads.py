@@ -27,6 +27,7 @@ import streamlit as st
 
 from lofc.dashboard.loaders import competition_name_by_id, get_engine
 from lofc.dashboard.session import go_to_player
+from lofc.store import squads as store_squads
 
 
 @st.cache_data(ttl=300)
@@ -140,16 +141,20 @@ def scraped_squads() -> pd.DataFrame:
 
     Impect cannot supply a squad list -- it knows a player only once he plays. Transfermarkt
     publishes the registered squad, which is what "who is at this club" means.
+
+    Reads `transfermarkt_squads`, NOT the scrape CSV. The CSV is the scraper's handoff to the
+    pipeline stages that run beside it on the same disk; the dashboard is a separate process
+    and may be a separate host, where that file does not exist. While this read the file, the
+    page silently fell back to appearance data -- 2,966 players instead of 3,783 -- anywhere
+    the scrape had not been run. Same shape as `player_injuries`: scrape -> loader -> table ->
+    dashboard reads the table.
     """
-    from pathlib import Path
-    from lofc.config import settings
-    path = Path(settings.reference_data_dir) / "transfermarkt" / "efl_values.csv"
-    if not path.exists():
+    frame = store_squads.load_frame(get_engine())
+    if frame.empty:
         return pd.DataFrame()
-    d = pd.read_csv(path)
     keep = ["competition_id", "club_name", "player_name", "tm_player_id",
             "date_of_birth", "contract_until", "height_cm", "foot"]
-    d = d[[c for c in keep if c in d.columns]].copy()
+    d = frame[[c for c in keep if c in frame.columns]].copy()
     d["contract_until"] = pd.to_datetime(d["contract_until"], errors="coerce")
     d["date_of_birth"] = pd.to_datetime(d["date_of_birth"], errors="coerce")
     return d

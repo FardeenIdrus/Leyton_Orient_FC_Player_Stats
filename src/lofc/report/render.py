@@ -34,8 +34,9 @@ _PHYSICAL_AXES: list[tuple[str, str]] = [
 ]
 
 
-def _ordinal(n: int) -> str:
-    """1 -> st, 2 -> nd, 3 -> rd, 11-13 -> th. Used for "4th of 13"."""
+def ordinal(n: int) -> str:
+    """1 -> st, 2 -> nd, 3 -> rd, 11-13 -> th. Used for "4th of 13" on the report AND on
+    the player profile, so the two surfaces phrase a rank identically."""
     if 11 <= (n % 100) <= 13:
         return "th"
     return {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
@@ -45,7 +46,7 @@ def _environment() -> Environment:
     env = Environment(loader=FileSystemLoader(str(_TEMPLATES)),
                       autoescape=select_autoescape(["html", "j2"]),
                       trim_blocks=True, lstrip_blocks=True)
-    env.filters["ordinal"] = _ordinal
+    env.filters["ordinal"] = ordinal
     return env
 
 

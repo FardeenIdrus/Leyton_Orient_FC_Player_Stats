@@ -765,3 +765,46 @@ class PlayerMetricNeutral(Base):
 for _spec in _METRIC_REGISTRY:
     setattr(PlayerMetricNeutral, _spec.name, mapped_column(Float, nullable=True))
 del _spec
+
+
+class TransfermarktSquad(Base):
+    """The REGISTERED squad at every club we cover, as scraped from Transfermarkt.
+
+    WHY THIS TABLE EXISTS. Impect knows a player only once he has PLAYED, so it cannot
+    answer "who is at this club" -- five matches into 2026/27 that question returned 16 of
+    Leyton Orient's 33 players. Transfermarkt publishes the registered squad, which is what
+    the question actually means, and is the only source for contract expiry and height.
+
+    The scrape has always landed in `data/reference/transfermarkt/efl_values.csv`, and the
+    pipeline stages that consume it (valuation, identity, player_bio, the injury scraper)
+    read that file directly -- correctly, since they run alongside the scraper. The
+    DASHBOARD also read it, which made the Squads & loans page depend on the app process
+    sharing a filesystem with the scrape. This table removes that: the scrape loads here,
+    and the dashboard reads here, exactly as the injury scrape already does via
+    `player_injuries`.
+
+    A SNAPSHOT, NOT A HISTORY. Rows are replaced wholesale on each load. That is the
+    opposite of `player_injuries`, deliberately: an injury spell the scraper did not revisit
+    is still true, whereas a squad row for a player who has left is simply wrong. The volume
+    guard in `store/squads.py` is what stops a truncated scrape emptying the table -- the
+    11 Aug 2026 incident, where a degraded scrape reported success and destroyed 1,381
+    contract dates, is why that guard exists.
+    """
+
+    __tablename__ = "transfermarkt_squads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tm_player_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    league_code: Mapped[str | None] = mapped_column(String, nullable=True)
+    competition_id: Mapped[int] = mapped_column(Integer, index=True)
+    club_name: Mapped[str] = mapped_column(String, index=True)
+    player_name: Mapped[str] = mapped_column(String)
+    date_of_birth: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    position: Mapped[str | None] = mapped_column(String, nullable=True)
+    height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    foot: Mapped[str | None] = mapped_column(String, nullable=True)
+    contract_until: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    market_value_eur: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # When this snapshot was taken. The UI shows the age of the contract data from
+    # MAX(scraped_at); it used to read the CSV file's mtime, which any `touch` would move.
+    scraped_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())

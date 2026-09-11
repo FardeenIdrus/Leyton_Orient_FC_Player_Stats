@@ -31,7 +31,7 @@ from lofc.model import report_categories as rc
 from lofc.model import scout_scores
 from lofc.model.medical import (AVAILABILITY_SEASONS, availability_with_evidence,
                                 games_missed_in_window)
-from lofc.model.scorecard import metric_percentiles
+from lofc.model.scorecard import metric_percentiles, rank_in_pool
 from lofc.store import assessments as store_assess
 from lofc.store import injuries as store_injuries
 from lofc.store.models import Player, PlayerMetricNeutral, PlayerScorecard, PlayerPositionShare
@@ -228,15 +228,17 @@ def build(engine, player_id: int, competition_id: int, season_id: int) -> Report
     peers_frame = neutral[(neutral.competition_id == competition_id)
                           & (neutral.position_group == position)
                           & neutral.rankable.astype(bool)]
+    # `rank_in_pool` (model/scorecard.py) does the ranking, so the report and the player
+    # profile quote one number from one function and cannot drift apart. It also shares a
+    # rank between tied composites rather than ordering them by row position, which the
+    # earlier inline version did.
     ranked = pd.read_sql(
-        select(_S.c.player_id, _S.c.objective_composite)
+        select(_S.c.player_id, _S.c.competition_id, _S.c.season_id, _S.c.position_group,
+               _S.c.objective_composite)
         .where(_S.c.competition_id == competition_id, _S.c.season_id == season_id,
                _S.c.position_group == position, _S.c.archetype == "All Metrics"), engine)
-    ranked = ranked.dropna(subset=["objective_composite"]).sort_values(
-        "objective_composite", ascending=False).reset_index(drop=True)
-    rank = None
-    if player_id in set(ranked.player_id):
-        rank = int(ranked.index[ranked.player_id == player_id][0]) + 1
+    ranked = ranked.dropna(subset=["objective_composite"])
+    rank, _peers = rank_in_pool(ranked, player_id, competition_id, season_id, position)
 
     # --- scatter peers, in category units ---------------------------------------------
     peers: list[tuple[str, float, float]] = []

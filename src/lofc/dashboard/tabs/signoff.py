@@ -109,6 +109,21 @@ def _save_and_sign_off(engine, user: CurrentUser, *, player_id: int, competition
     st.rerun()
 
 
+def starting_points(group: pd.DataFrame) -> list[tuple[str, int | None]]:
+    """What a reviewer may start their own assessment FROM: "Blank", then one option per
+    assessment already on this dimension, labelled by author and band.
+
+    Pure, so the choice can be tested without a Streamlit runtime. Nothing here depends on
+    how many assessments exist -- one is as good a thing to copy from as three, which is why
+    this form never needed to be reserved for a conflict.
+    """
+    points: list[tuple[str, int | None]] = [("Blank", None)]
+    for entry in group.itertuples():
+        band_txt = "—" if pd.isna(entry.band) else f"{entry.band:.2f}"
+        points.append((f"{entry.author_name} — band {band_txt}", int(entry.id)))
+    return points
+
+
 def _enter_own_form(engine, user: CurrentUser, player_id: int, competition_id: int,
                     season_id: int, dimension: str, position: str | None,
                     group: pd.DataFrame) -> None:
@@ -121,13 +136,10 @@ def _enter_own_form(engine, user: CurrentUser, player_id: int, competition_id: i
         return
 
     key_prefix = f"enterown_{player_id}_{competition_id}_{season_id}_{dimension}"
-    starting_points: list[tuple[str, int | None]] = [("Blank", None)]
-    for entry in group.itertuples():
-        band_txt = "—" if entry.band is None else f"{entry.band:.2f}"
-        starting_points.append((f"{entry.author_name} — band {band_txt}", int(entry.id)))
-    labels = [label for label, _ in starting_points]
+    points = starting_points(group)
+    labels = [label for label, _ in points]
     chosen_label = st.selectbox("Start from", labels, key=f"{key_prefix}_start")
-    chosen_id = dict(starting_points)[chosen_label]
+    chosen_id = dict(points)[chosen_label]
     # Every field below is keyed on `chosen_id`, not just `key_prefix`: a Streamlit widget
     # keeps whatever value session_state already holds under its key even when a fresh
     # `index=`/`default=` is passed on a later rerun. Without this, switching "Start from"
@@ -302,9 +314,6 @@ def _dimension_block(engine, user: CurrentUser, player_id: int, competition_id: 
                             "This was just resolved by someone else. Refreshing.")
                     st.rerun()
                 _reject_control(engine, user, entry)
-        with st.expander("Enter my own"):
-            _enter_own_form(engine, user, player_id, competition_id, season_id, dimension,
-                            position, submitted)
     else:
         entry = next(submitted.itertuples())
         if entry.author_name == user.full_name:
@@ -325,6 +334,17 @@ def _dimension_block(engine, user: CurrentUser, player_id: int, competition_id: 
                 st.rerun()
         with reject_col:
             _reject_control(engine, user, entry)
+
+    # Available on EVERY pending dimension, not only a contested one. This form was written
+    # for Decision 17's conflict case and was reachable only there, so a reviewer looking at
+    # a single assessment could sign it off or reject it and nothing else -- recording their
+    # own view meant leaving the queue for the Assess page. Nothing in it ever needed a
+    # conflict: it copies criterion scores from a chosen assessment (or starts blank), and
+    # saves a NEW, separately attributed assessment. Collapsed, so the common actions above
+    # stay the obvious ones.
+    with st.expander("Enter my own assessment"):
+        _enter_own_form(engine, user, player_id, competition_id, season_id, dimension,
+                        position, submitted)
 
 
 def _player_card(engine, user: CurrentUser, player_names: dict[int, str],

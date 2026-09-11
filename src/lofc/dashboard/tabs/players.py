@@ -22,7 +22,8 @@ from lofc.dashboard.loaders import (
     competition_name_by_id, load_loan_for_player, load_other_league_seasons,
     load_position_shares,
     load_scorecard_percentiles,
-    load_scorecards, load_scorecards_archetype, load_trajectory, season_label)
+    load_scorecards, load_scorecards_archetype, load_trajectory, season_label,
+    _stored_scorecards)
 from lofc.dashboard.search import filter_labels, search_options
 from lofc.dashboard.seasons import (
     CONTRACT_EXPIRED, CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_data_date,
@@ -32,6 +33,7 @@ from lofc.dashboard.session import (CarriedPlayer, go_to_assess,
 from lofc.model import assessment_status
 from lofc.model import club_framework as cf
 from lofc.model.score import POSITION_ROLE
+from lofc.report.render import ordinal
 from lofc.model import scorecard as scorecard_mod
 from lofc.model import scout_scores
 from lofc.store import assessments as store_assess
@@ -463,8 +465,30 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
     has_value = show_money and pd.notna(row.get("market_value_eur"))
     cols = st.columns(5 if has_value else 3)
     comp_label = f"Composite ({archetype})" if archetype != cf.DEFAULT_ARCHETYPE else "Composite"
+    # Where he actually stands, stated in the same breath as the number. The player report
+    # has quoted "3rd of 92" since it was built; this screen -- the one recruiters work from
+    # -- did not, so the same player read differently on the two surfaces. Both now call
+    # `scorecard.rank_in_pool`, so they cannot disagree. NOT the ranked list's "#" column,
+    # which is a row position in whatever the sidebar currently shows: with every league
+    # selected that put Wakeling 2nd and Burrowes 3rd when each is FIRST in his own division.
+    # Scoped to THIS archetype: `player_scorecards` holds one row per player-season per
+    # archetype, so ranking the unfiltered table would count each Full Back and Winger
+    # two or three times over. The composite on screen is this archetype's, so its rank
+    # must be too.
+    _all_cards = _stored_scorecards(int(row["season_id"]))
+    _cards = (_all_cards[_all_cards["archetype"] == archetype]
+              if "archetype" in getattr(_all_cards, "columns", []) else _all_cards)
+    rank, peers = scorecard_mod.rank_in_pool(
+        _cards, int(row["player_id"]),
+        int(row["competition_id"]), int(row["season_id"]), position)
     cols[0].metric(comp_label, fmt(composite), border=True,
-                   help="The club's objective composite (1-5): Performance + Physical, from real data.")
+                   delta=(f"{rank}{ordinal(rank)} of {peers} in this league"
+                          if rank is not None else None),
+                   delta_color="off",
+                   help="The club's objective composite (1-5): Performance + Physical, from "
+                        "real data. The figure beneath it is his standing among players in "
+                        "the SAME league, season and position — the group the composite is a "
+                        "percentile within, and the only group it can honestly be ranked in.")
     cols[1].metric("Performance", fmt(performance), border=True,
                    help="The club-framework Performance dimension (1-5).")
     cols[2].metric("Physical", fmt(physical), border=True,
@@ -536,6 +560,19 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
         st.caption("These are the metrics that build the **Performance** and **Physical** dimensions for "
                    f"this position{' / archetype' if archetype != cf.DEFAULT_ARCHETYPE else ''}. Definitions "
                    "are on the **Glossary** tab.")
+        # The scorecard table was the ONE table on this page with no download, while the
+        # broader "all tracked metrics" expander below had one -- backwards, since this is
+        # the table that builds the composite and the only one carrying the 1-5 Band column.
+        # Same reasoning as that button: re-keying numbers into a meeting is where errors
+        # come from.
+        st.download_button(
+            "⬇ Download scorecard metrics (CSV)",
+            data=grand.to_csv(index=False).encode("utf-8"),
+            file_name=(f"{str(row['player_name']).replace(' ', '_')}_"
+                       f"{int(row['season_id'])}_scorecard_metrics.csv"),
+            mime="text/csv", key=f"{key_prefix}_grand_dl",
+            help="The metrics behind this player's Performance and Physical dimensions: "
+                 "season total, per 90, percentile and 1-5 band.")
 
     # The broader set, for general scouting, kept out of the way.
     stats_table = _full_stats_table(row, percentiles, metric_values)

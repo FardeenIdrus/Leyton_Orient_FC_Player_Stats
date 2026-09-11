@@ -82,6 +82,13 @@ def build_steps() -> list[tuple[str, list[str]]]:
         # club than the squad scrape, so it is its own stage; ~6 min for 147 clubs.
         steps.append(("Pull loan players from Transfermarkt (parent club + loan end)",
                       [sys.executable, "-m", "lofc.ingest.transfermarkt_loans"]))
+        # The squad scrape into Postgres, so the DASHBOARD reads a table rather than the
+        # CSV on this machine's disk. Must run after transfermarkt_efl, which writes that
+        # CSV. The pipeline stages below (valuation, identity, player_bio) keep reading the
+        # file directly and are unaffected -- they run here, beside the scraper; only the
+        # dashboard needed decoupling from the filesystem.
+        steps.append(("Squads: load the Transfermarkt squad snapshot into Postgres",
+                      [sys.executable, "-m", "lofc.store.squads"]))
 
     # 6. Model outputs — read the metric table per SCORING_SOURCE (neutral by default).
     steps += [
