@@ -112,3 +112,14 @@ def test_the_players_table_renders_the_peer_count_it_gates_on():
         "players are withheld from the ranking when their pool is too small, but the table "
         "never shows the pool size — a recruiter cannot tell a 4.44-of-105 from a 4.90-of-1")
     assert "peer_count" in source, "the Peers column is declared but never sourced"
+
+
+def test_the_squad_page_announces_the_fallback_instead_of_rendering_it_silently():
+    """The fallback is fine; a fallback that looks complete is not. `render` must consult
+    `squad_source_warning` — without that call the page degrades with no signal at all."""
+    import inspect
+    from lofc.dashboard.tabs import squads
+    source = inspect.getsource(squads.render)
+    assert "squad_source_warning" in source, (
+        "Squads & loans falls back to appearance data when the Transfermarkt scrape is "
+        "absent (3,783 rows -> 2,966) but never says so — the 2026-09-07 half-squad bug")

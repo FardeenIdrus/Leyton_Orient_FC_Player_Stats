@@ -331,6 +331,31 @@ def for_export(table: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def squad_source_warning(scrape_rows: int, shown_rows: int) -> str | None:
+    """The banner text when this page is running on the fallback, or None when it is not.
+
+    The page is built on the Transfermarkt squad scrape, which is gitignored licensed data
+    and therefore absent from a freshly cloned server until the pipeline runs. Without it
+    `registered_squad_frame` falls back to `player_metrics_neutral` -- who has APPEARED --
+    silently dropping every registered player who has not yet featured. On 2026-09-11 that
+    was 3,783 rows down to 2,966, and Leyton Orient 33 down to 21.
+
+    The fallback itself is correct behaviour: a partial page beats a crash. What was wrong
+    was that it looked identical to a complete one -- the same defect fixed on 2026-09-07,
+    which survived because a half-populated squad list reads as a full one. So the page keeps
+    rendering and states plainly that it is incomplete, and says WHICH players are absent,
+    because "data missing" tells a recruiter nothing about whether to trust what he sees.
+    """
+    if scrape_rows:
+        return None
+    return (f"**Squad list incomplete — this is not the full squad.** Showing the "
+            f"**{shown_rows:,}** players who have appeared this season, so every registered "
+            f"member who has **not yet played** is missing: new signings, injured and "
+            f"unselected players. The Transfermarkt squad scrape (`efl_values.csv`) is not "
+            f"present on this server — run the pipeline, or copy `data/reference/"
+            f"transfermarkt/` across, to restore the full list.")
+
+
 def render(season_id: int, rating_season_id: int, season_label: str,
            rating_label: str) -> None:
     st.subheader("Squads, contracts and loans")
@@ -338,6 +363,11 @@ def render(season_id: int, rating_season_id: int, season_label: str,
                f"player. Ratings are {rating_label} — this season is not scored yet.")
 
     frame = prepare(registered_squad_frame(season_id, rating_season_id))
+    # Before anything else on the page: is this the real squad list, or the appearance-based
+    # fallback? `scraped_squads()` is @st.cache_data, so this second call is free.
+    warning = squad_source_warning(len(scraped_squads()), len(frame))
+    if warning:
+        st.error(warning)
     if frame.empty:
         st.info("No squad data for this season yet.")
         return
