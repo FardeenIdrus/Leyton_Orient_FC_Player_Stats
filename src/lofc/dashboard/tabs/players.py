@@ -831,6 +831,13 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
         view.insert(0, "Rank", range(1, len(view) + 1))
         view["Minutes"] = view["minutes"].round(0)
         view["Measured"] = (view["objective_weight_covered"] * 100).round(0)
+        # What the composite was ranked against. A 4.44 out of 105 peers and a 4.90 out of 1
+        # are different claims, and the number alone cannot tell them apart -- the report has
+        # stated its peer count since it was built, for exactly this reason. Safe as a
+        # NumberColumn (no "—" fallback needed, unlike Age/Months left): app.py withholds
+        # every row whose pool is below MIN_PEERS_FOR_RANKING, so a rendered row always has
+        # a real count.
+        view["Peers"] = view["peer_count"].astype("Int64")
         if lens:
             view["All-round"] = view["allround_composite"].round(2)
         # Contract expiry is REAL scraped data (not modelled), and the free-transfer market is a
@@ -865,7 +872,10 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             "affordable_fee": "Fee in budget", "affordable_wage": "Wages in budget"})
         composite_label = ("Scout-verified rating" if assessed_mode
                            else f"Composite ({archetype})" if lens else "Composite")
-        display_cols = ["Rank", "Player", "Club", "League", "Age", "Minutes", "Composite"]
+        # "Peers" sits directly beside the composite it qualifies, not in a footnote:
+        # spec section 16, "caveats sit beside the number they qualify".
+        display_cols = ["Rank", "Player", "Club", "League", "Age", "Minutes", "Composite",
+                        "Peers"]
         if lens:
             display_cols.append("All-round")
         display_cols += ["Performance", "Physical", "Measured", "Player type",
@@ -882,6 +892,13 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             "Age": st.column_config.TextColumn("Age", help="'—' = no known birth date or valuation."),
             "Minutes": st.column_config.NumberColumn("Minutes", format="%d"),
             "Composite": band(composite_label, composite_help),
+            "Peers": st.column_config.NumberColumn(
+                "Peers", format="%d",
+                help="How many players this score ranks him against — same league, same "
+                     "position, same season, all past 450 minutes. A percentile means more "
+                     "out of 105 than out of 12. Players whose pool is smaller than "
+                     f"{scorecard_mod.MIN_PEERS_FOR_RANKING} are not ranked here at all; find them on "
+                     "Squads & loans."),
             "All-round": band("All-round", "Full-profile composite (All Metrics), for context."),
             "Performance": band("Performance", "The club-framework Performance dimension (1-5)."),
             "Physical": band("Physical", "The club-framework Physical dimension (1-5), where tracking exists."),

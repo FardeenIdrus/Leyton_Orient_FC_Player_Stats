@@ -80,3 +80,35 @@ def test_both_squad_queries_produce_the_same_rating_columns(column):
     assert column in loans_sql, f"{column} missing from loans_frame"
     assert f"NULL::float           AS {column}" not in loans_sql, (
         f"{column} is hardcoded NULL in loans_frame — it will always render blank")
+
+
+# --- the peer count: gate and display must not diverge ---------------------------------
+#
+# A composite is a rank within a league-position pool, and since 2026-09-11 a pool below
+# MIN_PEERS_FOR_RANKING is withheld from the ranked list entirely. Gating on a number the
+# recruiter cannot see is the same class of failure as the two bugs above, one level up: the
+# logic is right, the screen does not say so, and the reader draws a wrong conclusion. The
+# player report has stated its peer count since it was built (report/data.py's peer_count);
+# the ranked list -- the surface that IS the ranking -- must state it too.
+
+def test_the_pool_carries_a_peer_count_before_any_page_renders_it():
+    """`with_peer_counts` must run in main(), against the season's FULL scorecard set."""
+    import inspect
+    from lofc.dashboard import app
+    source = inspect.getsource(app.main)
+    assert "with_peer_counts" in source, (
+        "the Players pool never gets a peer_count column, so the gate cannot run and the "
+        "Peers column would render empty")
+    assert "peer_pool_sizes(ranking)" in source, (
+        "peer pools must be counted from `ranking` (every scored player that season), not "
+        "from the filtered pool — a sidebar filter must not shrink a player's peer group")
+
+
+def test_the_players_table_renders_the_peer_count_it_gates_on():
+    import inspect
+    from lofc.dashboard.tabs import players
+    source = inspect.getsource(players._players)
+    assert '"Peers"' in source, (
+        "players are withheld from the ranking when their pool is too small, but the table "
+        "never shows the pool size — a recruiter cannot tell a 4.44-of-105 from a 4.90-of-1")
+    assert "peer_count" in source, "the Peers column is declared but never sourced"

@@ -233,3 +233,26 @@ def pool_is_thin(pool_size) -> bool:
     if pool_size is None:
         return True
     return int(pool_size) < MIN_PEERS_FOR_RANKING
+
+
+def with_peer_counts(frame, pool_sizes):
+    """`frame` plus a `peer_count` column: how many players share each row's peer pool.
+
+    The count comes from the UNFILTERED scorecard set for the season, never from the frame
+    being annotated -- a peer pool is a property of the data, not of whatever the sidebar
+    currently shows. Narrowing to one league or raising the minutes slider must not make a
+    player look less comparable than he is.
+
+    A row whose pool is unknown (no scorecard) gets NaN, which `pool_is_thin` already treats
+    as thin: absence of evidence is not evidence of a usable pool.
+
+    Returns a copy; the caller's frame is never mutated.
+    """
+    out = frame.copy()
+    if len(out) == 0:
+        out["peer_count"] = pd.Series(dtype="float64")
+        return out
+    keys = list(zip(out["competition_id"], out["season_id"], out["position_group"]))
+    out["peer_count"] = pd.Series([pool_sizes.get(k) for k in keys], index=out.index,
+                                  dtype="float64")
+    return out

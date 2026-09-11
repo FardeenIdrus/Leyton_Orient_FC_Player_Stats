@@ -45,7 +45,8 @@ from lofc.dashboard.loaders import (
     load_percentiles, load_scorecards, load_scorecards_archetype, load_wage_framework,
     max_minutes, player_context_lookup, player_names, position_and_league_for)
 from lofc.dashboard.seasons import (
-    CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_mask, season_name_for)
+    CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_mask, default_season_id,
+    ranking_notice, season_name_for)
 from lofc.dashboard.session import (
     force_reload_after_logout, peek_carry, register_pages, require_login, restore_from_cookie,
     restore_user, topbar_identity, peek_open_player)
@@ -59,7 +60,7 @@ from lofc.dashboard.tabs.player_types import _player_types
 from lofc.dashboard.tabs.players import _kpi_strip, _players
 from lofc.dashboard.tabs.signoff import render as _signoff
 from lofc.dashboard.search import build_search_index
-from lofc.model.scorecard import pool_is_thin
+from lofc.model.scorecard import MIN_PEERS_FOR_RANKING, peer_pool_sizes, with_peer_counts
 from lofc.dashboard.tabs.users import render as _users_render
 from lofc.dashboard.tabs.watchlist import _watchlist
 from lofc.dashboard.theme import LOGO, header, style
@@ -142,7 +143,14 @@ def main() -> None:
             _current = list(st.session_state.get("sidebar_leagues", []))
             if _current and _league not in _current:
                 st.session_state["sidebar_leagues"] = _current + [_league]
-    st.session_state.setdefault("sidebar_season", carry.season_id if carry else seasons[0])
+    # The last COMPLETE season, not simply the newest one held. `available_seasons()` is
+    # newest-first, so the season still being played became the landing default the moment it
+    # gained its first rankable player -- and early in a season the league-position pools a
+    # composite is a percentile within are tiny (2026-09-11: 19 of 36 pools under ten players,
+    # two holding exactly one). The live season stays one click away in this same selector.
+    st.session_state.setdefault(
+        "sidebar_season",
+        carry.season_id if carry else default_season_id(seasons, settings.live_season_id))
     season_id = st.sidebar.selectbox(
         "Season", seasons, format_func=season_name_for, key="sidebar_season",
         help="Players are scored and ranked within one season. The latest season is the "
@@ -272,6 +280,23 @@ def main() -> None:
     # Signable = affordable (fee + wage). The old on-profile/Style-fit gate is dropped: the
     # platform ranks everyone on the club composite and never excludes on a quality threshold.
     pool["qualifies"] = pool["affordable_fee"] & pool["affordable_wage"]
+    # How many players share each row's peer pool -- counted from the season's FULL scorecard
+    # set (`ranking`), never from `pool`, because a peer group is a property of the data and
+    # must not shrink when the sidebar narrows to one league or raises the minutes floor.
+    # The count is shown on every row (tabs/players.py's "Peers" column): a 4.44 out of 105
+    # and a 4.90 out of 1 are different claims and must not look identical.
+    pool_sizes = peer_pool_sizes(ranking)
+    pool = with_peer_counts(pool, pool_sizes)
+    # A composite is a rank within its pool, so below the floor it is not a weak ranking --
+    # it is not a ranking at all. A player alone in his pool takes the 100th percentile on
+    # every metric by construction and scores 4.90, above anything earned across a full
+    # season. He is withheld from the ranked list rather than placed in it: there is no
+    # honest position for him inside a list whose order is itself a quality claim. Squads &
+    # loans carries him with current-season facts and no score, which is the page built for
+    # that question. NaN (no scorecard) counts as thin -- `pool_is_thin` treats it that way.
+    thin = pool["peer_count"].isna() | (pool["peer_count"] < MIN_PEERS_FOR_RANKING)
+    withheld = int(thin.sum())
+    pool = pool[~thin]
     pool = pool.sort_values("objective_composite", ascending=False, na_position="last").reset_index(drop=True)
     metrics = role_metrics_for(position)
 
@@ -285,25 +310,22 @@ def main() -> None:
     # over this run's `ranking`/`season_id`, called from inside the page functions below rather
     # than unconditionally here.
     def _season_banner() -> None:
-        # A composite is a rank within a peer group, so early in a season it can be
-        # arbitrary rather than merely uncertain: on 2026-09-07, five matches in, 13 of 36
-        # position-league pools held under five players. Say so where the ranking is read,
-        # rather than let a number built on three peers look like one built on 105.
-        if not ranking.empty and "position_group" in ranking.columns:
-            pool = len(ranking)
-            if pool_is_thin(pool):
-                st.warning(
-                    f"**Only {pool} {position}s in {season_name_for(season_id)} have "
-                    f"reached 450 minutes.** A percentile ranks a player against his "
-                    f"peers, so with a pool this small the order is close to arbitrary — "
-                    f"read these as early indications, not as a ranking. "
-                    f"{season_name_for(max((x for x in seasons if x < season_id), default=season_id))} "
-                    "is complete and ranks on a full pool.")
-        if ranking.empty:
-            st.info(f"**{season_name_for(season_id)} is under way, but no player has yet "
-                    "reached the 450-minute minimum needed to be ranked.** Scores will appear "
-                    "here once enough of the season has been played — try an earlier season "
-                    "in the meantime.")
+        # Say what was withheld and why, or why the list is empty. The old version warned when
+        # the COUNT ON SCREEN was small -- `len(ranking)`, which spans every selected league --
+        # but percentiles are computed within ONE league, so it could never detect the real
+        # problem: on 2026-09-11 the 26/27 view held 24 centre forwards whose actual pools were
+        # 1, 4, 5, 13 and 1, and warned about none of them. It also stayed silent on a
+        # completely EMPTY list whenever `ranking` was non-empty, which is exactly the state
+        # 2026/27 was in -- a blank table and no explanation. Both decisions now live in
+        # `seasons.ranking_notice`, which is pure and unit-tested.
+        notice = ranking_notice(
+            n_ranked=len(pool), n_withheld=withheld,
+            season=season_name_for(season_id),
+            complete_season=season_name_for(default_season_id(seasons, settings.live_season_id)),
+            position=position)
+        if notice is not None:
+            level, text = notice
+            (st.warning if level == "warning" else st.info)(text)
 
     _kpi_strip(pool, season_name_for(season_id), season_id, show_money)
 
