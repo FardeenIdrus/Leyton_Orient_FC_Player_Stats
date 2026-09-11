@@ -279,6 +279,7 @@ def _dimension_block(engine, user: CurrentUser, player_id: int, competition_id: 
     st.dataframe(assessment_detail.entries_table(dim_rows), hide_index=True, width="stretch",
                 key=f"queue_table_{player_id}_{competition_id}_{season_id}_{dimension}")
     assessment_detail.render_flags(entries)
+    assessment_detail.render_narrative(entries)
     assessment_detail.render_criterion_detail(engine, position, dimension, entries)
 
     submitted = dim_rows[dim_rows["status"] == "submitted"]

@@ -478,9 +478,13 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
     _all_cards = _stored_scorecards(int(row["season_id"]))
     _cards = (_all_cards[_all_cards["archetype"] == archetype]
               if "archetype" in getattr(_all_cards, "columns", []) else _all_cards)
+    # `row["position_group"]`, not a local `position`: this function binds that name lower
+    # down (the grand table), so referencing it here made it an unbound local and crashed the
+    # whole profile. It is also the more correct source -- the player's OWN position, not
+    # whatever the sidebar is filtered to.
     rank, peers = scorecard_mod.rank_in_pool(
         _cards, int(row["player_id"]),
-        int(row["competition_id"]), int(row["season_id"]), position)
+        int(row["competition_id"]), int(row["season_id"]), row["position_group"])
     cols[0].metric(comp_label, fmt(composite), border=True,
                    delta=(f"{rank}{ordinal(rank)} of {peers} in this league"
                           if rank is not None else None),
@@ -865,7 +869,16 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             st.caption(f"**{len(pool)}** {position}s ranked.")
 
         view = pool.copy().reset_index(drop=True)
-        view.insert(0, "Rank", range(1, len(view) + 1))
+        # "#", not "Rank": this is the row's position in the list as currently filtered,
+        # renumbered whenever a filter changes -- not a ranking. It cannot be one across
+        # leagues, because a composite is a percentile WITHIN a league: measured on 25/26
+        # every league's mean composite is ~3.03 by construction (Championship 3.027,
+        # National League 3.023), and the same player in two leagues in one season differs
+        # by 0.51 on average against a population SD of 0.58. Sorted by composite the list
+        # answers "who dominates his own division", which is a real scouting question; the
+        # word "Rank" beside a score claimed it answered a different one. The player's true
+        # standing ("8th of 13 in this league") is on his profile.
+        view.insert(0, "#", range(1, len(view) + 1))
         view["Minutes"] = view["minutes"].round(0)
         view["Measured"] = (view["objective_weight_covered"] * 100).round(0)
         # What the composite was ranked against. A 4.44 out of 105 peers and a 4.90 out of 1
@@ -911,7 +924,7 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
                            else f"Composite ({archetype})" if lens else "Composite")
         # "Peers" sits directly beside the composite it qualifies, not in a footnote:
         # spec section 16, "caveats sit beside the number they qualify".
-        display_cols = ["Rank", "Player", "Club", "League", "Age", "Minutes", "Composite",
+        display_cols = ["#", "Player", "Club", "League", "Age", "Minutes", "Composite",
                         "Peers"]
         if lens:
             display_cols.append("All-round")
@@ -996,8 +1009,8 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
                 height=table_height, on_select="rerun", selection_mode="single-row",
                 key=_selectable_key(base_key), column_config=col_cfg)
 
-            export = table[[c for c in display_cols if c != "Rank"]].copy()
-            export.insert(0, "Rank", table["Rank"])
+            export = table[[c for c in display_cols if c != "#"]].copy()
+            export.insert(0, "#", table["#"])
             st.download_button("⬇ Download this list (CSV)", data=export.to_csv(index=False).encode("utf-8"),
                                file_name=f"lofc_players_{position.lower().replace(' ', '_')}.csv", mime="text/csv",
                                help="Saves exactly what is on screen.")
@@ -1102,6 +1115,7 @@ def _scout_section(engine, row) -> None:
                         width="stretch", key=f"assess_table_{row['player_id']}_"
                         f"{row['competition_id']}_{row['season_id']}_{dimension}")
             assessment_detail.render_flags(entries)
+            assessment_detail.render_narrative(entries)
             assessment_detail.render_criterion_detail(
                 engine, str(position) if pd.notna(position) else None, dimension, entries)
 

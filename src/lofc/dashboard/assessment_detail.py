@@ -149,6 +149,55 @@ def render_flags(entries) -> None:
             st.caption(f"**{e.author_name}**, {e.created_at:%d %b %Y} — " + "; ".join(pieces))
 
 
+# The scout's prose, in the order the report prints it, so a reader moving between the two
+# meets the same three headings in the same sequence.
+NARRATIVE_FIELDS = [("summary", "Summary"),
+                    ("why_sign", "Why sign him"),
+                    ("considerations", "Considerations")]
+
+
+def narrative_for(entry) -> list[tuple[str, str]]:
+    """(heading, text) for each prose field this assessment carries; empty when it carries
+    none.
+
+    Tolerates a row loaded without these columns at all -- `getattr(..., None)` rather than
+    attribute access -- because a frame selected before they were added must degrade to "no
+    narrative" rather than raise on a reviewer's screen.
+
+    Blank and whitespace-only text counts as absent: an empty box that was tabbed through
+    must not render a heading with nothing under it. NaN is checked explicitly because
+    pandas hands back NaN for a NULL column and `str(nan)` is the visible text "nan".
+    """
+    blocks: list[tuple[str, str]] = []
+    for field, heading in NARRATIVE_FIELDS:
+        value = getattr(entry, field, None)
+        if value is None or (not isinstance(value, str) and pd.isna(value)):
+            continue
+        text = str(value).strip()
+        if text:
+            blocks.append((heading, text))
+    return blocks
+
+
+def render_narrative(entries) -> None:
+    """The assessor's own words, attributed, under each assessment that has any.
+
+    Rendered by BOTH the player profile and the sign-off queue, from this one function, so
+    the reviewer approving a band and the scout reading their own entry see the same thing.
+    Collapsed behind an expander: prose is the longest thing on the card and the bands are
+    what the eye needs first, but it is one click away rather than absent.
+    """
+    for e in entries:
+        blocks = narrative_for(e)
+        if not blocks:
+            continue
+        author = getattr(e, "author_name", "Unknown")
+        with st.expander(f"{author}'s notes"):
+            for heading, text in blocks:
+                st.markdown(f"**{heading}**")
+                st.markdown(text)
+
+
 def _entry_scores(engine, assessment_id: int) -> dict[str, tuple[int | None, bool | None]]:
     crit = store_assess.criterion_scores_for(engine, assessment_id)
     out: dict[str, tuple[int | None, bool | None]] = {}

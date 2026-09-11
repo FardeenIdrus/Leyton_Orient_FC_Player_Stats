@@ -80,7 +80,21 @@ def save(engine, *, player_id: int, competition_id: int, season_id: int, dimensi
 
 
 def _frame(conn, query, columns: list[str]) -> pd.DataFrame:
-    return pd.DataFrame(conn.execute(query).fetchall(), columns=columns)
+    """Rows as a DataFrame, labelled by the QUERY's own column names.
+
+    `columns` is kept for the empty case only (a result with no rows still has to carry the
+    caller's expected column names so downstream selects don't KeyError).
+
+    It used to be the label source: `pd.DataFrame(rows, columns=columns)` maps by POSITION,
+    so any SELECT whose order drifted from the caller's hand-maintained list silently
+    mislabelled real values. Adding three prose columns to `pending_signoff` did exactly
+    that -- `summary` received the author's name, `author_name` received a NULL -- and
+    nothing raised, because both were strings of the right shape. The database already
+    knows what each column is called; asking it removes the class of bug.
+    """
+    result = conn.execute(query)
+    rows = result.fetchall()
+    return pd.DataFrame(rows, columns=list(result.keys()) if rows else columns)
 
 
 def load_for_player(engine, player_id: int, competition_id: int,
@@ -134,11 +148,20 @@ def pending_signoff(engine) -> pd.DataFrame:
     """Submitted assessments awaiting approval, oldest first -- a work queue, so the longest
     waiting is at the top."""
     author = _U.alias("author")
+    # The prose columns are selected here so the sign-off queue can SHOW the scout's
+    # reasoning. Without them a reviewer approved a band having read only the number.
+    # ORDER MUST MATCH THE SELECT BELOW EXACTLY -- `_frame` maps result columns to these
+    # names by POSITION, not by label, so a name in the wrong slot silently mislabels real
+    # data rather than failing. Adding the three prose columns here but appending them to
+    # the end of this list did exactly that: `summary` received the author's name.
     columns = ["id", "player_id", "competition_id", "season_id", "dimension", "band",
-               "screening_failed", "notes", "created_at", "author_name", "author_role"]
+               "screening_failed", "notes", "created_at",
+               "summary", "why_sign", "considerations",
+               "author_name", "author_role"]
     query = (select(_A.c.id, _A.c.player_id, _A.c.competition_id, _A.c.season_id,
                     _A.c.dimension, _A.c.band, _A.c.screening_failed, _A.c.notes,
                     _A.c.created_at,
+                    _A.c.summary, _A.c.why_sign, _A.c.considerations,
                     author.c.full_name.label("author_name"),
                     author.c.role.label("author_role"))
              .select_from(_A.join(author, author.c.id == _A.c.author_id))

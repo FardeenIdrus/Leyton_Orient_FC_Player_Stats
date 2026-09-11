@@ -29,13 +29,34 @@ def build_steps() -> list[tuple[str, list[str]]]:
     # because scoring then read the StatsBomb spine directly).
 
     # 1. Spine: raw StatsBomb -> aggregated player-season metrics, loaded into Postgres.
+    #
+    # SKIPPED ENTIRELY UNDER `impect_only`. These three stages exist only to rebuild
+    # `player_season_metrics` from raw StatsBomb events, and under impect_only every league
+    # -- the EFL included -- is spined on Impect instead (see build_neutral's job list:
+    # "so StatsBomb is not needed at all"). Verified: all 40 metrics the club composite uses
+    # come from Impect (32) and SkillCorner (8), and the neutral table's EFL minutes match
+    # the StatsBomb spine on 1 row in 2,940 -- they are Impect's numbers, not StatsBomb's.
+    #
+    # Leaving them in was invisible here, where data/raw already holds the files and the
+    # ingest is skip-if-exists. On a machine without them -- a fresh server -- the ingest
+    # would attempt ~8,900 paid API calls across 4,456 matches for 21 GB of events nothing
+    # reads, and the aggregation raises FileNotFoundError if they are absent, halting the
+    # whole run before the Impect pull, the scrapes or the scorecard rebuild.
+    #
+    # `player_season_metrics` itself is NOT dropped: archetypes, the profile's trajectory and
+    # the methodology page still read that TABLE (register P3/P6). They read what is already
+    # stored; none of them needs the raw events. This is the pipeline half of register R4.
     steps: list[tuple[str, list[str]]] = [
         ("Apply database schema", ["alembic", "upgrade", "head"]),
-        ("Ingest raw StatsBomb data (slow on first run)", [sys.executable, "-m", "lofc.ingest.run"]),
-        ("Aggregate to player-season metrics", [sys.executable, "-m", "lofc.aggregate.run"]),
-        ("Generate club reference data", [sys.executable, "-m", "lofc.store.reference_data"]),
-        ("Load metrics + reference data into Postgres", [sys.executable, "-m", "lofc.store.load"]),
     ]
+    if not settings.impect_only:
+        steps += [
+            ("Ingest raw StatsBomb data (slow on first run)",
+             [sys.executable, "-m", "lofc.ingest.run"]),
+            ("Aggregate to player-season metrics", [sys.executable, "-m", "lofc.aggregate.run"]),
+            ("Generate club reference data", [sys.executable, "-m", "lofc.store.reference_data"]),
+            ("Load metrics + reference data into Postgres", [sys.executable, "-m", "lofc.store.load"]),
+        ]
 
     # 2. Club-provided SkillCorner squad export (feeds the Physical tab; independent).
     if source_file() is not None:
