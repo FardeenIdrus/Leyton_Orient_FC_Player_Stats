@@ -95,7 +95,13 @@ def build_steps() -> list[tuple[str, list[str]]]:
     if comp_ids & set(LEAGUE_CODE):
         steps.append(("Download Transfermarkt market values",
                       [sys.executable, "-m", "lofc.ingest.transfermarkt"]))
-    if comp_ids & EFL_LEAGUE_IDS:
+    # The SCRAPE stages. Skipped on a server (`SKIP_TRANSFERMARKT_SCRAPE=true`): Transfermarkt
+    # sits behind AWS WAF Bot Control and serves a datacentre IP a JavaScript challenge rather
+    # than content -- see config.skip_transfermarkt_scrape for the full finding. The loaders
+    # below (store.squads, store.injuries) are NOT skipped, so CSVs pushed from a workstation
+    # are still ingested. Without this the pipeline halts here on a server and nothing after
+    # it -- scoring, scorecards, shortlists -- ever runs.
+    if comp_ids & EFL_LEAGUE_IDS and not settings.skip_transfermarkt_scrape:
         steps.append(("Pull squad bio + market values from Transfermarkt (7 leagues)",
                       [sys.executable, "-m", "lofc.ingest.transfermarkt_efl"]))
         # Who is on loan at each club, from whom, until when. Transfermarkt is the ONLY
@@ -103,11 +109,13 @@ def build_steps() -> list[tuple[str, list[str]]]:
         # club than the squad scrape, so it is its own stage; ~6 min for 147 clubs.
         steps.append(("Pull loan players from Transfermarkt (parent club + loan end)",
                       [sys.executable, "-m", "lofc.ingest.transfermarkt_loans"]))
-        # The squad scrape into Postgres, so the DASHBOARD reads a table rather than the
-        # CSV on this machine's disk. Must run after transfermarkt_efl, which writes that
-        # CSV. The pipeline stages below (valuation, identity, player_bio) keep reading the
-        # file directly and are unaffected -- they run here, beside the scraper; only the
-        # dashboard needed decoupling from the filesystem.
+
+    # The squad LOADER, deliberately outside the scrape block above: it reads the CSV rather
+    # than fetching it, so it must still run on a server that cannot scrape -- that is how a
+    # refresh pushed from a workstation reaches the database. Loads the snapshot into Postgres
+    # so the DASHBOARD reads a table, not a file on this machine's disk. Must run after
+    # transfermarkt_efl where that stage runs at all.
+    if comp_ids & EFL_LEAGUE_IDS:
         steps.append(("Squads: load the Transfermarkt squad snapshot into Postgres",
                       [sys.executable, "-m", "lofc.store.squads"]))
 

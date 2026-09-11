@@ -68,3 +68,49 @@ def test_the_statsbomb_era_is_unchanged(statsbomb_era):
     modules = _modules(build_steps())
     for module in (SB_INGEST, SB_AGGREGATE, SB_LOAD):
         assert module in modules, f"{module} was dropped from the StatsBomb path"
+
+
+# --- the Transfermarkt scrape cannot run from a datacentre IP --------------------------
+#
+# Confirmed on the DigitalOcean droplet, 2026-09-12: Transfermarkt sits behind AWS WAF Bot
+# Control and answers a server IP with HTTP 202 and a JavaScript challenge page
+# (`awsWafCookieDomainList`, `gokuProps`) instead of content. The same request from a home
+# connection returns the real page. Passing the challenge would mean executing their JS to
+# mint a WAF token -- deliberate circumvention of bot protection, which this project does not
+# do. So the SCRAPE stages run on a workstation and the server consumes what they produce.
+
+SKIP_ENV = "skip_transfermarkt_scrape"
+TM_SQUADS = "lofc.ingest.transfermarkt_efl"
+TM_LOANS = "lofc.ingest.transfermarkt_loans"
+SQUAD_LOADER = "lofc.store.squads"
+INJURY_LOADER = "lofc.store.injuries"
+
+
+@pytest.fixture
+def no_scraping(monkeypatch):
+    from lofc import config
+    monkeypatch.setattr(config.settings, "impect_only", True, raising=False)
+    monkeypatch.setattr(config.settings, SKIP_ENV, True, raising=False)
+    return config.settings
+
+
+def test_the_transfermarkt_scrapes_are_skipped(no_scraping):
+    modules = _modules(build_steps())
+    assert TM_SQUADS not in modules
+    assert TM_LOANS not in modules
+
+
+def test_the_loaders_that_read_those_files_still_run(no_scraping):
+    """The server must still INGEST Transfermarkt data pushed from a workstation -- it just
+    cannot fetch it itself. Skipping the loaders too would silently freeze contracts, loans
+    and injuries at whatever the last dump held."""
+    modules = _modules(build_steps())
+    assert SQUAD_LOADER in modules
+    assert INJURY_LOADER in modules
+
+
+def test_scraping_still_runs_by_default(impect_only):
+    """A workstation must be unaffected: the flag is opt-in, set only on the server."""
+    modules = _modules(build_steps())
+    assert TM_SQUADS in modules
+    assert TM_LOANS in modules

@@ -369,6 +369,24 @@ class Settings(BaseSettings):
     # the StatsBomb-spined EFL and the original metric sets.
     impect_only: bool = Field(default=False)
 
+    # Skip the two Transfermarkt SCRAPE stages in the pipeline. Set TRUE ON THE SERVER ONLY.
+    #
+    # WHY (verified on the DigitalOcean droplet, 2026-09-12): Transfermarkt is behind AWS WAF
+    # Bot Control and answers a datacentre IP with HTTP 202 and a JavaScript challenge page
+    # (`awsWafCookieDomainList` / `gokuProps`), never the content -- while the identical
+    # request from a home connection returns the real page. Passing that challenge would mean
+    # executing their JS to mint a WAF token, i.e. deliberately circumventing bot protection;
+    # this project does not do that. So the scrape runs on a workstation and the server
+    # consumes the CSVs it produces.
+    #
+    # This skips ONLY the fetching (`transfermarkt_efl`, `transfermarkt_loans`). The LOADERS
+    # (`store.squads`, `store.injuries`) still run, so a refresh pushed from a workstation is
+    # still ingested -- skipping those too would silently freeze contracts, loans and injuries
+    # at whatever the last database dump held.
+    #
+    # Left FALSE on a workstation, where scraping works normally.
+    skip_transfermarkt_scrape: bool = Field(default=False)
+
     # --- Paths --------------------------------------------------------------
     raw_data_dir: str = Field(default="data/raw")
     reference_data_dir: str = Field(default="data/reference")

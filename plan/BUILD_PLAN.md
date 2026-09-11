@@ -866,6 +866,50 @@ coverage overall is 82%.
 **Verified:** 891 tests pass. Squad view: 3,783 rows matching the scrape exactly, zero
 duplicate player-club pairs, 293 loans displayed.
 
+### 2026-09-12 — DEPLOYED to DigitalOcean; Transfermarkt cannot be scraped from a server
+
+**Live at https://lofc-recruitment.duckdns.org** — DigitalOcean droplet (Ubuntu 24.04, 1 vCPU,
+2 GB + 2 GB swap, London, $12/mo + $2.40 weekly backups), `docker-compose.prod.yml` + Caddy with
+an automatic Let's Encrypt certificate. Code in `/opt/lofc`, database restored from a `pg_dump`
+(verified identical to the workstation: 11,215 scorecards, 3,783 squad rows, 12 assessments).
+
+**TRANSFERMARKT IS BLOCKED FROM THE SERVER — this will not change.** Transfermarkt is behind
+**AWS WAF Bot Control**. A datacentre IP gets HTTP **202 with a JavaScript challenge page**
+(`awsWafCookieDomainList`, `gokuProps`, 2.4 KB) instead of the ~200 KB squad page the same
+request returns from a home connection. A complete browser header set does not help — it changes
+an empty 202 into a challenge-page 202. **Defeating it was declined, deliberately:** it requires
+executing their JS to mint a WAF token, which is circumventing bot protection, not a parsing fix.
+
+Handled with `SKIP_TRANSFERMARKT_SCRAPE` (`config.skip_transfermarkt_scrape`), set true on the
+server only. It omits `ingest.transfermarkt_efl` and `ingest.transfermarkt_loans` — **without it
+the pipeline halts there and scoring, scorecards and shortlists never run.** The LOADERS
+(`store.squads`, `store.injuries`) deliberately still run, so a scrape pushed from a workstation
+is still ingested. **Operating model: the three Transfermarkt scrapes run on a workstation**, the
+CSVs are rsynced to the server, and the loaders pick them up. Registration data moves at transfer
+windows, not weekly, so this is adequate rather than a compromise.
+
+**StatsBomb dropped from the pipeline under `impect_only`** (the pipeline half of R4).
+`ingest.run`, `aggregate.run` and `store.load` only rebuild `player_season_metrics` from 21 GB of
+raw events; every league is Impect-spined under `impect_only`, all 40 composite metrics come from
+Impect (32) + SkillCorner (8), and the neutral table's EFL minutes match the StatsBomb spine on
+**1 row in 2,940**. Locally the stages were invisible (files present, ingest skips); on a fresh
+server they would attempt **~8,900 paid API calls across 4,456 matches**, and the aggregation
+raises `FileNotFoundError` without them, halting the run. The TABLE is still read (archetypes,
+trajectory, methodology) and comes from the dump. Server pipeline is now **16 steps**.
+
+**Deployment facts worth not rediscovering:**
+- **`data/` on the server lives in the `appdata` Docker VOLUME, not `/opt/lofc/data`.** The `app`
+  service mounts `appdata:/app/data`, so host files are invisible to it. Load with `docker cp`
+  into the container, then `chown -R appuser:appuser /app/data` (the image runs as `appuser`;
+  `docker cp` lands as root).
+- The `dashboard` service mounts **no data at all** — it works entirely from Postgres. That is
+  what the 2026-09-11 squad-scrape-into-Postgres change bought.
+- Only **~400 MB** is copied to a server: the dump, `data/raw/impect`, `data/reference`,
+  `data/raw/skillcorner`. Never the 21 GB of StatsBomb events.
+- macOS ships rsync 2.6.9 — `--info=progress2` is unsupported, use `--progress`.
+
+**Verified:** 961 tests pass. Dashboard live over HTTPS, login works, Players opens on 2025/26.
+
 ## Pending work register (nothing here is dropped)
 
 **Player report — BUILT 2026-08-28 (register item P7).** A one-page A4-landscape scouting
@@ -923,6 +967,8 @@ last international recognition (held in no ingested source); the cut-out player 
 | P5 | **Injury panel heading is wrong for current-season spells.** The panel groups "In the scored window" vs "Earlier seasons", but the window is the last two *completed* seasons, so the 20 spells from 26/27 — the current season — are labelled "Earlier". Heading should read "Outside the scored window". | Open, small |
 | P6 | **The legacy `player_season_metrics` table has now caused three separate defects** (watchlist blanks, clustering coverage, cross-table disagreement). Frozen, incomplete, still read in several places. Retiring it properly is its own task. | Open |
 | P7 | **Player report feature** — a per-player report for the Head of Recruitment, chairman and manager, modelled on the supplied reference. See the spec. | Requested 2026-08-28 |
+| P9 | **Transfermarkt scrape is workstation-only** — AWS WAF blocks datacentre IPs (2026-09-12). The server runs with `SKIP_TRANSFERMARKT_SCRAPE=true`; the three scrapes must be run locally and the CSVs pushed. Not fixable by engineering, and deliberately not bypassed. | Permanent constraint |
+| P10 | **`store/load.py` has an unguarded `DELETE`** of `player_season_metrics` with no volume guard, unlike `store/injuries.py` and `store/squads.py`. Unreachable under `impect_only`, but fires if anyone runs `python -m lofc.store.load` by hand. | Open, small |
 | P8 | **Availability report** (per the supplied Kabia reference) — games available, squad involvement, apps/starts/sub/unused-sub, injured, suspended, not-in-squad. **Not currently possible**: the platform holds injury spells and minutes but no squad-involvement, suspension or appearance breakdown. Needs a Transfermarkt appearance scrape, previously assessed as brittle. | Blocked on new data |
 
 

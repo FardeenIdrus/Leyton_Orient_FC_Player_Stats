@@ -6,6 +6,70 @@ from your laptop** for a demo (Option B).
 
 ---
 
+## ⚠️ Two constraints that decide how a server is set up (read before deploying)
+
+### 1. Transfermarkt cannot be scraped from a server
+
+Verified on a DigitalOcean droplet, 2026-09-12. Transfermarkt is behind **AWS WAF Bot Control**.
+A datacentre IP receives HTTP **202 with a JavaScript challenge page** (`awsWafCookieDomainList`,
+`gokuProps`, ~2.4 KB) instead of the ~200 KB squad page the same request returns from a home
+connection. A full browser header set does not change the outcome.
+
+**Do not attempt to bypass it.** Passing the challenge requires executing their JavaScript to mint
+a WAF token — circumventing bot protection, which this project does not do.
+
+**Set on the server:**
+
+```
+SKIP_TRANSFERMARKT_SCRAPE=true
+```
+
+This omits `ingest.transfermarkt_efl` and `ingest.transfermarkt_loans`. **Without it the pipeline
+halts at that stage and scoring, scorecards and shortlists never run.** The loaders
+(`store.squads`, `store.injuries`) still run, so data pushed from a workstation is still ingested.
+
+**Refreshing registration data** (contracts, squads, loans, injuries) — on a workstation:
+
+```bash
+python -m lofc.ingest.transfermarkt_efl --force
+python -m lofc.ingest.transfermarkt_loans
+python -m lofc.ingest.transfermarkt_injuries
+rsync -avz data/reference/transfermarkt/ root@SERVER:/opt/lofc/data/reference/transfermarkt/
+```
+
+then on the server, copy into the app volume and re-run the loaders (see below).
+
+### 2. `data/` lives in a Docker VOLUME, not on the host
+
+`docker-compose.prod.yml` mounts `appdata:/app/data` for the `app` service. Files placed in
+`/opt/lofc/data` on the host are **invisible** to the container. Load them with `docker cp`:
+
+```bash
+APP=$(docker compose -f docker-compose.prod.yml ps -q app)
+docker compose -f docker-compose.prod.yml exec -u root app mkdir -p /app/data/raw /app/data/reference
+docker cp /opt/lofc/data/raw/impect      "$APP":/app/data/raw/
+docker cp /opt/lofc/data/raw/skillcorner "$APP":/app/data/raw/
+docker cp /opt/lofc/data/reference/.     "$APP":/app/data/reference/
+docker compose -f docker-compose.prod.yml exec -u root app chown -R appuser:appuser /app/data
+```
+
+The final `chown` is required: the image runs as `appuser`, and `docker cp` lands files as root.
+
+The `dashboard` service mounts no data at all — it runs entirely from Postgres.
+
+### What to copy to a new server (~400 MB, never 21 GB)
+
+| Item | Size |
+|---|---|
+| `pg_dump` of the database | ~8 MB compressed |
+| `data/raw/impect` | 218 MB |
+| `data/reference` | 183 MB |
+| `data/raw/skillcorner` | 1.1 MB |
+
+**Not** `data/raw/{3,4,5,65}` — 21 GB of StatsBomb events that nothing reads under `impect_only`
+(`ingest.run`, `aggregate.run` and `store.load` are skipped; the spine comes from the dump).
+
+
 ## Option A — Permanent deployment on a server (a real URL)
 
 You need: a Linux server/VM with Docker installed, reachable **from the public internet, not

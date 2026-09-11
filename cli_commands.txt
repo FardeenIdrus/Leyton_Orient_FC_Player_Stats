@@ -404,3 +404,21 @@ docker compose exec app python -m lofc.ingest.transfermarkt_loans --season 2025
 # Fill foot + nationality, each from its own source order (foot: Transfermarkt -> Impect;
 # nationality: Impect -> Transfermarkt). Gap-fill only; a stored value is never overwritten.
 docker compose exec app python -m lofc.model.player_bio
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SERVER vs WORKSTATION — Transfermarkt (added 2026-09-12)
+# ─────────────────────────────────────────────────────────────────────────────
+# Transfermarkt is behind AWS WAF Bot Control and BLOCKS datacentre IPs: a server
+# gets HTTP 202 + a JavaScript challenge page, never the content. The server therefore
+# runs with SKIP_TRANSFERMARKT_SCRAPE=true, which omits the two scrape stages from the
+# pipeline. Do not try to bypass the WAF -- that means minting a token by running their
+# JS, which this project deliberately does not do.
+#
+# The scrapes run HERE (a workstation), and the CSVs are pushed to the server:
+python -m lofc.ingest.transfermarkt_efl --force
+python -m lofc.ingest.transfermarkt_loans
+python -m lofc.ingest.transfermarkt_injuries
+# then push (replace SERVER with the droplet IP):
+rsync -avz data/reference/transfermarkt/ root@SERVER:/opt/lofc/data/reference/transfermarkt/
+# and on the SERVER, copy into the app volume (data/ is a Docker volume, not the host dir)
+# and re-run the loaders -- see DEPLOY.md, "Two constraints".
