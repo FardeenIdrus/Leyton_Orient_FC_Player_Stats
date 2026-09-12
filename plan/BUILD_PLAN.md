@@ -27,7 +27,8 @@ model), not a reporting dashboard. It runs end to end via `docker compose up` +
 
 | Document | What it covers | Read it when… |
 |---|---|---|
-| **`plan/BUILD_PLAN.md`** (this file) | Current state, doc index, roadmap | Always first — the entry point |
+| **`plan/BUILD_PLAN.md`** (this file) | Current state, doc index, roadmap, the **recurring manual tasks (M1/M2)** and the pending register | Always first — the entry point |
+| **`CLAUDE.md`** — ⚠️ **OPERATING MODEL section** | Which of the TWO machines does what; the Transfermarkt/AWS-WAF block (M1); the laptop↔server drift (M2); the per-match roadmap (P11) | **Before touching data, the pipeline or deployment** |
 | `plan/HISTORY.md` | Frozen append-only build log: every phase + decision + rationale | You need *why* a past decision was made |
 | `plan/LOFC_Recruitment_Platform_Build_Plan.md` | The original client brief (frozen, never edited) | You want the original scope/requirements |
 | `README.md` | Human front door: what it is, how to run it, repo layout | You're a new team member getting started |
@@ -910,6 +911,24 @@ trajectory, methodology) and comes from the dump. Server pipeline is now **16 st
 
 **Verified:** 961 tests pass. Dashboard live over HTTPS, login works, Players opens on 2025/26.
 
+## 🔁 RECURRING MANUAL TASKS (nothing automates these — they are a person's job)
+
+The platform is deployed and refreshes itself weekly, but **two things only happen when a human
+does them.** Both were established 2026-09-12; see `CLAUDE.md` for the full operating model.
+
+| # | Task | Where | When | Why it cannot be automated |
+|---|---|---|---|---|
+| M1 | **Transfermarkt scrape** — `transfermarkt_efl --force`, `transfermarkt_loans`, `transfermarkt_injuries`, then rsync `data/reference/transfermarkt/` to the server and re-run the pipeline there | **Workstation only** | Before the January window; occasionally for injuries | Transfermarkt is behind **AWS WAF Bot Control** and blocks datacentre IPs (HTTP 202 + JS challenge). Bypassing it means minting a WAF token by running their JS — **declined deliberately.** The server runs `SKIP_TRANSFERMARKT_SCRAPE=true` |
+| M2 | **Resync the workstation database from the server** before any local data work | Workstation | Whenever picking up local development | The server refreshes weekly and the laptop does not, so they drift. On 2026-09-12 the server already held 4,320 injury rows / 1,318 players against the laptop's 3,772 / 1,176. Reasoning about stale local numbers produces phantom "bugs" |
+
+**What DOES run automatically** (server cron, Monday 04:15 UTC, `scripts/weekly_refresh.sh`):
+Impect pull, SkillCorner pull, `build_neutral`, position shares, squad loader, scoring, archetypes,
+valuation, identity, injury loader, player bio, scorecards, shortlists — 16 steps. Contract, squad,
+loan and injury CONTENT only changes when M1 has been run; the loaders simply re-read whatever CSVs
+were last pushed.
+
+---
+
 ## Pending work register (nothing here is dropped)
 
 **Player report — BUILT 2026-08-28 (register item P7).** A one-page A4-landscape scouting
@@ -967,6 +986,7 @@ last international recognition (held in no ingested source); the cut-out player 
 | P5 | **Injury panel heading is wrong for current-season spells.** The panel groups "In the scored window" vs "Earlier seasons", but the window is the last two *completed* seasons, so the 20 spells from 26/27 — the current season — are labelled "Earlier". Heading should read "Outside the scored window". | Open, small |
 | P6 | **The legacy `player_season_metrics` table has now caused three separate defects** (watchlist blanks, clustering coverage, cross-table disagreement). Frozen, incomplete, still read in several places. Retiring it properly is its own task. | Open |
 | P7 | **Player report feature** — a per-player report for the Head of Recruitment, chairman and manager, modelled on the supplied reference. See the spec. | Requested 2026-08-28 |
+| P11 | **Per-MATCH performance and physical tracking** (owner-flagged 2026-09-12 as "a big and important step"). Everything today is SEASON-AGGREGATED: Impect via `getPlayerIterationAverages`, SkillCorner via `get_physical(group_by="player")` — "one row per player already aggregated to the season". A season average is a LAGGING signal by construction: one exceptional match barely moves it, so it cannot answer "what changed this week", which is what watchlist alerting needs ("he hit a new top speed on Saturday", "three goals in two games"). **Both providers already expose the per-match layer under the current licences — verified 2026-09-12:** Impect `getPlayerMatchsums` / `getPlayerMatchScores` / `getMatches`; SkillCorner `get_physical` accepts a match-level `group_by` (and `get_match_*` endpoints exist). So this is a BUILD, not a licence or data-availability question. Needs: new tables at player×match grain, an ingest stage per provider, and a decision on retention/pull-time (one row per player per match rather than per season is a large multiple of today's volume — size it before building). **Scoring must not read it**: the composite is a season-level percentile and adding match noise would change what it measures. | Open — needs its own design |
 | P9 | **Transfermarkt scrape is workstation-only** — AWS WAF blocks datacentre IPs (2026-09-12). The server runs with `SKIP_TRANSFERMARKT_SCRAPE=true`; the three scrapes must be run locally and the CSVs pushed. Not fixable by engineering, and deliberately not bypassed. | Permanent constraint |
 | P10 | **`store/load.py` has an unguarded `DELETE`** of `player_season_metrics` with no volume guard, unlike `store/injuries.py` and `store/squads.py`. Unreachable under `impect_only`, but fires if anyone runs `python -m lofc.store.load` by hand. | Open, small |
 | P8 | **Availability report** (per the supplied Kabia reference) — games available, squad involvement, apps/starts/sub/unused-sub, injured, suspended, not-in-squad. **Not currently possible**: the platform holds injury spells and minutes but no squad-involvement, suspension or appearance breakdown. Needs a Transfermarkt appearance scrape, previously assessed as brittle. | Blocked on new data |
