@@ -143,7 +143,26 @@ def _current_form_summary(rows: pd.DataFrame, player_id: int) -> dict[str, int] 
     }
 
 
-def _current_form(player_id: int) -> None:
+def current_form_caption(has_rating: bool) -> str:
+    """What to say under the current-form tiles, given whether this player is SCORED in the
+    live season.
+
+    This used to be one hard-coded string asserting that too little of the season had been
+    played for a composite and that the dimension tiles were from the player's most recent
+    FULL season. Both were true when written -- nobody in 2026/27 had cleared 450 minutes --
+    and both went false the moment players did: by 2026-09-12, 504 had a 2026/27 composite, so
+    the caption denied a rating displayed directly above it.
+
+    Deliberately short. The section is already headed "Current form" and the tiles are already
+    labelled; the only claim worth repeating is that these are counts rather than a score.
+    Long disclaimers train readers to skip captions, including the ones that matter.
+    """
+    if has_rating:
+        return "Season-to-date counts, not a rating."
+    return "Season-to-date counts, not a rating — under the 450-minute minimum to be scored."
+
+
+def _current_form(player_id: int, has_rating: bool = False) -> None:
     """Current-season form as plain facts, alongside the (older) scored season shown by the
     rest of the profile -- NOT a rating. 2026/27 has real data but nobody is near the 450-
     minute rankable threshold yet (see `loaders.load_current_form`), so a composite for it
@@ -163,10 +182,7 @@ def _current_form(player_id: int) -> None:
     c1.metric("Minutes", f"{summary['minutes']:,}", border=True)
     c2.metric("Goals", summary["goals"], border=True)
     c3.metric("Assists", summary["assists"], border=True)
-    st.caption("Plain facts, not a rating — too little of the season has been played for a "
-               "composite (well under the 450-minute rankable minimum). Match-played counts "
-               "are not tracked for this season's data. The scored dimension tiles below are "
-               "for his most recent full season.")
+    st.caption(current_form_caption(has_rating))
 
 
 def _strengths_weaknesses(percentiles: pd.DataFrame, player_id: int, comp_id: int,
@@ -456,7 +472,16 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
                    "goals/assists) drive the scores, because they're steadier season to season.")
 
     _trajectory(int(row["player_id"]), role, key_prefix)
-    _current_form(int(row["player_id"]))
+    # Whether he is SCORED in the live season decides what the caption may claim. Looked up
+    # against the live season's own scorecards, not this row: the row is the SELECTED season,
+    # which may not be the live one.
+    _live = settings.live_season_id
+    _live_cards = _stored_scorecards(_live) if _live is not None else None
+    _has_live_rating = bool(
+        _live_cards is not None and not _live_cards.empty
+        and ((_live_cards["player_id"] == int(row["player_id"]))
+             & (_live_cards["objective_composite"].notna())).any())
+    _current_form(int(row["player_id"]), _has_live_rating)
 
     # Dimension score tiles (1-5). Money tiles only when the affordability layer is on.
     composite, performance, physical = (row.get("objective_composite"), row.get("performance_band"),

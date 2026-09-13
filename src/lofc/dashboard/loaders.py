@@ -428,7 +428,7 @@ def load_trajectory() -> pd.DataFrame:
         "SELECT player_id, season_id, season_name, competition_name, team_name, "
         "minutes, goals, assists, np_xg_p90, xa_p90, "
         "save_pct, gk_saves_p90, tackles_p90, interceptions_p90, pass_completion_pct "
-        "FROM player_season_metrics ORDER BY season_id", get_engine())
+        "FROM player_season_metrics ORDER BY season_id DESC", get_engine())
 
 
 
