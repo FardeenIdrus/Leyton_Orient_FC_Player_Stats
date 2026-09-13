@@ -110,8 +110,18 @@ PERFORMANCE_METRICS: dict[str, list[str]] = {
         "dribble_carry_value_p90", "turnovers_p90", "dribble_success_pct",
         "dribbles_p90", "np_xg_p90", "np_xg_xa_p90",
     ],
-    # Defensive Mid and Central Mid share the club's single "Centre Midfield" list
-    # (archetype sub-profiles are Phase 2).
+    # THE CLUB'S "Centre Midfield" ROW = the DEFENSIVE midfielder (resolved 2026-09-13).
+    #
+    # The workbook describes THREE midfielder types on its MF tab (Defensive, Box to Box,
+    # Attacking) but gives metric names for only TWO on its Input tab ("Centre Midfield",
+    # "Attacking Midfield"), so one role had no list and these two groups shared one.
+    #
+    # The label and the contents of that row disagree. The name suggests the box-to-box role
+    # (the 6/8/10 convention); the CONTENTS contain `Aerial Win%` and `PAdj Tackles &
+    # Interceptions` and contain NO Shots, Dribbles, box touches or crosses -- and the MF tab
+    # says those four are precisely what separates Box to Box from Defensive. Reading it as
+    # box-to-box would mean the club omitted every defining attribute of that role while
+    # including two defensive ones, so the contents were taken as the better evidence.
     "Defensive Mid": [
         "aggressive_actions_p90", "aerial_win_pct", "padj_tackles_interceptions_p90",
         "counterpressures_p90", "padj_pressures_p90", "xa_p90", "passes_into_box_p90",
@@ -119,12 +129,28 @@ PERFORMANCE_METRICS: dict[str, list[str]] = {
         "pass_value_p90", "dribble_carry_value_p90", "turnovers_p90", "xg_buildup_p90",
         "assists_p90", "open_play_assists_p90", "goals_p90",
     ],
+    # CENTRAL MID = the club's BOX TO BOX midfielder: the defensive list above (he does all
+    # of it -- the MF tab gives him low block, 1v1, intercepting and second balls) PLUS the
+    # four capabilities that tab grants Box to Box and withholds from Defensive. Every added
+    # metric is lifted from the club's OWN Attacking Midfield row; none is invented.
+    #
+    # AERIAL DUELS KEPT, deliberately. The MF tab lists "Defend aerial duels" for Defensive
+    # and Attacking but not for Box to Box. One omission in a prose list was judged weak
+    # evidence against the same tab's "defend in a low block" and "win 2nd balls", both of
+    # which involve contesting aerial balls. This is the one judgement call in the mapping and
+    # the first thing to revisit if the club reads it differently.
     "Central Mid": [
         "aggressive_actions_p90", "aerial_win_pct", "padj_tackles_interceptions_p90",
         "counterpressures_p90", "padj_pressures_p90", "xa_p90", "passes_into_box_p90",
         "pass_completion_pct", "pressured_pass_pct", "deep_progressions_p90",
         "pass_value_p90", "dribble_carry_value_p90", "turnovers_p90", "xg_buildup_p90",
         "assists_p90", "open_play_assists_p90", "goals_p90",
+        # --- Box to Box additions (MF tab) ---
+        "shots_p90",                 # "Shots"
+        "dribbles_p90",              # "Dribbles attempted / success"
+        "dribble_success_pct",       # "Ability to break lines through dribbling"
+        "touches_in_box_p90",        # "Availability in the box"
+        "successful_box_cross_pct",  # "Crosses & crossing types - low / high"
     ],
     "Attacking Mid": [
         "aggressive_actions_p90", "counterpressures_p90", "padj_pressures_p90",
