@@ -57,6 +57,22 @@ The final `chown` is required: the image runs as `appuser`, and `docker cp` land
 
 The `dashboard` service mounts no data at all — it runs entirely from Postgres.
 
+
+### 3. Deploying code changes — always manual
+
+Nothing reaches the server on its own. `scripts/weekly_refresh.sh` (the Monday cron) runs the
+PIPELINE; it never runs `git pull`. Pushing to GitHub deploys nothing.
+
+`git pull` on its own is also not enough: the image bakes the source in at build time, so without
+`--build` the running containers keep serving the OLD code while `git log` shows the new commit.
+
+```bash
+ssh root@SERVER
+/opt/lofc/scripts/deploy.sh      # pull, rebuild, migrate, report status
+```
+
+About 3 minutes, most of it the rebuild. The site stays up until the new containers swap in.
+
 ### What to copy to a new server (~400 MB, never 21 GB)
 
 | Item | Size |

@@ -797,9 +797,14 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             st.caption("The **Archetype** lens (Full Back / Winger only, sidebar) reranks on that "
                        "archetype's Performance metrics; the all-round composite stays visible "
                        "alongside as the guardrail against overfitting to one lens.")
-            st.caption("Nobody appears below **450 minutes** played this season — per-90 rates on a "
-                       "smaller sample are noise, not signal. Raise or lower the minutes floor in "
-                       "the sidebar; it never goes below 450.")
+            # TWO exclusions, not one. This said 450 minutes was the only filter, which was
+            # true when written and stopped being true when the peer-pool gate went in: a
+            # composite from a league-position pool below MIN_PEERS_FOR_RANKING is withheld
+            # too. The live count of who was withheld is in the warning banner above; this is
+            # the standing rule. The "per-90 rates are noise" rationale was dropped -- it
+            # belongs on Methodology, not above every ranked list.
+            st.caption("Ranked players need **450+ minutes** and at least **10 peers** in their "
+                       "league and position. The sidebar minutes floor never goes below 450.")
 
         # Assessed ranking mode: opt-in, off by default. The `else` branch below leaves the
         # default ranking (RANK_COLUMN = objective_composite) byte-for-byte unchanged.
