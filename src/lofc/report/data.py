@@ -31,6 +31,8 @@ from lofc.model import report_categories as rc
 from lofc.model import scout_scores
 from lofc.model.medical import (AVAILABILITY_SEASONS, availability_with_evidence,
                                 games_missed_in_window)
+from lofc.config import settings
+from lofc.dashboard.seasons import age_reference_date
 from lofc.model.scorecard import metric_percentiles, rank_in_pool
 from lofc.store import assessments as store_assess
 from lofc.store import injuries as store_injuries
@@ -130,9 +132,19 @@ class ReportData:
 
 
 def _age(birth_date, season_id: int) -> float | None:
+    """The player's age, measured at the same reference date the dashboard uses.
+
+    This used to always measure against `pd.Timestamp.now()` (behind a dead `if False`
+    branch), so the report and the dashboard disagreed about the same player's age on every
+    completed season: the dashboard froze it at the season midpoint, the report let it keep
+    rising. Both now call `seasons.age_reference_date` -- fixed midpoint for a finished
+    season, today for the one being played.
+    """
     if birth_date is None:
         return None
-    ref = pd.Timestamp(f"{2008 + season_id % 1000}-01-01") if False else pd.Timestamp.now()
+    ref = age_reference_date(int(season_id), settings.live_season_id)
+    if ref is None:
+        return None
     years = (ref - pd.Timestamp(birth_date)).days / 365.25
     return round(years, 1) if 14 <= years <= 50 else None
 

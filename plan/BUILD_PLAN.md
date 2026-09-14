@@ -911,6 +911,62 @@ trajectory, methodology) and comes from the dump. Server pipeline is now **16 st
 
 **Verified:** 961 tests pass. Dashboard live over HTTPS, login works, Players opens on 2025/26.
 
+### 2026-09-13 — midfield archetypes resolved; Central Mid gets the club's Box to Box list
+
+**The problem.** `Impect Data - Positional Metrics.xlsx` describes THREE midfielder types on its
+**MF tab** (Defensive, Box to Box, Attacking) but gives metric NAMES for only TWO on its **Input
+tab** ("Centre Midfield", "Attacking Midfield"). One role therefore had no metric list, and the
+platform — which carries three midfield groups, because that is Impect's taxonomy — gave
+`Defensive Mid` and `Central Mid` the same 17 metrics. **667 players in 25/26** were scored on a
+profile written for one role, with nothing on screen saying so.
+
+**Why the two tabs cannot simply be merged.** The MF tab is capability PROSE, not metrics:
+*"Ability to play passes / keep the ball, with and without pressure"*, *"Ability to press in a
+mid-block"*. Nothing there is computable. Only the Input tab drives a score.
+
+**The resolution.** The Input tab's "Centre Midfield" row is read as the **DEFENSIVE
+midfielder's** list. The label and the contents disagree — the name suggests the box-to-box role
+(the 6/8/10 convention) — but the row carries `Aerial Win%` and `PAdj Tackles & Interceptions` and
+carries **no** Shots, Dribbles, box touches or crosses, and the MF tab names exactly those four as
+what separates Box to Box from Defensive. Reading it as box-to-box would mean the club omitted
+every defining attribute of that role while including two defensive ones.
+
+**Matching on the label was considered and rejected** on a practical ground, not a stylistic one:
+it leaves `Defensive Mid` and `Central Mid` identical anyway, because that row contains nothing
+attacking to strip out. Only one reading actually separates the two groups.
+
+**`Central Mid` therefore becomes the missing Box to Box list** — the defensive metrics plus the
+four capabilities the MF tab grants Box to Box and withholds from Defensive:
+`shots_p90`, `dribbles_p90`, `dribble_success_pct`, `touches_in_box_p90`,
+`successful_box_cross_pct`. **Every one is lifted from the club's own Attacking Midfield row.
+Nothing is invented and nothing new is sourced** — which is the whole point, and the line the
+retired Style-fit crossed.
+
+**Aerial duels KEPT.** The MF tab lists "Defend aerial duels" for Defensive and Attacking but not
+for Box to Box. One omission in a prose list was judged weak evidence against the same tab's
+"defend in a low block" and "win 2nd balls", both of which involve contesting aerial balls.
+**This is the one judgement call in the mapping**, decided by the owner under delegated authority
+from the club, and pinned by a test so it cannot change silently.
+
+**Measured impact:**
+
+| Group | Metrics | Players (25/26) | Re-scored | Average |
+|---|---|---|---|---|
+| Defensive Mid | 17 (unchanged) | 565 | **0** | 3.0175 → 3.0175 |
+| **Central Mid** | **17 → 22** | 102 | **99** | 3.1223 → **3.1252** |
+| Attacking Mid | 24 (unchanged) | 236 | **0** | 3.0546 → 3.0546 |
+
+197 of 6,951 scorecards changed platform-wide; largest single move **0.29** (Kyle Turner,
+Partick Thistle, 3.26 → 3.55). The average barely moves because a composite is a percentile
+within the same pool — adding metrics reshuffles the order rather than inflating it.
+
+**Verified:** 972 tests pass (was 965). Reasoning recorded in `model/club_framework.py` and
+`tests/test_midfield_archetypes.py`, not just the outcome.
+
+**Still open on midfield:** nothing. Box-to-Box has no capability of its own in the club's file —
+27 of its 36 lines are shared by all three archetypes and every remainder appears in Defensive or
+Attacking — so there is no fourth list to build.
+
 ## 🔁 RECURRING MANUAL TASKS (nothing automates these — they are a person's job)
 
 The platform is deployed and refreshes itself weekly, but **two things only happen when a human
@@ -1020,7 +1076,7 @@ scrape to the Scottish leagues and PL2 is the only fix.
 | # | Item | Blocked by | What to do when unblocked |
 |---|---|---|---|
 | B1 | ✅ **DONE (11 Aug 2026)** — recovery scrape completed; contract/foot/height data restored | — (resolved) | Database now holds 1,363 contract dates, 1,606 feet, 1,635 heights (was 20 / 23 / 24 immediately after the incident). Full incident record and recovery outcome directly below. |
-| B2 | **Midfield archetypes** (DM / Box-to-Box / AM) — RE-SCOPED 2026-09-07: **not blocked, needs a decision.** The MF sheet DOES give three distinct capability lists; the Input sheet gives only Centre Midfield + Attacking Midfield, so `Defensive Mid` and `Central Mid` currently share one list and Box-to-Box is unreflected (102 player-seasons). | a mapping decision with the club, same include/exclude technique already used for Full Back and Winger | encode into `ARCHETYPE_DROPS` |
+| B2 | ✅ **DONE (2026-09-13) — Central Mid now uses the club's Box to Box metric list.** The workbook describes THREE midfielder types on its MF tab (Defensive, Box to Box, Attacking) but gives metric NAMES for only TWO on its Input tab ("Centre Midfield", "Attacking Midfield"), so `Defensive Mid` and `Central Mid` shared one 17-metric list — 667 players in 25/26 scored on a profile written for one role. **Resolved by reading the Input tab's "Centre Midfield" row as the DEFENSIVE midfielder**: it carries `Aerial Win%` and `PAdj Tackles & Interceptions` and carries NO Shots, Dribbles, box touches or crosses, and the MF tab names exactly those four as what separates Box to Box from Defensive. Matching on the label instead was considered and rejected — it leaves the two groups identical anyway, because that row contains nothing attacking to remove. `Central Mid` became the missing Box to Box list: the same metrics **plus** `shots_p90`, `dribbles_p90`, `dribble_success_pct`, `touches_in_box_p90`, `successful_box_cross_pct` — every one lifted from the club's own Attacking Midfield row, none invented. **Aerial duels KEPT** against the MF tab's omission for Box to Box (the same tab has him defending a low block and winning second balls); the one judgement call, pinned by a test. Decided by the owner under delegated authority from the club. **Measured:** `Defensive Mid` (17 metrics) and `Attacking Mid` (24) byte-identical, 0 players moved; `Central Mid` 17 → 22 metrics, 99 of 102 players re-scored, position average 3.1223 → 3.1252, largest single move 0.29; 197 of 6,951 scorecards changed platform-wide. 972 tests pass. See `tests/test_midfield_archetypes.py` for the reasoning. | — (resolved) | — |
 | B3 | **Real financial models** | needs the club's real wage framework CSV | drop-in replaces the modelled wage grid; makes the money layer decision-grade |
 
 **B1 incident — contract/foot/height data destroyed, 11 Aug 2026 — RESOLVED, recovered the same day:**

@@ -27,6 +27,7 @@ import streamlit as st
 
 from lofc.dashboard.loaders import competition_name_by_id, get_engine
 from lofc.dashboard.session import go_to_player
+from lofc.model.scorecard import peer_pool_sizes, pool_is_thin
 from lofc.store import squads as store_squads
 
 
@@ -128,6 +129,17 @@ def loans_frame(season_id: int, rating_season_id: int) -> pd.DataFrame:
         ORDER BY l.club_name, l.loan_ends NULLS LAST, l.player_name
         """,
         get_engine(), params={"cur": season_id, "prev": rating_season_id})
+
+
+@st.cache_data(ttl=300)
+def _season_scorecards(season_id: int) -> pd.DataFrame:
+    """The live season's All-Metrics scorecards, for the "This season" column and its
+    peer-pool gate. 300s, matching the other loaders on this page."""
+    return pd.read_sql(
+        "SELECT player_id, competition_id, season_id, position_group, objective_composite "
+        "FROM player_scorecards WHERE season_id = %(s)s AND archetype = 'All Metrics' "
+        "AND objective_composite IS NOT NULL",
+        get_engine(), params={"s": season_id})
 
 
 @st.cache_data(ttl=300)
@@ -286,6 +298,76 @@ def months_left(when, today: datetime.date | None = None) -> float | None:
     return (end.year - today.year) * 12 + (end.month - today.month)
 
 
+# Position falls back to last season where a player has not featured, marked in the column so
+# the reader can tell an observed position from an inferred one. The filter must match on the
+# bare position, or "Centre Back" and "Centre Back (last season)" become two separate choices.
+_FALLBACK_SUFFIX = " (last season)"
+
+
+def _bare_position(value) -> str | None:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    text = str(value)
+    return text[: -len(_FALLBACK_SUFFIX)] if text.endswith(_FALLBACK_SUFFIX) else text
+
+
+def position_options(frame: pd.DataFrame) -> list[str]:
+    """"All" plus every position present, de-suffixed and sorted."""
+    if frame.empty or "Position" not in frame.columns:
+        return ["All"]
+    bare = {p for p in (_bare_position(v) for v in frame["Position"]) if p}
+    return ["All"] + sorted(bare)
+
+
+def filter_by_position(frame: pd.DataFrame, position: str) -> pd.DataFrame:
+    """Rows for one position, or everything when "All".
+
+    Players whose position falls back to last season are INCLUDED: a registered signing who
+    has not featured yet still has a known position, and he is exactly who a January search is
+    looking for. A player with no known position at all is excluded from a specific filter --
+    he cannot be asserted into a position group.
+    """
+    if position == "All" or frame.empty or "Position" not in frame.columns:
+        return frame
+    return frame[frame["Position"].map(_bare_position) == position]
+
+
+def this_season_score(frame: pd.DataFrame, scores: pd.DataFrame, pool_sizes: dict,
+                      season_id: int | None = None) -> pd.DataFrame:
+    """`frame` plus a `This season` column: the LIVE season's composite, where it is rankable.
+
+    GATED by the same peer-pool floor the Players page enforces. A live-season composite is a
+    percentile within a league-position pool, and early in a season those pools are tiny -- a
+    player alone in his pool takes the 100th percentile on every metric by construction and
+    scores 4.90, above anything earned across a full season. Showing that here would
+    reintroduce on this page exactly what was removed from the ranking.
+
+    Blank therefore means "not yet rankable" -- either under 450 minutes, or too few peers --
+    never "missing". Returns a copy.
+    """
+    out = frame.copy()
+    keys = ["player_id", "competition_id", "season_id"]
+    # The squad frame is built from the Transfermarkt scrape and carries no season column --
+    # the page knows which season it is showing, so it is passed in rather than inferred.
+    if "season_id" not in out.columns and season_id is not None:
+        out["season_id"] = int(season_id)
+    if out.empty or scores.empty or "season_id" not in out.columns:
+        out["This season"] = pd.Series(dtype="float64")
+        return out
+    usable = scores[[not pool_is_thin(pool_sizes.get(
+        (int(r.competition_id), int(r.season_id), r.position_group)))
+        for r in scores.itertuples()]]
+    if usable.empty:
+        out["This season"] = pd.Series([float("nan")] * len(out), index=out.index)
+        return out
+    lookup = (usable[keys + ["objective_composite"]]
+              .drop_duplicates(keys).set_index(keys)["objective_composite"])
+    out["This season"] = lookup.reindex(pd.MultiIndex.from_frame(out[keys])).to_numpy()
+    if "season_id" not in frame.columns:
+        out = out.drop(columns=["season_id"])
+    return out
+
+
 def prepare(frame: pd.DataFrame, today: datetime.date | None = None) -> pd.DataFrame:
     """Display columns, in the order a recruiter reads them."""
     if frame.empty:
@@ -307,13 +389,17 @@ def prepare(frame: pd.DataFrame, today: datetime.date | None = None) -> pd.DataF
     # signal a loan is meant to answer.
     out["Also rated"] = out["alt_rating"]
     out["Also in"] = out["alt_competition_id"].map(names)
+    # Declared here so `prepare` produces every DISPLAY_COLUMN (the invariant the display
+    # contract tests hold), and FILLED by `this_season_score`, which needs the scorecards and
+    # the peer-pool sizes. A page rendered without that call shows blanks, never a KeyError.
+    out["This season"] = pd.Series([float("nan")] * len(out), index=out.index)
     return out.rename(columns={
         "team_name": "Club", "player_name": "Player", "position_group": "Position",
         "minutes": "Minutes", "foot": "Foot", "nationality": "Nationality",
         "last_season_rating": "Last season"})
 
 
-DISPLAY_COLUMNS = ["Club", "Player", "Position", "Age", "Minutes", "Last season",
+DISPLAY_COLUMNS = ["Club", "Player", "Position", "Age", "Minutes", "This season", "Last season",
                    "Rated in", "Also rated", "Also in", "Contract to", "Months left",
                    "On loan from", "Loan ends", "Foot", "Nationality"]
 
@@ -368,6 +454,10 @@ def render(season_id: int, rating_season_id: int, season_label: str,
                f"player. Ratings are {rating_label} — this season is not scored yet.")
 
     frame = prepare(registered_squad_frame(season_id, rating_season_id))
+    # This season's rating where it is rankable -- gated by the same peer-pool floor the
+    # Players page uses, so a pool-of-one 4.90 cannot appear here after being removed there.
+    _live_cards = _season_scorecards(season_id)
+    frame = this_season_score(frame, _live_cards, peer_pool_sizes(_live_cards), season_id)
     # Before anything else on the page: is this the real squad list, or the appearance-based
     # fallback? `scraped_squads()` is @st.cache_data, so this second call is free.
     warning = squad_source_warning(len(scraped_squads()), len(frame))
@@ -378,13 +468,15 @@ def render(season_id: int, rating_season_id: int, season_label: str,
         return
 
     names = competition_name_by_id()
-    c1, c2, c3 = st.columns([2, 2, 3])
+    c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
     league = c1.selectbox("League", ["All"] + sorted(frame["League"].unique()))
     view = frame if league == "All" else frame[frame["League"] == league]
     club = c2.selectbox("Club", ["All"] + sorted(view["Club"].dropna().unique()))
     if club != "All":
         view = view[view["Club"] == club]
-    show = c3.radio("Show", ["Everyone", "On loan only", "Contract expiring (under 12 months)"],
+    position = c3.selectbox("Position", position_options(view))
+    view = filter_by_position(view, position)
+    show = c4.radio("Show", ["Everyone", "On loan only", "Contract expiring (under 12 months)"],
                     horizontal=True, label_visibility="visible")
 
     if show == "On loan only":
@@ -416,6 +508,11 @@ def render(season_id: int, rating_season_id: int, season_label: str,
         on_select="rerun", selection_mode="single-row", key="squads_table",
         column_config={
             "Age": st.column_config.NumberColumn("Age", format="%.1f", width="small"),
+            "This season": st.column_config.NumberColumn(
+                "This season", format="%.2f",
+                help="This season's rating, where enough of his league-position peers have "
+                     "played 450+ minutes for a ranking to mean anything. Blank = not yet "
+                     "rankable, not missing."),
             "Position": st.column_config.TextColumn(
                 "Position", help="Where he has played THIS season. Marked '(last season)' "
                                  "where he has not featured yet."),

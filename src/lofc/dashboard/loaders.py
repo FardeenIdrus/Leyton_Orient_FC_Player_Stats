@@ -15,7 +15,7 @@ from sqlalchemy import create_engine
 from lofc.config import settings
 from lofc.constrain.filters import build_candidates
 from lofc.dashboard.labels import LABELS
-from lofc.dashboard.seasons import SEASON_REF_DATE
+from lofc.dashboard.seasons import SEASON_REF_DATE, age_reference_date
 from lofc.model import assessment_status
 from lofc.model import club_framework as cf
 from lofc.model import metric_registry as reg
@@ -98,7 +98,11 @@ def load_candidates(wage_ceiling_multiplier: float, season_id: int | None = None
     # so age is not limited to valued EFL players. The valuations age (EFL only) is the fallback
     # for the rare player with no birth date. Implausible results are ignored, not shown.
     out["birth_date"] = pd.to_datetime(out["birth_date"], errors="coerce")
-    ref = out["season_id"].map(SEASON_REF_DATE)
+    # Per-season reference date: a completed season keeps its fixed midpoint, the LIVE season
+    # uses today. SEASON_REF_DATE[319] is 2027-01-01, so mapping it directly made every
+    # 2026/27 player up to a year too old (see seasons.age_reference_date).
+    ref = out["season_id"].map(
+        lambda sid: age_reference_date(int(sid), settings.live_season_id))
     dob_age = ((ref - out["birth_date"]).dt.days / 365.25).round(1)
     dob_age = dob_age.where(dob_age.between(14, 50))          # drop nonsense before using
     # pd.to_numeric (not a bare fallback): the EFL-only valuations "age" being replaced here
@@ -425,7 +429,7 @@ def load_trajectory() -> pd.DataFrame:
     mover has one row per league, deliberately: rates are league-relative.
     """
     return pd.read_sql(
-        "SELECT player_id, season_id, season_name, competition_name, team_name, "
+        "SELECT player_id, competition_id, season_id, season_name, competition_name, team_name, "
         "minutes, goals, assists, np_xg_p90, xa_p90, "
         "save_pct, gk_saves_p90, tackles_p90, interceptions_p90, pass_completion_pct "
         "FROM player_season_metrics ORDER BY season_id DESC", get_engine())

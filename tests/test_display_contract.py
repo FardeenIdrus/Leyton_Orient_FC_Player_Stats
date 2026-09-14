@@ -143,3 +143,16 @@ def test_the_contract_snapshot_date_comes_from_the_data_not_a_file_mtime():
     from lofc.dashboard import seasons
     source = inspect.getsource(seasons.contract_data_date)
     assert "st_mtime" not in source, "contract_data_date is back on the file's mtime"
+
+
+def test_the_trajectory_loader_selects_the_keys_its_score_join_needs():
+    """`attach_season_scores` joins on player AND league AND season -- league, because 116
+    players hold two scorecards in one season and a looser join puts one number on both rows.
+    The loader did not SELECT competition_id, so the join raised KeyError for any player with
+    two seasons. It went unseen because the smoke-test player is Scottish Premiership, absent
+    from the EFL-only table the trajectory reads, so the code never ran."""
+    import inspect
+    from lofc.dashboard import loaders
+    source = inspect.getsource(loaders.load_trajectory)
+    for column in ("player_id", "competition_id", "season_id"):
+        assert column in source, f"load_trajectory does not select {column}"

@@ -77,17 +77,53 @@ def _veto_reasons(row: pd.Series, include_modelled: bool = True) -> list[str]:
             for value in [row.get(col)] if pd.notna(value) and value < cf.VETO_BAND]
 
 
+def attach_season_scores(rows: pd.DataFrame, scores: pd.DataFrame) -> pd.DataFrame:
+    """`rows` plus a `Score` column: the club composite that season row earned.
+
+    Joined on player AND league AND season, never player+season alone. 116 players hold two
+    scorecards in one season because they played in two leagues, and a loose join would put
+    one number on both rows -- losing exactly the level-step reading that makes those rows
+    worth showing (3.42 in League Two beside 4.00 in Premier League 2).
+
+    A season with no composite (under 450 minutes, or a pool too thin to rank) stays NaN. Zero
+    would be a claim about the player; blank is the fact.
+
+    NO TREND OR DELTA IS COMPUTED. Measured on the live data: of 2,184 players scored in both
+    complete seasons, the mean absolute season-on-season change is 0.49 for those who stayed
+    in the SAME league, against a population SD of 0.58 -- a ~0.85 SD swing is the normal
+    amount of movement, so an "improved/declined" flag would fire on nearly everyone and mean
+    little. Two complete seasons is a line, not a curve. Worth revisiting at four or five.
+
+    Returns a copy; the caller's frame is untouched.
+    """
+    out = rows.copy()
+    keys = ["player_id", "competition_id", "season_id"]
+    if out.empty:
+        out["Score"] = pd.Series(dtype="float64")
+        return out
+    lookup = (scores[keys + ["objective_composite"]]
+              .drop_duplicates(keys).set_index(keys)["objective_composite"])
+    idx = pd.MultiIndex.from_frame(out[keys])
+    out["Score"] = lookup.reindex(idx).to_numpy()
+    return out
+
+
 def _trajectory(player_id: int, role: str, key_prefix: str) -> None:
     """Season-by-season output for one player, role-relevant columns only."""
     rows = load_trajectory()
     rows = rows[rows["player_id"] == player_id]
     if len(rows) < 2:
         return
+    # Each season's own composite, joined on player+league+season (see attach_season_scores).
+    # The table showed output but not the rating -- the one number the rest of the platform
+    # ranks on -- so comparing two seasons meant changing the sidebar season and reopening.
+    rows = attach_season_scores(rows, _stored_scorecards())
     view = pd.DataFrame({
         "Season": rows["season_name"].str.replace("/20", "/", regex=False),
         "League": rows["competition_name"],
         "Club": rows["team_name"],
         "Minutes": rows["minutes"].round(0).astype(int),
+        "Score": rows["Score"].round(2),
     })
     if role == "goalkeeper":
         view["Save %"] = (rows["save_pct"] * 100).round(0)  # stored 0-1
@@ -102,11 +138,41 @@ def _trajectory(player_id: int, role: str, key_prefix: str) -> None:
         view["npxG/90"] = rows["np_xg_p90"].round(2)
         view["xA/90"] = rows["xa_p90"].round(2)
     st.markdown("**Season by season**")
-    st.dataframe(view, hide_index=True, width="stretch", key=f"{key_prefix}_trajectory")
+    st.dataframe(view, hide_index=True, width="stretch", key=f"{key_prefix}_trajectory",
+                 column_config={"Score": st.column_config.NumberColumn(
+                     "Score", format="%.2f",
+                     help="The club composite that season, in that league. Blank = not scored "
+                          "(under 450 minutes). Each is a rank against THAT league's peers, so "
+                          "two seasons in different leagues are not like-for-like.")})
     st.caption("Direction matters as much as level: improving output across seasons is a different "
-               "buy from a one-off year. Scores and prices on this page are for the latest season; "
-               "a league change between rows means the rates are not like-for-like (per-90 numbers "
-               "are relative to each league).")
+               "buy from a one-off year. A league change between rows means the rates and the "
+               "score are not like-for-like — both are relative to each league's own peers.")
+
+
+# Aggregate assessment status -> the badge vocabulary, so the ranked list, the watchlist and
+# the profile all say the same words for the same state. Mirrors watchlist.py's map.
+_AGGREGATE_TO_RAW_STATUS = {
+    assessment_status.NOT_ASSESSED: None,
+    assessment_status.AWAITING: "submitted",
+    assessment_status.CONFLICTED: scout_scores.CONFLICT,
+    assessment_status.SIGNED_OFF: "signed_off",
+}
+
+
+def assessed_column(statuses: pd.Series) -> pd.Series:
+    """The ranked list's "Assessed" column: one badge phrase per player.
+
+    DISPLAY ONLY. It never reorders the list and never touches a score -- scout input must not
+    influence `objective_composite`, which is and stays the ranking. This exists only because
+    the card showed the whole assessment while the list showed nothing, so telling an assessed
+    player from an unassessed one meant opening each in turn.
+
+    A missing status reads as "not assessed" rather than NaN: `attach()` left-joins, so a
+    player with no assessment row simply has none.
+    """
+    filled = statuses.fillna(assessment_status.NOT_ASSESSED)
+    return filled.map(lambda s: badges.for_status(
+        _AGGREGATE_TO_RAW_STATUS.get(s, None)).text)
 
 
 def _current_form_summary(rows: pd.DataFrame, player_id: int) -> dict[str, int] | None:
@@ -918,6 +984,17 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
         # every row whose pool is below MIN_PEERS_FOR_RANKING, so a rendered row always has
         # a real count.
         view["Peers"] = view["peer_count"].astype("Int64")
+        # Whether a scout has assessed this player. DISPLAY ONLY -- it never reorders the list
+        # and never touches a score; scout input must not influence objective_composite, which
+        # is the ranking. The card has always shown the full assessment; the list showed
+        # nothing, so telling an assessed player from an unassessed one meant opening each one.
+        # attach() LEFT joins, so adding the column can never drop a player from the ranking.
+        _season = int(view["season_id"].iloc[0]) if not view.empty else None
+        if "assessment_status" not in view.columns and _season is not None:
+            view = assessment_status.attach(view, load_assessment_status(_season))
+        view["Assessed"] = assessed_column(
+            view["assessment_status"] if "assessment_status" in view.columns
+            else pd.Series([None] * len(view), index=view.index))
         if lens:
             view["All-round"] = view["allround_composite"].round(2)
         # Contract expiry is REAL scraped data (not modelled), and the free-transfer market is a
@@ -958,7 +1035,7 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
                         "Peers"]
         if lens:
             display_cols.append("All-round")
-        display_cols += ["Performance", "Physical", "Measured", "Player type",
+        display_cols += ["Performance", "Physical", "Measured", "Assessed", "Player type",
                          "Contract", "Months left"]
         if show_money:
             display_cols += ["Market value", "Est. wage", "Below fair value",
@@ -984,6 +1061,9 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             "Physical": band("Physical", "The club-framework Physical dimension (1-5), where tracking exists."),
             "Measured": st.column_config.NumberColumn(
                 "Measured %", help="Share of the composite that could be measured from data.", format="%d%%"),
+            "Assessed": st.column_config.TextColumn(
+                "Assessed", help="Whether a scout has assessed this player. Does NOT affect "
+                                 "the ranking - scout input never moves the composite."),
             "Player type": st.column_config.TextColumn("Player type", help="Playing-style archetype."),
             "Contract": st.column_config.TextColumn(
                 "Contract", help="Contract expiry (MM/YYYY) from Transfermarkt. '—' = not known "

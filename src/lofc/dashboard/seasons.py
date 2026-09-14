@@ -130,3 +130,24 @@ def ranking_notice(n_ranked: int, n_withheld: int, season: str, complete_season:
                 f"**Squads & loans** lists them with this season's minutes and last season's "
                 f"rating.")
     return None
+
+
+def age_reference_date(season_id: int, live_season_id: int | None = None,
+                       today: datetime.date | None = None):
+    """The date a player's age is measured at, for one season. None for an unknown season.
+
+    A COMPLETED season uses its fixed midpoint (`SEASON_REF_DATE`), so the age stays put: a
+    player WAS 24.2 while producing his 2025/26 numbers, and that does not change because
+    time passes. The age sits beside the performance it belongs to.
+
+    The LIVE season uses TODAY. Its midpoint is in the future -- `SEASON_REF_DATE[319]` is
+    2027-01-01 -- so measuring against it made every 2026/27 player up to a year too old:
+    Leon Chambers-Parillon read 25.2 on 2026-09-14 against an actual 24.9 (born 2001-11-05,
+    Transfermarkt says 24). Age is a recruitment FILTER, so an inflated age pushes a player
+    across a maximum-age threshold he has not reached.
+
+    `today` is injectable so the behaviour is testable without freezing the clock.
+    """
+    if live_season_id is not None and season_id == live_season_id:
+        return pd.Timestamp(today or datetime.date.today())
+    return SEASON_REF_DATE.get(season_id)
