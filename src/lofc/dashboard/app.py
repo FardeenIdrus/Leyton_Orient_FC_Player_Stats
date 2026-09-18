@@ -43,9 +43,11 @@ from lofc.dashboard.controls import synced_budget, synced_min_minutes, synced_wa
 from lofc.dashboard.loaders import (
     available_seasons, get_engine, league_names, load_candidates, load_metric_values,
     load_percentiles, load_scorecards, load_scorecards_archetype, load_wage_framework,
-    max_minutes, player_context_lookup, player_names, position_and_league_for)
+    load_loan_status, max_minutes, player_context_lookup, player_names,
+    position_and_league_for)
 from lofc.dashboard.seasons import (
-    CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_mask, default_season_id,
+    CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, LOAN_ANY, LOAN_FILTERS, contract_mask,
+    default_season_id, loan_data_date, loan_mask,
     ranking_notice, season_name_for)
 from lofc.dashboard.session import (
     force_reload_after_logout, peek_carry, register_pages, require_login, restore_from_cookie,
@@ -200,6 +202,18 @@ def main() -> None:
              "shows (6 or fewer). Contract dates come from the Transfermarkt scrape and are largely "
              "EFL-only; the number of players hidden for having no known date is shown on the "
              "Players tab.")
+    # Loan status. The date lives in THIS help text rather than the page's "About this list"
+    # expander (where the contract snapshot date sits, collapsed and below the table, so in
+    # practice unread): it matters at the moment someone filters on it. And it matters more
+    # for loans than contracts -- Transfermarkt cannot be scraped from the server (AWS WAF),
+    # so loan data only moves when a human runs the scrape and pushes it (register M1).
+    _loan_as_of = loan_data_date()
+    loan_choice = st.sidebar.selectbox(
+        "Loan status", LOAN_FILTERS,
+        help="Loan status is current, not the selected season — the 'On loan at' column "
+             "shows where he is now."
+             + (f" Loan data as of {_loan_as_of}, updated manually." if _loan_as_of
+                else " No loan data loaded."))
     foot_choice = st.sidebar.selectbox(
         "Preferred foot", ["Any", "Left", "Right"],
         help="Left/Right includes two-footed players. Only known feet are shown when set.")
@@ -279,6 +293,14 @@ def main() -> None:
     pool = pool.merge(ranking[sc_cols], on=keys3, how="left").merge(all_round, on=keys3, how="left")
     # Signable = affordable (fee + wage). The old on-profile/Style-fit gate is dropped: the
     # platform ranks everyone on the club composite and never excludes on a quality threshold.
+    # Loan status joined on player_id only -- a loan is a fact about the player TODAY, not
+    # about the season being ranked, so it deliberately does not key on season.
+    _loans = load_loan_status()
+    pool = pool.merge(_loans, on="player_id", how="left")
+    pool["on_loan"] = pool["on_loan"].fillna(False)
+    _loan_filter = loan_mask(pool["on_loan"], pool["loan_ends"], loan_choice)
+    if _loan_filter is not None:
+        pool = pool[_loan_filter]
     pool["qualifies"] = pool["affordable_fee"] & pool["affordable_wage"]
     # How many players share each row's peer pool -- counted from the season's FULL scorecard
     # set (`ranking`), never from `pool`, because a peer group is a property of the data and
@@ -340,7 +362,8 @@ def main() -> None:
     def _players_page():
         _season_banner()
         _players(st.container(), pool, position, percentiles, metrics, metric_values,
-                 search_index, archetype, show_money, contract_horizon, contract_unknown)
+                 search_index, archetype, show_money, contract_horizon, contract_unknown,
+                 loan_filter_active=(loan_choice != LOAN_ANY))
 
     def _compare_page():
         _season_banner()

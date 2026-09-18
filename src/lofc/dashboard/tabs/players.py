@@ -144,9 +144,7 @@ def _trajectory(player_id: int, role: str, key_prefix: str) -> None:
                      help="The club composite that season, in that league. Blank = not scored "
                           "(under 450 minutes). Each is a rank against THAT league's peers, so "
                           "two seasons in different leagues are not like-for-like.")})
-    st.caption("Direction matters as much as level: improving output across seasons is a different "
-               "buy from a one-off year. A league change between rows means the rates and the "
-               "score are not like-for-like — both are relative to each league's own peers.")
+
 
 
 # Aggregate assessment status -> the badge vocabulary, so the ranked list, the watchlist and
@@ -157,6 +155,60 @@ _AGGREGATE_TO_RAW_STATUS = {
     assessment_status.CONFLICTED: scout_scores.CONFLICT,
     assessment_status.SIGNED_OFF: "signed_off",
 }
+
+
+def season_output_heading(season_id: int) -> str:
+    """Heading for the season-output tiles, naming the season -- "**Season output — 2025/26**".
+
+    The profile stacks two sets of Goals / Assists / Minutes tiles. The lower set is headed
+    "Current form - <live season>"; this upper set had NO heading, so two identically-labelled
+    groups sat adjacent with only one saying which season it was. Alfie May read "Goals 7,
+    Assists 7, Minutes 2,371" directly above "Minutes 475, Goals 1, Assists 0".
+
+    Same format as the Current form heading deliberately, so the pair reads as a matched set.
+    """
+    return f"**Season output — {season_name_for(int(season_id))}**"
+
+
+def composite_tile_label(season_id: int, archetype: str) -> str:
+    """The Composite tile's label, always naming its season -- "Composite · 2025/26".
+
+    The profile shows "Current form - 2026/27" immediately above this tile, and a reader
+    attaches a number to the heading above it, so the composite (the SELECTED season, normally
+    2025/26) read as a current-season figure. The caption there compounded it: it said "not a
+    rating" and a rating appeared directly beneath.
+
+    Fixed in the label rather than with more prose. A caption written to explain an adjacency
+    means the adjacency is the defect, and a hard-coded caption goes stale -- two on this page
+    already did. A label built from the data cannot.
+    """
+    season = season_name_for(int(season_id))
+    lens = f" ({archetype})" if archetype != cf.DEFAULT_ARCHETYPE else ""
+    return f"Composite{lens} · {season}"
+
+
+def on_loan_at_column(club_name: pd.Series, parent_club: pd.Series) -> pd.Series:
+    """Where a player is playing NOW, and who owns him -- "Sheffield United (from Southampton FC)".
+
+    The Players page shows one season at a time, so its Club column is the club he played for
+    in THAT season. Loans exist only for the current season. Filtering to loans therefore
+    selected rows on a current-season fact and showed a previous-season club: measured,
+    208 of 221 rows named a club the player had already left, because the loan is usually what
+    moved him. Ben Brereton Díaz read "Derby County" while on loan at Sheffield United from
+    Southampton -- every part correct, the row simply silent about where he is.
+
+    Blank for a player not on loan. Where the owner is unknown the current club is still named:
+    where he is playing is the more useful half and should not be withheld for a missing
+    parent.
+    """
+    def one(club, parent):
+        if club is None or (not isinstance(club, str) and pd.isna(club)):
+            return ""
+        if parent is None or (not isinstance(parent, str) and pd.isna(parent)):
+            return str(club)
+        return f"{club} (from {parent})"
+    return pd.Series([one(c, p) for c, p in zip(club_name, parent_club)],
+                     index=club_name.index, dtype=object)
 
 
 def assessed_column(statuses: pd.Series) -> pd.Series:
@@ -209,25 +261,6 @@ def _current_form_summary(rows: pd.DataFrame, player_id: int) -> dict[str, int] 
     }
 
 
-def current_form_caption(has_rating: bool) -> str:
-    """What to say under the current-form tiles, given whether this player is SCORED in the
-    live season.
-
-    This used to be one hard-coded string asserting that too little of the season had been
-    played for a composite and that the dimension tiles were from the player's most recent
-    FULL season. Both were true when written -- nobody in 2026/27 had cleared 450 minutes --
-    and both went false the moment players did: by 2026-09-12, 504 had a 2026/27 composite, so
-    the caption denied a rating displayed directly above it.
-
-    Deliberately short. The section is already headed "Current form" and the tiles are already
-    labelled; the only claim worth repeating is that these are counts rather than a score.
-    Long disclaimers train readers to skip captions, including the ones that matter.
-    """
-    if has_rating:
-        return "Season-to-date counts, not a rating."
-    return "Season-to-date counts, not a rating — under the 450-minute minimum to be scored."
-
-
 def _current_form(player_id: int, has_rating: bool = False) -> None:
     """Current-season form as plain facts, alongside the (older) scored season shown by the
     rest of the profile -- NOT a rating. 2026/27 has real data but nobody is near the 450-
@@ -248,7 +281,12 @@ def _current_form(player_id: int, has_rating: bool = False) -> None:
     c1.metric("Minutes", f"{summary['minutes']:,}", border=True)
     c2.metric("Goals", summary["goals"], border=True)
     c3.metric("Assists", summary["assists"], border=True)
-    st.caption(current_form_caption(has_rating))
+    # No caption. The section is headed "Current form - <season>", the tiles are labelled
+    # Minutes / Goals / Assists, and the Composite tile below now names its OWN season
+    # (composite_tile_label), so nothing here is ambiguous. The caption that stood here said
+    # "not a rating" immediately above a rating, which read as denying the number below it.
+    if not has_rating:
+        st.caption("Not enough minutes yet to be scored this season (450 needed).")
 
 
 def _strengths_weaknesses(percentiles: pd.DataFrame, player_id: int, comp_id: int,
@@ -492,6 +530,9 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
         value = mv.get(per90_col)
         return f"{round(float(value) * minutes / 90):,}" if pd.notna(value) and minutes else "—"
 
+    # Names its season, matching the "Current form - <season>" heading below it. Without it
+    # two identical sets of Goals/Assists/Minutes tiles sat adjacent, only one of them labelled.
+    st.markdown(season_output_heading(int(row["season_id"])))
     o1, o2, o3 = st.columns(3)
     if role == "goalkeeper":
         # save_pct/gk_saves_p90 are retired StatsBomb columns, NULL for every goalkeeper in
@@ -555,7 +596,7 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
     fmt = lambda v: f"{v:.2f}" if pd.notna(v) else "—"
     has_value = show_money and pd.notna(row.get("market_value_eur"))
     cols = st.columns(5 if has_value else 3)
-    comp_label = f"Composite ({archetype})" if archetype != cf.DEFAULT_ARCHETYPE else "Composite"
+    comp_label = composite_tile_label(int(row["season_id"]), archetype)
     # Where he actually stands, stated in the same breath as the number. The player report
     # has quoted "3rd of 92" since it was built; this screen -- the one recruiters work from
     # -- did not, so the same player read differently on the two surfaces. Both now call
@@ -719,7 +760,7 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
              metric_values: pd.DataFrame, search_index: pd.DataFrame,
              archetype: str = cf.DEFAULT_ARCHETYPE,
              show_money: bool = False, contract_horizon: str = DEFAULT_CONTRACT_HORIZON,
-             contract_unknown: int = 0) -> None:
+             contract_unknown: int = 0, loan_filter_active: bool = False) -> None:
     """The one workspace: a composite-ranked list of players (master) with a full player
     detail (detail) opened by clicking a row or searching. Money is an opt-in layer."""
     with tab:
@@ -992,6 +1033,11 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
         _season = int(view["season_id"].iloc[0]) if not view.empty else None
         if "assessment_status" not in view.columns and _season is not None:
             view = assessment_status.attach(view, load_assessment_status(_season))
+        # Where he is playing NOW. Only meaningful when the loan filter is engaged, and blank
+        # for 94% of players otherwise, so it is added to the table only in that mode -- this
+        # is already a ~50-column view.
+        if {"loan_club", "parent_club"} <= set(view.columns):
+            view["On loan at"] = on_loan_at_column(view["loan_club"], view["parent_club"])
         view["Assessed"] = assessed_column(
             view["assessment_status"] if "assessment_status" in view.columns
             else pd.Series([None] * len(view), index=view.index))
@@ -1035,8 +1081,12 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
                         "Peers"]
         if lens:
             display_cols.append("All-round")
-        display_cols += ["Performance", "Physical", "Measured", "Assessed", "Player type",
-                         "Contract", "Months left"]
+        display_cols += ["Performance", "Physical", "Measured", "Assessed"]
+        # Placed directly after the season Club so the two read together: Club is the season
+        # being viewed, On loan at is today. Only when the loan filter is engaged.
+        if loan_filter_active and "On loan at" in view.columns:
+            display_cols.insert(display_cols.index("Club") + 1, "On loan at")
+        display_cols += ["Player type", "Contract", "Months left"]
         if show_money:
             display_cols += ["Market value", "Est. wage", "Below fair value",
                              "Fee in budget", "Wages in budget"]
@@ -1061,6 +1111,9 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             "Physical": band("Physical", "The club-framework Physical dimension (1-5), where tracking exists."),
             "Measured": st.column_config.NumberColumn(
                 "Measured %", help="Share of the composite that could be measured from data.", format="%d%%"),
+            "On loan at": st.column_config.TextColumn(
+                "On loan at", help="Where he is playing THIS season, and who owns him. The "
+                                   "Club column is the season you are viewing."),
             "Assessed": st.column_config.TextColumn(
                 "Assessed", help="Whether a scout has assessed this player. Does NOT affect "
                                  "the ranking - scout input never moves the composite."),

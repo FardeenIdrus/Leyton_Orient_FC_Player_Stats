@@ -621,3 +621,28 @@ def position_and_league_for(player_id: int, season_id: int):
     row = d.iloc[0]
     return str(row["position_group"]), competition_name_by_id().get(
         int(row["competition_id"]))
+
+
+@st.cache_data(ttl=600)
+def load_loan_status() -> pd.DataFrame:
+    """One row per player currently on loan: `on_loan` and `loan_ends`, for the sidebar filter.
+
+    Keyed on player_id ALONE, not on season: a loan is a fact about the player today, while
+    the ranking beside it is last season's. Deliberate -- whether he is on loan now is what a
+    January decision turns on -- and stated in the filter's help text.
+
+    Where a player has more than one loan row we keep the one with the LATEST end date, so an
+    old, expired loan cannot mask a live one -- and `loan_club`/`parent_club` come from that
+    SAME row, never mixed across two loans.
+    """
+    live = settings.live_season_id
+    and_season = f"AND season_id = {int(live)}" if live is not None else ""
+    frame = pd.read_sql(
+        "SELECT DISTINCT ON (player_id) player_id, loan_ends, "
+        "       club_name AS loan_club, parent_club "
+        f"FROM player_loans WHERE player_id IS NOT NULL {and_season} "
+        "ORDER BY player_id, loan_ends DESC NULLS LAST",
+        get_engine())
+    frame["on_loan"] = True
+    frame["loan_ends"] = pd.to_datetime(frame["loan_ends"], errors="coerce")
+    return frame

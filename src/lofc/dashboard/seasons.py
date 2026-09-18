@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from sqlalchemy import text as sa_text
 
 from lofc.config import SEASON_REF_DATE, settings  # SEASON_REF_DATE re-exported for callers
 
@@ -151,3 +152,68 @@ def age_reference_date(season_id: int, live_season_id: int | None = None,
     if live_season_id is not None and season_id == live_season_id:
         return pd.Timestamp(today or datetime.date.today())
     return SEASON_REF_DATE.get(season_id)
+
+
+# --- loan status -----------------------------------------------------------------------
+# The sidebar's loan filter, shaped like CONTRACT_HORIZONS above. The HORIZON option is the
+# one that earns its place: measured on the live data, 259 of 293 linked loans run to summer
+# 2027 or later and only 30 end within four months, so a flat "on loan" filter returns mostly
+# players nobody can act on for nine months. `loan_ends` is populated for 100% of loans.
+LOAN_ANY = "Any"
+LOAN_ON_NOW = "On loan now"
+LOAN_ENDING = "Loan ends within 6 months"
+LOAN_NOT = "Not on loan"
+LOAN_FILTERS = [LOAN_ANY, LOAN_ON_NOW, LOAN_ENDING, LOAN_NOT]
+_LOAN_HORIZON_DAYS = 183
+
+
+def loan_mask(on_loan: pd.Series, loan_ends: pd.Series, option: str,
+              today: pd.Timestamp | None = None) -> pd.Series | None:
+    """Boolean mask for a loan-status option; None means "no filter" (the default).
+
+    Returns None rather than an all-True mask for "Any", matching `contract_mask`: every gate
+    on this platform is opt-in, and a caller can skip the filtering entirely.
+
+    "On loan now" excludes a loan whose end date has already passed -- it is on record, but he
+    is not on loan today -- while KEEPING a loan with no end date, since an unknown date is not
+    evidence the loan is over. The horizon excludes both: a loan with no end date cannot be
+    judged against a deadline, so it is left out rather than guessed at, the same rule
+    `contract_mask` applies to an unknown contract date.
+
+    NOTE the cross-season fact this encodes: loan status is TODAY, while the composite beside
+    it was earned last season. Deliberate -- whether a player is on loan now is what a January
+    decision turns on -- but the caller must say so on screen.
+    """
+    today = today or pd.Timestamp.now().normalize()
+    has_loan = on_loan.fillna(False).astype(bool)
+    ends = pd.to_datetime(loan_ends, errors="coerce")
+    live = has_loan & (ends.isna() | (ends >= today))
+
+    if option == LOAN_ON_NOW:
+        return live
+    if option == LOAN_ENDING:
+        return live & ends.notna() & (ends <= today + pd.Timedelta(days=_LOAN_HORIZON_DAYS))
+    if option == LOAN_NOT:
+        return ~has_loan
+    return None
+
+
+@st.cache_data(ttl=600)
+def loan_data_date() -> str | None:
+    """When the loan scrape last ran, from `MAX(player_loans.scraped_at)`.
+
+    Shown in the loan filter's own help text rather than in the page's "About this list"
+    expander, where the contract snapshot date sits: that expander is collapsed and below the
+    table, so in practice nobody reads it. The date matters at the moment someone filters on
+    it. It matters MORE for loans than for contracts -- loans change constantly during a
+    window, and Transfermarkt cannot be scraped from the server (AWS WAF), so this data only
+    moves when a human runs the scrape on a workstation and pushes it. See register M1.
+    """
+    try:
+        from lofc.dashboard.loaders import get_engine
+        with get_engine().connect() as conn:
+            value = conn.execute(
+                sa_text("SELECT MAX(scraped_at) FROM player_loans")).scalar()
+        return pd.to_datetime(value).strftime("%d %b %Y") if value is not None else None
+    except Exception:
+        return None
