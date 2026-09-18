@@ -27,6 +27,7 @@ import re
 import pandas as pd
 from bs4 import BeautifulSoup
 
+from lofc.config import settings
 from lofc.ingest.transfermarkt_common import fetch
 from lofc.ingest.transfermarkt_efl import LEAGUES, club_pages, current_tm_season
 
@@ -236,6 +237,28 @@ def load(engine, frame: pd.DataFrame, season_id: int) -> int:
     return len(frame)
 
 
+def resolve_season_id(explicit: int | None, tm_season: int,
+                      live_season_id: int | None) -> int:
+    """OUR season id to stamp these loans with.
+
+    `scrape_all` works in TRANSFERMARKT season numbers (2026); the platform works in its own
+    (319). This must return the platform's, or the rows land under a key nothing reads: run
+    with no arguments, the default used to fall back to `tm_season`, writing 411 loans under
+    season_id 2026 while every reader filters on 319. Three runs looked like silent failures.
+
+    Refuses rather than guessing when no live season is configured -- writing under a guessed
+    key is exactly how this happened.
+    """
+    if explicit is not None:
+        return int(explicit)
+    if live_season_id is None:
+        raise ValueError(
+            "No LIVE_SEASON_ID configured, so there is no season to stamp these loans with. "
+            "Pass --season-id explicitly (the platform's id, e.g. 319 -- NOT the Transfermarkt "
+            f"season {tm_season}).")
+    return int(live_season_id)
+
+
 def main() -> None:
     from lofc.store.load import get_engine
     parser = argparse.ArgumentParser(description=__doc__)
@@ -246,7 +269,8 @@ def main() -> None:
     args = parser.parse_args()
     season = args.season or current_tm_season()
     frame = scrape_all(season)
-    load(get_engine(), frame, args.season_id or season)
+    load(get_engine(), frame,
+         resolve_season_id(args.season_id, season, settings.live_season_id))
 
 
 if __name__ == "__main__":
