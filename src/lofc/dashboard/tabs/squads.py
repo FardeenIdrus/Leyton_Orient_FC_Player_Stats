@@ -132,6 +132,19 @@ def loans_frame(season_id: int, rating_season_id: int) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=300)
+def player_rated_rows(player_id: int) -> pd.DataFrame:
+    """Every league-season this player has a rating in, with his minutes -- the input to
+    `best_profile_target`. Small (a handful of rows per player) and cached."""
+    return pd.read_sql(
+        "SELECT s.competition_id, s.season_id, m.minutes, s.objective_composite "
+        "FROM player_scorecards s "
+        "JOIN player_metrics_neutral m ON m.player_id = s.player_id "
+        " AND m.competition_id = s.competition_id AND m.season_id = s.season_id "
+        "WHERE s.player_id = %(p)s AND s.archetype = 'All Metrics'",
+        get_engine(), params={"p": int(player_id)})
+
+
+@st.cache_data(ttl=300)
 def _season_scorecards(season_id: int) -> pd.DataFrame:
     """The live season's All-Metrics scorecards, for the "This season" column and its
     peer-pool gate. 300s, matching the other loaders on this page."""
@@ -309,6 +322,33 @@ def _bare_position(value) -> str | None:
         return None
     text = str(value)
     return text[: -len(_FALLBACK_SUFFIX)] if text.endswith(_FALLBACK_SUFFIX) else text
+
+
+def best_profile_target(rows: pd.DataFrame) -> tuple[int, int] | None:
+    """(competition_id, season_id) where this player's profile should open, or None.
+
+    The click used to carry THIS season's competition_id with LAST season's season_id -- one
+    from each -- so a player who changed league over the summer was looked up in a
+    league-season he had barely played in. Phillip Chinedu, at Leyton Orient in 2026/27, was
+    looked up in League One 2025/26 where he has 14 minutes and no rating, and no profile
+    rendered. It hits most of a 2026/27 squad, since a summer move is the normal case.
+
+    The rule: his most recent season WITH A RATING, and within it the league he played most
+    minutes in. That row best represents him, and it is guaranteed to exist because it is
+    chosen from the rows he actually has -- the previous version constructed a pair that might
+    not correspond to any row at all.
+
+    None when he has no rating anywhere; the caller shows a message rather than opening
+    somebody else's profile.
+    """
+    if rows is None or rows.empty:
+        return None
+    rated = rows[rows["objective_composite"].notna()]
+    if rated.empty:
+        return None
+    latest = rated[rated["season_id"] == rated["season_id"].max()]
+    best = latest.sort_values("minutes", ascending=False).iloc[0]
+    return int(best["competition_id"]), int(best["season_id"])
 
 
 def position_options(frame: pd.DataFrame) -> list[str]:
@@ -554,8 +594,16 @@ def render(season_id: int, rating_season_id: int, season_label: str,
                 "seven leagues. His contract and loan details above are everything we "
                 "have. There is no profile to open.")
         else:
-            go_to_player(int(picked["player_id"]), int(picked["competition_id"]),
-                         int(rating_season_id))
+            # Pick a league-season he actually HAS a rating in, rather than pairing this
+            # season's league with last season's id -- see best_profile_target.
+            target = best_profile_target(player_rated_rows(int(picked["player_id"])))
+            if target is None:
+                st.info(
+                    f"**{picked['Player']}** has no rating in any season yet — he has not "
+                    "played 450 minutes in one of our seven leagues. His squad, contract and "
+                    "loan details above are everything we hold.")
+            else:
+                go_to_player(int(picked["player_id"]), target[0], target[1])
 
     d1, d2 = st.columns([1, 4])
     d1.download_button(
