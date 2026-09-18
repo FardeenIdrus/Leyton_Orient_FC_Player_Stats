@@ -73,6 +73,46 @@ ssh root@SERVER
 
 About 3 minutes, most of it the rebuild. The site stays up until the new containers swap in.
 
+
+### 4. The repository is PRIVATE — the server needs a deploy key
+
+It was public when the droplet was first provisioned, so `git pull` worked anonymously over
+HTTPS. Once it was made private that stopped, and `scripts/deploy.sh` failed at the pull with
+*"Password authentication is not supported for Git operations"*.
+
+**On a new or rebuilt server:**
+
+```bash
+ssh-keygen -t ed25519 -f /root/.ssh/id_ed25519 -N "" -C "lofc-platform-deploy"
+cat /root/.ssh/id_ed25519.pub
+```
+
+Add that key at **GitHub → repo → Settings → Deploy keys → Add deploy key**, titled after the
+machine (e.g. `lofc-platform (DigitalOcean)`). **Leave "Allow write access" unticked** — the
+server only ever pulls.
+
+Then switch the remote to SSH and confirm:
+
+```bash
+cd /opt/lofc
+git remote set-url origin git@github.com:FardeenIdrus/Leyton_Orient_FC_Player_Stats.git
+ssh -o StrictHostKeyChecking=accept-new -T git@github.com
+```
+
+`"Hi <repo>! You've successfully authenticated, but GitHub does not provide shell access."` is
+success, not an error.
+
+### 5. Production runs `main`
+
+Changed 2026-09-18. The deployed branch was previously `r3a0-injury-scrape`, which had become
+the trunk in practice while `main` sat weeks behind — a trap, since cloning `main` produced an
+old platform. Branch for a piece of work, merge to `main`, deploy `main`. Nothing else is
+deployed.
+
+```bash
+cd /opt/lofc && git checkout main
+```
+
 ### What to copy to a new server (~400 MB, never 21 GB)
 
 | Item | Size |

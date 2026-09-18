@@ -911,6 +911,75 @@ trajectory, methodology) and comes from the dump. Server pipeline is now **16 st
 
 **Verified:** 961 tests pass. Dashboard live over HTTPS, login works, Players opens on 2025/26.
 
+### 2026-09-18 — recruiter feedback: loan filter, season labelling, and a 35% profile bug
+
+**A loan-status filter on the Players page**, requested by the recruiters. Sidebar selector:
+*Any* (default) · *On loan now* · *Loan ends within 6 months* · *Not on loan*. The horizon
+option earns its place — **259 of 293 linked loans run to summer 2027 and only 30 end within
+four months**, so a flat on-loan filter buries the players who are actually gettable. Same
+reasoning as `contract_mask`, which asks WHEN a contract ends rather than whether one exists.
+
+**Loans are current-season; the Players page shows one selected season.** Filtering therefore
+paired a current fact with a previous season's club: measured, **208 of 221 rows named a club
+the player had already left**, because the loan is usually what moved him. Ben Brereton Díaz
+read "Derby County" (his 2025/26 club) while on loan at Sheffield United from Southampton — all
+three facts correct, the row simply silent about where he is. Fixed with an **"On loan at"**
+column, shown only when the filter is engaged, carrying the current club and the owner from the
+SAME loan row (latest end date, never mixed across two loans).
+
+**A blank-profile bug affecting 35% of squad members — found by one random click.**
+`squads.py` carried THIS season's `competition_id` with LAST season's `season_id`, a pair that
+often matched no row at all. Phillip Chinedu, at Leyton Orient in 2026/27, resolved to League
+One 2025/26 where he has 14 minutes and no rating, so nothing rendered. **Measured: 807 of
+2,293 squad players with a rating opened blank.** It hits any player who changed league over
+the summer — most of a 2026/27 squad, and exactly the cohort a recruiter cares about.
+`best_profile_target` now picks his most recent season WITH a rating and, within it, the league
+he played most minutes in — chosen FROM the rows he has rather than constructed from two. No
+rating anywhere shows a message instead of an empty page. **Predates the loan work.**
+
+**Age was measured against a FUTURE date for the live season.** `SEASON_REF_DATE[319]` is
+2027-01-01, so every 2026/27 player read up to a year too old — Leon Chambers-Parillon showed
+25.2 against an actual 24.9 (born 2001-11-05; Transfermarkt says 24). Age is a recruitment
+FILTER, so an inflated age pushes a player past a maximum-age threshold he has not reached.
+`seasons.age_reference_date` now uses the fixed midpoint for a COMPLETED season (he WAS 24.2
+while producing those numbers) and TODAY for the live one. `report/data.py::_age` had a dead
+`if False` branch and always used `now()`, so the report and the dashboard disagreed on every
+completed season; both now share one function.
+
+**Season labelling — the UX principle this session established.** Every number now states its
+own season in a LABEL, not a caption:
+- `Composite` → **`Composite · 2025/26`**. It sat directly beneath "Current form — 2026/27" and
+  read as a current-season figure; the caption there made it worse by saying "not a rating"
+  immediately above a rating.
+- The season-output tiles gained **"Season output — 2025/26"**. Two identical sets of
+  Goals/Assists/Minutes tiles sat adjacent with only the lower one labelled.
+- **Three captions removed**, plus the now-dead `current_form_caption` and its tests.
+
+> **The principle, for future work: a fact belongs in a LABEL or a COLUMN, never in a
+> paragraph. Wherever a caption exists to explain an adjacency, the adjacency is the defect.**
+> Two hard-coded captions on this page had already gone stale and were contradicting the data
+> beside them. A label built from the data cannot. **The Players page still carries ~15
+> captions worth auditing on this basis.**
+
+**Also landed:** an **Assessed** column on the ranked list (display only — no reorder, no score
+touched); each season's **Score** on the player card's season-by-season table, joined on player
+AND league AND season so a loanee's two rows keep their own numbers; a **Position filter** and a
+gated **"This season"** rating column on Squads & loans.
+
+**No season-on-season trend or delta is computed, deliberately.** Measured: of 2,184 players
+scored in both complete seasons, the mean absolute change is **0.49 for players who never
+changed league**, against a population SD of 0.58. A ~0.85 SD swing is the normal amount of
+movement, so an "improved/declined" verdict would fire on nearly everyone. Two complete seasons
+is a line, not a curve. Worth revisiting at four or five. Pinned by a test.
+
+**Two join-key bugs caught by the display-contract tests**, both the same shape — a key the
+source frame does not carry: `load_trajectory` did not SELECT `competition_id`, and the squad
+frame carries no `season_id` at all (it is a registered-squad list, not appearances). Both now
+pinned.
+
+**Verified:** 1,028 tests pass (was 965). `objective_composite` unchanged for Defensive Mid
+(3.0175) and Attacking Mid (3.0546).
+
 ### 2026-09-13 — midfield archetypes resolved; Central Mid gets the club's Box to Box list
 
 **The problem.** `Impect Data - Positional Metrics.xlsx` describes THREE midfielder types on its
@@ -966,6 +1035,20 @@ within the same pool — adding metrics reshuffles the order rather than inflati
 **Still open on midfield:** nothing. Box-to-Box has no capability of its own in the club's file —
 27 of its 36 lines are shared by all three archetypes and every remainder appears in Defensive or
 Attacking — so there is no fourth list to build.
+
+## 📦 Branching and deployment (changed 2026-09-18)
+
+**Production runs `main`.** Until 2026-09-18 the deployed branch was `r3a0-injury-scrape`,
+which had become the trunk in practice — 22 commits ahead of `main`, 0 behind — while `main`
+sat at an August state with no Squads & loans, no player report and no peer-pool guard. Anyone
+cloning `main` got a platform weeks out of date. The branch was fast-forward merged into `main`
+and the server switched to it.
+
+**The rule now:** branch for a piece of work, merge to `main`, deploy `main`. Nothing else is
+deployed. The server pulls over **SSH with a read-only deploy key** (register P16) because the
+repository is private.
+
+---
 
 ## 🔁 RECURRING MANUAL TASKS (nothing automates these — they are a person's job)
 
@@ -1044,6 +1127,8 @@ last international recognition (held in no ingested source); the cut-out player 
 | P7 | **Player report feature** — a per-player report for the Head of Recruitment, chairman and manager, modelled on the supplied reference. See the spec. | Requested 2026-08-28 |
 | P12 | **No way to withdraw or correct an assessment.** `store/assessments.py` has INSERT-only `save()` plus `sign_off()` and `reject()` — **no update of the prose and no delete, anywhere in the UI or CLI.** A typo, a summary written about the wrong player, or a test entry is PERMANENT and keeps rendering on the profile and on the one-page report stamped "Final". Revising means submitting a whole new assessment, with the wrong one left visible beside it forever. Found 2026-09-12 after test rows ("Testing scout summary") were discovered signed-off on a real player in production and had to be cleared by hand with SQL. **This is not what Decision 17 requires:** that decision forbids OVERWRITING someone's judgement silently, not withdrawing one's own mistake. `reject()` already proves the pattern — mark it, keep the row, stop it scoring. Proposed: a `withdraw` action available to an assessment's own AUTHOR while it is unsigned (and to a sign-off holder afterwards), setting `status='withdrawn'` with a reason; the row stays on record, attributed, and never scores. Needs a migration (status value), `resolve_bands` to ignore it, and a button on the profile. | Open — real gap, small design |
 | P13 | **The platform supports CONFIRMATION better than DISCOVERY — owner's central concern, raised 2026-09-12.** *"Recruiters are using it to check players they already know, rather than let the data help them discover players."* The design currently reinforces that: the default view is ONE position at a time sorted by composite (so you must already know what you are shopping for); search is BY NAME (a player you have already thought of); the watchlist only holds players someone already chose; and there is no surface anywhere that answers "show me something I don't know". Per-match alerting (P11) would INHERIT this flaw if scoped to the watchlist — it would tell a recruiter more about players they had already picked. **Deliberately NOT designed yet.** The owner's own view is that it "will need proper planning and a few iterations of the design to get right", and a first design here is likely to be wrong. Recorded as the problem statement and the evidence, not a proposed solution. Any discovery surface must respect the platform's existing honesty rules: no cross-league ordering without a league-strength adjustment (register: every league's mean composite is ~3.03 BY CONSTRUCTION), and no composite from a peer pool below `MIN_PEERS_FOR_RANKING`. | Open — the most valuable open question on the platform |
+| P15 | **~15 captions on the Players page assert facts that nothing re-checks.** Two have already gone stale and contradicted the data beside them: the current-form caption claimed no composite existed while one sat above it, and the ranked-list caption named 450 minutes as the only exclusion after the peer-pool gate added a second. Both are fixed; the class is not. **The principle established 2026-09-18: a fact belongs in a LABEL or a COLUMN, never in a paragraph — wherever a caption explains an adjacency, the adjacency is the defect.** A label built from the data cannot drift; a hard-coded sentence can. Worth a deliberate audit pass rather than fixing one at a time as they are noticed. | Open — UX debt |
+| P16 | **The GitHub repository is now PRIVATE, which broke server deploys.** It was public when the droplet was provisioned, so `git clone`/`git pull` worked anonymously over HTTPS; after it was made private the server had no credentials and `deploy.sh` failed at the pull with "Password authentication is not supported". Resolved 2026-09-18 with a **read-only deploy key** (`/root/.ssh/id_ed25519` on the server, registered under the repo's Deploy keys, write access NOT granted) and the remote switched from HTTPS to SSH. **`DEPLOY.md` documents this now** — a rebuilt server needs the same steps or it cannot pull. | Resolved, documented |
 | P14 | **STALE DATA IS INVISIBLE — no freshness date on screen, and nobody is told when a refresh fails.** Two distinct failures, both costly, logged together because both end as "the platform confidently shows old numbers". **(a) PASSIVE:** nothing on the dashboard says when the scoring data was last refreshed. Only CONTRACT dates carry an "as of" (`tabs/players.py:766` via `seasons.contract_data_date`). Verified 2026-09-12: `transfermarkt_squads.scraped_at`, `player_loans.scraped_at` and `player_injuries.created_at` all exist — so the MANUALLY refreshed data can report its age — while `player_metrics_neutral` and `player_scorecards`, which every score is built on and which refresh WEEKLY AND AUTOMATICALLY, carry **no timestamp at all**. **(b) ACTIVE:** `scripts/weekly_refresh.sh` writes `data/ops/last_failure` on failure and **nothing reads it**. A failed Monday cron leaves the dashboard serving last week's data, looking entirely normal. **This has already happened once:** on 2026-09-07 the 26/27 Impect data was three weeks stale while every figure computed from it was correct, and it was caught only because the Head of Recruitment noticed League One clubs had played five matches while the platform showed one — on a laptop, where someone at least knew when they last ran it. On a self-running server nobody holds that mental model. **Fix needs a decision, not just code:** one "last refreshed" date would itself be misleading, because Impect/SkillCorner now refresh weekly and automatically while Transfermarkt refreshes only when a human scrapes (M1) — so the date must be PER SOURCE. Impect/SkillCorner have no timestamp to read, so this needs a `pipeline_runs` record (stage, finished_at, rows) written by the pipeline. **Do before January**: that is when it matters most and when it will be watched least. | Open — do before the January window |
 | P11 | **Per-MATCH performance and physical tracking** (owner-flagged 2026-09-12 as "a big and important step"). Everything today is SEASON-AGGREGATED: Impect via `getPlayerIterationAverages`, SkillCorner via `get_physical(group_by="player")` — "one row per player already aggregated to the season". A season average is a LAGGING signal by construction: one exceptional match barely moves it, so it cannot answer "what changed this week", which is what watchlist alerting needs ("he hit a new top speed on Saturday", "three goals in two games"). **Both providers already expose the per-match layer under the current licences — verified 2026-09-12:** Impect `getPlayerMatchsums` / `getPlayerMatchScores` / `getMatches`; SkillCorner `get_physical` accepts a match-level `group_by` (and `get_match_*` endpoints exist). So this is a BUILD, not a licence or data-availability question. Needs: new tables at player×match grain, an ingest stage per provider, and a decision on retention/pull-time (one row per player per match rather than per season is a large multiple of today's volume — size it before building). **Scoring must not read it**: the composite is a season-level percentile and adding match noise would change what it measures. | Open — needs its own design |
 | P9 | **Transfermarkt scrape is workstation-only** — AWS WAF blocks datacentre IPs (2026-09-12). The server runs with `SKIP_TRANSFERMARKT_SCRAPE=true`; the three scrapes must be run locally and the CSVs pushed. Not fixable by engineering, and deliberately not bypassed. | Permanent constraint |
