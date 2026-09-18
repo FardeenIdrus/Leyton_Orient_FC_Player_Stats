@@ -977,7 +977,27 @@ source frame does not carry: `load_trajectory` did not SELECT `competition_id`, 
 frame carries no `season_id` at all (it is a registered-squad list, not appearances). Both now
 pinned.
 
-**Verified:** 1,028 tests pass (was 965). `objective_composite` unchanged for Defensive Mid
+**The loan scrape was writing to a season key nothing reads.** `transfermarkt_loans.py`'s
+`--season-id` defaulted to the TRANSFERMARKT season label (**2026**) rather than the platform's
+(**319**), so three consecutive runs wrote 411 fresh loans under `season_id = 2026` while every
+reader filtered on 319 and saw the 10 September data. It looked like the scrape was failing
+silently; it was succeeding into the wrong place. `resolve_season_id()` now defaults to
+`settings.live_season_id` and **raises rather than guessing** when none is configured — guessing
+is how this happened. **This is the SECOND bug of this exact shape**: on 2026-09-07 the loader
+DELETEd 319 while INSERTing 2026, which that fix corrected without fixing this default.
+**Lesson, and it is in the test docstring: check loan data by GROUPING on season, never by
+filtering to one — a wrong-key write is invisible to a filtered query.** Orphaned 2026 rows
+deleted on both machines. Loans now: **411 scraped 18 Sep, 303 linked** (was 398 / 10 Sep / 293).
+
+**Deployment changes made the same day:** the GitHub repository became **PRIVATE**, which broke
+`deploy.sh` at the pull (HTTPS password auth is not supported) — resolved with a **read-only
+deploy key** and the remote switched to SSH (register P16, DEPLOY.md §4). And **production now
+runs `main`**: the old deployed branch `r3a0-injury-scrape` was 22 commits ahead and 0 behind, so
+`main` was a trap for anyone cloning it. Fast-forward merged; the server tracks `main`.
+
+**Verified: 1,033 tests pass.**
+
+**Verified:** 1,028 tests pass (was 965) before the loan-scrape fix below. `objective_composite` unchanged for Defensive Mid
 (3.0175) and Attacking Mid (3.0546).
 
 ### 2026-09-13 — midfield archetypes resolved; Central Mid gets the club's Box to Box list
