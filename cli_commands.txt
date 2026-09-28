@@ -422,3 +422,16 @@ python -m lofc.ingest.transfermarkt_injuries
 rsync -avz data/reference/transfermarkt/ root@SERVER:/opt/lofc/data/reference/transfermarkt/
 # and on the SERVER, copy into the app volume (data/ is a Docker volume, not the host dir)
 # and re-run the loaders -- see DEPLOY.md, "Two constraints".
+
+# --- Scout reports: read the club's scouting sheet (READ-ONLY) -----------------------
+# Fetches the Google Sheet, upserts reports on submission_id, replaces the player
+# lookup, then resolves each report's player_id on name + date of birth. Stops without
+# touching the database when the sheet is unchanged, which is the usual outcome.
+# Needs SCOUT_SHEET_ID in .env and the service-account key at secrets/google-sheets.json.
+docker compose exec -T app python -m lofc.store.scout_reports
+# Load even when the sheet is unchanged (after a code change to the parsers):
+docker compose exec -T app python -m lofc.store.scout_reports --force
+# Report what the credential can see, without writing anything anywhere:
+docker compose exec -T app python -m lofc.ingest.scout_sheets
+# Re-resolve player links only (does not re-read the sheet):
+docker compose exec -T app python -m lofc.model.scout_report_link

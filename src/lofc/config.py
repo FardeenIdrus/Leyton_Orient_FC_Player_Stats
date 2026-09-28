@@ -8,6 +8,7 @@ file via pydantic-settings, so nothing sensitive lives in code. Import the share
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 import pandas as pd
 from pydantic import BaseModel, Field, model_validator
@@ -306,6 +307,15 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # --- Scout reporting sheet (Google Sheets, READ-ONLY) --------------------
+    # The club's scouts file match reports through a JotForm form, which writes
+    # them into a Google Sheet. The platform READS that sheet and never writes to
+    # it: the service-account key carries only `spreadsheets.readonly`, so Google
+    # itself rejects a write with HTTP 403 regardless of what this code does.
+    # SCOUT_SHEET_ID is the id from the sheet's URL, between /d/ and /edit.
+    scout_sheet_id: str | None = Field(default=None)
+    scout_sheet_credentials: str = Field(default="secrets/google-sheets.json")
+
     # --- Database -----------------------------------------------------------
     database_url: str = Field(
         default="postgresql+psycopg2://lofc:lofc@db:5432/lofc",
@@ -451,6 +461,16 @@ class Settings(BaseSettings):
     def skillcorner_authenticated(self) -> bool:
         """True when SkillCorner credentials are configured."""
         return bool(self.skillcorner_username and self.skillcorner_password)
+
+    @property
+    def scout_sheet_configured(self) -> bool:
+        """True when both the sheet id and a readable credentials file are present.
+
+        Checked rather than assumed: the credential is a file on disk, and a missing
+        one must stop the stage with a clear message instead of raising deep inside
+        the Google client.
+        """
+        return bool(self.scout_sheet_id) and Path(self.scout_sheet_credentials).exists()
 
 
 @lru_cache

@@ -912,6 +912,65 @@ trajectory, methodology) and comes from the dump. Server pipeline is now **16 st
 
 **Verified:** 961 tests pass. Dashboard live over HTTPS, login works, Players opens on 2025/26.
 
+### 2026-09-28 — scout reports: the club's scouting sheet read into the platform
+
+**Phase 1 of the scouting integration, data layer and interface. Read-only throughout.**
+
+Six club scouts file match reports through a JotForm form; JotForm writes them into a
+Google Sheet the Head of Recruitment curates across 11 tabs. The platform now READS that
+sheet every 60 seconds and joins the reports to its own players, scores, contracts and
+injuries — the join that was impossible while the data lived in a spreadsheet.
+
+**Read-only is enforced twice, and neither layer depends on our code.** The service-account
+token carries only `spreadsheets.readonly`, and the account is a Viewer on the file.
+Verified by attempting a write: Google answered **HTTP 403, "Request had insufficient
+authentication scopes"**.
+
+| | |
+|---|---|
+| Reports stored | **437** from 6 scouts, 350 players |
+| Linked to a platform player | **289** (244 distinct), **0 ambiguous** |
+| Unlinked — outside our seven leagues | 129, shown in full without a rating |
+| Placeholder (`"A New Player"`, 19 rows) | never linked |
+| Tests | 1,033 → **1,195** |
+
+**Identity is matched on name + DATE OF BIRTH**, the rule `model/identity.py` already trusts.
+Measured: name-only links 279 of 350 **but leaves 13 names claimed by two of our players**;
+name+DOB links 200 with zero ambiguity. Dates of birth come from the sheet's own
+`Player Names` tab — without that tab this integration would not have been safe to build.
+
+**Three hazards found and pinned by tests:**
+- **33% of fixture dates would have been silently wrong.** `Fixture Date` is DD-MM-YYYY;
+  pandas defaults to month-first and mis-parses **143 of 437** without raising — Joe Lewis's
+  10 February report would have read as 2 October.
+- **The Sheets API returns RAGGED ROWS** — `Player Names` sends a 9-column header and 4,598
+  rows of 6 columns. A naive `DataFrame(rows, columns=header)` raises outright.
+- **`Database` is a byte-identical copy of `Form responses`** (`DataFrame.equals` → True).
+  Reading both would double every report. `Teams Watched` is a pivot of `Fixtures Schedule`
+  whose stored numbers are **already stale for 21 of 156 clubs** — computed, never imported.
+
+**New:** `ingest/scout_sheets.py` · `ingest/scout_reports.py` · `ingest/scout_lookup.py` ·
+`store/scout_reports.py` · `model/scout_report_link.py` · `dashboard/tabs/scout_reports.py` ·
+migration `7fce0dc9323f` (3 tables) · `scripts/scout_sync.sh`.
+
+**The interface.** A "Scout reports" page under Scouting, with three views — all reports
+(six filters), **where we disagree**, and scout activity. Plus a "Scout reports" section on
+the player profile, silent when there are none. `scout_sync` is the first table in the
+platform that can state its own freshness, and the page says *"the sync is not updating"*
+rather than printing a timestamp the reader has to evaluate — register P14 in miniature.
+
+**The output that justifies it.** Of 54 reports saying "Sign", 22 are on players we can
+score: 6 the model also rates highly, **18 reports where the model points the other way**.
+Alfie Gilchrist — scout grade B, "Sign"; composite **1.74**. Those are the conversations
+nothing surfaced before. *Caveat carried on screen: the composite is 25/26 and the fixtures
+are 26/27.*
+
+**Nothing here touches a score.** `objective_composite` is unchanged.
+
+**Open:** pointing at the live sheet (one `.env` line; it is not yet shared with the service
+account), the cron entry, and register **P21** — the platform's own watchlist (5 rows) and
+scout assessments (10 rows) against this sheet's 437 reports and 223 players of interest.
+
 ### 2026-09-18 — recruiter feedback: loan filter, season labelling, and a 35% profile bug
 
 **A loan-status filter on the Players page**, requested by the recruiters. Sidebar selector:
@@ -1150,6 +1209,9 @@ last international recognition (held in no ingested source); the cut-out player 
 | P13 | **The platform supports CONFIRMATION better than DISCOVERY — owner's central concern, raised 2026-09-12.** *"Recruiters are using it to check players they already know, rather than let the data help them discover players."* The design currently reinforces that: the default view is ONE position at a time sorted by composite (so you must already know what you are shopping for); search is BY NAME (a player you have already thought of); the watchlist only holds players someone already chose; and there is no surface anywhere that answers "show me something I don't know". Per-match alerting (P11) would INHERIT this flaw if scoped to the watchlist — it would tell a recruiter more about players they had already picked. **Deliberately NOT designed yet.** The owner's own view is that it "will need proper planning and a few iterations of the design to get right", and a first design here is likely to be wrong. Recorded as the problem statement and the evidence, not a proposed solution. Any discovery surface must respect the platform's existing honesty rules: no cross-league ordering without a league-strength adjustment (register: every league's mean composite is ~3.03 BY CONSTRUCTION), and no composite from a peer pool below `MIN_PEERS_FOR_RANKING`. | Open — the most valuable open question on the platform |
 | P17 | **108 of 411 loans are invisible on Squads & loans — the data is held, the join drops it.** `squads.py:74` joins `player_loans` on `player_id` ONLY (`LEFT JOIN player_loans l ON l.player_id = n.player_id`). 303 of 411 loan rows carry a `player_id`; the other **108 carry only `tm_player_id`** — a real Transfermarkt player we hold no internal id for. The squad frame itself is built from `transfermarkt_squads`, which is **keyed on `tm_player_id`**, so joining on that key as well would recover all 108. **Verified case: Joel Catesby** — Transfermarkt shows him at Accrington Stanley on loan from Everton FC U21 until 31/05/2027; we hold that exact row in `player_loans` (`tm_player_id 1083709`, `parent_club 'Everton FC U21'`, `loan_ends 2027-05-31`) and the page renders "On loan from" **blank**. His contract DOES show (8 months left), so the row is half-populated from two different joins. **This is the class of defect recruiters notice and lose confidence over — the platform claiming nothing is there when Transfermarkt shows it plainly.** Fix: add `OR l.tm_player_id = <the squad row's tm_player_id>` to the join, or join the loans frame on `tm_player_id` first and fall back to `player_id`. | **DONE 2026-09-28** (not yet deployed) — see `plan/2026-09-28-P17-P18-squads-joins.md`. The cited line was wrong: `squads.py:74` is the fallback frame; the rendered one is `registered_squad_frame`, which filtered `WHERE player_id IS NOT NULL` before merging. `attach_loans` now prefers `player_id` and falls back to `tm_player_id`; `resolve_loan_player_ids` does the same for the Loans table and DROPS a `tm_player_id` claimed by two of our players (David Kamara, 1076889 → 445315 + 2000224875 — a plain join returned 412 rows for 411 loans). Squad frame 3,783 rows, loans attached 303 → **409**. |
 | P17b | **"On loan only" silently discarded the Position filter.** Owner-reported 2026-09-28: set Position to Centre Forward on Squads, contracts and loans, click "On loan only", and every position comes back. "On loan only" does not filter the squad view — it REPLACES it with a separately built loans frame (135 linked loanees have not appeared in league data and are absent from the squad frame). League and Club were re-applied to the replacement; **Position never was**. Fixing only that would have caused a second complaint: `loans_frame` sourced position from the current season alone with no `"(last season)"` fallback, and `filter_by_position` excludes rows with no position — so the filter would have dropped 131 of 411 loanees whose position the platform knows. Both fixed together: `loan_view` re-applies all three filters, `with_last_season_position` gives the Loans table the same three position tiers as the squad table. Position present on loans 280 → **379 of 411**. | **DONE 2026-09-28** (not yet deployed) |
+| P21 | **The platform's own scouting features are effectively unused, and duplicate the club's spreadsheet.** Measured 2026-09-28 across **22 registered users**: platform `watchlist` **5 rows**, `scout_assessments` **10 rows** (7 signed off, 2 rejected, 1 submitted, some of it test data). Against that, the club's JotForm/Sheet workflow holds **437 reports from 6 scouts**, filed daily, and a **223-row "Players of Interest" list**. Two distinct problems. (a) DUPLICATION — watchlist and Players of Interest answer the same question, "who are we interested in"; the spreadsheet's version is 45x bigger and is the one people maintain. (b) CONTRADICTION — an assessment scores a player-season and moves `assessed_composite`; a scout report is a per-match verdict. A player can be signed off at 4.5 and carry a "Don't sign" report, and nothing on screen says which is the club's view. **Do not delete either — FREEZE both** (stop investing) until the workflow is written down. Note `assessed_composite` is currently a scored feature fed by ten rows. Proposed ownership rule: *every piece of data has exactly one owning system; the platform owns what it COMPUTES, the scouting workflow owns what a human OBSERVED or DECIDED.* | Open — needs a written workflow, then a decision |
+| P19 | **`docs/architecture.md` needs a rewrite — it is stale and teaches nothing.** Its own status block says `STATUS (2026-08-25): current` while claiming "1,771 players" for 2026/27 against the server's **3,351**. No diagrams. Organised by code MODULE, which is the right axis for maintaining a file and the wrong one for understanding a system. Rewrite structured **by flow**: topology → physical placement → pipeline DAG → data model → identity → DB-to-screen → scheduling → failure modes → an end-to-end trace of one player → a decisions-and-alternatives table. Mermaid diagrams (render on GitHub). Concept sidebars for generic ideas, marked, so the reference spine stays clean. **Do not create a second doc** — two files describing one system drift within a month. Driver: a second engineer joins the codebase w/c 2026-10-05. | Open — deferred 2026-09-28 |
+| P20 | **NO AUTOMATED BACKUP of the production database.** Found 2026-09-28 while gathering facts for P19. `crontab -l` on the droplet holds only the Monday refresh; `/opt/lofc/backups` does not exist; DEPLOY.md:232 says "Snapshot it (or `pg_dump`) regularly" and nothing does. Every other table can be rebuilt by re-running the pipeline — **`scout_assessments` cannot.** It is human judgement, it exists in exactly one place (the `pgdata` Docker volume on one droplet), and a volume loss destroys it permanently. Fix: a nightly `pg_dump -Fc` to a second location with rotation, and a documented restore drill. | Open — found 2026-09-28 |
 | P18 | **518 squad members show no position, though the scrape has one for all 3,783.** The Position column uses IMPECT's position (derived from minutes played), falling back to last season's Impect position labelled "(last season)" — 2,650 observed, 615 fallback, **518 blank**. `transfermarkt_squads.position` is populated for **100% of rows** and is never read. So a registered player who has appeared in neither season reads as position-unknown while the scrape says e.g. "Left Winger". Joel Catesby again shows the mismatch from the other side: the scrape says **Left Winger**, the page shows **Centre Forward** (Impect's, from 144 minutes). Fix: fall back to `transfermarkt_squads.position` as a third tier, labelled by source so an inferred position is never mistaken for an observed one — the same honesty rule "(last season)" already follows. **Decide first** whether Impect's minutes-based position should still win where both exist; it probably should, since it reflects where he actually played. | Open — fills 518 blanks |
 | P15 | **~15 captions on the Players page assert facts that nothing re-checks.** Two have already gone stale and contradicted the data beside them: the current-form caption claimed no composite existed while one sat above it, and the ranked-list caption named 450 minutes as the only exclusion after the peer-pool gate added a second. Both are fixed; the class is not. **The principle established 2026-09-18: a fact belongs in a LABEL or a COLUMN, never in a paragraph — wherever a caption explains an adjacency, the adjacency is the defect.** A label built from the data cannot drift; a hard-coded sentence can. Worth a deliberate audit pass rather than fixing one at a time as they are noticed. | Open — UX debt |
 | P16 | **The GitHub repository is now PRIVATE, which broke server deploys.** It was public when the droplet was provisioned, so `git clone`/`git pull` worked anonymously over HTTPS; after it was made private the server had no credentials and `deploy.sh` failed at the pull with "Password authentication is not supported". Resolved 2026-09-18 with a **read-only deploy key** (`/root/.ssh/id_ed25519` on the server, registered under the repo's Deploy keys, write access NOT granted) and the remote switched from HTTPS to SSH. **`DEPLOY.md` documents this now** — a rebuilt server needs the same steps or it cannot pull. | Resolved, documented |

@@ -1200,6 +1200,56 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             st.caption("⬆️ Click a player in the table, or search above, to open their full detail.")
 
 
+def _scout_reports_section(engine, row) -> None:
+    """What the club's scouts wrote about this player, beside the model's own rating.
+
+    This is the join the platform could not make while the reports lived in a
+    spreadsheet: "our model says 3.42, and two scouts who watched him said Sign and
+    Monitor". Read-only -- the reports are synced from the club's scouting sheet and
+    nothing here writes anywhere.
+
+    Silent when there are none. 244 of 6,170 players carry a report, so a heading reading
+    "Scout reports (0)" on every other profile would be noise on 96% of the page's
+    visits -- and would imply a gap where there is simply no coverage yet.
+    """
+    from lofc.dashboard.tabs.scout_reports import reports_for_player
+
+    reports = reports_for_player(engine, int(row["player_id"]))
+    if reports.empty:
+        return
+
+    st.markdown(f"#### Scout reports ({len(reports)})")
+    verdicts = [v for v in reports["verdict"].dropna().unique()]
+    if len(verdicts) > 1:
+        # Two scouts reaching different conclusions is information, not a data problem,
+        # and it is exactly what a recruiter needs to see rather than an average.
+        st.caption("Scouts did not agree: " + " · ".join(verdicts))
+
+    for _, report in reports.iterrows():
+        date = pd.to_datetime(report["fixture_date"], errors="coerce")
+        fixture = (f"{report['home_team']} v {report['away_team']}"
+                   if pd.notna(report["home_team"]) else "")
+        played = (", ".join(report["positions_played"])
+                  if isinstance(report["positions_played"], list) else "")
+        header = " · ".join(b for b in [
+            f"**{report['scout']}**",
+            date.strftime("%d %b %Y") if pd.notna(date) else None,
+            report["observation"],
+            f"Grade {report['grade']}" if pd.notna(report["grade"]) else None,
+            report["verdict"]] if b)
+        with st.expander(header, expanded=len(reports) == 1):
+            if fixture or played:
+                st.caption(" · ".join(b for b in [fixture,
+                                                  f"played {played}" if played else None] if b))
+            if pd.notna(report["squad_role"]):
+                st.caption(f"Squad role: {report['squad_role']}")
+            # The scout's own words, as TEXT. Rendering 437 free-text reports through
+            # markdown would let a stray asterisk or bracket rewrite the layout, and
+            # carries the injection risk the 2026-08-25 XSS sweep closed elsewhere.
+            if pd.notna(report["comments"]):
+                st.text(str(report["comments"]))
+
+
 def _dimension_status(frame: pd.DataFrame, dimension: str) -> str | None:
     """See `assessment_detail.dimension_status` -- one shared implementation so the profile
     and the sign-off queue can never derive the Decision 17 verdict two different ways."""
@@ -1281,6 +1331,8 @@ def _scout_section(engine, row) -> None:
             assessment_detail.render_narrative(entries)
             assessment_detail.render_criterion_detail(
                 engine, str(position) if pd.notna(position) else None, dimension, entries)
+
+    _scout_reports_section(engine, row)
 
     minutes = row.get("minutes")
     evidence.render(engine, int(row["player_id"]), int(row["competition_id"]),

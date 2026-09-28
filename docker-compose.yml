@@ -32,6 +32,10 @@ services:
       - ./alembic.ini:/app/alembic.ini
       - ./tests:/app/tests
       - ./data:/app/data
+      # Service-account key for the scouting sheet. READ-ONLY mount, and the key
+      # itself carries only the spreadsheets.readonly scope -- two independent
+      # reasons the container cannot alter the club's spreadsheet.
+      - ./secrets:/app/secrets:ro
     # Keep the container alive so `docker-compose run` / `exec` are convenient.
     command: ["tail", "-f", "/dev/null"]
 

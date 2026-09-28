@@ -30,6 +30,9 @@ dependencies = [
     "impectPy>=2.7",
     "skillcorner>=2.2",
     "extra-streamlit-components>=0.1.71",
+    # Read-only access to the club's scouting sheet (Sheets API v4).
+    "google-api-python-client>=2.120",
+    "google-auth>=2.29",
 ]
 
 [project.optional-dependencies]

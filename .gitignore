@@ -82,3 +82,9 @@ Josh Campbell — Recruitment Report.pdf
 Luka Lynch — Recruitment Report.pdf
 Luke Berry — Recruitment Report.pdf
 Lyall Cameron — Recruitment Report.pdf
+
+# Google service-account credentials — NEVER commit.
+# Read-only key for the scouting sheet (Sheets API). Lives on this machine and on the
+# server; the path is referenced from .env, never the contents.
+secrets/
+*.iam.gserviceaccount.com.json

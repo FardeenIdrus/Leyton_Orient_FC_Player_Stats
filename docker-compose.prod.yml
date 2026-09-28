@@ -38,6 +38,11 @@ services:
       DATABASE_URL: ${DATABASE_URL}
     volumes:
       - appdata:/app/data          # persist raw pulls across container restarts
+      # Service-account key for the club's scouting sheet. READ-ONLY mount, and the key
+      # carries only the spreadsheets.readonly scope -- two independent reasons this
+      # container cannot alter the spreadsheet. Copy the file to /opt/lofc/secrets/ on
+      # the server; it is gitignored and never travels with a deploy.
+      - ./secrets:/app/secrets:ro
     command: ["tail", "-f", "/dev/null"]   # idle helper; run the pipeline via `exec`
     restart: unless-stopped
 

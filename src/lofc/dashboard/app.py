@@ -413,9 +413,22 @@ def main() -> None:
         with st.container():
             _squads.render(cur, prev, season_name_for(cur), season_name_for(prev))
 
+    def _scout_reports_page():
+        # Reports are CURRENT-season observations; the rating beside them is the last
+        # COMPLETE season, because nobody is past 450 minutes two months in. Both seasons
+        # are resolved here and the label travels with the number, so the page can never
+        # present a 25/26 rating as though it described a 26/27 performance.
+        from lofc.dashboard.tabs import scout_reports as _scout_reports
+        cur = max(seasons) if seasons else season_id
+        prev = max((s for s in seasons if s < cur), default=cur)
+        with st.container():
+            _scout_reports.render(prev, season_name_for(prev))
+
     pages = {
         "players": st.Page(_players_page, title="Players", url_path="players", default=True),
         "squads": st.Page(_squads_page, title="Squads & loans", url_path="squads"),
+        "scout_reports": st.Page(_scout_reports_page, title="Scout reports",
+                                 url_path="scout-reports"),
         "compare": st.Page(_compare_page, title="Compare", url_path="compare"),
         "watchlist": st.Page(_watchlist_page, title="Watchlist", url_path="watchlist"),
         "report": st.Page(_report_page, title="Report", url_path="report"),
@@ -447,8 +460,8 @@ def main() -> None:
     # unchanged page order (Players, Compare, Watchlist, Assess, Sign-off, Player types,
     # Physical, Glossary, Methodology); only the grouping and the section labels are new.
     nav_sections = {
-        "Scouting": [pages["players"], pages["squads"], pages["compare"],
-                     pages["watchlist"], pages["report"]],
+        "Scouting": [pages["players"], pages["squads"], pages["scout_reports"],
+                     pages["compare"], pages["watchlist"], pages["report"]],
         "Assessment": [pages["assess"], pages["signoff"]],
         "Analysis": [pages["player_types"], pages["physical"]],
         "Reference": [pages["glossary"], pages["methodology"]],

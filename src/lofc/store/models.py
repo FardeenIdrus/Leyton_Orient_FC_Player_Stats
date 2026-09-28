@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     Date,
@@ -20,6 +21,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -808,3 +810,141 @@ class TransfermarktSquad(Base):
     # When this snapshot was taken. The UI shows the age of the contract data from
     # MAX(scraped_at); it used to read the CSV file's mtime, which any `touch` would move.
     scraped_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ScoutReport(Base):
+    """One match report written by a club scout, read from the scouting sheet.
+
+    PROVENANCE. Scouts file these through a JotForm form; JotForm writes each submission
+    into a Google Sheet; the platform READS that sheet and never writes to it (the
+    service-account token carries only `spreadsheets.readonly`, and a write attempt was
+    confirmed to return HTTP 403 on 2026-09-28). The sheet is the source of truth for now
+    -- if the form is ever rebuilt inside the platform, the direction reverses and this
+    table becomes the origin. Both must never be writable at once: a spreadsheet has no
+    concept of who owns a row, so two writers means two truths and no referee.
+
+    THE KEY IS JOTFORM'S. `submission_id` is unique across all 437 live rows and STABLE
+    ACROSS EDITS, which is what lets an edited report upsert rather than duplicate. Our
+    own autoincrement id exists only because the rest of the schema uses one.
+
+    NOT EVERY REPORT LINKS TO A PLAYER, AND THAT IS CORRECT. `player_id` is nullable.
+    Matching is on name + date of birth -- the rule `model/identity.py` already trusts --
+    and links 200 of the 350 scouted players with ZERO ambiguous matches. The other 152
+    are non-league and academy players outside the seven leagues the platform holds data
+    for; they are exactly who a scout is sent to watch. Their reports are stored and shown
+    in full, without a rating. A `player_id` is never minted for them: twelve tables carry
+    a foreign key to `players`, and a row with no metrics would reach the ranking, the peer
+    pools and the scorecards.
+
+    `linkable` is False for the form's "A New Player" dropdown option, chosen 19 times --
+    the most frequent "player" in the sheet. Nineteen unrelated reports about nineteen
+    different people, which must never be joined into one identity.
+
+    ROWS ARE NEVER DELETED. A report that was filed is a fact. If one disappears from the
+    sheet, `missing_since` is stamped and the row stays -- the same principle as the
+    injury loader, and the opposite of the squad snapshot.
+    """
+
+    __tablename__ = "scout_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    submission_id: Mapped[str] = mapped_column(String, unique=True, index=True)
+
+    scout: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    observation: Mapped[str | None] = mapped_column(String, nullable=True)   # Live / Video
+    report_type: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    player_name: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    club_name: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    foot: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    home_team: Mapped[str | None] = mapped_column(String, nullable=True)
+    away_team: Mapped[str | None] = mapped_column(String, nullable=True)
+    # DD-MM-YYYY in the sheet. Parsed with an explicit format: a default pandas read is
+    # month-first and would silently mis-date 143 of the 437 live reports (33%) --
+    # Joe Lewis's 10 February report would read as 2 October.
+    fixture_date: Mapped[datetime.date | None] = mapped_column(Date, index=True, nullable=True)
+
+    comments: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The scout's own vocabulary, kept verbatim -- 35 codes, none of which are the
+    # platform's eight position groups. RCB means the right-sided centre back of a back
+    # three; mapping it to "Centre Back" would assert something the scout did not say.
+    # JSON rather than a Postgres ARRAY so the same model runs on the sqlite used in tests.
+    positions_played: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    recommended_positions: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    grade: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    squad_role: Mapped[str | None] = mapped_column(String, nullable=True)
+    verdict: Mapped[str | None] = mapped_column(String, index=True, nullable=True)
+    edit_url: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # Sparse in the sheet -- Submission Date is blank on 22 of 437 rows, Last Update on
+    # 310. Absent stays absent: never now(), never the epoch.
+    submitted_at: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    updated_at: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+
+    linkable: Mapped[bool] = mapped_column(Boolean, default=True)
+    player_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("players.player_id"), index=True, nullable=True)
+
+    first_seen_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+    last_synced_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+    # Stamped when a report we have seen is no longer in the sheet. The row stays.
+    missing_since: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class ScoutPlayerLookup(Base):
+    """The `Player Names` tab -- the controlled list behind the form's Player dropdown.
+
+    THIS TABLE IS WHY IDENTITY MATCHING IS SAFE. The reports themselves carry only a
+    player's NAME, and name-only matching against `players` links 279 of 350 but leaves
+    13 names claimed by two different people -- thirteen chances to attach one man's
+    scout report to another. This tab carries DATE OF BIRTH, and name + date of birth
+    links 200 with ZERO ambiguity. Fewer matches, no landmines; the platform already
+    made the same trade in `model/identity.py` after the 54-namesake audit.
+
+    A snapshot of a lookup list, so rows are replaced wholesale -- unlike the reports,
+    a name removed from the dropdown is simply no longer offered.
+    """
+
+    __tablename__ = "scout_player_lookup"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_name: Mapped[str] = mapped_column(String, index=True)
+    # 2,903 of 4,598 rows carry a parseable one. The column also holds values like
+    # "19 yrs" for players whose birthday nobody recorded, which parse to NULL.
+    date_of_birth: Mapped[datetime.date | None] = mapped_column(Date, index=True, nullable=True)
+    # The sheet's own id, formatted "Aaron Bouwman (39322)". A sortitoutsi reference,
+    # not a Transfermarkt or Impect one, so it cannot join to anything we hold -- kept
+    # because it is the club's handle for the player and may become joinable later.
+    source_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+    profile_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    flagged: Mapped[str | None] = mapped_column(String, nullable=True)
+    scraped_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ScoutSync(Base):
+    """One row per completed sync of the scouting sheet: what was read, and when.
+
+    TWO JOBS. It is the change detector -- `digest` is a hash of the whole pull, and a
+    run whose digest matches the last one stops before opening a database transaction,
+    which is the overwhelmingly common case at a 60-second poll against a sheet that
+    changes a few times a day.
+
+    It is also the freshness record the DASHBOARD reads. Register P14 exists because
+    `player_metrics_neutral` and `player_scorecards` carry no timestamp at all, so a
+    failed Monday cron serves last week's numbers looking completely normal. This table
+    is the first piece of scoring-adjacent data that can say how old it is, and the
+    dashboard cache is keyed on `digest` so the page refreshes the moment the data
+    actually changes rather than on a timer.
+    """
+
+    __tablename__ = "scout_sync"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    digest: Mapped[str] = mapped_column(String, index=True)
+    synced_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+    reports_seen: Mapped[int] = mapped_column(Integer, default=0)
+    reports_written: Mapped[int] = mapped_column(Integer, default=0)
+    # False when the pull was identical to the previous one and nothing was written.
+    changed: Mapped[bool] = mapped_column(Boolean, default=True)
