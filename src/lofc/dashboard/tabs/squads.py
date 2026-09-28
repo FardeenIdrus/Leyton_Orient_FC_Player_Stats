@@ -92,43 +92,76 @@ def loans_frame(season_id: int, rating_season_id: int) -> pd.DataFrame:
 
     Player details are LEFT joined: a loan we cannot yet match to one of our players is
     still a true fact about the club, and is listed with blank details rather than hidden.
+
+    Detail is attached in pandas rather than in one SQL statement so the loan's identity can
+    be RESOLVED first. 108 of 411 loan rows carry no `player_id`, and joining detail on that
+    column left all of them blank -- including the 77 for whom the platform holds a full
+    record under an id the loan row simply never carried.
     """
-    return pd.read_sql(
-        """
-        WITH rated AS (
-            SELECT s.player_id, s.objective_composite, s.competition_id,
-                   ROW_NUMBER() OVER (PARTITION BY s.player_id
-                                      ORDER BY m.minutes DESC NULLS LAST) AS rn
-            FROM player_scorecards s
-            JOIN player_metrics_neutral m
-              ON m.player_id = s.player_id AND m.competition_id = s.competition_id
-             AND m.season_id = s.season_id
-            WHERE s.season_id = %(prev)s AND s.archetype = 'All Metrics'
-              AND s.objective_composite IS NOT NULL
-        )
-        SELECT l.competition_id, l.club_name AS team_name, l.player_id, l.player_name,
-               l.parent_club, l.loan_ends,
-               n.position_group, n.minutes,
-               p.contract_until, p.foot, p.nationality, p.birth_date, p.height_cm,
-               b.objective_composite  AS last_season_rating,
-               b.competition_id       AS rating_competition_id,
-               sc.objective_composite AS alt_rating,
-               sc.competition_id      AS alt_competition_id
-        FROM player_loans l
-        LEFT JOIN players p ON p.player_id = l.player_id
-        LEFT JOIN player_metrics_neutral n
-               ON n.player_id = l.player_id AND n.season_id = %(cur)s
-              AND n.competition_id = l.competition_id
-        LEFT JOIN rated b  ON b.player_id  = l.player_id AND b.rn = 1
-        -- The SECOND reading, same as the squad view. This was hardcoded NULL, so a
-        -- loanee -- exactly the cohort most likely to have played in two leagues -- showed
-        -- a blank "Also rated" while the platform held the number. Yusuf Akhamrich read
-        -- 3.42 with nothing beside it, when 4.00 in PL2 was known.
-        LEFT JOIN rated sc ON sc.player_id = l.player_id AND sc.rn = 2
-        WHERE l.season_id = %(cur)s
-        ORDER BY l.club_name, l.loan_ends NULLS LAST, l.player_name
-        """,
-        get_engine(), params={"cur": season_id, "prev": rating_season_id})
+    loans = pd.read_sql(
+        "SELECT competition_id, club_name AS team_name, player_id, tm_player_id, "
+        "       player_name, parent_club, loan_ends "
+        "FROM player_loans WHERE season_id = %(cur)s "
+        "ORDER BY club_name, loan_ends NULLS LAST, player_name",
+        get_engine(), params={"cur": season_id})
+    if loans.empty:
+        return loans
+    # Fill the missing internal ids from the Transfermarkt id, dropping any claimed by two
+    # of our players. Row count is unchanged -- see resolve_loan_player_ids.
+    loans = resolve_loan_player_ids(
+        loans,
+        pd.read_sql("SELECT player_id, tm_player_id FROM players "
+                    "WHERE tm_player_id IS NOT NULL", get_engine()))
+
+    bio = pd.read_sql(
+        "SELECT player_id, contract_until, foot, nationality, birth_date, height_cm "
+        "FROM players", get_engine())
+    # ONE appearance row per player, the league he played MOST minutes in. The previous
+    # query additionally required the appearance's competition to match the LOAN's, so a
+    # loanee whose minutes sat in another competition showed no position at all; this
+    # matches what `registered_squad_frame` does, so the two tables cannot disagree.
+    now = pd.read_sql(
+        "SELECT DISTINCT ON (player_id) player_id, position_group, minutes "
+        "FROM player_metrics_neutral WHERE season_id = %(s)s "
+        "ORDER BY player_id, minutes DESC NULLS LAST",
+        get_engine(), params={"s": season_id})
+    last = pd.read_sql(
+        "SELECT DISTINCT ON (player_id) player_id, position_group AS last_position "
+        "FROM player_metrics_neutral WHERE season_id = %(s)s "
+        "ORDER BY player_id, minutes DESC NULLS LAST",
+        get_engine(), params={"s": rating_season_id})
+    # Last season's rating, and the SECOND reading where he played in two leagues. `alt_*`
+    # was once hardcoded NULL here, so a loanee -- exactly the cohort most likely to have a
+    # second reading -- showed a blank while the platform held the number. Yusuf Akhamrich
+    # read 3.42 with nothing beside it, when 4.00 in PL2 was known.
+    rated = pd.read_sql(
+        """SELECT player_id, objective_composite, competition_id, rn FROM (
+             SELECT s.player_id, s.objective_composite, s.competition_id,
+                    ROW_NUMBER() OVER (PARTITION BY s.player_id
+                                       ORDER BY m.minutes DESC NULLS LAST) rn
+             FROM player_scorecards s
+             JOIN player_metrics_neutral m ON m.player_id = s.player_id
+              AND m.competition_id = s.competition_id AND m.season_id = s.season_id
+             WHERE s.season_id = %(s)s AND s.archetype = 'All Metrics'
+               AND s.objective_composite IS NOT NULL) x WHERE rn <= 2""",
+        get_engine(), params={"s": rating_season_id})
+
+    out = loans.merge(bio, on="player_id", how="left")
+    out = out.merge(now, on="player_id", how="left")
+    out = out.merge(last, on="player_id", how="left")
+    out = out.merge(rated[rated.rn == 1][["player_id", "objective_composite",
+                                          "competition_id"]]
+                    .rename(columns={"objective_composite": "last_season_rating",
+                                     "competition_id": "rating_competition_id"}),
+                    on="player_id", how="left")
+    out = out.merge(rated[rated.rn == 2][["player_id", "objective_composite",
+                                          "competition_id"]]
+                    .rename(columns={"objective_composite": "alt_rating",
+                                     "competition_id": "alt_competition_id"}),
+                    on="player_id", how="left")
+    # Last known position, marked -- same three tiers as the squad view, so the Position
+    # filter behaves identically whichever table the reader is looking at.
+    return with_last_season_position(out)
 
 
 @st.cache_data(ttl=300)
@@ -238,11 +271,13 @@ def registered_squad_frame(season_id: int, rating_season_id: int) -> pd.DataFram
              WHERE s.season_id = %(s)s AND s.archetype = 'All Metrics'
                AND s.objective_composite IS NOT NULL) x WHERE rn <= 2""",
         get_engine(), params={"s": rating_season_id})
-    # Likewise one loan row per player.
+    # BOTH keys, and NO `player_id IS NOT NULL` filter. That filter discarded 108 of 411
+    # loans at source -- every one held under a Transfermarkt id alone, which is the key
+    # this frame is built on. `attach_loans` prefers player_id and falls back to
+    # tm_player_id, so a loan reaches the squad member under either.
     loans = pd.read_sql(
-        "SELECT DISTINCT ON (player_id) player_id, parent_club, loan_ends "
-        "FROM player_loans WHERE season_id = %(s)s AND player_id IS NOT NULL "
-        "ORDER BY player_id, loan_ends DESC NULLS LAST",
+        "SELECT player_id, tm_player_id, parent_club, loan_ends "
+        "FROM player_loans WHERE season_id = %(s)s",
         get_engine(), params={"s": season_id})
 
     # --- LINK FIRST, then attach bio ---------------------------------------------
@@ -294,11 +329,10 @@ def registered_squad_frame(season_id: int, rating_season_id: int) -> pd.DataFram
                     .rename(columns={"objective_composite": "alt_rating",
                                      "competition_id": "alt_competition_id"}),
                     on="player_id", how="left")
-    out = out.merge(loans, on="player_id", how="left")
+    out = attach_loans(out, loans)
     out["team_name"] = out["club_name"]
     # Last known position, marked, where he has not featured yet this season.
-    out["position_group"] = out["position_group"].fillna(
-        out["last_position"].map(lambda v: f"{v} (last season)" if pd.notna(v) else None))
+    out = with_last_season_position(out)
     return out
 
 
@@ -370,6 +404,124 @@ def filter_by_position(frame: pd.DataFrame, position: str) -> pd.DataFrame:
     if position == "All" or frame.empty or "Position" not in frame.columns:
         return frame
     return frame[frame["Position"].map(_bare_position) == position]
+
+
+def with_last_season_position(frame: pd.DataFrame, column: str = "position_group",
+                              fallback: str = "last_position") -> pd.DataFrame:
+    """`frame` with `column` filled from `fallback`, MARKED as last season's.
+
+    A registered signing who has not featured yet still has a known position, and he is
+    exactly who a January search is for. The suffix is not decoration: an observed position
+    and an inferred one are different claims and must not read alike. `_bare_position`
+    strips it, so one filter covers both tiers.
+
+    No position either season stays blank. Blank is a fact; a guessed group changes which
+    peers a reader assumes he was measured against.
+    """
+    out = frame.copy()
+    if out.empty or column not in out.columns or fallback not in out.columns:
+        return out
+    marked = out[fallback].map(
+        lambda v: f"{v}{_FALLBACK_SUFFIX}" if pd.notna(v) else None)
+    out[column] = out[column].where(out[column].notna(), marked)
+    return out
+
+
+LOAN_COLUMNS = ["parent_club", "loan_ends"]
+
+
+def _loan_lookup(frame: pd.DataFrame, loans: pd.DataFrame, key: str,
+                 column: str) -> pd.Series:
+    """One loan column, looked up through `key`. Blank where the key is absent or ambiguous.
+
+    A key claimed by more than one loan row is DROPPED, not picked -- attaching one man's
+    loan to another is worse than showing no loan. Both keys are unique in `player_loans`
+    today; the guard is what keeps that true.
+    """
+    blank = pd.Series([None] * len(frame), index=frame.index, dtype=object)
+    if key not in frame.columns or key not in loans.columns or column not in loans.columns:
+        return blank
+    src = loans.assign(_k=pd.to_numeric(loans[key], errors="coerce")).dropna(subset=["_k"])
+    src = src.drop_duplicates("_k", keep=False)
+    if src.empty:
+        return blank
+    return pd.to_numeric(frame[key], errors="coerce").map(src.set_index("_k")[column])
+
+
+def attach_loans(squad: pd.DataFrame, loans: pd.DataFrame) -> pd.DataFrame:
+    """`squad` plus parent_club and loan_ends, matched on player_id OR tm_player_id.
+
+    The squad frame is built from the Transfermarkt scrape and keyed on `tm_player_id`;
+    `player_loans` carries our internal `player_id` only where the scrape could resolve one.
+    Joining on `player_id` alone left 108 of 411 loans invisible -- Joel Catesby rendered
+    with a blank "On loan from" while Transfermarkt plainly showed Accrington Stanley, on
+    loan from Everton FC U21 until 31/05/2027.
+
+    `player_id` is preferred where both sides carry one: it is the key the rest of the
+    platform joins on, and it survives a Transfermarkt id being re-issued.
+
+    A LEFT attach, always: the row count is the scrape's, and a join that adds or drops a
+    row has invented or hidden a registered squad member.
+    """
+    out = squad.copy()
+    for column in LOAN_COLUMNS:
+        out[column] = pd.Series([None] * len(out), index=out.index, dtype=object)
+    if out.empty or loans.empty:
+        return out
+    for column in LOAN_COLUMNS:
+        primary = _loan_lookup(out, loans, "player_id", column)
+        out[column] = primary.where(
+            primary.notna(), _loan_lookup(out, loans, "tm_player_id", column))
+    return out
+
+
+def resolve_loan_player_ids(loans: pd.DataFrame, players: pd.DataFrame) -> pd.DataFrame:
+    """`loans` with `player_id` filled from `players.tm_player_id` where the scrape left it blank.
+
+    This is what lets a loanee we DO hold show his bio, position and rating in the Loans
+    table: 77 of the 108 unresolved loans are players with a full record under an id the
+    loan row simply never carried.
+
+    A `tm_player_id` claimed by more than one of our players is left UNRESOLVED. David
+    Kamara holds two identities -- 445315 seeded from StatsBomb, 2000224875 minted from
+    Impect -- both claiming Transfermarkt 1076889, so a plain join returns 412 rows for 411
+    loans and lists him twice. Picking one would attach that identity's rating, injuries and
+    assessments to a loan that may belong to the other. Same rule as
+    `identity.drop_ambiguous_matches`.
+    """
+    out = loans.copy()
+    if out.empty or players.empty or "tm_player_id" not in out.columns:
+        return out
+    ours = players.assign(_k=pd.to_numeric(players["tm_player_id"], errors="coerce"))
+    ours = ours.dropna(subset=["_k"]).drop_duplicates("_k", keep=False)
+    if ours.empty:
+        return out
+    found = pd.to_numeric(out["tm_player_id"], errors="coerce").map(
+        ours.set_index("_k")["player_id"])
+    have = (out["player_id"] if "player_id" in out.columns
+            else pd.Series([None] * len(out), index=out.index, dtype=object))
+    out["player_id"] = have.where(have.notna(), found)
+    return out
+
+
+def loan_view(loans: pd.DataFrame, league: str = "All", club: str = "All",
+              position: str = "All") -> pd.DataFrame:
+    """The "On loan only" view: the SAME three filters the squad view applies.
+
+    "On loan only" does not filter the squad frame -- it REPLACES it, because 135 of the
+    linked loanees have not appeared in league data yet and are absent from the squad frame
+    entirely. League and Club were re-applied to the replacement; Position was not, so
+    selecting Centre Forward and then "On loan only" returned every position. Every filter
+    the page offers has to survive the swap, which is what this function is for.
+    """
+    if loans.empty:
+        return loans
+    view = loans
+    if league != "All" and "League" in view.columns:
+        view = view[view["League"] == league]
+    if club != "All" and "Club" in view.columns:
+        view = view[view["Club"] == club]
+    return filter_by_position(view, position)
 
 
 def this_season_score(frame: pd.DataFrame, scores: pd.DataFrame, pool_sizes: dict,
@@ -521,14 +673,14 @@ def render(season_id: int, rating_season_id: int, season_label: str,
 
     if show == "On loan only":
         # From player_loans, NOT from the squad frame: 135 of 290 linked loanees have not
-        # appeared in league data yet and are absent from the squad frame entirely.
+        # appeared in league data yet and are absent from the squad frame entirely. So this
+        # REPLACES the view rather than filtering it -- and every filter the page offers has
+        # to be re-applied to the replacement. League and Club were; Position was not, so
+        # selecting Centre Forward and then "On loan only" returned every position.
         loans = prepare(loans_frame(season_id, rating_season_id))
         if not loans.empty:
             loans["League"] = loans["competition_id"].map(names).fillna("\u2014")
-            if league != "All":
-                loans = loans[loans["League"] == league]
-            if club != "All":
-                loans = loans[loans["Club"] == club]
+            loans = loan_view(loans, league=league, club=club, position=position)
         view = loans
     elif show.startswith("Contract expiring"):
         # Expired dates are INCLUDED deliberately: a lapsed date is a live question --
