@@ -45,7 +45,7 @@ REPORT_COLUMNS = [
     "submission_id", "scout", "observation", "report_type", "player_name", "club_name",
     "foot", "home_team", "away_team", "fixture_date", "comments", "positions_played",
     "recommended_positions", "grade", "squad_role", "verdict", "edit_url",
-    "submitted_at", "updated_at", "linkable",
+    "submitted_at", "updated_at", "linkable", "name_from_report",
 ]
 LOOKUP_COLUMNS = ["player_name", "date_of_birth", "source_ref", "profile_url", "flagged"]
 
@@ -101,6 +101,7 @@ def upsert_reports(engine, frame: pd.DataFrame) -> int:
             value = row[column]
             row[column] = None if value is None or pd.isna(value) else value
         row["linkable"] = bool(row["linkable"]) if row["linkable"] is not None else True
+        row["name_from_report"] = bool(row.get("name_from_report"))
         rows.append(row)
 
     # Core constructs against the Table, NOT text() SQL: `positions_played` is a JSON

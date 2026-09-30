@@ -884,6 +884,11 @@ class ScoutReport(Base):
     updated_at: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
 
     linkable: Mapped[bool] = mapped_column(Boolean, default=True)
+    # True when `player_name` was read out of the report text because the scout selected
+    # the form's "A New Player" option. The interface marks these, because a name recovered
+    # from free text is evidence of who was watched, not a confirmed identity. Such a row is
+    # never linkable, whatever name was recovered.
+    name_from_report: Mapped[bool] = mapped_column(Boolean, default=False)
     player_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("players.player_id"), index=True, nullable=True)
 

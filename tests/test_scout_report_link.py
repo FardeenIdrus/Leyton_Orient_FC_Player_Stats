@@ -119,6 +119,57 @@ def test_a_name_absent_from_the_lookup_stays_unlinked():
                    ["player_id"].iloc[0])
 
 
+# --- names recovered from the report text ---------------------------------------------------
+#
+# A player the scout could not find in the form's dropdown still has a name, written into
+# the report. The dropdown and OUR PLAYERS TABLE are different lists: 9 of the 20 recovered
+# names on the live sheet are players we hold full Impect data on, mostly Premier League 2.
+#
+# They cannot be matched on name + date of birth -- there is no date, which is exactly why
+# they were absent from the dropdown. So they match on NAME ALONE, and the safety comes from
+# refusing ambiguity rather than from a second field: a name held by more than one of our
+# players links to none of them. Measured on the live data: 9 matched, 0 ambiguous.
+
+def test_a_recovered_name_matching_one_of_our_players_links():
+    """Finley Hooper is not in the form's dropdown but IS in our data (PL2). Before this,
+    his report opened nothing."""
+    reports = pd.DataFrame([{"submission_id": "1", "player_name": "Sam Chambers",
+                             "linkable": False, "name_from_report": True}])
+    assert _ids(resolve_links(reports, LOOKUP, OURS)) == [388235]
+
+
+def test_a_recovered_name_held_by_two_of_our_players_links_to_neither():
+    """Botan Ameen is two people in our table. With no date of birth to separate them,
+    the only safe answer is no link."""
+    reports = pd.DataFrame([{"submission_id": "1", "player_name": "Botan Ameen",
+                             "linkable": False, "name_from_report": True}])
+    assert pd.isna(resolve_links(reports, LOOKUP, OURS)["player_id"].iloc[0])
+
+
+def test_a_recovered_name_we_hold_no_player_for_stays_unlinked():
+    """11 of the 20 are academy players outside our seven leagues."""
+    reports = pd.DataFrame([{"submission_id": "1", "player_name": "Jephta Medine",
+                             "linkable": False, "name_from_report": True}])
+    assert pd.isna(resolve_links(reports, LOOKUP, OURS)["player_id"].iloc[0])
+
+
+def test_the_placeholder_itself_is_never_matched_by_the_recovered_name_path():
+    """A comment the parser could not read leaves the name as "A New Player", and that
+    string must never be looked up."""
+    reports = pd.DataFrame([{"submission_id": "1", "player_name": "A New Player",
+                             "linkable": False, "name_from_report": False}])
+    assert pd.isna(resolve_links(reports, LOOKUP, OURS)["player_id"].iloc[0])
+
+
+def test_an_unlinkable_report_without_a_recovered_name_is_not_matched_on_name_alone():
+    """Name-only matching is the WEAK rule -- it leaves 13 namesakes ambiguous across the
+    platform. It is used only where no date of birth can exist. A dropdown-named player has
+    one and must go through the strict path, never this one."""
+    reports = pd.DataFrame([{"submission_id": "1", "player_name": "Sam Chambers",
+                             "linkable": False, "name_from_report": False}])
+    assert pd.isna(resolve_links(reports, LOOKUP, OURS)["player_id"].iloc[0])
+
+
 def test_the_placeholder_dropdown_option_never_links():
     """"A New Player" was chosen on 19 reports about 19 different people. Linking them
     would fuse nineteen strangers into one identity."""

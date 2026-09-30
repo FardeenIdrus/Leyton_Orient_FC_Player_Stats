@@ -1041,6 +1041,20 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
         view["Assessed"] = assessed_column(
             view["assessment_status"] if "assessment_status" in view.columns
             else pd.Series([None] * len(view), index=view.index))
+        # What the club's own scouts concluded, aggregated across every report on the
+        # player. Requested by the Head of Recruitment: if every scout who watched him
+        # said Sign, the ranked list should say so. Blank for the 96% nobody has watched,
+        # which is the honest state -- blank means no coverage, never a poor verdict.
+        # Aggregation only: it never touches the composite or the ranking.
+        from lofc.dashboard.tabs.scout_reports import consensus_by_player
+
+        _consensus = consensus_by_player()
+        if not _consensus.empty:
+            view = view.merge(_consensus[["player_id", "Scouts"]], on="player_id",
+                              how="left")
+        else:
+            view["Scouts"] = None
+        view["Scouts"] = view["Scouts"].fillna("")
         if lens:
             view["All-round"] = view["allround_composite"].round(2)
         # Contract expiry is REAL scraped data (not modelled), and the free-transfer market is a
@@ -1081,7 +1095,7 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
                         "Peers"]
         if lens:
             display_cols.append("All-round")
-        display_cols += ["Performance", "Physical", "Measured", "Assessed"]
+        display_cols += ["Performance", "Physical", "Measured", "Assessed", "Scouts"]
         # Placed directly after the season Club so the two read together: Club is the season
         # being viewed, On loan at is today. Only when the loan filter is engaged.
         if loan_filter_active and "On loan at" in view.columns:
@@ -1117,6 +1131,9 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             "Assessed": st.column_config.TextColumn(
                 "Assessed", help="Whether a scout has assessed this player. Does NOT affect "
                                  "the ranking - scout input never moves the composite."),
+            "Scouts": st.column_config.TextColumn(
+                "Scouts", help="High priority = all scouts said Sign. "
+                               "Split = they disagreed. Blank = no reports."),
             "Player type": st.column_config.TextColumn("Player type", help="Playing-style archetype."),
             "Contract": st.column_config.TextColumn(
                 "Contract", help="Contract expiry (MM/YYYY) from Transfermarkt. '—' = not known "
@@ -1212,18 +1229,22 @@ def _scout_reports_section(engine, row) -> None:
     "Scout reports (0)" on every other profile would be noise on 96% of the page's
     visits -- and would imply a gap where there is simply no coverage yet.
     """
-    from lofc.dashboard.tabs.scout_reports import reports_for_player
+    from lofc.dashboard.tabs.scout_reports import (
+        inject_chip_style,
+        reports_for_player,
+        verdict_chips_html,
+    )
 
     reports = reports_for_player(engine, int(row["player_id"]))
     if reports.empty:
         return
 
     st.markdown(f"#### Scout reports ({len(reports)})")
-    verdicts = [v for v in reports["verdict"].dropna().unique()]
-    if len(verdicts) > 1:
-        # Two scouts reaching different conclusions is information, not a data problem,
-        # and it is exactly what a recruiter needs to see rather than an average.
-        st.caption("Scouts did not agree: " + " · ".join(verdicts))
+    # COUNTED, not a list of distinct verdicts. The previous version printed
+    # "Scouts did not agree: Sign · Don't sign", which read identically whether the split
+    # was 3-1 or 1-1. Counting is not picking a winner; it is showing the evidence.
+    inject_chip_style()
+    st.markdown(verdict_chips_html(reports["verdict"]), unsafe_allow_html=True)
 
     for _, report in reports.iterrows():
         date = pd.to_datetime(report["fixture_date"], errors="coerce")

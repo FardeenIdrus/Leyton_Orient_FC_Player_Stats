@@ -100,6 +100,40 @@ def test_a_filter_matching_nothing_returns_an_empty_frame_not_an_error():
     assert filter_reports(REPORTS, scout="Nobody").empty
 
 
+def test_searching_matches_part_of_a_name():
+    """A recruiter should not have to reproduce "Ra'ess Bangura-Williams" -- including the
+    typo the live sheet actually carries -- to find him."""
+    assert _names(filter_reports(REPORTS, search="gilchrist")) == ["Alfie Gilchrist"]
+
+
+def test_the_search_is_case_insensitive():
+    assert len(filter_reports(REPORTS, search="ALFIE")) == 1
+
+
+def test_the_search_treats_its_input_as_text_not_a_pattern():
+    """A stray bracket or asterisk in a name search must not raise a regex error."""
+    assert filter_reports(REPORTS, search="Gilchrist (").empty
+
+
+def test_an_empty_search_does_not_filter():
+    assert len(filter_reports(REPORTS, search="")) == 5
+
+
+def test_filtering_to_players_we_hold_data_for():
+    """"Only the ones I can compare to the model"."""
+    out = filter_reports(REPORTS.assign(player_id=[1, 2, None, 4, 5]),
+                         in_our_data="In our data")
+    assert "Alain Kizenga" not in _names(out)
+    assert len(out) == 4
+
+
+def test_filtering_to_players_we_do_not_hold():
+    """The discovery list: 129 reports on players the model has never seen."""
+    out = filter_reports(REPORTS.assign(player_id=[1, 2, None, 4, 5]),
+                         in_our_data="Not in our data")
+    assert _names(out) == ["Alain Kizenga"]
+
+
 def test_the_caller_frame_is_not_mutated():
     filter_reports(REPORTS, scout="Joe Austin")
     assert len(REPORTS) == 5
@@ -113,7 +147,7 @@ def test_an_empty_frame_is_handled():
 
 def test_a_sign_the_model_rates_low_is_flagged_as_the_disagreement():
     """THE POINT OF THE PAGE. A scout watched him and said sign; the model puts him below
-    the 3.03 average for his league and position."""
+    the 3.00 average for his league and position."""
     out = model_view(REPORTS)
     assert out.loc[out.player_name == "Alfie Gilchrist", MODEL_VIEW].iloc[0] == \
         "Model disagrees"
