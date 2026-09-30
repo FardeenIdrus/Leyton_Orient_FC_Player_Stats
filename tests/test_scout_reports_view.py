@@ -251,5 +251,30 @@ def test_a_stale_sync_is_called_out_not_merely_reported():
     assert "not updating" in label.lower() or "stale" in label.lower()
 
 
+def test_the_refresh_button_actually_reads_the_sheet():
+    """The first version only cleared Streamlit's cached reads. The page reloaded the same
+    stored rows, the "Synced" line never moved, and the button appeared to do nothing --
+    because it did nothing. It must call the sync stage, which is the same code path the
+    60-second cron uses, so the two cannot drift.
+    """
+    import inspect
+
+    from lofc.dashboard.tabs import scout_reports
+    source = inspect.getsource(scout_reports.render)
+    assert "sync_sheet(" in source, (
+        "the Refresh button does not call the sync stage — it only clears caches, so the "
+        "page would reload the same stored rows")
+
+
+def test_the_refresh_button_handles_a_failed_read():
+    """Google can be unreachable, the credential can be missing, the sheet can be
+    unshared. The page must say so rather than show a traceback."""
+    import inspect
+
+    from lofc.dashboard.tabs import scout_reports
+    source = inspect.getsource(scout_reports.render)
+    assert "st.error(" in source and "except Exception" in source
+
+
 def test_never_synced_says_so_plainly():
     assert "never" in sync_status(None, NOW).lower()

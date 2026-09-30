@@ -55,6 +55,11 @@ services:
       - .env
     environment:
       DATABASE_URL: ${DATABASE_URL}
+    volumes:
+      # The Refresh button reads the scouting sheet directly, so the dashboard
+      # needs the key as well as the app container. Read-only mount, and the
+      # key itself carries only the spreadsheets.readonly scope.
+      - ./secrets:/app/secrets:ro
     command: ["streamlit", "run", "src/lofc/dashboard/app.py",
               "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
     restart: unless-stopped

@@ -585,19 +585,32 @@ def render(rating_season_id: int, rating_label: str) -> None:
         return
 
     status = sync_status(sync["synced_at"] if sync is not None else None)
+    done = st.session_state.pop("scout_sync_result", None)
     left, right = st.columns([5, 1])
     with left:
-        (st.warning if "not updating" in status or "Never" in status else st.caption)(
-            status)
+        line = status
+        if done is not None:
+            line += (" · sheet unchanged" if not done["changed"]
+                     else f" · {done['written']} reports updated")
+        (st.warning if "not updating" in status or "Never" in status else st.caption)(line)
     with right:
-        # The sync runs on its own every 60 seconds. This is for the moment somebody has
-        # just filed a report and wants it now -- it clears the cached reads so the next
-        # render goes back to Postgres, which the background sync keeps current.
+        # Actually reads the sheet. An earlier version only cleared the cached reads, so
+        # the page reloaded the same stored rows and the "Synced" line never moved -- a
+        # button labelled Refresh that refreshed nothing.
         if st.button("Refresh", key="scout_refresh", width="stretch"):
-            reports_frame.clear()
-            last_sync.clear()
-            consensus_by_player.clear()
-            st.rerun()
+            from lofc.store.scout_reports import sync as sync_sheet
+
+            try:
+                with st.spinner("Reading the scouting sheet…"):
+                    result = sync_sheet(get_engine(), force=False)
+            except Exception as exc:                      # noqa: BLE001 - shown to the user
+                st.error(f"Could not read the scouting sheet: {exc}")
+            else:
+                reports_frame.clear()
+                last_sync.clear()
+                consensus_by_player.clear()
+                st.session_state["scout_sync_result"] = result
+                st.rerun()
 
     frame = model_view(frame)
     names = competition_name_by_id()

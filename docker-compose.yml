@@ -69,6 +69,10 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://lofc:lofc@db:5432/lofc}
     volumes:
+      # The Refresh button reads the scouting sheet directly, so the dashboard
+      # needs the key as well as the app container. Read-only mount, and the
+      # key itself carries only the spreadsheets.readonly scope.
+      - ./secrets:/app/secrets:ro
       - ./src:/app/src
       - ./assets:/app/assets
       - ./.streamlit:/app/.streamlit

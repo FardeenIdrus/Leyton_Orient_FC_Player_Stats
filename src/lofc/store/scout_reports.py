@@ -190,57 +190,74 @@ def last_digest(engine) -> str | None:
             select(table.c.digest).order_by(table.c.id.desc()).limit(1)).scalar()
 
 
-def main() -> None:
-    """Fetch the sheet and load it. Reads the sheet; writes only to Postgres."""
+def sync(engine, force: bool = False) -> dict:
+    """Fetch the sheet, load it, and resolve player links. Returns a summary.
+
+    The single entry point for BOTH the cron and the dashboard's Refresh button, so the two
+    cannot drift: a button that only cleared a cache would leave the page showing whatever
+    the last cron run stored, while claiming to have refreshed.
+
+    Reads Google; writes only to Postgres. Raises RuntimeError on a problem the caller
+    should show, rather than exiting — the dashboard cannot handle a SystemExit.
+    """
     from lofc.config import settings
+    from lofc.ingest.scout_lookup import lookup_frame
     from lofc.ingest.scout_reports import reports_frame
     from lofc.ingest.scout_sheets import fetch, frame_from_values, payload_hash
-    from lofc.store.load import get_engine
-
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--force", action="store_true",
-                        help="load even when the sheet is unchanged")
-    args = parser.parse_args()
+    from lofc.model.scout_report_link import relink
 
     if not settings.scout_sheet_configured:
-        raise SystemExit(
-            "Scouting sheet not configured. Set SCOUT_SHEET_ID in .env and place the "
+        raise RuntimeError(
+            "Scouting sheet not configured: set SCOUT_SHEET_ID and place the "
             f"service-account key at {settings.scout_sheet_credentials}.")
 
-    engine = get_engine()
     payload = fetch(settings.scout_sheet_id, settings.scout_sheet_credentials)
     digest = payload_hash(payload)
     reports = reports_frame(frame_from_values(payload["Form responses"]))
 
-    if digest == last_digest(engine) and not args.force:
+    if digest == last_digest(engine) and not force:
         record_sync(engine, digest, len(reports), 0, changed=False)
-        print(f"scouting sheet unchanged ({len(reports)} reports); nothing written")
-        return
+        return {"changed": False, "reports": len(reports), "written": 0,
+                "missing": 0, "lookup": 0, "linked": 0}
 
     with engine.connect() as conn:
         existing = int(conn.execute(
             text("SELECT COUNT(*) FROM scout_reports")).scalar() or 0)
     problem = volume_problem(len(reports), existing)
     if problem:
-        raise SystemExit(problem)
+        raise RuntimeError(problem)
 
     written = upsert_reports(engine, reports)
     gone = stamp_missing(engine, set(reports["submission_id"]))
-
-    from lofc.ingest.scout_lookup import lookup_frame
     lookup = lookup_frame(frame_from_values(payload["Player Names"]))
     load_player_lookup(engine, lookup)
-
-    # Resolve identities in the same run. The link depends on BOTH the reports and the
-    # lookup being current, and splitting it into a second cron entry would leave a
-    # window where new reports exist with no player attached -- which on screen is
-    # indistinguishable from a player we cannot match.
-    from lofc.model.scout_report_link import main as link_reports
-
+    # Linked in the same run: the link needs BOTH the reports and the lookup current, and
+    # doing it separately would leave a window where new reports exist with no player
+    # attached — on screen indistinguishable from a player we cannot match.
+    linked = relink(engine)
     record_sync(engine, digest, len(reports), written, changed=True)
-    print(f"scout_reports: {written} reports upserted, {gone} newly missing")
-    print(f"scout_player_lookup: {len(lookup)} rows")
-    link_reports()
+    return {"changed": True, "reports": len(reports), "written": written,
+            "missing": gone, "lookup": len(lookup), "linked": linked}
+
+
+def main() -> None:
+    """Fetch the sheet and load it. Reads the sheet; writes only to Postgres."""
+    from lofc.store.load import get_engine
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--force", action="store_true",
+                        help="load even when the sheet is unchanged")
+    args = parser.parse_args()
+    try:
+        r = sync(get_engine(), force=args.force)
+    except RuntimeError as exc:
+        raise SystemExit(str(exc))
+    if not r["changed"]:
+        print(f"scouting sheet unchanged ({r['reports']} reports); nothing written")
+        return
+    print(f"scout_reports: {r['written']} reports upserted, {r['missing']} newly missing")
+    print(f"scout_player_lookup: {r['lookup']} rows")
+    print(f"scout reports linked: {r['linked']}")
 
 
 if __name__ == "__main__":

@@ -128,20 +128,21 @@ def resolve_links(reports: pd.DataFrame, lookup: pd.DataFrame,
     return out
 
 
-def main() -> None:
-    """Resolve every stored report's player, and write the ids back."""
-    from sqlalchemy import select, update
+def relink(engine) -> int:
+    """Resolve every stored report's player and write the ids back. Returns how many linked.
 
-    from lofc.store.load import get_engine
+    Callable, so the sync stage and the dashboard's Refresh button both reach it without
+    going through the command line.
+    """
+    from sqlalchemy import update
+
     from lofc.store.models import ScoutReport
 
-    engine = get_engine()
     reports = pd.read_sql(
         "SELECT submission_id, player_name, linkable, name_from_report "
         "FROM scout_reports", engine)
     if reports.empty:
-        print("no scout reports stored yet")
-        return
+        return 0
     lookup = pd.read_sql(
         "SELECT player_name, date_of_birth FROM scout_player_lookup", engine)
     # No birth-date filter. The strict path ignores a player without one anyway (`_key`
@@ -159,12 +160,23 @@ def main() -> None:
                          .where(table.c.submission_id == row["submission_id"])
                          .values(player_id=None if pd.isna(player_id) else int(player_id)))
             written += int(pd.notna(player_id))
-    players = linked["player_id"].dropna().nunique()
-    via_report = int((linked["name_from_report"].fillna(False).astype(bool)
-                      & linked["player_id"].notna()).sum())
-    print(f"scout reports linked: {written} of {len(linked)} "
-          f"({players} distinct players); {len(linked) - written} unlinked")
-    print(f"  of which matched on a name read from the report text: {via_report}")
+    return written
+
+
+def main() -> None:
+    """Resolve every stored report's player, and write the ids back."""
+    from lofc.store.load import get_engine
+
+    engine = get_engine()
+    written = relink(engine)
+    total = pd.read_sql("SELECT count(*) n FROM scout_reports", engine).n[0]
+    via = pd.read_sql("SELECT count(*) n FROM scout_reports WHERE name_from_report "
+                      "AND player_id IS NOT NULL", engine).n[0]
+    players = pd.read_sql("SELECT count(DISTINCT player_id) n FROM scout_reports "
+                          "WHERE player_id IS NOT NULL", engine).n[0]
+    print(f"scout reports linked: {written} of {total} ({players} distinct players); "
+          f"{total - written} unlinked")
+    print(f"  of which matched on a name read from the report text: {via}")
 
 
 if __name__ == "__main__":
