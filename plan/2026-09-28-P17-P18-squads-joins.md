@@ -11,7 +11,7 @@
 > 1,033 → **1,066**. Measured on the live data afterwards: squad frame still **3,783** rows
 > with **409** loans attached (was 303) and 0 duplicate club/player pairs; Loans table still
 > **411** rows with **380** identities resolved (was 303) and **379** positions (was 280).
-> `objective_composite` unchanged — 3,345 rows, mean 3.029426.
+> `objective_composite` unchanged by that work — 3,345 rows, mean 3.029426 at the time. (The percentile fix of 2026-09-30 has since moved it to 2.9972.)
 >
 > **Read `CLAUDE.md` and `plan/BUILD_PLAN.md` first.** This file is the detail behind register
 > rows P17 and P18; it does not restate the platform's operating model.
@@ -328,7 +328,7 @@ that explicitly after each:
 ```sql
 SELECT count(*), round(avg(objective_composite)::numeric,6)
 FROM player_scorecards WHERE archetype='All Metrics' AND season_id=318;
--- expect 3345 rows, mean 3.0293
+-- expect 3345 rows, mean 2.9972 (was 3.0293 before the 2026-09-30 percentile fix)
 ```
 
 ---

@@ -64,7 +64,26 @@ def metric_percentiles(neutral: pd.DataFrame) -> pd.DataFrame:
     group = df.groupby(["competition_id", "season_id", "position_group"])
     out = df[KEY].copy()
     for m in metric_cols:
-        pct = group[m].rank(pct=True) * 100.0
+        # MID-RANK, not rank/n. pandas' `rank(pct=True)` returns rank / n with ranks
+        # running 1..n, so the scale runs 100/n .. 100 and its mean is 50 + 50/n -- never
+        # 50. Through the club's band formula that lifted every rating, and by MORE in a
+        # small pool: measured on 2025/26, pools under 30 players averaged 3.14 against
+        # 3.01 for pools of 100+, with pool size correlating -0.725 with mean rating.
+        #
+        # That matters because 3.00 is the club's Minimum Standard, defined as the league
+        # median. A pool whose median player scores 3.30 has moved the bar the whole
+        # framework is anchored on -- and a Scottish Championship central midfielder (6 in
+        # the pool) was scored a third of a band above a League Two centre back for no
+        # footballing reason.
+        #
+        # (rank - 0.5) / n is symmetric about 50 and averages exactly 50 at every pool
+        # size. Ordering is untouched; only the clamp boundaries at bands 1 and 5 move,
+        # which shifts a handful of players near them by a place or two.
+        # The divisor is how many players HAVE this metric, not how many are in the pool.
+        # Physical metrics are absent for 318 outfielders and every goalkeeper, so this is
+        # the ordinary case: dividing by the pool size would rank four players inside a pool
+        # of ten at 5/15/25/35 instead of 12.5/37.5/62.5/87.5 -- a band of 1.0 for all four.
+        pct = (group[m].rank() - 0.5).div(group[m].transform("count")) * 100.0
         if m in cf.LOWER_IS_BETTER:
             pct = 100.0 - pct
         out[m] = pct

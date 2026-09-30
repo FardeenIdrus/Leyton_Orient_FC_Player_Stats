@@ -912,6 +912,56 @@ trajectory, methodology) and comes from the dump. Server pipeline is now **16 st
 
 **Verified:** 961 tests pass. Dashboard live over HTTPS, login works, Players opens on 2025/26.
 
+### 2026-09-30 — percentile scale centred; every peer pool now averages exactly 3.00
+
+**A real defect in the scoring engine, found while preparing the scoring report for the
+Head of Recruitment. Fixed, not reported to him — it carries no football judgement.**
+
+`metric_percentiles` used pandas `rank(pct=True)`, which returns **rank / n** with ranks
+running 1..n. The percentile scale therefore ran `100/n .. 100` and its mean was
+**50 + 50/n — never 50**. Through the club's band formula that lifted every rating, and by
+MORE in a small pool:
+
+| pool size | mean band before | after |
+|---|---|---|
+| 6 | 3.333 | **3.000** |
+| 20 | 3.100 | **3.000** |
+| 116 | 3.017 | **3.000** |
+| 300 | 3.007 | **3.000** |
+
+Measured on 25/26 before the fix: **pools under 30 players averaged 3.14 against 3.01 for
+pools of 100+**, with pool size correlating **−0.725** with mean rating. A Scottish
+Championship central midfielder (6 in the pool) was scored a third of a band above a League
+Two centre back for no footballing reason. That matters because **3.00 is the club's Minimum
+Standard, defined as the league median** — a pool whose median player scores 3.30 has moved
+the bar the whole framework is anchored on.
+
+**The fix** is the standard mid-rank convention, `(rank − 0.5) / n`.
+
+**A second defect was introduced and caught during the fix.** The first attempt divided by
+the POOL size (`transform("size")`) rather than the number of players holding that metric
+(`transform("count")`). Physical metrics are absent for 318 outfielders and every
+goalkeeper, so this is the ordinary case, not an edge one: four players inside a pool of ten
+came out at 5/15/25/35 instead of 12.5/37.5/62.5/87.5 — a band of 1.0 for all four. Caught
+by a test written for exactly that case before the code was trusted.
+
+**Verified after re-running `scorecard_run`:**
+
+| | |
+|---|---|
+| Pools where every player has both dimensions | **14 of 14 average exactly 3.00** |
+| Pools where no player has physical | **14 of 14 average exactly 3.00** |
+| Mixed pools (some missing physical) | 17 of 28 — residual is the 57/43-vs-100/0 weighting difference, a decision for the club, not a bug |
+| Overall mean, 25/26 | 3.0294 → **2.9972** |
+| Ratings moving more than 0.1 | 112 of 3,345 |
+| **Players whose rank changed within their pool** | **660 of 3,345 (20%), biggest move 4 places** |
+
+Tests 1,226 → **1,248** (`tests/test_percentile_centring.py`, 22).
+
+**Live anchors updated** — CLAUDE.md, the P17 plan's verification query, and register P13's
+"every league averages ~3.03" (now 3.00). Historical work-log entries and the frozen
+`docs/superpowers/` plans were deliberately NOT rewritten: they record what was true then.
+
 ### 2026-09-28 — scout reports: the club's scouting sheet read into the platform
 
 **Phase 1 of the scouting integration, data layer and interface. Read-only throughout.**
@@ -967,8 +1017,23 @@ are 26/27.*
 
 **Nothing here touches a score.** `objective_composite` is unchanged.
 
-**Open:** pointing at the live sheet (one `.env` line; it is not yet shared with the service
-account), the cron entry, and register **P21** — the platform's own watchlist (5 rows) and
+**Presented to the Head of Recruitment the same day; feedback applied immediately.** Now
+reading the LIVE sheet (shared with the service account, 11 tabs, same 437 reports). The
+report detail was rebuilt as a card -- `st.text_area(disabled=True)` renders grey text on a
+grey field, so the scout's own words, the most valuable content on the page, were styled as
+the least readable thing on it. Added: a player search, a "Fixture" column that names the
+MATCH rather than showing a bare date under that heading, an "In our data / Not in our data"
+filter (the second half being the discovery list), and a primary button into the player's
+profile via `best_profile_target`. New **"Scouts" column on the Players page**, requested
+directly: every scout who watched him said Sign -> **High priority** (23 players), they
+disagreed -> **Scouts split** (11), all rejected -> Not recommended (38), otherwise Monitor
+(172). Blank for the 96% nobody has watched, which is the honest state. Aggregation only --
+it never touches the composite, so next week's formula change cannot break it.
+
+**He also confirmed the model/scout conflict is fine for now** -- the composite formula is
+being modified next week.
+
+**Open:** the cron entry, and register **P21** — the platform's own watchlist (5 rows) and
 scout assessments (10 rows) against this sheet's 437 reports and 223 players of interest.
 
 ### 2026-09-18 — recruiter feedback: loan filter, season labelling, and a 35% profile bug
@@ -1206,7 +1271,7 @@ last international recognition (held in no ingested source); the cut-out player 
 | P6 | **The legacy `player_season_metrics` table has now caused three separate defects** (watchlist blanks, clustering coverage, cross-table disagreement). Frozen, incomplete, still read in several places. Retiring it properly is its own task. | Open |
 | P7 | **Player report feature** — a per-player report for the Head of Recruitment, chairman and manager, modelled on the supplied reference. See the spec. | Requested 2026-08-28 |
 | P12 | **No way to withdraw or correct an assessment.** `store/assessments.py` has INSERT-only `save()` plus `sign_off()` and `reject()` — **no update of the prose and no delete, anywhere in the UI or CLI.** A typo, a summary written about the wrong player, or a test entry is PERMANENT and keeps rendering on the profile and on the one-page report stamped "Final". Revising means submitting a whole new assessment, with the wrong one left visible beside it forever. Found 2026-09-12 after test rows ("Testing scout summary") were discovered signed-off on a real player in production and had to be cleared by hand with SQL. **This is not what Decision 17 requires:** that decision forbids OVERWRITING someone's judgement silently, not withdrawing one's own mistake. `reject()` already proves the pattern — mark it, keep the row, stop it scoring. Proposed: a `withdraw` action available to an assessment's own AUTHOR while it is unsigned (and to a sign-off holder afterwards), setting `status='withdrawn'` with a reason; the row stays on record, attributed, and never scores. Needs a migration (status value), `resolve_bands` to ignore it, and a button on the profile. | Open — real gap, small design |
-| P13 | **The platform supports CONFIRMATION better than DISCOVERY — owner's central concern, raised 2026-09-12.** *"Recruiters are using it to check players they already know, rather than let the data help them discover players."* The design currently reinforces that: the default view is ONE position at a time sorted by composite (so you must already know what you are shopping for); search is BY NAME (a player you have already thought of); the watchlist only holds players someone already chose; and there is no surface anywhere that answers "show me something I don't know". Per-match alerting (P11) would INHERIT this flaw if scoped to the watchlist — it would tell a recruiter more about players they had already picked. **Deliberately NOT designed yet.** The owner's own view is that it "will need proper planning and a few iterations of the design to get right", and a first design here is likely to be wrong. Recorded as the problem statement and the evidence, not a proposed solution. Any discovery surface must respect the platform's existing honesty rules: no cross-league ordering without a league-strength adjustment (register: every league's mean composite is ~3.03 BY CONSTRUCTION), and no composite from a peer pool below `MIN_PEERS_FOR_RANKING`. | Open — the most valuable open question on the platform |
+| P13 | **The platform supports CONFIRMATION better than DISCOVERY — owner's central concern, raised 2026-09-12.** *"Recruiters are using it to check players they already know, rather than let the data help them discover players."* The design currently reinforces that: the default view is ONE position at a time sorted by composite (so you must already know what you are shopping for); search is BY NAME (a player you have already thought of); the watchlist only holds players someone already chose; and there is no surface anywhere that answers "show me something I don't know". Per-match alerting (P11) would INHERIT this flaw if scoped to the watchlist — it would tell a recruiter more about players they had already picked. **Deliberately NOT designed yet.** The owner's own view is that it "will need proper planning and a few iterations of the design to get right", and a first design here is likely to be wrong. Recorded as the problem statement and the evidence, not a proposed solution. Any discovery surface must respect the platform's existing honesty rules: no cross-league ordering without a league-strength adjustment (register: every league's mean composite is 3.00 BY CONSTRUCTION), and no composite from a peer pool below `MIN_PEERS_FOR_RANKING`. | Open — the most valuable open question on the platform |
 | P17 | **108 of 411 loans are invisible on Squads & loans — the data is held, the join drops it.** `squads.py:74` joins `player_loans` on `player_id` ONLY (`LEFT JOIN player_loans l ON l.player_id = n.player_id`). 303 of 411 loan rows carry a `player_id`; the other **108 carry only `tm_player_id`** — a real Transfermarkt player we hold no internal id for. The squad frame itself is built from `transfermarkt_squads`, which is **keyed on `tm_player_id`**, so joining on that key as well would recover all 108. **Verified case: Joel Catesby** — Transfermarkt shows him at Accrington Stanley on loan from Everton FC U21 until 31/05/2027; we hold that exact row in `player_loans` (`tm_player_id 1083709`, `parent_club 'Everton FC U21'`, `loan_ends 2027-05-31`) and the page renders "On loan from" **blank**. His contract DOES show (8 months left), so the row is half-populated from two different joins. **This is the class of defect recruiters notice and lose confidence over — the platform claiming nothing is there when Transfermarkt shows it plainly.** Fix: add `OR l.tm_player_id = <the squad row's tm_player_id>` to the join, or join the loans frame on `tm_player_id` first and fall back to `player_id`. | **DONE 2026-09-28** (not yet deployed) — see `plan/2026-09-28-P17-P18-squads-joins.md`. The cited line was wrong: `squads.py:74` is the fallback frame; the rendered one is `registered_squad_frame`, which filtered `WHERE player_id IS NOT NULL` before merging. `attach_loans` now prefers `player_id` and falls back to `tm_player_id`; `resolve_loan_player_ids` does the same for the Loans table and DROPS a `tm_player_id` claimed by two of our players (David Kamara, 1076889 → 445315 + 2000224875 — a plain join returned 412 rows for 411 loans). Squad frame 3,783 rows, loans attached 303 → **409**. |
 | P17b | **"On loan only" silently discarded the Position filter.** Owner-reported 2026-09-28: set Position to Centre Forward on Squads, contracts and loans, click "On loan only", and every position comes back. "On loan only" does not filter the squad view — it REPLACES it with a separately built loans frame (135 linked loanees have not appeared in league data and are absent from the squad frame). League and Club were re-applied to the replacement; **Position never was**. Fixing only that would have caused a second complaint: `loans_frame` sourced position from the current season alone with no `"(last season)"` fallback, and `filter_by_position` excludes rows with no position — so the filter would have dropped 131 of 411 loanees whose position the platform knows. Both fixed together: `loan_view` re-applies all three filters, `with_last_season_position` gives the Loans table the same three position tiers as the squad table. Position present on loans 280 → **379 of 411**. | **DONE 2026-09-28** (not yet deployed) |
 | P21 | **The platform's own scouting features are effectively unused, and duplicate the club's spreadsheet.** Measured 2026-09-28 across **22 registered users**: platform `watchlist` **5 rows**, `scout_assessments` **10 rows** (7 signed off, 2 rejected, 1 submitted, some of it test data). Against that, the club's JotForm/Sheet workflow holds **437 reports from 6 scouts**, filed daily, and a **223-row "Players of Interest" list**. Two distinct problems. (a) DUPLICATION — watchlist and Players of Interest answer the same question, "who are we interested in"; the spreadsheet's version is 45x bigger and is the one people maintain. (b) CONTRADICTION — an assessment scores a player-season and moves `assessed_composite`; a scout report is a per-match verdict. A player can be signed off at 4.5 and carry a "Don't sign" report, and nothing on screen says which is the club's view. **Do not delete either — FREEZE both** (stop investing) until the workflow is written down. Note `assessed_composite` is currently a scored feature fed by ten rows. Proposed ownership rule: *every piece of data has exactly one owning system; the platform owns what it COMPUTES, the scouting workflow owns what a human OBSERVED or DECIDED.* | Open — needs a written workflow, then a decision |
