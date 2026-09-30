@@ -97,6 +97,34 @@ def resolve_links(reports: pd.DataFrame, lookup: pd.DataFrame,
                 if "linkable" in out.columns else pd.Series(True, index=out.index))
     keys = out.loc[linkable, "player_name"].map(_norm).map(name_to_key)
     out.loc[linkable, "player_id"] = keys.map(by_key)
+
+    # --- second tier: names recovered from the report text --------------------------------
+    #
+    # The form's dropdown and OUR players table are DIFFERENT LISTS. A scout who could not
+    # find a player in the dropdown may well have watched someone we hold full data on --
+    # measured on the live sheet, 9 of the 20 recovered names are players we have, mostly
+    # Premier League 2. Leaving them unlinked meant their report opened nothing.
+    #
+    # They cannot go through the strict path: there is no date of birth for them, which is
+    # precisely why they were missing from the dropdown. So they match on NAME ALONE, and
+    # the safety comes from refusing ambiguity rather than from a second field -- a name
+    # held by more than one of our players links to none of them. On the live data that
+    # rule produced 9 matches and 0 ambiguous.
+    #
+    # This tier is reached ONLY by a recovered name. A dropdown-named player HAS a date of
+    # birth available and must never be downgraded to name-only matching, which across the
+    # platform leaves 13 names claimed by two people.
+    recovered = (out["name_from_report"].fillna(False).astype(bool)
+                 if "name_from_report" in out.columns
+                 else pd.Series(False, index=out.index))
+    recovered = recovered & out["player_id"].isna()
+    if recovered.any():
+        by_name = (ours.assign(_n=ours["player_name"].map(_norm))
+                       .query("_n != ''")
+                       .drop_duplicates("_n", keep=False)
+                       .set_index("_n")["player_id"])
+        out.loc[recovered, "player_id"] = (
+            out.loc[recovered, "player_name"].map(_norm).map(by_name))
     return out
 
 
@@ -109,15 +137,17 @@ def main() -> None:
 
     engine = get_engine()
     reports = pd.read_sql(
-        "SELECT submission_id, player_name, linkable FROM scout_reports", engine)
+        "SELECT submission_id, player_name, linkable, name_from_report "
+        "FROM scout_reports", engine)
     if reports.empty:
         print("no scout reports stored yet")
         return
     lookup = pd.read_sql(
         "SELECT player_name, date_of_birth FROM scout_player_lookup", engine)
-    ours = pd.read_sql(
-        "SELECT player_id, player_name, birth_date FROM players "
-        "WHERE birth_date IS NOT NULL", engine)
+    # No birth-date filter. The strict path ignores a player without one anyway (`_key`
+    # returns None), and the recovered-name path needs to see EVERY player -- both to find
+    # a match and, just as importantly, to notice that a name is held by two of them.
+    ours = pd.read_sql("SELECT player_id, player_name, birth_date FROM players", engine)
 
     linked = resolve_links(reports, lookup, ours)
     table = ScoutReport.__table__
@@ -130,8 +160,11 @@ def main() -> None:
                          .values(player_id=None if pd.isna(player_id) else int(player_id)))
             written += int(pd.notna(player_id))
     players = linked["player_id"].dropna().nunique()
+    via_report = int((linked["name_from_report"].fillna(False).astype(bool)
+                      & linked["player_id"].notna()).sum())
     print(f"scout reports linked: {written} of {len(linked)} "
           f"({players} distinct players); {len(linked) - written} unlinked")
+    print(f"  of which matched on a name read from the report text: {via_report}")
 
 
 if __name__ == "__main__":
