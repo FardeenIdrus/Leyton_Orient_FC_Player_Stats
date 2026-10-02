@@ -91,3 +91,8 @@ secrets/
 
 # Excel lock files — created while a workbook is open, never committed.
 ~$*
+
+# Generated deliverables — rebuilt from the database, never committed.
+*.pdf
+*.xlsx
+!Copy of 2026_27 Leyton Orient Scout Reporting*.xlsx
