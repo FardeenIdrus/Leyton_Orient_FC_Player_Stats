@@ -88,3 +88,6 @@ Lyall Cameron — Recruitment Report.pdf
 # server; the path is referenced from .env, never the contents.
 secrets/
 *.iam.gserviceaccount.com.json
+
+# Excel lock files — created while a workbook is open, never committed.
+~$*

@@ -287,7 +287,28 @@ def archetypes_for(position: str) -> list[str]:
 
 def performance_metrics_for_archetype(position: str, archetype: str) -> list[str]:
     """The club-intended Performance metrics for a position's archetype. 'All Metrics'
-    (or an unknown archetype) returns the full list."""
+    (or an unknown archetype) returns the full list.
+
+    DROPS ARE MATCHED ON THE RESOLVED METRIC, not on the club's name for it. Several club
+    entries resolve through CLUB_SUCCESSOR to a metric another entry already supplies --
+    `dribble_success_pct` and `dribble_carry_value_p90` are both the latter, and
+    `padj_tackles_interceptions_p90` and `ground_duel_win_pct` are both the latter. Dropping
+    one club name left the twin in place and the measurement survived, so the drop achieved
+    nothing.
+
+    Measured before this was fixed: Winger / "Crossing & Creative Threat" dropped 0 of its 1
+    configured metrics and scored every one of 415 wingers IDENTICALLY to the full list --
+    an archetype offered in the interface that could not change a single number. Full Back /
+    "Attacking" achieved 2 of its 3.
+
+    Matching on the resolved metric applies the instruction each archetype already carried.
+    It changes no archetype's intent, and it cannot alter any position's FULL list, so
+    `objective_composite` -- the ranking -- is untouched.
+    """
     base = PERFORMANCE_METRICS.get(position, [])
     drop = ARCHETYPE_DROPS.get(position, {}).get(archetype, set())
-    return [m for m in base if m not in drop]
+    if not drop:
+        return list(base)
+    resolved_drop = {resolve_metric(m) for m in drop}
+    resolved_drop.discard("")
+    return [m for m in base if resolve_metric(m) not in resolved_drop]
