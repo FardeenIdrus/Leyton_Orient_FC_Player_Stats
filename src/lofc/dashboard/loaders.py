@@ -408,16 +408,24 @@ def load_sc_players() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=600)
-def headline(season_id: int | None = None) -> tuple[int, int]:
-    """Top-level counts for the KPI strip: distinct players analysed and leagues covered, for
-    ONE season (from the combined table, so all 7 leagues — not the EFL-only spine)."""
+def headline(season_id: int | None = None) -> tuple[int, int, int]:
+    """Top-level counts for the KPI strip, for ONE season (from the combined table, so all 7
+    leagues — not the EFL-only spine): (players with any data, players with a rating, leagues).
+
+    Both player counts are returned because they differ by everyone under the minutes floor
+    (4,376 vs 3,229 on 2025/26), and the Players table lists only the rated ones. Showing the
+    wider count alone led a reader to divide a table count by it."""
     engine = get_engine()
     where = f"WHERE season_id = {int(season_id)}" if season_id is not None else ""
     players = pd.read_sql(
         f"SELECT COUNT(DISTINCT player_id) AS c FROM player_metrics_neutral {where}", engine)["c"][0]
+    rated_where = (f"{where} AND" if where else "WHERE") + (
+        " archetype = 'All Metrics' AND objective_composite IS NOT NULL")
+    rated = pd.read_sql(
+        f"SELECT COUNT(DISTINCT player_id) AS c FROM player_scorecards {rated_where}", engine)["c"][0]
     leagues = pd.read_sql(
         f"SELECT COUNT(DISTINCT competition_id) AS c FROM player_metrics_neutral {where}", engine)["c"][0]
-    return int(players), int(leagues)
+    return int(players), int(rated), int(leagues)
 
 
 @st.cache_data(ttl=600)

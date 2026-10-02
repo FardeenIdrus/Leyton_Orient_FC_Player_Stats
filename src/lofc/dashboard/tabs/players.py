@@ -11,6 +11,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from lofc.aggregate.player_season import RANKABLE_MINUTES
 from lofc.config import settings
 from lofc.constrain.filters import RANK_COLUMN
 from lofc.dashboard import assessment_detail, badges, evidence, player_header
@@ -391,15 +392,24 @@ def _clear_selection_button(base_key: str, disabled: bool = False,
               help="Clear the selected player.")
 
 
+def infobar_count_items(players: int, rated: int) -> list[str]:
+    """The info bar's two player counts: everyone with data, and the rated subset the table
+    lists. Both are shown so neither is read as the denominator of the other."""
+    return [
+        f"<b>{players:,}</b> players",
+        f"<b>{rated:,}</b> rated ({RANKABLE_MINUTES}+ mins)",
+    ]
+
+
 def _kpi_strip(pool: pd.DataFrame, season_label_text: str | None = None,
                season_id: int | None = None, show_money: bool = False) -> None:
     """A quiet, single-line orientation strip: which dataset am I looking at. Shown above
     every page (chrome, not a headline) -- so it stays a slim bar rather than the large
     metric cards a dashboard's own landing page might earn."""
-    players, _ = headline(season_id)
+    players, rated, _ = headline(season_id)
     leagues = league_names()
     items = [
-        f"<b>{players:,}</b> players analysed",
+        *infobar_count_items(players, rated),
         f"<b>{len(leagues)}</b> leagues",
         f"<b>{season_label_text or season_label()}</b> season",
     ]
