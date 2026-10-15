@@ -305,6 +305,16 @@ def physical_table(detail: pd.DataFrame, neutral: pd.Series, pcts: pd.Series | N
 
 # --- data -------------------------------------------------------------------------------
 
+def split_physical(table: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(metrics in the rating, with band; every other physical metric, without band). The
+    headings carry the meaning, so neither keeps the 'In rating' column."""
+    if table.empty:
+        return table, table
+    rated = table[table["In rating"] == "✓"].drop(columns=["In rating"])
+    other = table[table["In rating"] != "✓"].drop(columns=["In rating", "Band"])
+    return rated.reset_index(drop=True), other.reset_index(drop=True)
+
+
 def like_prefix(prefix: str) -> str:
     """A SQL LIKE pattern matching `prefix` literally (`_` is a LIKE wildcard)."""
     return prefix.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%") + "%"
@@ -400,18 +410,19 @@ def render(row: pd.Series, neutral: pd.Series | None, league: str, key_prefix: s
     if neutral is not None:
         table = physical_table(phys, neutral, pcts, scored or [])
         if not table.empty:
-            st.markdown("##### Physical")
-            st.dataframe(
-                table, hide_index=True, width="stretch",
-                column_config={
-                    "In rating": st.column_config.TextColumn(
-                        width="small", help="✓ = one of the metrics in his Physical rating."),
-                    **{c: st.column_config.NumberColumn(format="%.1f")
-                       for c in ("All phases", "In possession", "Out of possession")},
-                    "Percentile": st.column_config.ProgressColumn(
-                        min_value=0, max_value=100, format="%d",
-                        help="Against the same position in his league."),
-                    "Band": st.column_config.NumberColumn(format="%.2f",
-                                                          help="1-5, rating metrics only."),
-                })
+            rated, other = split_physical(table)
+            cfg = {**{c: st.column_config.NumberColumn(format="%.1f")
+                      for c in ("All phases", "In possession", "Out of possession")},
+                   "Percentile": st.column_config.ProgressColumn(
+                       min_value=0, max_value=100, format="%d",
+                       help="Against the same position in his league."),
+                   "Band": st.column_config.NumberColumn(format="%.2f", help="1-5.")}
+            if not rated.empty:
+                st.markdown("##### Physical — in the rating")
+                st.dataframe(rated, hide_index=True, width="stretch", column_config=cfg,
+                             key=f"{key_prefix}_phys_rated")
+            if not other.empty:
+                st.markdown("##### Other physical metrics")
+                st.dataframe(other, hide_index=True, width="stretch", column_config=cfg,
+                             key=f"{key_prefix}_phys_other")
             st.caption("Per 90 minutes played. Metres per minute is a rate.")

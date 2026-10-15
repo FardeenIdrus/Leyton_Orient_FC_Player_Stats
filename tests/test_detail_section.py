@@ -250,3 +250,27 @@ def test_render_uses_the_frame_not_markdown_for_the_pitch():
     # components.html is deprecated in Streamlit 1.64 (scheduled for removal); st.iframe
     # replaces it. The HTML is ours, every text value escaped -- never user input.
     assert "st.iframe(" in src and "components.html(" not in src
+
+
+# --- 2026-10-15: which physical metrics count must be obvious (owner) -------------------
+# The ✓ column was easy to miss and the Scorecard heading ("the stats behind the composite")
+# listed Performance only. Now: "Performance — in the rating", "Physical — in the rating"
+# and "Other physical metrics". The headings carry the meaning; no ✓ column.
+
+def test_physical_splits_into_rated_and_other():
+    detail, neutral, pcts = _phys_inputs()
+    table = ds.physical_table(detail, neutral, pcts, scored=["distance_p90", "psv99_kmh"])
+    rated, other = ds.split_physical(table)
+    assert set(rated["Metric"]) == {"Distance (m)", "Top speed (PSV-99, km/h)"}
+    assert "Changes of direction" in set(other["Metric"])
+    assert "In rating" not in rated.columns and "In rating" not in other.columns
+    assert "Band" in rated.columns and "Band" not in other.columns
+
+
+def test_card_headings_say_what_counts():
+    import inspect
+    from lofc.dashboard.tabs import players
+    src_ds, src_p = inspect.getsource(ds.render), inspect.getsource(players._render_profile_body)
+    assert "Physical — in the rating" in src_ds and "Other physical metrics" in src_ds
+    assert "Performance — in the rating" in src_p
+    assert "the stats behind the composite" not in src_p

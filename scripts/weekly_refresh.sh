@@ -53,8 +53,9 @@
 #                       locking/logging/failure-handling can be exercised without
 #                       touching Docker or the real pipeline.
 #
-# NOT enabled anywhere yet. This script is not installed in any crontab — see
-# cli_commands.txt for the line to add once the platform is actually deployed.
+# INSTALLED on the production server (root crontab, verified 2026-10-15):
+#   15 4 * * 1 /opt/lofc/scripts/weekly_refresh.sh >> /opt/lofc/data/ops/cron.out 2>&1
+# i.e. every Monday 04:15 UTC.
 
 set -uo pipefail
 

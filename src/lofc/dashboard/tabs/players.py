@@ -787,7 +787,7 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
         st.markdown(summary)
     grand = _grand_table(row, position, archetype, sc_pcts, metric_values)
     if not grand.empty:
-        st.markdown("##### Scorecard metrics — the stats behind the composite")
+        st.markdown("##### Performance — in the rating")
         st.dataframe(
             grand, hide_index=True, width="stretch", key=f"{key_prefix}_grand",
             column_config={
@@ -797,9 +797,8 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
                     min_value=0, max_value=100, format="%d"),
                 "Band": st.column_config.ProgressColumn(
                     "Band", help="The metric's 1-5 band (median→3, 70th→4).", min_value=1, max_value=5, format="%.2f")})
-        st.caption("These are the metrics that build the **Performance** and **Physical** dimensions for "
-                   f"this position{' / archetype' if archetype != cf.DEFAULT_ARCHETYPE else ''}. Definitions "
-                   "are on the **Glossary** tab.")
+        st.caption(f"Definitions on the Glossary page"
+                   f"{' · scored on this archetype' if archetype != cf.DEFAULT_ARCHETYPE else ''}.")
         # The scorecard table was the ONE table on this page with no download, while the
         # broader "all tracked metrics" expander below had one -- backwards, since this is
         # the table that builds the composite and the only one carrying the 1-5 Band column.
