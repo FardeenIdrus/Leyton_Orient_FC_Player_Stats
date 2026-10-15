@@ -8,15 +8,19 @@ ranking."""
 
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 import streamlit as st
 
 from lofc.aggregate.player_season import RANKABLE_MINUTES
 from lofc.config import settings
 from lofc.constrain.filters import RANK_COLUMN
-from lofc.dashboard import assessment_detail, badges, evidence, player_header
+from lofc.dashboard import (assessment_detail, badges, detail_section, evidence, metric_filters,
+                            player_header)
 from lofc.dashboard.charts import PLOTLY_CONFIG, bar_chart, radar_chart
 from lofc.dashboard.formatting import numeric_or_dash
+from lofc.dashboard.units import season_total
 from lofc.dashboard.labels import LABELS, _metric_source, metric_label
 from lofc.dashboard.loaders import (
     get_engine, headline, league_names, load_assessment_status, load_current_form,
@@ -290,13 +294,13 @@ def _current_form(player_id: int, has_rating: bool = False) -> None:
         st.caption("Not enough minutes yet to be scored this season (450 needed).")
 
 
-def _strengths_weaknesses(percentiles: pd.DataFrame, player_id: int, comp_id: int,
-                          metrics: list[str]) -> str:
-    """A one-line plain-English read of a player: top-3 and bottom-3 percentiles."""
-    series = percentiles[(percentiles["player_id"] == player_id)
-                         & (percentiles["competition_id"] == comp_id)
-                         ].set_index("metric")["percentile"]
-    pairs = [(m, float(series[m])) for m in metrics if m in series.index and pd.notna(series[m])]
+def _strengths_weaknesses(pcts: pd.Series | None, metrics: list[str]) -> str:
+    """A one-line read of a player: top-3 and bottom-3 percentiles among the metrics that
+    build his rating. `pcts` is his scorecard-percentile row -- the same numbers as the
+    Scorecard table, so the card never shows two percentiles for one metric."""
+    if pcts is None:
+        return ""
+    pairs = [(m, float(pcts[m])) for m in metrics if m in pcts.index and pd.notna(pcts[m])]
     if len(pairs) < 2:
         return ""
     high = sorted(pairs, key=lambda x: x[1], reverse=True)[:3]
@@ -345,16 +349,17 @@ def _output_tile_plan(role: str, metric_values: pd.DataFrame) -> dict[str, bool]
     return {k: k in held for k in keys}
 
 
-def _full_stats_table(row: pd.Series, percentiles: pd.DataFrame, metric_values: pd.DataFrame) -> pd.DataFrame | None:
+def _full_stats_table(row: pd.Series, sc_pcts: pd.DataFrame,
+                      metric_values: pd.DataFrame) -> pd.DataFrame | None:
     """Every metric the platform actually holds data for, as real numbers for one player:
-    season total, per-90 (or rate), and percentile. Metrics nobody in the population has a
-    value for (see `_metrics_held_by_anyone`) are dropped, not shown as a blank row."""
+    season total (only where adding up makes sense -- dashboard/units.py), per 90 or rate,
+    and the SCORECARD percentile, the same number the Scorecard table shows. Metrics nobody
+    in the population has a value for (see `_metrics_held_by_anyone`) are dropped."""
     player_id, comp_id = int(row["player_id"]), int(row["competition_id"])
-    pcts = percentiles[(percentiles["player_id"] == player_id)
-                       & (percentiles["competition_id"] == comp_id)].set_index("metric")["percentile"]
+    pcts = _sc_pct_series(sc_pcts, player_id, comp_id, int(row["season_id"]))
     value_rows = metric_values[(metric_values["player_id"] == player_id)
                                & (metric_values["competition_id"] == comp_id)]
-    if value_rows.empty:
+    if value_rows.empty or pcts is None:
         return None
     values = value_rows.iloc[0]
     minutes = float(row["minutes"]) if pd.notna(row.get("minutes")) else 0.0
@@ -362,16 +367,13 @@ def _full_stats_table(row: pd.Series, percentiles: pd.DataFrame, metric_values: 
 
     records = []
     for metric in held:
-        if metric not in pcts.index or metric not in values.index or pd.isna(values[metric]):
+        if metric not in pcts.index or pd.isna(pcts[metric]) or metric not in values.index \
+                or pd.isna(values[metric]):
             continue
         value = float(values[metric])
-        if metric.endswith("_pct"):  # a 0-1 rate, not a count: no season total
-            season_total, per_90 = "—", f"{value * 100:.0f}%"
-        else:
-            season_total = f"{round(value * minutes / 90):,}" if minutes else "—"
-            per_90 = f"{value:.2f}"
+        per_90 = f"{value * 100:.0f}%" if metric.endswith("_pct") else f"{value:.2f}"
         records.append({"Metric": LABELS[metric], "Source": _metric_source(metric),
-                        "Season total": season_total,
+                        "Season total": season_total(metric, value, minutes),
                         "Per 90 / rate": per_90, "Percentile": round(float(pcts[metric]))})
     if not records:
         return None
@@ -390,6 +392,97 @@ def _clear_selection_button(base_key: str, disabled: bool = False,
               on_click=lambda: st.session_state.update(
                   {base_key + "__nonce": st.session_state.get(base_key + "__nonce", 0) + 1}),
               help="Clear the selected player.")
+
+
+MONEY_COLUMNS = ["Market value", "Est. wage", "Below fair value", "Fee in budget",
+                 "Wages in budget"]
+
+
+def _metric_filter_panel(pool: pd.DataFrame, position: str, archetype: str,
+                         metric_values: pd.DataFrame) -> pd.DataFrame:
+    """Render the metric sliders and return the pool filtered by them.
+
+    Physical bounds come from the whole season's players in this position, not the filtered
+    pool, so a slider does not jump when a sidebar filter changes."""
+    if pool.empty:
+        return pool
+    season_id = int(pool["season_id"].iloc[0])
+    pcts = load_scorecard_percentiles(season_id)
+    in_position = pcts.loc[pcts["position_group"] == position, ["player_id", "competition_id"]]
+    raw = metric_values.merge(in_position, on=["player_id", "competition_id"], how="inner")
+    perf_metrics = metric_filters.performance_slider_metrics(position, archetype)
+    phys_metrics = [m for m in metric_filters.PHYSICAL_SLIDERS.get(position, [])
+                    if m in raw.columns and raw[m].notna().any()]
+    prefix = f"mf_{position}_{archetype}_"
+
+    def _reset():
+        for k in [k for k in st.session_state if str(k).startswith(prefix)]:
+            del st.session_state[k]
+
+    active = sum(1 for k, v in st.session_state.items()
+                 if str(k).startswith(prefix + "pct_") and v)
+    active += sum(1 for m in phys_metrics
+                  if st.session_state.get(prefix + "raw_" + m, None) not in
+                  (None, float(math.floor(raw[m].min()))))
+    title = f"Metric filters · {active} active" if active else "Metric filters"
+    pct_mins: dict[str, float] = {}
+    raw_mins: dict[str, float] = {}
+    with st.expander(title, expanded=bool(active)):
+        if phys_metrics:
+            st.markdown("**Physical** · raw values")
+            cols = st.columns(3)
+            for i, m in enumerate(phys_metrics):
+                label, fmt = metric_filters.PHYSICAL_LABELS[m]
+                lo, hi = float(math.floor(raw[m].min())), float(math.ceil(raw[m].max()))
+                step = 0.1 if fmt.endswith("1f") else 1.0
+                value = cols[i % 3].slider(f"Min {label}", lo, hi, lo, step=step,
+                                           format=fmt, key=prefix + "raw_" + m)
+                if value > lo:
+                    raw_mins[m] = value
+        st.markdown("**Performance** · minimum percentile in league and position")
+        cols = st.columns(4)
+        for i, m in enumerate(perf_metrics):
+            pct_mins[m] = cols[i % 4].slider(metric_label(m), 0, 100, 0, step=5,
+                                             key=prefix + "pct_" + m)
+        st.button("Reset metric filters", on_click=_reset, key=prefix + "reset")
+    filtered, unknown = metric_filters.apply_metric_filters(pool, pcts, raw, pct_mins, raw_mins)
+    if unknown:
+        st.caption(f"{unknown} hidden: no data for an active metric filter.")
+    return filtered
+
+
+# The club's own thresholds (Position Archetype document): composite below 3.0 = below the
+# minimum standard (the league median); any dimension below 2.0 = veto; 4.0 = elite (70th
+# percentile). Pale fills so the number stays readable.
+_BAND_FILLS = [(2.0, "#F6D5D8"), (3.0, "#FBE7C6"), (4.0, "#E2F0E4"), (99.0, "#BFE0C5")]
+
+
+def band_colour(value) -> str:
+    """CSS for a 1-5 rating cell, coloured by the club's thresholds; '' when no rating."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if pd.isna(v):
+        return ""
+    fill = next(colour for bound, colour in _BAND_FILLS if v < bound)
+    return f"background-color: {fill}; color: #1A1A1A"
+
+
+def players_table_columns(lens: bool, show_money: bool, loan_column: bool) -> list[str]:
+    """The ranked list's columns, in order. Contract, months left and peer rank are on the
+    player card, not here."""
+    cols = ["#", "Player", "Club", "League", "Age", "Mins", "Composite"]
+    if lens:
+        cols.append("All-round")
+    # "Assessed" hidden for now (owner, 2026-10-12): assessments are not in use.
+    cols += ["Performance", "Physical", "Top speed", "Scouts"]
+    # Directly after Club: Club is the season being viewed, On loan at is today.
+    if loan_column:
+        cols.insert(cols.index("Club") + 1, "On loan at")
+    if show_money:
+        cols += MONEY_COLUMNS
+    return cols
 
 
 def infobar_count_items(players: int, rated: int) -> list[str]:
@@ -446,21 +539,22 @@ def _grand_table(row: pd.Series, position: str, archetype: str,
     minutes = float(row["minutes"]) if pd.notna(row.get("minutes")) else 0.0
     perf, phys = _club_metrics_for(position, archetype)
 
+    # Performance only: the physical metrics in the rating are shown once, in the card's
+    # Physical section (detail_section), with the same percentile and band.
     records = []
-    for dim, metrics in (("Performance", perf), ("Physical", phys)):
-        for m in metrics:
-            if pr is None or m not in pr.index or pd.isna(pr[m]):
-                continue
-            pct = float(pr[m])
-            val = mvr.get(m)
-            if m.endswith("_pct"):
-                total, per90 = "—", (f"{float(val) * 100:.0f}%" if pd.notna(val) else "—")
-            else:
-                per90 = f"{float(val):.2f}" if pd.notna(val) else "—"
-                total = f"{round(float(val) * minutes / 90):,}" if pd.notna(val) and minutes else "—"
-            records.append({"Dimension": dim, "Metric": metric_label(m), "Source": _metric_source(m),
-                            "Season total": total, "Per 90 / rate": per90,
-                            "Percentile": round(pct), "Band": round(cf.band(pct), 2)})
+    for m in perf:
+        if pr is None or m not in pr.index or pd.isna(pr[m]):
+            continue
+        pct = float(pr[m])
+        val = mvr.get(m)
+        if pd.isna(val):
+            per90 = "—"
+        else:
+            per90 = f"{float(val) * 100:.0f}%" if m.endswith("_pct") else f"{float(val):.2f}"
+        records.append({"Dimension": "Performance", "Metric": metric_label(m),
+                        "Source": _metric_source(m),
+                        "Season total": season_total(m, val, minutes), "Per 90 / rate": per90,
+                        "Percentile": round(pct), "Band": round(cf.band(pct), 2)})
     return pd.DataFrame(records)
 
 
@@ -485,8 +579,7 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
     # are on screen.
     player_header.render(row, shares, load_loan_for_player(pid))
 
-    if pd.notna(row.get("cluster_label")):
-        st.caption(f"Playing style: {row['cluster_label']}")
+    # No playing-style label: the clustering is hidden until rebuilt (register P4).
 
     # The label names ONE position. For roughly one player in ten it covers under half his
     # season, and every percentile below is against that group's peers -- said plainly
@@ -684,13 +777,14 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
             f"<ul style='margin:5px 0 0;padding-left:20px;'>{items}</ul></div>",
             unsafe_allow_html=True)
 
-    summary = _strengths_weaknesses(percentiles, int(row["player_id"]), int(row["competition_id"]), metrics)
-    if summary:
-        st.markdown(summary)
-
     # THE GRAND TABLE — the club-framework metrics that build the composite, with real numbers.
     position, sid = row["position_group"], int(row["season_id"])
     sc_pcts = load_scorecard_percentiles(sid)
+    summary = _strengths_weaknesses(
+        _sc_pct_series(sc_pcts, int(row["player_id"]), int(row["competition_id"]), sid),
+        _club_metrics_for(position, archetype)[0])
+    if summary:
+        st.markdown(summary)
     grand = _grand_table(row, position, archetype, sc_pcts, metric_values)
     if not grand.empty:
         st.markdown("##### Scorecard metrics — the stats behind the composite")
@@ -721,7 +815,7 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
                  "season total, per 90, percentile and 1-5 band.")
 
     # The broader set, for general scouting, kept out of the way.
-    stats_table = _full_stats_table(row, percentiles, metric_values)
+    stats_table = _full_stats_table(row, sc_pcts, metric_values)
     if stats_table is not None and not stats_table.empty:
         with st.expander("All tracked metrics (every stat the platform holds — season total, per 90, percentile)"):
             st.dataframe(
@@ -761,6 +855,13 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
         chart = (bar_chart(chart_metrics, values) if view == "Bars"
                  else radar_chart([(row["player_name"], values)], chart_metrics))
         st.plotly_chart(chart, width="stretch", config=PLOTLY_CONFIG, key=f"{key_prefix}_chart")
+
+    # Impect scores, where he plays, physical by phase. Display only -- never scored.
+    mv = metric_values[(metric_values["player_id"] == int(row["player_id"]))
+                       & (metric_values["competition_id"] == int(row["competition_id"]))]
+    detail_section.render(row, mv.iloc[0] if not mv.empty else None,
+                          str(row.get("league", "")), key_prefix,
+                          pcts=prow, scored=cf.PHYSICAL_METRICS.get(position, []))
 
     st.divider()
     _scout_section(get_engine(), row)
@@ -884,9 +985,10 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             # nothing is safe either way, since the very next run resolves it.
         st.divider()
 
+        pool = _metric_filter_panel(pool, position, archetype, metric_values)
+
         st.caption("Ranked by the club's **objective composite** (Performance + Physical, real data), "
-                   "within the selected season and position. Money is off by default; turn on "
-                   "**Affordability (modelled)** in the sidebar.")
+                   "within the selected season and position.")
         # The contract filter hides anyone with no known expiry date -- said plainly, but as
         # one compact line rather than a bordered callout, so the filter chrome above the
         # table stays out of the ranked list's way. Full provenance (scrape date etc.) moves
@@ -987,18 +1089,9 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             rank_column = RANK_COLUMN
             signed_only = False
 
-        # Playing-style filter + grouping.
-        types = sorted(pool["cluster_label"].dropna().unique().tolist())
-        fc1, fc2 = st.columns([3, 1])
-        chosen = fc1.multiselect("Player type", types, default=types,
-                                 help="Filter to one or more playing-style groups. Players with no "
-                                      "playing-style (leagues we don't cluster) are always kept.")
-        group_by_type = fc2.toggle("Group by type", value=False,
-                                   help="Order by playing-style group, then by composite within each group.")
-        if chosen:
-            pool = pool[pool["cluster_label"].isin(chosen) | pool["cluster_label"].isna()]
-        sort_cols = (["cluster_label", rank_column] if group_by_type else [rank_column])
-        pool = pool.sort_values(sort_cols, ascending=[True, False] if group_by_type else False,
+        # No playing-style filter: the clustering behind it is weak (register P4) and is to be
+        # rebuilt from the recruitment team's own profile definitions. Hidden until then.
+        pool = pool.sort_values(rank_column, ascending=False,
                                 na_position="last").reset_index(drop=True)
 
         # Money: optional signable filter.
@@ -1026,15 +1119,12 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
         # word "Rank" beside a score claimed it answered a different one. The player's true
         # standing ("8th of 13 in this league") is on his profile.
         view.insert(0, "#", range(1, len(view) + 1))
-        view["Minutes"] = view["minutes"].round(0)
-        view["Measured"] = (view["objective_weight_covered"] * 100).round(0)
-        # What the composite was ranked against. A 4.44 out of 105 peers and a 4.90 out of 1
-        # are different claims, and the number alone cannot tell them apart -- the report has
-        # stated its peer count since it was built, for exactly this reason. Safe as a
-        # NumberColumn (no "—" fallback needed, unlike Age/Months left): app.py withholds
-        # every row whose pool is below MIN_PEERS_FOR_RANKING, so a rendered row always has
-        # a real count.
-        view["Peers"] = view["peer_count"].astype("Int64")
+        view["Mins"] = view["minutes"].round(0)
+        # Peak sprint speed (SkillCorner PSV-99), raw km/h: means the same in every league.
+        _speed = metric_values[["player_id", "competition_id", "psv99_kmh"]].drop_duplicates(
+            ["player_id", "competition_id"])
+        view = view.merge(_speed, on=["player_id", "competition_id"], how="left")
+        view["Top speed"] = numeric_or_dash(view["psv99_kmh"], "{:.1f}")
         # Whether a scout has assessed this player. DISPLAY ONLY -- it never reorders the list
         # and never touches a score; scout input must not influence objective_composite, which
         # is the ranking. The card has always shown the full assessment; the list showed
@@ -1067,26 +1157,15 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
         view["Scouts"] = view["Scouts"].fillna("")
         if lens:
             view["All-round"] = view["allround_composite"].round(2)
-        # Contract expiry is REAL scraped data (not modelled), and the free-transfer market is a
-        # first-class recruitment question — so it shows by default, not only under the money layer.
-        view["Contract"] = view["contract_until"].dt.strftime("%m/%Y").fillna("—")
-        # A TextColumn does not save a raw NaN either -- confirmed directly, same as
-        # NumberColumn (see the block below) -- so a player from a league this platform
-        # doesn't cluster into playing styles (Scottish Prem/Champ, PL2) needs the same
-        # "—" fallback "Contract" above already gets, not a bare `.rename()` of the NaN.
-        view["cluster_label"] = view["cluster_label"].fillna("—")
-        months_left = (view["contract_until"] - pd.Timestamp.now().normalize()).dt.days / 30.44
-        # Age/Months left/Market value/Est. wage/Below fair value render as pre-formatted
-        # text (numeric_or_dash, dashboard/formatting.py), not raw numbers fed to
-        # NumberColumn: confirmed directly against the running app that a missing
-        # NumberColumn cell renders the literal text "None"/"nan" here rather than a blank
-        # cell, for every missing-value representation tried (numpy NaN, Python None,
-        # pandas' own pd.NA) -- the same gap "Contract" above has always avoided by being
-        # pre-formatted text with a "—" fallback rather than a raw value handed to a
-        # number-typed column. Minutes/Measured stay NumberColumn: both are guaranteed
-        # non-null for a ranked row (the 450-minute filter drops anyone without one).
+        # Contract, Months left and Peers are on the player card, not here.
+        # Age/Market value/Est. wage/Below fair value render as pre-formatted text
+        # (numeric_or_dash, dashboard/formatting.py), not raw numbers fed to NumberColumn:
+        # confirmed directly against the running app that a missing NumberColumn cell renders
+        # the literal text "None"/"nan" here rather than a blank cell, for every
+        # missing-value representation tried (numpy NaN, Python None, pandas' own pd.NA).
+        # Minutes stays NumberColumn: it is guaranteed non-null for a ranked row (the
+        # 450-minute filter drops anyone without one).
         view["Age"] = numeric_or_dash(view["age"], "{:.1f}")
-        view["Months left"] = numeric_or_dash(months_left, "{:.0f}")
         if show_money:
             view["Market value"] = numeric_or_dash(view["market_value_eur"] / 1e6, "€{:.1f}m")
             view["Est. wage"] = numeric_or_dash(view["estimated_weekly_wage_gbp"] / 1000, "£{:.1f}k")
@@ -1095,46 +1174,34 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
         table = view.rename(columns={
             "player_name": "Player", "team_name": "Club", "league": "League",
             rank_column: "Composite", "performance_band": "Performance",
-            "physical_band": "Physical", "cluster_label": "Player type",
+            "physical_band": "Physical",
             "affordable_fee": "Fee in budget", "affordable_wage": "Wages in budget"})
         composite_label = ("Scout-verified rating" if assessed_mode
                            else f"Composite ({archetype})" if lens else "Composite")
-        # "Peers" sits directly beside the composite it qualifies, not in a footnote:
-        # spec section 16, "caveats sit beside the number they qualify".
-        display_cols = ["#", "Player", "Club", "League", "Age", "Minutes", "Composite",
-                        "Peers"]
-        if lens:
-            display_cols.append("All-round")
-        display_cols += ["Performance", "Physical", "Measured", "Assessed", "Scouts"]
-        # Placed directly after the season Club so the two read together: Club is the season
-        # being viewed, On loan at is today. Only when the loan filter is engaged.
-        if loan_filter_active and "On loan at" in view.columns:
-            display_cols.insert(display_cols.index("Club") + 1, "On loan at")
-        display_cols += ["Player type", "Contract", "Months left"]
-        if show_money:
-            display_cols += ["Market value", "Est. wage", "Below fair value",
-                             "Fee in budget", "Wages in budget"]
+        display_cols = players_table_columns(
+            lens=lens, show_money=show_money,
+            loan_column=loan_filter_active and "On loan at" in view.columns)
 
-        band = lambda lbl, hlp: st.column_config.ProgressColumn(lbl, help=hlp, min_value=1, max_value=5, format="%.2f")
+        band = lambda lbl, hlp: st.column_config.NumberColumn(lbl, help=hlp, format="%.2f",
+                                                               width="small")
         composite_help = ("Performance + Physical + Psychological + Medical (1-5) — the "
                           "assessed ranking, opt-in.") if assessed_mode else \
                          "The club's objective composite (1-5) — the ranking."
         col_cfg = {
-            "Age": st.column_config.TextColumn("Age", help="'—' = no known birth date or valuation."),
-            "Minutes": st.column_config.NumberColumn("Minutes", format="%d"),
+            "Age": st.column_config.TextColumn("Age", width=50,
+                                               help="'—' = no known birth date or valuation."),
+            "#": st.column_config.NumberColumn("#", width=40),
+            "Player": st.column_config.TextColumn("Player", width="medium"),
+            "Club": st.column_config.TextColumn("Club", width="medium"),
+            "League": st.column_config.TextColumn("League", width="small"),
+            "Mins": st.column_config.NumberColumn("Mins", format="%d", width=60,
+                                                  help="Minutes played this season."),
             "Composite": band(composite_label, composite_help),
-            "Peers": st.column_config.NumberColumn(
-                "Peers", format="%d",
-                help="How many players this score ranks him against — same league, same "
-                     "position, same season, all past 450 minutes. A percentile means more "
-                     "out of 105 than out of 12. Players whose pool is smaller than "
-                     f"{scorecard_mod.MIN_PEERS_FOR_RANKING} are not ranked here at all; find them on "
-                     "Squads & loans."),
             "All-round": band("All-round", "Full-profile composite (All Metrics), for context."),
             "Performance": band("Performance", "The club-framework Performance dimension (1-5)."),
             "Physical": band("Physical", "The club-framework Physical dimension (1-5), where tracking exists."),
-            "Measured": st.column_config.NumberColumn(
-                "Measured %", help="Share of the composite that could be measured from data.", format="%d%%"),
+            "Top speed": st.column_config.TextColumn(
+                "Top speed", width="small", help="Peak sprint speed, km/h (SkillCorner PSV-99)."),
             "On loan at": st.column_config.TextColumn(
                 "On loan at", help="Where he is playing THIS season, and who owns him. The "
                                    "Club column is the season you are viewing."),
@@ -1144,14 +1211,6 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             "Scouts": st.column_config.TextColumn(
                 "Scouts", help="High priority = all scouts said Sign. "
                                "Split = they disagreed. Blank = no reports."),
-            "Player type": st.column_config.TextColumn("Player type", help="Playing-style archetype."),
-            "Contract": st.column_config.TextColumn(
-                "Contract", help="Contract expiry (MM/YYYY) from Transfermarkt. '—' = not known "
-                                 "(contract data is largely EFL-only)."),
-            "Months left": st.column_config.TextColumn(
-                "Months left", help="Months from today until the contract expires. Under 6 = he can "
-                                    "sign a pre-contract elsewhere. Negative = already expired. "
-                                    "'—' = no known contract date."),
         }
         # No per-row styling here (no zebra stripe, no affordability tint): a pandas Styler
         # emits an inline CSS string PER CELL, and `st.dataframe` renders to a canvas-based
@@ -1166,7 +1225,6 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             col_cfg |= {
                 "Market value": st.column_config.TextColumn("Market value", help="Transfermarkt (modelled context). '—' = no known valuation."),
                 "Est. wage": st.column_config.TextColumn("Est. wage", help="Modelled weekly wage (£ thousands). '—' = no known valuation."),
-                "Contract": st.column_config.TextColumn("Contract", help="Contract end (Transfermarkt)."),
                 "Below fair value": st.column_config.TextColumn("Below fair value", help="How far under fair value the market prices them. '—' = no known valuation."),
                 "Fee in budget": st.column_config.CheckboxColumn("Fee in budget", help="Transfer fee fits the budget."),
                 "Wages in budget": st.column_config.CheckboxColumn("Wages in budget", help="Modelled wage fits the ceiling."),
@@ -1176,8 +1234,8 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
         # Byte-for-byte identical to the pre-existing key when assessed_mode is off (Rule A):
         # the suffix only appears once the opt-in ranking mode is engaged.
         mode_suffix = f"_{assessed_mode}_{signed_only}" if assessed_mode else ""
-        base_key = (f"players_{position}_{archetype}_{show_money}_{only_qualifying}_"
-                   f"{group_by_type}_{'|'.join(chosen)}{mode_suffix}")
+        base_key = (f"players_{position}_{archetype}_{show_money}_{only_qualifying}"
+                    f"{mode_suffix}")
         # The ranked list is the platform's primary display -- it should dominate the page and
         # be comfortable to scan, not a small pane squeezed by everything around it. Height
         # scales with how many rows there are (capped, since st.dataframe scrolls internally
@@ -1194,8 +1252,14 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
         list_box = (st.expander(f"Ranked list — {len(view)} {position}s", expanded=False)
                     if opened_directly else st.container())
         with list_box:
+            # Rating cells coloured on the club's own thresholds (band_colour). Only these
+            # 3-4 columns are styled, so the per-cell cost stays small; the number is always
+            # shown too, so colour never carries the meaning alone.
+            rating_cols = [c for c in ("Composite", "All-round", "Performance", "Physical")
+                           if c in display_cols and c in table.columns]
+            styled = table.style.map(lambda v: band_colour(v), subset=rating_cols)
             selection = st.dataframe(
-                table, column_order=display_cols, hide_index=True, width="stretch",
+                styled, column_order=display_cols, hide_index=True, width="stretch",
                 height=table_height, on_select="rerun", selection_mode="single-row",
                 key=_selectable_key(base_key), column_config=col_cfg)
 

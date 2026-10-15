@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from lofc.ingest.impect_map import IMPECT_MAP, mappable
-from lofc.ingest.skillcorner_map import LOWER_IS_BETTER, SKILLCORNER_MAP
+from lofc.ingest.skillcorner_map import LOWER_IS_BETTER, PER_APPEARANCE, SKILLCORNER_MAP
 from lofc.ingest.statsbomb_season import STATSBOMB_GAP_MAP
 
 # The four sources. Every registry entry carries exactly one.
@@ -154,7 +154,10 @@ def build_registry() -> list[MetricSpec]:
     specs.extend(SB_COMPUTED_SPECS)                        # 15 computed from events
     for m in SKILLCORNER_MAP:                              # 24 physical
         specs.append(MetricSpec(m.name, SKILLCORNER,
-                                f"per-match average from SkillCorner column {m.source}",
+                                (f"SkillCorner column {m.source}, per appearance -> per 90 via "
+                                 f"minutes_full_all (skillcorner_map.to_per90)"
+                                 if m.name in PER_APPEARANCE else
+                                 f"taken as-is from SkillCorner column {m.source}"),
                                 club_metric=m.description,
                                 lower_is_better=m.name in LOWER_IS_BETTER))
     return specs

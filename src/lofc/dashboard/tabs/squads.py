@@ -27,6 +27,7 @@ import streamlit as st
 
 from lofc.dashboard.loaders import competition_name_by_id, get_engine
 from lofc.dashboard.session import go_to_player
+from lofc.dashboard.sidebar_filters import SidebarFilters, apply_sidebar_filters
 from lofc.model.scorecard import peer_pool_sizes, pool_is_thin
 from lofc.store import squads as store_squads
 
@@ -639,8 +640,24 @@ def squad_source_warning(scrape_rows: int, shown_rows: int) -> str | None:
             f"transfermarkt/` across, to restore the full list.")
 
 
+def sidebar_view(frame: pd.DataFrame, filters: SidebarFilters) -> pd.DataFrame:
+    """A `prepare`d frame narrowed by the sidebar: age, leagues, foot, contract, loan.
+
+    Season, Position and Minimum minutes do not apply here: the page is the current squad,
+    has its own Position filter with "All", and lists registered players who have not
+    played."""
+    if frame.empty:
+        return frame
+    framed = frame.assign(_on_loan=frame["On loan from"].notna())
+    out = apply_sidebar_filters(framed, filters, age="Age", league="League", foot="Foot",
+                                contract="contract_until", on_loan="_on_loan",
+                                loan_ends="loan_ends")
+    return out.drop(columns=["_on_loan"])
+
+
 def render(season_id: int, rating_season_id: int, season_label: str,
-           rating_label: str) -> None:
+           rating_label: str, filters: SidebarFilters | None = None) -> None:
+    filters = filters or SidebarFilters()
     st.subheader("Squads, contracts and loans")
     st.caption(f"Every registered squad member, {season_label}. Click a row to open the "
                f"player. Ratings are {rating_label} — this season is not scored yet.")
@@ -659,6 +676,7 @@ def render(season_id: int, rating_season_id: int, season_label: str,
         st.info("No squad data for this season yet.")
         return
 
+    frame = sidebar_view(frame, filters)
     names = competition_name_by_id()
     c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
     league = c1.selectbox("League", ["All"] + sorted(frame["League"].unique()))
@@ -680,7 +698,8 @@ def render(season_id: int, rating_season_id: int, season_label: str,
         loans = prepare(loans_frame(season_id, rating_season_id))
         if not loans.empty:
             loans["League"] = loans["competition_id"].map(names).fillna("\u2014")
-            loans = loan_view(loans, league=league, club=club, position=position)
+            loans = sidebar_view(loan_view(loans, league=league, club=club, position=position),
+                                 filters)
         view = loans
     elif show.startswith("Contract expiring"):
         # Expired dates are INCLUDED deliberately: a lapsed date is a live question --

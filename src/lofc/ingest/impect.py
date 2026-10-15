@@ -74,29 +74,36 @@ def is_live(target: ImpectTarget) -> bool:
     return settings.live_season_id is not None and target.season_id == settings.live_season_id
 
 
-def pull_iteration(target: ImpectTarget, token: str, force: bool = False) -> bool:
-    """Land one iteration's player averages. Return True if pulled, False if skipped.
+FINISHED_REFRESH_DAYS = 30
+
+
+def scores_path(iteration_id: int) -> Path:
+    return impect_root() / f"player_iteration_scores_{iteration_id}.parquet"
+
+
+def _pull(target: ImpectTarget, path: Path, fetch, what: str, force: bool = False) -> bool:
+    """Land one iteration-level frame. Return True if pulled, False if skipped.
 
     Skip-if-exists is right for a FINISHED season (its data can never change), but wrong for
     the season being played: Impect returns season-to-date aggregates, so a landed file is
     stale as soon as the next round is played. The live season therefore always re-pulls --
     without this, the first in-season pull would silently be the only one.
     """
-    path = averages_path(target.iteration_id)
     live = is_live(target)
-    refresh = force or live                      # live seasons overwrite; finished ones don't
+    # Live seasons always overwrite. Finished ones refresh monthly: Impect revises them
+    # (National League 25/26: 34 players changed July -> October, median 0.3%).
+    refresh = force or live or landing.older_than(path, FINISHED_REFRESH_DAYS)
     if landing.exists(path) and not refresh:
         return False
 
-    import impectPy as ip
     try:
-        frame = ip.getPlayerIterationAverages(target.iteration_id, token)
+        frame = fetch()
     except Exception as exc:
         # A live season configured before kick-off legitimately has nothing yet: skip it
         # quietly and try again next run. Any other failure -- and any failure on a season
         # that should already have data -- still raises loudly.
         if live and not landing.exists(path):
-            print(f"  [{target.label}] no data yet (season not started): {exc}")
+            print(f"  [{target.label}] no {what} yet (season not started): {exc}")
             return False
         raise
 
@@ -104,12 +111,29 @@ def pull_iteration(target: ImpectTarget, token: str, force: bool = False) -> boo
         # A transient API hiccup must not land an empty file that a re-run
         # would then skip forever (the same guard the StatsBomb ingest has).
         if live and not landing.exists(path):
-            print(f"  [{target.label}] no data yet (season not started); nothing landed")
+            print(f"  [{target.label}] no {what} yet (season not started); nothing landed")
             return False
-        raise RuntimeError(f"Impect returned no rows for {target.label} "
+        raise RuntimeError(f"Impect returned no {what} for {target.label} "
                            f"(iteration {target.iteration_id}); not persisting.")
     write_parquet(path, frame, force=refresh)
     return True
+
+
+def pull_iteration(target: ImpectTarget, token: str, force: bool = False) -> bool:
+    """Land one iteration's player averages (the scoring input)."""
+    import impectPy as ip
+    return _pull(target, averages_path(target.iteration_id),
+                 lambda: ip.getPlayerIterationAverages(target.iteration_id, token),
+                 "averages", force)
+
+
+def pull_scores(target: ImpectTarget, token: str, force: bool = False) -> bool:
+    """Land one iteration's Impect player scores (IMPECT, offensive, defensive, ...).
+    Display only -- never read by scoring."""
+    import impectPy as ip
+    return _pull(target, scores_path(target.iteration_id),
+                 lambda: ip.getPlayerIterationScores(target.iteration_id, token),
+                 "scores", force)
 
 
 def main() -> None:
@@ -145,6 +169,8 @@ def main() -> None:
             skipped += 1
             if not is_live(target):
                 print(f"  [{target.label}] already present, skipped")
+        if pull_scores(target, token, force=args.force):
+            print(f"  [{target.label}] scores pulled")
     live_ids = sorted({t.season_id for t in targets if is_live(t)})
     note = (f" | live season {settings.live_season_id} always re-pulled" if live_ids
             else " | no live season configured (all skip-if-exists)")

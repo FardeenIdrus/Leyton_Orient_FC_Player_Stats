@@ -31,7 +31,7 @@ import pandas as pd
 
 from lofc.config import settings
 from lofc.ingest import skillcorner_api
-from lofc.ingest.skillcorner_map import SKILLCORNER_MAP
+from lofc.ingest.skillcorner_map import SKILLCORNER_MAP, to_per90
 from lofc.ingest.statsbomb_season import stats_path, translate_competition
 from lofc.ingest.impect import averages_path
 from lofc.ingest.impect_translate import translate_target
@@ -133,7 +133,8 @@ def load_skillcorner(engine, competition_id: int, season_id: int) -> pd.DataFram
                             league_name_index=_league_name_index(engine, competition_id, season_id)
                             ).dropna(subset=["player_id_ours"])
     renames = {m.source: m.name for m in SKILLCORNER_MAP}
-    matched = matched.rename(columns=renames)
+    # Volumes arrive per APPEARANCE; scoring compares per 90 (see skillcorner_map).
+    matched = to_per90(matched.rename(columns=renames))
     matched["player_id"] = matched["player_id_ours"]
     return (matched.sort_values("minutes_full_all", ascending=False)
                    .drop_duplicates("player_id"))
@@ -187,6 +188,85 @@ def _register_minted_players(engine, minted: pd.DataFrame) -> int:
         conn.execute(pg_insert(Player.__table__).on_conflict_do_nothing(
             index_elements=["player_id"]), rows)
     return len(rows)
+
+
+DETAIL_COLUMNS = ["player_id", "competition_id", "season_id", "metric", "value_p90", "total"]
+
+
+def key_detail(long: pd.DataFrame, ids: pd.DataFrame, provider_key: str,
+               competition_id: int, season_id: int) -> pd.DataFrame:
+    """Long detail rows keyed by a provider id -> keyed by OUR player_id for one league season.
+
+    `ids` maps provider id -> player_id with a `minutes` column. Unmatched provider ids are
+    dropped; where two provider ids resolve to one player, the higher-minutes one is kept --
+    the rule build_spine and load_skillcorner apply -- so no metric lands twice."""
+    best = (ids.dropna(subset=["player_id"]).sort_values("minutes", ascending=False)
+               .drop_duplicates("player_id")[[provider_key, "player_id"]])
+    out = long.merge(best, on=provider_key, how="inner")
+    out["player_id"] = out["player_id"].astype("int64")
+    out["competition_id"] = competition_id
+    out["season_id"] = season_id
+    return out[DETAIL_COLUMNS]
+
+
+def build_detail_for_impect_league(engine, target) -> pd.DataFrame:
+    """Display-only detail for one league season: Impect zones, lanes, availability and
+    scores, plus SkillCorner in/out-of-possession physical. Never read by scoring."""
+    from lofc.ingest import impect_detail
+    from lofc.ingest.impect import scores_path
+    from lofc.ingest.skillcorner_map import SPLIT_PHASES, split_to_long
+    from lofc.model.impect_check import load_overrides
+    from lofc.model.impect_spine import attach_identity
+
+    cid, sid = target.competition_id, target.season_id
+    parts = []
+
+    # Impect: the same identity match build_spine uses, so ids agree with the neutral row.
+    averages = pd.read_parquet(averages_path(target.iteration_id))
+    ours = pd.read_sql("SELECT player_id, player_name, birth_date, tm_player_id FROM players",
+                       engine)
+    ident = attach_identity(translate_target(target), ours, overrides=load_overrides())
+    ids = ident[["playerId", "player_id", "minutes"]]
+    parts.append(key_detail(impect_detail.translate_detail(averages), ids, "playerId", cid, sid))
+    if scores_path(target.iteration_id).exists():
+        scores = pd.read_parquet(scores_path(target.iteration_id))
+        parts.append(key_detail(impect_detail.translate_scores(scores), ids, "playerId",
+                                cid, sid))
+
+    # SkillCorner: the same match load_skillcorner uses.
+    sc_target = next((t for t in settings.skillcorner_targets
+                      if t.competition_id == cid and t.season_id == sid), None)
+    if sc_target is not None and skillcorner_api.physical_path(sc_target.edition_id).exists():
+        from lofc.model.skillcorner_check import match_to_ours
+        full = pd.read_parquet(skillcorner_api.physical_path(sc_target.edition_id))
+        bio = pd.read_sql("SELECT player_id, player_name, birth_date FROM players", engine)
+        # match_to_ours overwrites SkillCorner's player_id with ours, so keep a copy.
+        matched = match_to_ours(full.assign(sc_player_id=full["player_id"]), bio,
+                                league_name_index=_league_name_index(engine, cid, sid))
+        sc_ids = (matched.dropna(subset=["player_id_ours"])
+                         .rename(columns={"player_id_ours": "player_id",
+                                          "minutes_full_all": "minutes"})
+                  [["sc_player_id", "player_id", "minutes"]])
+        for phase in SPLIT_PHASES:
+            path = skillcorner_api.split_path(sc_target.edition_id, phase)
+            if path.exists():
+                long = split_to_long(pd.read_parquet(path), full, phase)
+                parts.append(key_detail(long, sc_ids, "sc_player_id", cid, sid))
+
+    parts = [p for p in parts if not p.empty]
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=DETAIL_COLUMNS)
+
+
+def write_detail_for(engine, frame: pd.DataFrame, competition_id: int, season_id: int) -> int:
+    """Clear-then-insert one league season into player_detail_metrics."""
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM player_detail_metrics WHERE "
+                          "competition_id = :c AND season_id = :s"),
+                     {"c": competition_id, "s": season_id})
+        frame.to_sql("player_detail_metrics", conn, if_exists="append", index=False,
+                     chunksize=20_000, method="multi")
+    return len(frame)
 
 
 def write_for(engine, table: pd.DataFrame, competition_id: int, season_id: int) -> int:
@@ -246,6 +326,9 @@ def main() -> None:
         if args.write:
             total += write_for(engine, table, competition_id, season_id)
             line.append("written")
+            if spine_source == "impect":
+                detail = build_detail_for_impect_league(engine, target)
+                line.append(f"detail {write_detail_for(engine, detail, competition_id, season_id):,}")
         print("  " + " | ".join(line))
     if args.write:
         print(f"\nplayer_metrics_neutral: wrote {total} rows across {len(jobs)} league seasons.")

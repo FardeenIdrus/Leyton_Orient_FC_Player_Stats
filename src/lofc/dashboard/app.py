@@ -62,6 +62,11 @@ from lofc.dashboard.tabs.player_types import _player_types
 from lofc.dashboard.tabs.players import _kpi_strip, _players
 from lofc.dashboard.tabs.signoff import render as _signoff
 from lofc.dashboard.search import build_search_index
+from lofc.dashboard.sidebar_filters import SidebarFilters
+
+# Methodology is hidden for now (owner, 2026-10-09: too much text, users found it noisy).
+# The page code is kept; set True to restore it.
+SHOW_METHODOLOGY = False
 from lofc.model.scorecard import MIN_PEERS_FOR_RANKING, peer_pool_sizes, with_peer_counts
 from lofc.dashboard.tabs.users import render as _users_render
 from lofc.dashboard.tabs.watchlist import _watchlist
@@ -244,6 +249,13 @@ def main() -> None:
         budget_eur = float("inf")   # no fee cap when money is off
         wage_multiplier = 1.0
 
+    # The same sidebar filters, packaged for pages that do not read `pool` (Squads & loans,
+    # Scout reports, Watchlist). Every league selected = no league filter.
+    sidebar = SidebarFilters(
+        max_age=max_age,
+        leagues=(() if set(chosen_leagues) >= set(league_options) else tuple(chosen_leagues)),
+        contract_horizon=contract_horizon, loan=loan_choice, foot=foot_choice)
+
     candidates = load_candidates(wage_multiplier, season_id)
     # The global player search's universe: every position, every league, for this season --
     # built BEFORE any sidebar filter (age/league/contract/foot/position) narrows `candidates`
@@ -387,6 +399,11 @@ def main() -> None:
     def _physical_page():
         _physical(st.container())
 
+    def _rating_reference_page():
+        from lofc.dashboard import rating_reference
+        with st.container():
+            rating_reference.render()
+
     def _glossary_page():
         _glossary(st.container())
 
@@ -411,7 +428,7 @@ def main() -> None:
         cur = max(seasons) if seasons else season_id
         prev = max((s for s in seasons if s < cur), default=cur)
         with st.container():
-            _squads.render(cur, prev, season_name_for(cur), season_name_for(prev))
+            _squads.render(cur, prev, season_name_for(cur), season_name_for(prev), sidebar)
 
     def _scout_reports_page():
         # Reports are CURRENT-season observations; the rating beside them is the last
@@ -434,9 +451,12 @@ def main() -> None:
         "report": st.Page(_report_page, title="Report", url_path="report"),
         "assess": st.Page(_assess_page, title="Assess", url_path="assess"),
         "signoff": st.Page(_signoff_page, title="Sign-off", url_path="sign-off"),
-        "player_types": st.Page(_player_types_page, title="Player types", url_path="player-types"),
+        # "player_types" is withheld until the clustering is rebuilt (register P4); the page
+        # function above is kept so restoring it is one line here and one in nav_sections.
         "physical": st.Page(_physical_page, title="Physical", url_path="physical"),
         "glossary": st.Page(_glossary_page, title="Glossary", url_path="glossary"),
+        "rating_reference": st.Page(_rating_reference_page, title="What goes into each rating",
+                                    url_path="rating-reference"),
         "methodology": st.Page(_methodology_page, title="Methodology", url_path="methodology"),
     }
     # The Users page (admin account management -- create, reset a password, deactivate/
@@ -463,8 +483,9 @@ def main() -> None:
         "Scouting": [pages["players"], pages["squads"], pages["scout_reports"],
                      pages["compare"], pages["watchlist"], pages["report"]],
         "Assessment": [pages["assess"], pages["signoff"]],
-        "Analysis": [pages["player_types"], pages["physical"]],
-        "Reference": [pages["glossary"], pages["methodology"]],
+        "Analysis": [pages["physical"]],
+        "Reference": [pages["rating_reference"], pages["glossary"]]
+                     + ([pages["methodology"]] if SHOW_METHODOLOGY else []),
     }
     # A tenth page, but its own section: it is not scouting/assessment/analysis/reference
     # work, it is platform administration, and folding it into an existing group would bury

@@ -23,10 +23,22 @@ SCATTER_CONFIG = {"displayModeBar": True, "scrollZoom": True, "displaylogo": Fal
                   "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"]}
 
 
+# Percentile colours on the club's own thresholds: 70th = Elite; below 30th = band 2.0, the
+# veto level; between = normal range.
+PCT_GREEN, PCT_GREY, PCT_RED = "#3A9D5D", "#B9BEC5", "#C8102E"
+
+
+def percentile_colour(pct: float) -> str:
+    if pct >= 70:
+        return PCT_GREEN
+    return PCT_GREY if pct >= 30 else PCT_RED
+
+
 def bar_chart(metrics: list[str], values: list[float]) -> go.Figure:
     labels = [LABELS.get(m, m) for m in metrics]
     fig = go.Figure(go.Bar(
-        x=values, y=labels, orientation="h", marker_color=RED,
+        x=values, y=labels, orientation="h",
+        marker_color=[percentile_colour(v) for v in values],
         text=[f"{v:.0f}" for v in values], textposition="outside", cliponaxis=False,
         hovertemplate="%{y}: %{x:.0f} percentile<extra></extra>",
     ))

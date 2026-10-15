@@ -177,21 +177,74 @@ def _metric_source(metric: str) -> str:
 
 
 @st.cache_data
-def metric_glossary() -> dict[str, dict]:
-    """metric -> {label, source, definition text} using Impect's EXACT glossary wording.
+def clean_definition(text: str) -> str:
+    """Impect's definitions carry HTML (`<br/>`, `<b>`). Render them as Markdown: line
+    breaks and bold kept, every other tag removed, entities decoded."""
+    import html
+    import re
+    out = re.sub(r"<br\s*/?>", "\n", text or "", flags=re.I)
+    out = re.sub(r"</?(b|strong)>", "**", out, flags=re.I)
+    out = re.sub(r"<[^>]+>", "", out)
+    return html.unescape(out)
 
-    Built once from metric_definitions.describe(): for an Impect-sourced metric this is
-    Impect's own definition of the underlying KPI(s); for the others it is our documented
-    derivation. Cached so the login-gated glossary is resolved a single time.
+
+def _impect_name(column: str, defs: dict) -> str:
+    """Impect's own name for a column: its catalogue label, plus the context it is scoped to
+    (e.g. 'Successful Passes · Opponent Box'). Falls back to the raw column name."""
+    d = defs.get(column) or {}
+    label = d.get("label") or column
+    return f"{label} · {d['context_label']}" if d.get("context_label") else label
+
+
+def impect_basis(metric: str, defs: dict | None = None) -> str:
+    """How a metric is built from Impect, in Impect's own names. The only words that are
+    ours are the arithmetic: '+', '−', '÷' and 'per 90'."""
+    from lofc.ingest.impect_definitions import load_definitions
+    from lofc.ingest.impect_map import IMPECT_MAP
+    defs = load_definitions() if defs is None else defs
+    m = next((x for x in IMPECT_MAP if x.name == metric), None)
+    if m is None or m.kind == "none":
+        return ""
+
+    def terms(pairs):
+        out = ""
+        for i, (col, sign) in enumerate(pairs):
+            name = _impect_name(col, defs)
+            out += name if i == 0 else (f" − {name}" if sign < 0 else f" + {name}")
+        return out
+
+    if m.kind == "ratio":
+        num, den = terms(m.numer), terms(m.denom)
+        num = f"({num})" if len(m.numer) > 1 else num
+        den = f"({den})" if len(m.denom) > 1 else den
+        return f"{num} ÷ {den}"
+    return f"{terms(m.numer)}, per 90"
+
+
+def metric_glossary() -> dict[str, dict]:
+    """metric -> {label, source, text}: Impect's own words only, so a recruiter can check
+    every entry against Impect (owner, 2026-10-12).
+
+    text = the Impect metric(s) it is built from (impect_basis), then Impect's definition of
+    each, verbatim and once per distinct Impect metric. The old '(scoped to this metric via
+    X)' notes are gone: the basis line already names the scope in Impect's terms.
     """
+    from lofc.ingest.impect_definitions import load_definitions
+    from lofc.ingest.impect_map import IMPECT_MAP
+    defs = load_definitions()
+    by_name = {m.name: m for m in IMPECT_MAP}
     out = {}
     for metric, label in LABELS.items():
-        md = describe(metric)
-        if md.impect_columns:
-            parts = []
-            for c in md.impect_columns:
-                scope = f" (scoped to this metric via {c.scoped_from})" if c.scoped_from else ""
-                parts.append(f"**{c.label}**{scope}: {c.definition}")
+        md = describe(metric, defs)
+        m = by_name.get(metric)
+        if m is not None and m.kind != "none":
+            parts, seen = [f"**Built from (Impect):** {impect_basis(metric, defs)}"], set()
+            for col, _ in list(m.numer) + list(m.denom):
+                d = defs.get(col) or {}
+                if d.get("label") in seen or not d.get("definition"):
+                    continue
+                seen.add(d.get("label"))
+                parts.append(f"**{d['label']}**: {clean_definition(d['definition'])}")
             text = "\n\n".join(parts)
         else:
             text = f"_LOFC derivation:_ {md.lofc_derivation}"

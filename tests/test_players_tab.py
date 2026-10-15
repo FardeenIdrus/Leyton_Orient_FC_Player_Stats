@@ -44,13 +44,20 @@ def test_metrics_held_by_anyone_is_pure_data_driven_not_a_hard_coded_list():
 
 
 def _percentiles(rows):
-    return pd.DataFrame(rows, columns=["player_id", "competition_id", "metric", "percentile"])
+    """Scorecard percentiles (wide: one row per player-season, one column per metric) --
+    the card's single percentile source since 2026-10-12."""
+    long = pd.DataFrame(rows, columns=["player_id", "competition_id", "metric", "percentile"])
+    wide = long.pivot_table(index=["player_id", "competition_id"], columns="metric",
+                            values="percentile").reset_index()
+    wide["season_id"] = 318
+    wide["position_group"] = "Centre Forward"
+    return wide
 
 
 def test_full_stats_table_drops_metric_null_for_every_player():
     """The end-to-end table for one player omits a metric nobody in the season holds a
     value for -- no placeholder row, no '6 of 8' commentary, just absent."""
-    row = pd.Series({"player_id": 1, "competition_id": 5, "minutes": 900.0})
+    row = pd.Series({"player_id": 1, "competition_id": 5, "season_id": 318, "minutes": 900.0})
     metric_values = pd.DataFrame({
         "player_id": [1, 2],
         "competition_id": [5, 5],
@@ -72,7 +79,7 @@ def test_full_stats_table_keeps_metric_held_by_someone_but_null_for_this_player(
     """A metric genuinely absent for THIS player (e.g. save % for an outfielder) but held by
     someone else in the population (a goalkeeper) is still correctly skipped for him -- the
     population-level filter only decides table MEMBERSHIP, not per-player presence."""
-    row = pd.Series({"player_id": 1, "competition_id": 5, "minutes": 900.0})
+    row = pd.Series({"player_id": 1, "competition_id": 5, "season_id": 318, "minutes": 900.0})
     metric_values = pd.DataFrame({
         "player_id": [1, 2],
         "competition_id": [5, 5],

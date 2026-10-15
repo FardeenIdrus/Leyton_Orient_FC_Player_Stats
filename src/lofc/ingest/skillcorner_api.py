@@ -62,23 +62,41 @@ def is_live(target: SkillCornerTarget) -> bool:
     return settings.live_season_id is not None and target.season_id == settings.live_season_id
 
 
-def pull_edition(target: SkillCornerTarget, client, force: bool = False) -> bool:
+FINISHED_REFRESH_DAYS = 30
+
+
+def split_path(edition_id: int, phase: str):
+    """In-possession (tip) / out-of-possession (otip) physical file for one edition."""
+    return skillcorner_root() / f"physical_player_season_{edition_id}_{phase}.parquet"
+
+
+def pull_split(target: SkillCornerTarget, client, phase: str, force: bool = False) -> bool:
+    """Land one edition's physical data for one possession phase. Display only."""
+    return pull_edition(target, client, force=force, phase=phase)
+
+
+def pull_edition(target: SkillCornerTarget, client, force: bool = False,
+                 phase: str | None = None) -> bool:
     """Land one edition's season physical data. True if pulled, False if skipped.
+    `phase` = None for all phases (the scoring input), or "tip" / "otip".
 
     Skip-if-exists is right for a FINISHED season (its data can never change) but wrong for
     the season being played: these are season-to-date aggregates, so a landed file is stale
     as soon as the next round is played. The live season therefore always re-pulls.
     """
-    path = physical_path(target.edition_id)
+    path = physical_path(target.edition_id) if phase is None else split_path(target.edition_id, phase)
     live = is_live(target)
-    refresh = force or live                      # live seasons overwrite; finished ones don't
+    # Live seasons always overwrite; finished ones refresh monthly (providers revise them).
+    refresh = force or live or landing.older_than(path, FINISHED_REFRESH_DAYS)
     if landing.exists(path) and not refresh:
         return False
 
     # group_by=player returns one season-aggregated row per player.
     try:
-        response = client.get_physical(params={"competition_edition": target.edition_id,
-                                               "group_by": "player"})
+        params = {"competition_edition": target.edition_id, "group_by": "player"}
+        if phase is not None:
+            params["possession"] = phase
+        response = client.get_physical(params=params)
     except Exception as exc:
         # A live edition configured before kick-off (or before SkillCorner has processed any
         # matches) legitimately has nothing yet: skip and try again next run. Every other
@@ -126,6 +144,9 @@ def main() -> None:
             skipped += 1
             if not is_live(target):
                 print(f"  [{target.label}] already present, skipped")
+        for phase in ("tip", "otip"):
+            if pull_split(target, client, phase, force=args.force):
+                print(f"  [{target.label}] {phase} pulled")
     note = (f" | live season {settings.live_season_id} always re-pulled"
             if any(is_live(t) for t in targets)
             else " | no live season configured (all skip-if-exists)")

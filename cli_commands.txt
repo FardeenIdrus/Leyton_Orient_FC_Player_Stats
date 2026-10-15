@@ -435,3 +435,13 @@ docker compose exec -T app python -m lofc.store.scout_reports --force
 docker compose exec -T app python -m lofc.ingest.scout_sheets
 # Re-resolve player links only (does not re-read the sheet):
 docker compose exec -T app python -m lofc.model.scout_report_link
+
+# --- Detail data (2026-10-09): Impect scores, zones, possession-split physical. Display only. ---
+# Pulls Impect scores beside the averages (also runs inside `python -m lofc.ingest.impect`):
+docker compose exec -T app python -m lofc.ingest.impect
+# Pulls SkillCorner in/out-of-possession splits (also runs inside the SkillCorner ingest):
+docker compose exec -T app python -m lofc.ingest.skillcorner_api
+# Writes player_metrics_neutral AND player_detail_metrics (per league season):
+docker compose exec -T app python -m lofc.model.build_neutral --write
+# Re-score after any physical change (the per-90 fix changes stored scores):
+docker compose exec -T app python -m lofc.model.scorecard_run

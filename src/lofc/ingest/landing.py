@@ -66,3 +66,11 @@ def write_json(path: Path, data, force: bool = False) -> bool:
 def read_json(path: Path):
     with path.open(encoding="utf-8") as f:
         return json.load(f)
+
+
+def older_than(path, days: float) -> bool:
+    """True if `path` exists and was last written more than `days` ago."""
+    import time
+    from pathlib import Path
+    p = Path(path)
+    return p.exists() and (time.time() - p.stat().st_mtime) > days * 86400

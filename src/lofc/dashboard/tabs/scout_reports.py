@@ -28,6 +28,7 @@ import pandas as pd
 import streamlit as st
 
 from lofc.dashboard import theme
+from lofc.config import settings
 from lofc.dashboard.loaders import competition_name_by_id, get_engine
 from lofc.dashboard.session import go_to_player
 
@@ -56,7 +57,9 @@ def filter_reports(frame: pd.DataFrame, scout: str | None = None,
                    verdict: str | None = None, grade: str | None = None,
                    club: str | None = None, observation: str | None = None,
                    position: str | None = None, search: str | None = None,
-                   in_our_data: str | None = None) -> pd.DataFrame:
+                   in_our_data: str | None = None, league: str | None = None,
+                   max_age: int | None = None, foot: str | None = None,
+                   today: dt.date | None = None) -> pd.DataFrame:
     """Reports matching every filter given. "All" and None mean no filter.
 
     Position matches ANY of a multi-value report: 43 of the 437 carry more than one, and a
@@ -77,6 +80,16 @@ def filter_reports(frame: pd.DataFrame, scout: str | None = None,
         # sheet actually carries.
         out = out[out["player_name"].str.contains(search.strip(), case=False, na=False,
                                                   regex=False)]
+    # The page's own League / Max age / Foot -- the platform's rules: an unknown age is
+    # kept by an age cap, and Left/Right include two-footed players.
+    if league and league != "All" and "league" in out.columns:
+        out = out[out["league"] == league]
+    if max_age is not None and "birth_date" in out.columns:
+        ref = pd.Timestamp(today or dt.date.today())
+        age = (ref - pd.to_datetime(out["birth_date"], errors="coerce")).dt.days / 365.25
+        out = out[age.isna() | (age <= max_age)]
+    if foot and foot != "All" and "foot" in out.columns:
+        out = out[out["foot"].isin([foot, "Both"])]
     if in_our_data == "In our data":
         out = out[out["player_id"].notna()]
     elif in_our_data == "Not in our data":
@@ -471,13 +484,24 @@ def reports_frame(rating_season_id: int) -> pd.DataFrame:
                r.verdict, r.player_id, r.linkable, r.missing_since,
                r.name_from_report,
                b.objective_composite AS composite,
-               b.competition_id      AS rated_in
+               b.competition_id      AS rated_in,
+               p.birth_date,
+               -- The page's League filter: where he plays THIS season, else last season.
+               COALESCE(live.competition_id, prev.competition_id) AS league_id
         FROM scout_reports r
         LEFT JOIN rated b ON b.player_id = r.player_id
+        LEFT JOIN players p ON p.player_id = r.player_id
+        LEFT JOIN LATERAL (SELECT competition_id FROM player_metrics_neutral m
+                           WHERE m.player_id = r.player_id AND m.season_id = %(live)s
+                           ORDER BY minutes DESC NULLS LAST LIMIT 1) live ON true
+        LEFT JOIN LATERAL (SELECT competition_id FROM player_metrics_neutral m
+                           WHERE m.player_id = r.player_id AND m.season_id = %(prev)s
+                           ORDER BY minutes DESC NULLS LAST LIMIT 1) prev ON true
         WHERE r.missing_since IS NULL
         ORDER BY r.fixture_date DESC NULLS LAST, r.player_name
         """,
-        get_engine(), params={"prev": rating_season_id})
+        get_engine(), params={"prev": rating_season_id,
+                              "live": settings.live_season_id or rating_season_id})
 
 
 @st.cache_data(ttl=60)
@@ -614,6 +638,7 @@ def render(rating_season_id: int, rating_label: str) -> None:
 
     frame = model_view(frame)
     names = competition_name_by_id()
+    frame["league"] = frame["league_id"].map(names)
 
     linked = int(frame["player_id"].notna().sum())
     disagree = int((frame[MODEL_VIEW] == "Model disagrees").sum())
@@ -623,8 +648,14 @@ def render(rating_season_id: int, rating_label: str) -> None:
          "Scout activity"])
 
     with browse:
-        search = st.text_input("Search for a player", placeholder="Start typing a name…",
+        s1, s2, s3, s4 = st.columns([3, 2, 1, 1])
+        search = s1.text_input("Search for a player", placeholder="Start typing a name…",
                                key="scout_search")
+        league = s2.selectbox("League", ["All"] + sorted(frame["league"].dropna().unique()),
+                              key="scout_league")
+        max_age = s3.number_input("Max age", min_value=16, max_value=40, value=40, step=1,
+                                  key="scout_max_age")
+        foot = s4.selectbox("Foot", ["All", "Left", "Right"], key="scout_foot")
         c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
         scout = c1.selectbox("Scout", _options(frame, "scout"))
         verdict = c2.selectbox("Verdict", _options(frame, "verdict"))
@@ -638,7 +669,8 @@ def render(rating_season_id: int, rating_label: str) -> None:
         in_our_data = c7.selectbox("Our data", ["All", "In our data", "Not in our data"])
         view = filter_reports(frame, scout=scout, verdict=verdict, grade=grade,
                               club=club, observation=observation, position=position,
-                              search=search, in_our_data=in_our_data)
+                              search=search, in_our_data=in_our_data, league=league,
+                              max_age=None if max_age >= 40 else int(max_age), foot=foot)
         st.caption(f"{len(view):,} of {len(frame):,} reports · "
                    f"{frame['player_name'].nunique():,} players · "
                    f"{frame['scout'].nunique()} scouts · {linked:,} matched to our data")

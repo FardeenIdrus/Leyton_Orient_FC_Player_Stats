@@ -104,14 +104,16 @@ def test_the_pool_carries_a_peer_count_before_any_page_renders_it():
         "from the filtered pool — a sidebar filter must not shrink a player's peer group")
 
 
-def test_the_players_table_renders_the_peer_count_it_gates_on():
+def test_the_player_card_renders_the_peer_count_it_gates_on():
+    """The pool size moved from a table column to the card (2026-10-02, Head of
+    Recruitment): "3rd of 92 in this league". The list itself withholds any pool under
+    MIN_PEERS_FOR_RANKING, so no listed composite rests on a 4.90-of-1."""
     import inspect
     from lofc.dashboard.tabs import players
-    source = inspect.getsource(players._players)
-    assert '"Peers"' in source, (
-        "players are withheld from the ranking when their pool is too small, but the table "
-        "never shows the pool size — a recruiter cannot tell a 4.44-of-105 from a 4.90-of-1")
-    assert "peer_count" in source, "the Peers column is declared but never sourced"
+    source = inspect.getsource(players._render_profile_body)
+    assert "rank_in_pool" in source, (
+        "the card no longer states the player's rank among his peers — a recruiter cannot "
+        "tell a 4.44-of-105 from a 4.44-of-12")
 
 
 def test_the_squad_page_announces_the_fallback_instead_of_rendering_it_silently():

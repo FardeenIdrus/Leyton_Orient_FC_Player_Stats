@@ -7,15 +7,21 @@ returned". Internal names reuse the earlier squad-only loader's convention where
 they overlap, so the existing skillcorner_player_season table and dashboard stay
 consistent.
 
-Units note: SkillCorner's `_full_all` columns are per-full-match-played averages
-(a match runs ~95-100 min), so the `_p90` suffix here means "per match played",
-close to but not exactly per-90 -- kept for naming consistency, documented here.
-Speeds are km/h; times are seconds; distances are metres.
+Units note: SkillCorner's `_full_all` columns are averages PER APPEARANCE, over the
+minutes actually played -- NOT per 90. `minutes_full_all` is the average minutes per
+appearance (median 67, 10th percentile 25). Until 2026-10-04 they were stored as if they
+were per 90 (an earlier version of this note said "close to per-90"), so minutes per
+appearance explained 97% of the variance in "distance per match" and the Physical
+dimension ranked starters above substitutes. `to_per90` converts the volume metrics;
+the `_p90` names are now accurate. Rates (metres per minute), peaks (PSV-99) and timing
+tests are unaffected. Speeds are km/h; times are seconds; distances are metres.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+import pandas as pd
 
 
 @dataclass(frozen=True)
@@ -63,6 +69,57 @@ SKILLCORNER_MAP: list[PhysicalMetric] = [
 
 # metrics where a lower value is BETTER (the timing tests), so scoring must invert them.
 LOWER_IS_BETTER = {m.name for m in SKILLCORNER_MAP if m.name.startswith(("time_to_", "agility_"))}
+
+# Volume metrics: SkillCorner reports these per APPEARANCE, so they scale with minutes
+# played. Every `_full_all` distance or count EXCEPT metres-per-minute, already a rate.
+PER_APPEARANCE = {m.name for m in SKILLCORNER_MAP
+                  if m.source.endswith("_full_all") and "metersperminute" not in m.source}
+
+MINUTES_PER_APPEARANCE = "minutes_full_all"
+
+
+SPLIT_PHASES = {"tip": "In possession", "otip": "Out of possession"}
+
+
+def split_to_long(split: pd.DataFrame, full: pd.DataFrame, phase: str) -> pd.DataFrame:
+    """A possession-phase pull (`possession=tip|otip`) as long rows
+    (sc_player_id, metric, value_p90, total) for player_detail_metrics.
+
+    Volumes per 90 minutes PLAYED -- divided by the all-phase `minutes_full_all` from `full`
+    (the ordinary pull), so in + out sum to roughly the all-phase figure. Metres per minute is
+    already a rate within the phase and is kept. Display only."""
+    minutes = full.set_index("player_id")[MINUTES_PER_APPEARANCE]
+    minutes = minutes.where(minutes > 0)
+    work = split[split["player_id"].isin(minutes.dropna().index)]
+    mins = work["player_id"].map(minutes)
+    rows = []
+    for m in SKILLCORNER_MAP:
+        col = m.source.replace("_full_all", f"_full_{phase}")
+        if col not in work.columns:
+            continue
+        if m.name in PER_APPEARANCE:
+            value = work[col] / mins * 90.0
+        elif "metersperminute" in m.source:
+            value = work[col]
+        else:
+            continue
+        rows.append(pd.DataFrame({"sc_player_id": work["player_id"].to_numpy(),
+                                  "metric": f"phys_{phase}.{m.name}",
+                                  "value_p90": value.to_numpy(), "total": float("nan")}))
+    if not rows:
+        return pd.DataFrame(columns=["sc_player_id", "metric", "value_p90", "total"])
+    return pd.concat(rows, ignore_index=True).dropna(subset=["value_p90"])
+
+
+def to_per90(frame: pd.DataFrame) -> pd.DataFrame:
+    """Per-appearance volumes -> per 90 minutes. Expects the renamed metric columns plus
+    `minutes_full_all`. No minutes gives no value, never infinity. Returns a copy."""
+    out = frame.copy()
+    minutes = pd.to_numeric(out[MINUTES_PER_APPEARANCE], errors="coerce")
+    minutes = minutes.where(minutes > 0)
+    for name in PER_APPEARANCE & set(out.columns):
+        out[name] = pd.to_numeric(out[name], errors="coerce") / minutes * 90.0
+    return out
 
 
 def skillcorner_columns_used() -> set[str]:

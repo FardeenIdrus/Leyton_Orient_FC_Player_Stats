@@ -19,6 +19,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -953,3 +954,47 @@ class ScoutSync(Base):
     reports_written: Mapped[int] = mapped_column(Integer, default=0)
     # False when the pull was identical to the previous one and nothing was written.
     changed: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class PlayerDetailMetric(Base):
+    """Display-only detail per player-season, stored long (one row per metric) so a new
+    family needs no migration: Impect zones / lanes / receptions by availability, Impect's
+    own scores, SkillCorner in- and out-of-possession physical. Never read by scoring.
+
+    `value_p90` is per 90 for counts and physical volumes, the minutes-weighted rating for
+    an Impect score, and metres per minute as given. `total` is the season total where one
+    exists (Impect counts), else NULL."""
+    __tablename__ = "player_detail_metrics"
+    __table_args__ = (
+        UniqueConstraint("player_id", "competition_id", "season_id", "metric",
+                         name="uq_detail_player_comp_season_metric"),
+        Index("ix_detail_pool_metric", "competition_id", "season_id", "metric"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    competition_id: Mapped[int] = mapped_column(Integer)
+    season_id: Mapped[int] = mapped_column(Integer)
+    metric: Mapped[str] = mapped_column(String)
+    value_p90: Mapped[float] = mapped_column(Float)
+    total: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class ImpectDefinition(Base):
+    """Impect's official KPI definitions (its glossary), for the dashboard's glossary.
+
+    In Postgres because the production dashboard reads ONLY Postgres: data/ is excluded from
+    the image and not mounted, so a CSV under data/reference was invisible there. Licensed
+    Impect text -- displayed in our own tool, never republished. `context_*` carries Impect's
+    zone / reception-type definition where the KPI is split by one (e.g. IBWL)."""
+    __tablename__ = "impect_definitions"
+
+    column: Mapped[str] = mapped_column(String, primary_key=True)
+    label: Mapped[str | None] = mapped_column(String, nullable=True)
+    official_definition: Mapped[str | None] = mapped_column(Text, nullable=True)
+    meaning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parent_kpi: Mapped[str | None] = mapped_column(String, nullable=True)
+    inverted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    context_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    context_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    context_definition: Mapped[str | None] = mapped_column(Text, nullable=True)

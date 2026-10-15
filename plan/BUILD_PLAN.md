@@ -9,7 +9,7 @@
 >   read only when you need the *why* behind something).
 > - **Technical deep-dives** are in `docs/` (see the Documentation map below).
 >
-> _Last updated: 2026-08-25._
+> _Last updated: 2026-10-09._
 
 ---
 
@@ -912,6 +912,119 @@ trajectory, methodology) and comes from the dump. Server pipeline is now **16 st
 
 **Verified:** 961 tests pass. Dashboard live over HTTPS, login works, Players opens on 2025/26.
 
+### 2026-10-12 to 10-15 — card, glossary and reference pages made correct and consistent
+
+**NOT DEPLOYED.** Tests 1,401 → **1,512**. Full list in `plan/2026-10-15-STATE.md`.
+
+**Errors found and fixed (all display, none in stored scores):**
+- Card showed physical "season totals" that cannot exist (Dan Happe: top speed 995, metres per
+  minute 3,459) and overstated distances (Impect minutes, SkillCorner tracks fewer). Totals now
+  only where adding up makes sense (`dashboard/units.py`); value metrics keep 2 dp (0.80, was "1").
+- One card showed two percentiles for the same metric (Pressures 20 and 22): "All tracked
+  metrics" and Strengths/Watch-outs read the legacy `player_percentiles` table. All now read
+  the scorecard percentiles — 13 shared metrics, 0 mismatches.
+- Glossary showed Impect's definition of the PARENT metric ("Passes into box" = a successful
+  pass) with "(scoped to …)" notes; it now shows what each metric is built from in Impect's own
+  names, then Impect's definition verbatim. It also had no physical entries at all.
+- Glossary definitions lived in a CSV under `data/`, which the production dashboard cannot read
+  (excluded from the image, not mounted) — the live glossary very likely showed "(definition
+  not in glossary pull)". Now in Postgres (`impect_definitions`, migration `c7e2a1f4d903`).
+- Packing-zone labels "Box", wrong layout, my own metric list: replaced with Impect's names,
+  layout from Impect's zone definitions, Impect's tab metrics and per-match unit. Verified:
+  Josh Walker CF rows 22/22 against Impect's screen.
+- Physical names differed between card, sliders and glossary; a slider stated an unpublished
+  15 km/h threshold. One name per metric now, from the glossary.
+
+**SkillCorner also revises finished seasons** (2025/26 since download: PL2 815 players changed,
+median 3.0%; National League 607). The 30-day refresh covers it. Re-scored locally 2026-10-15:
+**PL2 134 ratings moved >0.1, 45 >0.25 (max 0.86), 173 players 5+ places**; National League 27
+>0.1; Scottish Championship 0 (no SkillCorner data — the expected control).
+
+### 2026-10-02 to 10-09 — Head of Recruitment's comments: table cleanup, a physical defect, new data
+
+**NOT DEPLOYED.** Local only, awaiting the Head of Recruitment's review. Tests 1,309 → **1,401**.
+
+**"27% meet our benchmarks" (1,687 / 4,376) was a denominator error, not a scoring one.** 4,376 is
+every player with data; 1,147 of them are under 450 minutes and carry no rating. 1,687 of 3,345
+ratings = **50.4%**, 48–55% in every league and position, as the median definition requires.
+The info bar invited the division, so it now names both counts:
+`4,376 players · 3,229 rated (450+ mins) · 7 leagues · 2025/26 season`.
+
+**Players table, at his request:** removed Measured %, Peers, Contract, Months left (the card
+states rank, contract and months), Player type and its filter; removed "Money is off by default…"
+from the caption. Added **Top speed**. The card's playing-style line and the Player types page are
+hidden until P4 is rebuilt.
+
+**PHYSICAL DEFECT — ours, fixed, changes rankings.** SkillCorner `_full_all` values are per
+APPEARANCE; we stored them as per 90. Minutes per appearance explained **97%** of "distance per
+match" and Physical correlated 0.43 with minutes played. Converted the 15 volume metrics with
+`minutes_full_all` (`skillcorner_map.to_per90`). After re-scoring 2025/26 locally: Physical vs
+minutes **0.43 → 0.00**, Performance unchanged, **2,716 of 3,345 ratings changed rank** within
+their pool (1,327 by 10+). Consequences for the formula meeting: the report's B2 figures are
+stale, and distance per 90 is now metres-per-minute × 90 (**r = 1.00**) — both in Physical.
+
+**Metric sliders** (`dashboard/metric_filters.py`): a minimum-percentile slider per scored
+Performance metric, and three raw per-90 physical sliders per position (placeholders chosen from
+positional demand, pending his list). A slider at its floor filters nobody (verified, 21 sliders).
+
+**Sidebar on Squads & loans** — it applied none of the filters. Age, leagues, foot, contract and
+loan now apply through one shared function (`dashboard/sidebar_filters.py`). Left foot:
+3,783 → 879. Scout reports, Watchlist and Sign-off still pending a decision.
+
+**New data, display only — never scored** (`player_detail_metrics`, migration `b4d1e7a90c21`,
+2.18M rows / 473 MB locally): Impect's own scores (IMPECT, offensive, defensive + 10 more, via
+`getPlayerIterationScores`, minutes-weighted across positions); Impect zones (11 packing zones)
+and lanes (5) for touches, receptions, defensive actions, ball wins, duels, shots, xG, goals —
+already in the landed averages, never used; receptions between the lines / out wide / in the box
+/ hold-up; SkillCorner in- and out-of-possession physical (`possession=tip|otip`). On the card:
+Impect score tiles, a "Where he plays" pitch map (zones or lanes, per 90 or season total,
+coloured by percentile vs league-position peers), and physical by phase plus speed/agility.
+Verified: lanes sum to Impect's total touches exactly; zones to 91% for outfielders because
+Impect supplies no values for its GK zone (the map says "Not supplied"). The pitch is a
+schematic of Impect's zone codes — **geometry to be checked against Impect's platform.**
+
+### 2026-10-01/02 — scout reports and the scoring fixes DEPLOYED; archetype drops repaired
+
+**Everything from the two open threads is now live on the server.** Tests 1,248 → **1,309**.
+
+**Deployed:** the scout-reports integration (459 reports, 309 linked, 0 ambiguous, syncing
+every 60 seconds by cron), the percentile fix, and the archetype fix. Server at `f7bd3bc`.
+
+**The Refresh button was doing nothing.** It cleared Streamlit's caches and re-read the same
+stored rows, so the "Synced" line never moved — a button labelled Refresh that refreshed
+nothing. It now calls the same `sync()` the cron uses, so the two cannot drift. Required
+mounting `secrets/` into the DASHBOARD service as well as `app`, and rebuilding its image —
+`--force-recreate` recreates from the EXISTING image and does not rebuild.
+
+**ARCHETYPE DROPS DID NOTHING — a real defect, found while building a metrics spreadsheet.**
+`performance_metrics_for_archetype` dropped metrics by the CLUB's name for them. Two club
+entries can resolve through `CLUB_SUCCESSOR` to the same stored metric, so dropping one left
+the twin in place and the measurement survived.
+
+| Archetype | Configured | Actually dropped |
+|---|---|---|
+| **Winger / Crossing & Creative Threat** | 1 | **0 — inert** |
+| Full Back / Attacking | 3 | 2 |
+
+**Winger / "Crossing & Creative Threat" scored all 415 wingers IDENTICALLY to "All Metrics"**
+— offered in the interface, stored in the database, and incapable of changing a number.
+Fixed by matching drops on the RESOLVED metric. Verified after re-scoring: `All Metrics`
+changed for **0 of 7,607** rows, so the ranking is untouched; only the two broken archetype
+views moved. Guarded by `tests/test_archetype_drops_take_effect.py` (14), which fails if any
+archetype's resolved list equals the full list.
+
+**Delivered to the Head of Recruitment and the Director of Football:**
+`How Players Are Scored` (17-page PDF) and `Scoring Metrics by Position` (xlsx, one sheet per
+position). Both generated, neither committed — `*.pdf` and `*.xlsx` are now gitignored.
+
+**Three errors in the first draft of the report, all mine, corrected before sending:**
+"13 requested metrics" (actually 5 pairs across 18 slots); "lowering Physical to 30% only
+reaches 55%" (actually **42%** — estimated, never computed, and it reversed the
+recommendation); and "percentiles averaged 3.03" (percentiles averaged 50.8; 3.03 is the band).
+
+**Next:** work through the Head of Recruitment's comments on the report. See
+`plan/2026-10-02-STATE.md`.
+
 ### 2026-09-30 — percentile scale centred; every peer pool now averages exactly 3.00
 
 **A real defect in the scoring engine, found while preparing the scoring report for the
@@ -1181,6 +1294,71 @@ within the same pool — adding metrics reshuffles the order rather than inflati
 27 of its 36 lines are shared by all three archetypes and every remainder appears in Defensive or
 Attacking — so there is no fourth list to build.
 
+## 📋 OPEN TASKS — Head of Recruitment review (started 2026-10-02) — keep this list current
+
+**Decision rule:** I bring every decision to the owner with options and a recommendation. The
+owner decides, or batches the football-judgement ones into ONE short list for the Head of
+Recruitment. Nothing is assumed. Nothing here is deployed yet.
+
+### Done (local, not deployed)
+Info bar counts · Players table cleanup (6 columns out, Top speed in) · metric sliders ·
+physical per-90 defect fixed + re-scored · Squads & loans sidebar filters · Impect scores
+(offensive/defensive + per position) · packing-zones map (Impect names/layout/units; Josh Walker
+CF rows 22/22) · physical in/out of possession · finished seasons refresh monthly · Impect
+revisions pulled + re-scored (Scottish Championship 25/26 materially changed) · glossary HTML
+fixed, StatsBomb lineage removed · Methodology hidden (flag `SHOW_METHODOLOGY`) · Player type
+hidden · profiles spreadsheet deleted by the owner (superseded by the profiles conversation).
+
+### Open — before the Head of Recruitment meeting (owner sets the priority; updated after every task)
+
+**Owner's priority (2026-10-12):** 1 Scout reports: own page filters (NOT the sidebar) → 2 Table: no
+sideways scrolling + cleaner look → 3 Reference page → 4 Player card: merge duplicated physical
+sections. Proposals for 1 and 2 sent to the owner; build after approval.
+**Meeting question added:** "add metrics for each position" = extra table columns, which conflicts
+with "no sideways scrolling" in the same sentence — ask what he means. Not built.
+| Task | Status |
+|---|---|
+| Glossary: content for every metric shown (physical, packing zones, receptions, Impect scores) | **Done 2026-10-11** — tests pass |
+| Glossary: definitions stored in Postgres (prod dashboard cannot read data/; live glossary likely shows "(definition not in glossary pull)") | **Done locally 2026-10-11** — owner to confirm the live symptom |
+| Glossary page: complete content on screen (was 45 Impect only) — 4 tabs, search, compact rows, "In rating" tag on the 40 scored metrics | **Built 2026-10-15** — 98 entries, 40 tagged, 0 scored metrics missing; browser check pending |
+| Packing-zones hover did not appear (owner) — pitch now in its own frame with a custom tooltip (hover + tap) | **Built 2026-10-15** — hover test page published; browser check on the card pending |
+| Table: metrics per position | **Not built — meeting question** (extra columns conflict with "no sideways scrolling") |
+| Reference page "What goes into each rating" | **Built 2026-10-12** — from the scoring code; Impect rows in Impect's own names; 21 tests; browser check pending |
+| Glossary: Impect's own wording only (owner 2026-10-12) — "Built from (Impect)" + Impect definitions verbatim; "(scoped to…)" noise removed | **Built 2026-10-12** — browser check pending |
+| Player card: ONE Physical section (in rating ✓, all phases, in/out of possession, percentile, band) | **Built 2026-10-12** — Dan Happe's 8 rated physical percentiles identical to the old table; browser check pending |
+| Season totals only where they make sense (dashboard/units.py): none for speeds, rates, ratios, physical; value metrics to 2 dp | **Built 2026-10-12** — Dan Happe: 8/8 Impect totals = raw; PxT totals 0.43 / 0.80 (were "0" / "1") |
+| One percentile per metric on the card: "All tracked metrics" + Strengths/Watch-outs now read the scorecard percentiles (were the legacy table: Pressures 20 vs 22 etc.) | **Built 2026-10-12** — 13 shared metrics, 0 mismatches |
+| One name per physical metric across card, sliders, glossary, reference page; unpublished "15–20 km/h" removed from slider labels | **Built 2026-10-12** |
+| DECISION for owner: metres per minute in/out of possession (125 / 149) exceed the all-phases figure (100) — correct (rate within each phase) but may confuse | Recommended: show "—" for its possession split |
+| Packing-zones pitch: larger, pitch markings, club-threshold colours (green ≥70th / grey / red <30th), percentile on hover, legend chips; "no percentile" (under 450 min) shown white + dashed, not grey | **Built 2026-10-15** (owner approved the design) — real output checked: Josh Walker 11/11 zones with percentiles; Tom Blackwell (447 min) 11/11 "no percentile" + chip |
+| Players table: page cap removed, "Mins", column widths, ratings coloured by club thresholds; League kept separate; Assessed hidden | **Built 2026-10-12** — browser check pending |
+| Player card: Performance-profile bars coloured green ≥70th / grey / red <30th (club thresholds) | **Built 2026-10-12** — browser check pending |
+| Scout reports: own League / Max age / Foot filters | **Built 2026-10-12** — tested on real data (Left = 155 = 139 left + 16 both); browser check pending |
+| SkillCorner finished seasons: check for revisions | **Done 2026-10-15** — revised (PL2 most); refreshed + re-scored locally; server refreshes on deploy rebuild |
+| Browser check | **Done headlessly 2026-10-15** (Streamlit AppTest: glossary, reference, card for 3 players incl. one under 450 min, scout reports — 0 exceptions). Chrome extension disconnected: owner to eyeball |
+| Documentation (work log, STATE, CLAUDE.md) | **Done 2026-10-15** — `plan/2026-10-15-STATE.md` |
+| Commit + deploy (owner runs the commands) | Open — owner's call whether he sees it live |
+| Timing "maximum" sliders | Blocked on his slider list |
+
+### Open — needs a decision (owner first; Head of Recruitment only where football judgement)
+| # | Decision |
+|---|---|
+| 9 | Profiles: his definitions + 1–2 example players per style (24 styles) |
+| 10 | His physical sliders per position (3 each, currently placeholders) |
+| 11 | Archetype vs profile: A keep both renamed / B merge / C drop archetypes |
+| 12 | "Individual threat score": which Impect score (likely PxT) |
+| 12b | Table: "add metrics for each position or profile type" — columns by POSITION or by PROFILE? (his words; reading unconfirmed) |
+| 14 | Formula meeting: B1–B5, per-90 fix, distance double-count — **last** |
+
+### Open — external
+| # | Task |
+|---|---|
+| 15 | Impect question document (owner sends): BALL_WIN_NUMBER equals DEFENSIVE_TOUCHES for 80–98% of rows |
+
+### Not in this review's scope (still in the register, untouched)
+P12 withdraw an assessment · P14 stale-data indicator · P18 squad positions · P19 architecture doc ·
+P20 production backups · P21 watchlist vs Players of Interest.
+
 ## 📦 Branching and deployment (changed 2026-09-18)
 
 **Production runs `main`.** Until 2026-09-18 the deployed branch was `r3a0-injury-scrape`,
@@ -1266,7 +1444,7 @@ last international recognition (held in no ingested source); the cut-out player 
 | P1 | **Identity-split root cause unfixed.** Two provider-matching paths each mint a new `player_id` when matching fails, so one footballer gets metrics under one id and his Transfermarkt link under another. 76 pairs were merged 2026-08-25; **15 duplicate `tm_player_id` pairs remain** and the split recurs on every pipeline run. In all 15 only one half is scored, and that half holds the contract/injury data, so nothing user-visible is wrong today — but it regenerates. | Open, degrades over time |
 | P2 | **One identity pair awaits a decision** — merging it would move two already-scored `player_scorecards` rows between ids. | Needs a human ruling |
 | P3 | **Clustering reads the wrong table.** `model/archetypes.py` reads `player_season_metrics` (legacy, four English leagues only) instead of `player_metrics_neutral` (all seven). This — not any methodology objection — is why the Scottish leagues and PL2 have **0% archetype coverage** against 96–100% in the EFL. One-line fix. Data checked: Scottish Premiership 92% physical-complete, PL2 77%, Scottish Championship 0% (that one is a genuine gap). | Open, one line |
-| P4 | **The clustering model is weak.** Every position resolves to k=2 with silhouettes 0.16–0.31, and four positions produce the same "pressing vs passing" split — one latent axis rediscovered per position, not a playing-style taxonomy. Feature set is the Performance metrics, which measure *quality*; style clustering needs tendency/proportion features normalised for volume. Only Centre Forward yields three genuinely distinct groups. | Open, needs redesign not a re-run |
+| P4 | **The clustering model is weak.** Every position resolves to k=2 with silhouettes 0.16–0.31, and four positions produce the same "pressing vs passing" split — one latent axis rediscovered per position, not a playing-style taxonomy. Feature set is the Performance metrics, which measure *quality*; style clustering needs tendency/proportion features normalised for volume. Only Centre Forward yields three genuinely distinct groups. | Open, needs redesign not a re-run. **2026-10-04: hidden from the UI** (table column, filter, card line, Player types page). Rebuild from the Head of Recruitment's named profiles (FB attacking/defending/inside; CB aerial/ball-playing/aggressive; DM & CM destroyer/playmaker/box-to-box; AM box-to-box/runner/pocket; W in behind/pocket/wide/1v1/creator; CF target/in behind/presser/scorer) on the Impect zone and availability data now in `player_detail_metrics`. Definitions need his sign-off. |
 | P5 | **Injury panel heading is wrong for current-season spells.** The panel groups "In the scored window" vs "Earlier seasons", but the window is the last two *completed* seasons, so the 20 spells from 26/27 — the current season — are labelled "Earlier". Heading should read "Outside the scored window". | Open, small |
 | P6 | **The legacy `player_season_metrics` table has now caused three separate defects** (watchlist blanks, clustering coverage, cross-table disagreement). Frozen, incomplete, still read in several places. Retiring it properly is its own task. | Open |
 | P7 | **Player report feature** — a per-player report for the Head of Recruitment, chairman and manager, modelled on the supplied reference. See the spec. | Requested 2026-08-28 |

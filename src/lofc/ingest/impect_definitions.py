@@ -76,6 +76,10 @@ def _flatten(kpis: list[dict]) -> pd.DataFrame:
             "meaning": details.get("meaning") or parent.get("meaning"),
             "parent_kpi": parent.get("name") if inherited else None,
             "inverted": k.get("inverted"),
+            # The zone / reception type this KPI is split by, with Impect's own definition.
+            "context_name": (k.get("context") or {}).get("name"),
+            "context_label": (k.get("context") or {}).get("label"),
+            "context_definition": (k.get("context") or {}).get("definition"),
         })
     return pd.DataFrame(rows).dropna(subset=["column"]).drop_duplicates("column")
 
@@ -93,17 +97,20 @@ def build_reference_csv() -> int:
     return len(frame)
 
 
-def load_definitions() -> dict[str, dict]:
-    """column -> {label, definition, meaning, inverted}, from the reference CSV.
+def write_definitions_to_db(engine, frame: pd.DataFrame) -> int:
+    """Replace the impect_definitions table with `frame` (the flattened catalogue)."""
+    from sqlalchemy import text
+    cols = ["column", "label", "official_definition", "meaning", "parent_kpi", "inverted",
+            "context_name", "context_label", "context_definition"]
+    out = frame.reindex(columns=cols)
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM impect_definitions"))
+        out.to_sql("impect_definitions", conn, if_exists="append", index=False)
+    return len(out)
 
-    Empty dict if the CSV is absent (definitions are optional to the pipeline: the
-    dashboard degrades to showing no glossary text rather than crashing).
-    """
-    path = reference_csv_path()
-    if not path.exists():
-        return {}
-    # Empty cells read back as float NaN; coerce to None so callers get clean strings.
-    df = pd.read_csv(path).astype(object).where(lambda d: d.notna(), None)
+
+def _as_dict(df: pd.DataFrame) -> dict[str, dict]:
+    df = df.astype(object).where(lambda d: d.notna(), None)
     return {
         r["column"]: {
             "label": r["label"],
@@ -111,9 +118,33 @@ def load_definitions() -> dict[str, dict]:
             "meaning": r["meaning"],
             "parent_kpi": r.get("parent_kpi"),
             "inverted": r["inverted"],
+            "context_name": r.get("context_name"),
+            "context_label": r.get("context_label"),
+            "context_definition": r.get("context_definition"),
         }
         for _, r in df.iterrows()
     }
+
+
+def load_definitions(engine=None) -> dict[str, dict]:
+    """column -> {label, definition, meaning, parent_kpi, inverted, context_*}.
+
+    Postgres first -- the only store the production dashboard can read -- then the local
+    reference CSV. Empty dict if neither exists (the glossary then shows no Impect text
+    rather than crashing)."""
+    try:
+        if engine is None:
+            from lofc.store.load import get_engine
+            engine = get_engine()
+        df = pd.read_sql("SELECT * FROM impect_definitions", engine)
+        if not df.empty:
+            return _as_dict(df)
+    except Exception:
+        pass
+    path = reference_csv_path()
+    if not path.exists():
+        return {}
+    return _as_dict(pd.read_csv(path))
 
 
 def main() -> None:
@@ -123,8 +154,11 @@ def main() -> None:
     token = _token()
     pulled = pull_definitions(token, force=args.force)
     n = build_reference_csv()
+    from lofc.store.load import get_engine
+    stored = write_definitions_to_db(get_engine(),
+                                     _flatten(json.loads(definitions_raw_path().read_text())))
     print(f"Impect KPI definitions: {'pulled' if pulled else 'reused landed'}; "
-          f"reference CSV rebuilt with {n} definitions at {reference_csv_path()}")
+          f"reference CSV rebuilt with {n} definitions; {stored} stored in impect_definitions")
 
 
 if __name__ == "__main__":
