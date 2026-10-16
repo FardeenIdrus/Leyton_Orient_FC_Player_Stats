@@ -9,3 +9,11 @@
 {$DASHBOARD_DOMAIN} {
 	reverse_proxy dashboard:8501
 }
+
+# A colleague's platform shares this droplet (owner, 2026-10-16). Only this Caddy may bind
+# 80/443, so it routes his subdomain too. His container joins the lofc_default network with
+# the fixed alias `match-analysis` and serves on 5050; no host ports. Until his container is
+# running this site returns 502 -- ours is unaffected.
+orient-matchanalysis.duckdns.org {
+	reverse_proxy match-analysis:5050
+}

@@ -31,6 +31,7 @@ services:
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
       - ./tests:/app/tests
+      - ./Caddyfile:/app/Caddyfile:ro   # so tests/test_caddyfile.py checks the live file
       - ./data:/app/data
       # Service-account key for the scouting sheet. READ-ONLY mount, and the key
       # itself carries only the spreadsheets.readonly scope -- two independent
