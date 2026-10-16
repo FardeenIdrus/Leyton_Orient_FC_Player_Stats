@@ -172,6 +172,59 @@ def test_a_player_with_no_rating_says_so_and_is_not_scored_as_zero():
     assert out.loc[out.player_name == "Alain Kizenga", MODEL_VIEW].iloc[0] == "Not in our data"
 
 
+def _unrated(**flags):
+    """One Sign report with no composite; `flags` say what we hold for him."""
+    row = {"player_name": "X", "verdict": "Sign", "composite": None}
+    return pd.DataFrame([{**row, **flags}])
+
+
+def test_a_player_we_hold_but_under_450_minutes_is_not_called_missing():
+    """The "Our data" filter tests the LINK; the label used to test the RATING, so a
+    linked player under 450 minutes passed "In our data" and read "Not in our data"
+    (owner, 2026-10-16: 91 reports on 75 players)."""
+    out = model_view(_unrated(player_id=7, in_rating_season=True, in_live_season=True),
+                     season="25/26")
+    assert out[MODEL_VIEW].iloc[0] == "Under 450 mins (25/26)"
+
+
+def test_a_player_we_hold_only_this_season_is_new_this_season():
+    out = model_view(_unrated(player_id=7, in_rating_season=False, in_live_season=True),
+                     season="25/26")
+    assert out[MODEL_VIEW].iloc[0] == "New this season"
+
+
+def test_a_linked_player_with_no_minutes_in_either_season_is_not_rated():
+    out = model_view(_unrated(player_id=7, in_rating_season=False, in_live_season=False),
+                     season="25/26")
+    assert out[MODEL_VIEW].iloc[0] == "Not rated"
+
+
+def test_an_unlinked_player_is_still_not_in_our_data():
+    out = model_view(_unrated(player_id=None, in_rating_season=False, in_live_season=False),
+                     season="25/26")
+    assert out[MODEL_VIEW].iloc[0] == "Not in our data"
+
+
+def test_the_label_never_contradicts_the_our_data_filter():
+    """Every row "In our data" keeps must carry a label other than "Not in our data", and
+    every row "Not in our data" keeps must carry exactly that label."""
+    frame = pd.DataFrame([
+        {"player_name": "A", "verdict": "Sign", "composite": None, "player_id": 1,
+         "in_rating_season": True, "in_live_season": True},
+        {"player_name": "B", "verdict": "Sign", "composite": None, "player_id": 2,
+         "in_rating_season": False, "in_live_season": True},
+        {"player_name": "C", "verdict": "Sign", "composite": None, "player_id": None,
+         "in_rating_season": False, "in_live_season": False},
+        {"player_name": "D", "verdict": "Sign", "composite": 3.9, "player_id": 4,
+         "in_rating_season": True, "in_live_season": True},
+    ])
+    out = model_view(frame, season="25/26")
+    held = filter_reports(out, in_our_data="In our data")
+    missing = filter_reports(out, in_our_data="Not in our data")
+    assert (held[MODEL_VIEW] != "Not in our data").all()
+    assert (missing[MODEL_VIEW] == "Not in our data").all()
+
+
 def test_a_monitor_verdict_is_not_forced_into_agreement_or_disagreement():
     """"Monitor" is the scout declining to commit. Grading it against the model would
     invent a position he did not take."""

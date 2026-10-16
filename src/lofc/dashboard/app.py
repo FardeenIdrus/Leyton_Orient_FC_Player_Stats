@@ -47,7 +47,7 @@ from lofc.dashboard.loaders import (
     position_and_league_for)
 from lofc.dashboard.seasons import (
     CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, LOAN_ANY, LOAN_FILTERS, contract_mask,
-    default_season_id, loan_data_date, loan_mask,
+    default_season_id, last_complete_season_id, loan_data_date, loan_mask,
     ranking_notice, season_name_for)
 from lofc.dashboard.session import (
     force_reload_after_logout, peek_carry, register_pages, require_login, restore_from_cookie,
@@ -150,19 +150,15 @@ def main() -> None:
             _current = list(st.session_state.get("sidebar_leagues", []))
             if _current and _league not in _current:
                 st.session_state["sidebar_leagues"] = _current + [_league]
-    # The last COMPLETE season, not simply the newest one held. `available_seasons()` is
-    # newest-first, so the season still being played became the landing default the moment it
-    # gained its first rankable player -- and early in a season the league-position pools a
-    # composite is a percentile within are tiny (2026-09-11: 19 of 36 pools under ten players,
-    # two holding exactly one). The live season stays one click away in this same selector.
+    # Opens on the season being played (owner, 2026-10-16). Thin league-position pools are
+    # withheld and announced by `ranking_notice`, so this only decides what opens.
     st.session_state.setdefault(
         "sidebar_season",
         carry.season_id if carry else default_season_id(seasons, settings.live_season_id))
     season_id = st.sidebar.selectbox(
         "Season", seasons, format_func=season_name_for, key="sidebar_season",
-        help="Players are scored and ranked within one season. The latest season is the "
-             "default; earlier seasons stay fully available here (and power the trajectory "
-             "chart). SkillCorner physical data exists for 2025/26 only.")
+        help="Players are scored and ranked within one season. Opens on the season being "
+             "played; earlier seasons stay available here.")
     # key="sidebar_position": the global player search (tabs/players.py) sets this session
     # key from an on_change callback when a searched player is in a different position, so
     # picking a search result switches this widget too. `setdefault` (not `index=`) supplies
@@ -355,7 +351,7 @@ def main() -> None:
         notice = ranking_notice(
             n_ranked=len(pool), n_withheld=withheld,
             season=season_name_for(season_id),
-            complete_season=season_name_for(default_season_id(seasons, settings.live_season_id)),
+            complete_season=season_name_for(last_complete_season_id(seasons, settings.live_season_id)),
             position=position)
         if notice is not None:
             level, text = notice

@@ -1318,6 +1318,8 @@ sections. Proposals for 1 and 2 sent to the owner; build after approval.
 with "no sideways scrolling" in the same sentence — ask what he means. Not built.
 | Task | Status |
 |---|---|
+| Scout reports: "Not in our data" label contradicted the "Our data" filter (label tested rating, filter tested link; 91 reports / 75 players) | **Done locally 2026-10-16** (option A): linked-but-unrated now say Under 450 mins (25/26) 49 · New this season 34 · Not rated 8; 0 contradictions; 1,525 tests |
+| Players page default season 25/26 → 26/27 (owner request 2026-10-16) | **Done locally 2026-10-16** — server: 1,282 of 3,457 at 450+ (37%), 13 of 51 pools under 10 (55 players withheld + notice). Squads already 26/27; stale "not scored yet" captions removed; season help no longer claims physical is 25/26-only (26/27: 82% have physical). Scout reports rating season: owner to decide |
 | Shared droplet safeguards (colleague has docker = root): `.env` chmod 600 · DO backups weekly→daily · nightly pg_dump of our DB (`scripts/db_backup.sh`, 14 kept, verified, count-based retention) · his containers get `mem_limit` · written rule | `.env` **done 2026-10-16**; db_backup built + tested 2026-10-16 (restore to scratch DB: 28/28 tables identical) — **deployed 31ad876, cron 19:30 UTC installed, first dump 63 MB**; DO backups **daily** (owner); his `mem_limit` + rule message pending |
 | Glossary: content for every metric shown (physical, packing zones, receptions, Impect scores) | **Done 2026-10-11** — tests pass |
 | Glossary: definitions stored in Postgres (prod dashboard cannot read data/; live glossary likely shows "(definition not in glossary pull)") | **Done locally 2026-10-11** — owner to confirm the live symptom |

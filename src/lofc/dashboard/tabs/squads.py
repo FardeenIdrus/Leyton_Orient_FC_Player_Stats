@@ -660,7 +660,7 @@ def render(season_id: int, rating_season_id: int, season_label: str,
     filters = filters or SidebarFilters()
     st.subheader("Squads, contracts and loans")
     st.caption(f"Every registered squad member, {season_label}. Click a row to open the "
-               f"player. Ratings are {rating_label} — this season is not scored yet.")
+               f"player.")
 
     frame = prepare(registered_squad_frame(season_id, rating_season_id))
     # This season's rating where it is rankable -- gated by the same peer-pool floor the
@@ -733,8 +733,7 @@ def render(season_id: int, rating_season_id: int, season_label: str,
             "Minutes": st.column_config.NumberColumn("Minutes", format="%d", width="small"),
             "Last season": st.column_config.NumberColumn(
                 f"{rating_label} rating", format="%.2f", width="small",
-                help="The club composite from the last complete season. This season is "
-                     "not scored yet."),
+                help="The club composite from the last complete season."),
             "Also rated": st.column_config.NumberColumn(
                 "Also rated", format="%.2f", width="small",
                 help="A second rating, where the player appeared in two leagues last "

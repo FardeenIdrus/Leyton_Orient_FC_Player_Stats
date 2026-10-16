@@ -76,20 +76,21 @@ def contract_data_date() -> str | None:
 
 
 def default_season_id(available: list[int], live_season_id: int | None) -> int:
-    """The season the Players page should OPEN on: the most recent COMPLETE one.
+    """The season the Players page OPENS on: the newest held, i.e. the one being played.
 
-    `available_seasons()` returns newest first, so the live season -- the one still being
-    played -- used to be the landing default the moment it gained its first rankable player.
-    That is the wrong default: a composite is a percentile within a league-position pool, and
-    early in a season those pools are tiny. On 2026-09-11, five matches into 2026/27, 19 of
-    its 36 pools held fewer than ten players and two held exactly one; a player alone in his
-    pool ranks 100th percentile on every metric by construction and scores 4.90, above
-    anything earned across a full 46-game season.
-
-    The live season stays in the selector and is one click away -- this decides what opens,
-    not what exists. Falls back to the newest season held when every season is live (a fresh
-    database mid-season) so the page always opens on something.
+    Owner, 2026-10-16, about ten matches into 2026/27: open on 2026/27. Early-season pools
+    are still small, and that is handled where it matters -- `pool_is_thin` withholds any
+    league-position pool under the floor and `ranking_notice` says how many -- not by
+    hiding the live season. (September 2026, five matches in, it opened on the last
+    complete season instead: 19 of 36 pools were under ten. See `last_complete_season_id`.)
+    `live_season_id` is accepted for the call sites' symmetry and does not change the answer.
     """
+    return max(available)
+
+
+def last_complete_season_id(available: list[int], live_season_id: int | None) -> int:
+    """The newest season that is NOT still being played. Falls back to the newest held
+    when every season is live (a fresh database mid-season)."""
     complete = [s for s in available if s != live_season_id]
     return max(complete) if complete else max(available)
 

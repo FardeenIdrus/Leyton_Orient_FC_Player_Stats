@@ -97,18 +97,25 @@ def filter_reports(frame: pd.DataFrame, scout: str | None = None,
     return out
 
 
-def model_view(frame: pd.DataFrame) -> pd.DataFrame:
+def model_view(frame: pd.DataFrame, season: str = "25/26") -> pd.DataFrame:
     """`frame` plus a column saying whether the model and the scout agree.
 
-    Four states, and three of them are deliberately NOT a verdict on the player:
+    The states without a composite are deliberately NOT a verdict on the player:
 
       Model agrees          scout committed, and the composite points the same way
       Model disagrees       scout committed, and the composite points the other way
-      Not in our data       no composite. 129 reports are on players outside the seven
-                            leagues we hold data for -- academy and non-league players
-                            scouts are SENT to watch. Not a low rating; not a gap.
+      Not in our data       not linked to any player we hold -- academy and non-league
+                            players scouts are SENT to watch. Not a low rating; not a gap.
+      Under 450 mins (..)   linked, played in the rating season, but under 450 minutes
+      New this season       linked, but only has minutes in the season being played
+      Not rated             linked, no minutes in either season
       No verdict to compare "Monitor" is the scout declining to commit. Grading it
                             against the model would invent a position he did not take.
+
+    "Not in our data" means exactly what the page's "Our data" filter means: no player
+    link. It once meant "no composite", so 91 linked reports passed "In our data" and were
+    labelled "Not in our data" (owner, 2026-10-16). The three linked reasons say WHY there
+    is no rating, which a recruiter can act on; `season` is the rating season, short form.
 
     Disagreement runs both ways: a player the model likes and a scout rejected is as
     worth discussing as the reverse.
@@ -118,9 +125,18 @@ def model_view(frame: pd.DataFrame) -> pd.DataFrame:
         out[MODEL_VIEW] = pd.Series(dtype=object)
         return out
 
-    def one(verdict, composite):
-        if composite is None or pd.isna(composite):
+    def no_rating(player_id, in_rating, in_live):
+        if player_id is None or pd.isna(player_id):
             return "Not in our data"
+        if in_rating is True:
+            return f"Under 450 mins ({season})"
+        if in_live is True:
+            return "New this season"
+        return "Not rated"
+
+    def one(verdict, composite, player_id, in_rating, in_live):
+        if composite is None or pd.isna(composite):
+            return no_rating(player_id, in_rating, in_live)
         if verdict in POSITIVE_VERDICTS:
             return "Model agrees" if composite >= STRONG else (
                 "Model disagrees" if composite < WEAK else "Model is lukewarm")
@@ -129,7 +145,13 @@ def model_view(frame: pd.DataFrame) -> pd.DataFrame:
                 "Model agrees" if composite < WEAK else "Model is lukewarm")
         return "No verdict to compare"
 
-    out[MODEL_VIEW] = [one(v, c) for v, c in zip(out["verdict"], out["composite"])]
+    n = len(out)
+    out[MODEL_VIEW] = [
+        one(v, c, p, bool(r) if pd.notna(r) else False, bool(l) if pd.notna(l) else False)
+        for v, c, p, r, l in zip(out["verdict"], out["composite"],
+                                 out.get("player_id", pd.Series([None] * n, index=out.index)),
+                                 out.get("in_rating_season", pd.Series([None] * n, index=out.index)),
+                                 out.get("in_live_season", pd.Series([None] * n, index=out.index)))]
     return out
 
 
@@ -487,7 +509,11 @@ def reports_frame(rating_season_id: int) -> pd.DataFrame:
                b.competition_id      AS rated_in,
                p.birth_date,
                -- The page's League filter: where he plays THIS season, else last season.
-               COALESCE(live.competition_id, prev.competition_id) AS league_id
+               COALESCE(live.competition_id, prev.competition_id) AS league_id,
+               -- Why a LINKED player has no rating (model_view): he played in the rating
+               -- season but under 450 minutes, or only has minutes in the live one.
+               prev.competition_id IS NOT NULL AS in_rating_season,
+               live.competition_id IS NOT NULL AS in_live_season
         FROM scout_reports r
         LEFT JOIN rated b ON b.player_id = r.player_id
         LEFT JOIN players p ON p.player_id = r.player_id
@@ -636,7 +662,7 @@ def render(rating_season_id: int, rating_label: str) -> None:
                 st.session_state["scout_sync_result"] = result
                 st.rerun()
 
-    frame = model_view(frame)
+    frame = model_view(frame, season=rating_label[2:] if len(rating_label) == 7 else rating_label)
     names = competition_name_by_id()
     frame["league"] = frame["league_id"].map(names)
 
@@ -704,8 +730,7 @@ def _report_table(view: pd.DataFrame, names: dict, rating_label: str, key: str) 
             "Rating": st.column_config.NumberColumn(
                 f"Rating ({rating_label})", format="%.2f", width="small",
                 help="The platform's 1-5 composite from the last complete season. Blank "
-                     "means the player is outside the seven leagues we hold data for — "
-                     "not that he rated poorly."),
+                     "is not a poor rating — Model view says why there is none."),
             "Date": st.column_config.DateColumn("Fixture", format="DD MMM YY",
                                                 width="small"),
             "Player": st.column_config.TextColumn(
