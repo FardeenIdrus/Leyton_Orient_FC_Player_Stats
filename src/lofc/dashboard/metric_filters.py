@@ -22,21 +22,21 @@ from lofc.model.scorecard import _resolved_performance
 
 PHYSICAL_SLIDERS: dict[str, list[str]] = {
     "Goalkeeper": [],
-    "Centre Back": ["psv99_kmh", "distance_p90", "medium_accel_count_p90"],
-    "Full Back": ["psv99_kmh", "hsr_distance_p90", "sprint_distance_p90"],
+    "Centre Back": ["top5_psv99_kmh", "distance_p90", "medium_accel_count_p90"],
+    "Full Back": ["top5_psv99_kmh", "hsr_distance_p90", "sprint_distance_p90"],
     "Defensive Mid": ["distance_p90", "running_distance_p90", "medium_decel_count_p90"],
     "Central Mid": ["meters_per_minute", "running_distance_p90", "hsr_distance_p90"],
     "Attacking Mid": ["meters_per_minute", "hsr_distance_p90", "cod_count_p90"],
-    "Winger": ["psv99_kmh", "sprint_distance_p90", "explosive_accel_to_sprint_p90"],
-    "Centre Forward": ["psv99_kmh", "sprint_count_p90", "high_accel_count_p90"],
+    "Winger": ["top5_psv99_kmh", "sprint_distance_p90", "explosive_accel_to_sprint_p90"],
+    "Centre Forward": ["top5_psv99_kmh", "sprint_count_p90", "high_accel_count_p90"],
 }
 
 # metric -> (label, display format). Labels are the glossary's names (glossary_data.PHYSICAL)
 # with a unit, so a metric has one name on every page.
-_SLIDER_UNITS = {"psv99_kmh": "km/h", "distance_p90": "m per 90",
+_SLIDER_UNITS = {"top5_psv99_kmh": "km/h", "distance_p90": "m per 90",
                  "running_distance_p90": "m per 90", "hsr_distance_p90": "m per 90",
                  "sprint_distance_p90": "m per 90"}
-_FORMATS = {"psv99_kmh": "%.1f", "sprint_count_p90": "%.1f", "high_accel_count_p90": "%.1f",
+_FORMATS = {"top5_psv99_kmh": "%.1f", "sprint_count_p90": "%.1f", "high_accel_count_p90": "%.1f",
             "explosive_accel_to_sprint_p90": "%.1f"}
 
 

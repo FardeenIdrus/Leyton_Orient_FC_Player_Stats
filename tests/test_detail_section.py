@@ -145,16 +145,16 @@ def test_long_zone_names_wrap_instead_of_overflowing():
 def _phys_inputs():
     detail = pd.DataFrame({"metric": ["phys_tip.distance_p90", "phys_otip.distance_p90"],
                            "value_p90": [3400.0, 5900.0]})
-    neutral = pd.Series({"distance_p90": 10100.0, "psv99_kmh": 30.9, "time_to_sprint": 0.99,
+    neutral = pd.Series({"distance_p90": 10100.0, "top5_psv99_kmh": 30.9, "time_to_sprint": 0.99,
                          "cod_count_p90": 34.6})
-    pcts = pd.Series({"distance_p90": 13.0, "psv99_kmh": 69.0, "time_to_sprint": 88.0,
+    pcts = pd.Series({"distance_p90": 13.0, "top5_psv99_kmh": 69.0, "time_to_sprint": 88.0,
                       "cod_count_p90": 40.0})
     return detail, neutral, pcts
 
 
 def test_physical_table_lists_each_metric_once_with_its_rating_role():
     detail, neutral, pcts = _phys_inputs()
-    t = ds.physical_table(detail, neutral, pcts, scored=["distance_p90", "psv99_kmh"])
+    t = ds.physical_table(detail, neutral, pcts, scored=["distance_p90", "top5_psv99_kmh"])
     assert t["Metric"].is_unique
     rows = t.set_index("Metric")
     assert rows.loc["Distance (m)", "In rating"] == "✓"
@@ -165,7 +165,7 @@ def test_physical_table_lists_each_metric_once_with_its_rating_role():
 
 def test_physical_table_uses_the_scorecard_percentile_and_bands_only_rated_metrics():
     detail, neutral, pcts = _phys_inputs()
-    rows = ds.physical_table(detail, neutral, pcts, scored=["distance_p90", "psv99_kmh"]).set_index("Metric")
+    rows = ds.physical_table(detail, neutral, pcts, scored=["distance_p90", "top5_psv99_kmh"]).set_index("Metric")
     assert rows.loc["Distance (m)", "Percentile"] == 13
     assert rows.loc["Distance (m)", "Band"] == pytest.approx(1.15)
     assert pd.isna(rows.loc["Changes of direction", "Band"])
@@ -174,8 +174,8 @@ def test_physical_table_uses_the_scorecard_percentile_and_bands_only_rated_metri
 def test_speed_and_agility_rows_have_no_possession_split():
     detail, neutral, pcts = _phys_inputs()
     rows = ds.physical_table(detail, neutral, pcts, scored=[]).set_index("Metric")
-    assert rows.loc["Top speed (PSV-99, km/h)", "All phases"] == 30.9
-    assert pd.isna(rows.loc["Top speed (PSV-99, km/h)", "In possession"])
+    assert rows.loc["Top speed (km/h)", "All phases"] == 30.9
+    assert pd.isna(rows.loc["Top speed (km/h)", "In possession"])
     assert rows.loc["Time to sprint (s)", "Percentile"] == 88
 
 
@@ -259,9 +259,9 @@ def test_render_uses_the_frame_not_markdown_for_the_pitch():
 
 def test_physical_splits_into_rated_and_other():
     detail, neutral, pcts = _phys_inputs()
-    table = ds.physical_table(detail, neutral, pcts, scored=["distance_p90", "psv99_kmh"])
+    table = ds.physical_table(detail, neutral, pcts, scored=["distance_p90", "top5_psv99_kmh"])
     rated, other = ds.split_physical(table)
-    assert set(rated["Metric"]) == {"Distance (m)", "Top speed (PSV-99, km/h)"}
+    assert set(rated["Metric"]) == {"Distance (m)", "Top speed (km/h)"}
     assert "Changes of direction" in set(other["Metric"])
     assert "In rating" not in rated.columns and "In rating" not in other.columns
     assert "Band" in rated.columns and "Band" not in other.columns

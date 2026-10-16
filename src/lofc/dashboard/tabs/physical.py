@@ -65,7 +65,7 @@ def _physical(tab) -> None:
             cols = {"player_name": "Player", "position_group": "Position",
                     "matches_measured": "Matches tracked", "distance_p90": "Distance/90 (m)",
                     "hsr_distance_p90": "High-speed dist/90 (m)", "sprint_count_p90": "Sprints/90",
-                    "high_accel_count_p90": "High accels/90", "psv99_kmh": "Peak speed (km/h)"}
+                    "high_accel_count_p90": "High accels/90", "psv99_kmh": "PSV-99 (km/h)"}
             view = (players[list(cols)].rename(columns=cols)
                     .sort_values("Distance/90 (m)", ascending=False).round(1))
             st.dataframe(view, hide_index=True, width="stretch", height=420)

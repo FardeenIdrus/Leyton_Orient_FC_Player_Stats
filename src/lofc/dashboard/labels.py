@@ -167,7 +167,7 @@ SC_METRIC_LABELS = {'distance_p90': 'Total distance (m per 90)',
  'high_accel_count_p90': 'High accelerations (per 90)',
  'high_decel_count_p90': 'High decelerations (per 90)',
  'cod_count_p90': 'Changes of direction (per 90)',
- 'psv99_kmh': 'Peak speed, PSV-99 (km/h)'}
+ 'psv99_kmh': 'Average match top speed (km/h)'}
 
 
 def _metric_source(metric: str) -> str:
@@ -267,6 +267,6 @@ PHYS_COMPARE_LABEL = {
     "hsr_distance_p90": ("High-speed distance", "m/90"),
     "sprint_count_p90": ("Sprints", "per 90"),
     "sprint_distance_p90": ("Sprint distance", "m/90"),
-    "psv99_kmh": ("Peak speed (PSV-99)", "km/h"),
-    "top5_psv99_kmh": ("Top-5 peak speed", "km/h"),
+    "psv99_kmh": ("Average match top speed", "km/h"),
+    "top5_psv99_kmh": ("Top speed (best 5 matches)", "km/h"),
 }

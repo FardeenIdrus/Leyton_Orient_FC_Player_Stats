@@ -1119,11 +1119,12 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
         # standing ("8th of 13 in this league") is on his profile.
         view.insert(0, "#", range(1, len(view) + 1))
         view["Mins"] = view["minutes"].round(0)
-        # Peak sprint speed (SkillCorner PSV-99), raw km/h: means the same in every league.
-        _speed = metric_values[["player_id", "competition_id", "psv99_kmh"]].drop_duplicates(
+        # Top speed = average of his 5 fastest matches (SkillCorner PSV-99 Top 5), raw km/h --
+        # the Head of Recruitment's definition; not psv99, which averages ALL his matches.
+        _speed = metric_values[["player_id", "competition_id", "top5_psv99_kmh"]].drop_duplicates(
             ["player_id", "competition_id"])
         view = view.merge(_speed, on=["player_id", "competition_id"], how="left")
-        view["Top speed"] = numeric_or_dash(view["psv99_kmh"], "{:.1f}")
+        view["Top speed"] = numeric_or_dash(view["top5_psv99_kmh"], "{:.1f}")
         # Whether a scout has assessed this player. DISPLAY ONLY -- it never reorders the list
         # and never touches a score; scout input must not influence objective_composite, which
         # is the ranking. The card has always shown the full assessment; the list showed
@@ -1200,7 +1201,8 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             "Performance": band("Performance", "The club-framework Performance dimension (1-5)."),
             "Physical": band("Physical", "The club-framework Physical dimension (1-5), where tracking exists."),
             "Top speed": st.column_config.TextColumn(
-                "Top speed", width="small", help="Peak sprint speed, km/h (SkillCorner PSV-99)."),
+                "Top speed", width="small",
+                help="Average of his 5 fastest matches, km/h (SkillCorner PSV-99 Top 5)."),
             "On loan at": st.column_config.TextColumn(
                 "On loan at", help="Where he is playing THIS season, and who owns him. The "
                                    "Club column is the season you are viewing."),

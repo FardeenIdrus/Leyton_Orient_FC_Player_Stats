@@ -80,7 +80,7 @@ PHASE_METRICS = [(m, _label(m)) for m in (
     "hsr_count_p90", "sprint_count_p90", "medium_accel_count_p90", "high_accel_count_p90",
     "medium_decel_count_p90", "high_decel_count_p90", "cod_count_p90", "meters_per_minute")]
 SPEED_METRICS = [(m, _label(m), m.startswith(("time_", "agility_"))) for m in (
-    "psv99_kmh", "top5_psv99_kmh", "time_to_hsr", "time_to_sprint", "time_to_hsr_post_cod",
+    "top5_psv99_kmh", "psv99_kmh", "time_to_hsr", "time_to_sprint", "time_to_hsr_post_cod",
     "time_to_sprint_post_cod", "agility_505_90", "agility_505_180")]
 
 
