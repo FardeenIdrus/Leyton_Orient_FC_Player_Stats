@@ -28,6 +28,7 @@ import pandas as pd
 
 from lofc.dashboard.tabs.scout_reports import (
     MODEL_VIEW,
+    disagrees,
     filter_reports,
     model_view,
     scout_activity,
@@ -150,19 +151,21 @@ def test_a_sign_the_model_rates_low_is_flagged_as_the_disagreement():
     the 3.00 average for his league and position."""
     out = model_view(REPORTS)
     assert out.loc[out.player_name == "Alfie Gilchrist", MODEL_VIEW].iloc[0] == \
-        "Model disagrees"
+        "Model disagrees (25/26)"
 
 
 def test_a_sign_the_model_also_rates_highly_reads_as_agreement():
     out = model_view(REPORTS)
-    assert out.loc[out.player_name == "Jayden Wareham", MODEL_VIEW].iloc[0] == "Model agrees"
+    assert out.loc[out.player_name == "Jayden Wareham", MODEL_VIEW].iloc[0] == \
+        "Model agrees (25/26)"
 
 
 def test_a_dont_sign_the_model_rates_highly_is_also_a_disagreement():
     """Disagreement runs both ways. A player the model likes and a scout rejected is
     just as worth discussing as the reverse."""
     out = model_view(REPORTS)
-    assert out.loc[out.player_name == "Will Wright", MODEL_VIEW].iloc[0] == "Model disagrees"
+    assert out.loc[out.player_name == "Will Wright", MODEL_VIEW].iloc[0] == \
+        "Model disagrees (25/26)"
 
 
 def test_a_player_with_no_rating_says_so_and_is_not_scored_as_zero():
@@ -223,6 +226,40 @@ def test_the_label_never_contradicts_the_our_data_filter():
     missing = filter_reports(out, in_our_data="Not in our data")
     assert (held[MODEL_VIEW] != "Not in our data").all()
     assert (missing[MODEL_VIEW] == "Not in our data").all()
+
+
+# --- two ratings: this season's where it exists, else last season's (owner, 2026-10-16) ---
+
+def _rated(last, this):
+    return pd.DataFrame([{"player_name": "X", "verdict": "Sign", "player_id": 1,
+                          "composite": last, "composite_live": this,
+                          "in_rating_season": True, "in_live_season": True}])
+
+
+def test_this_seasons_rating_is_used_where_it_exists_and_the_label_says_so():
+    out = model_view(_rated(3.8, 2.7), season="25/26", live_season="26/27")
+    assert out[MODEL_VIEW].iloc[0] == "Model disagrees (26/27)"
+
+
+def test_last_seasons_rating_is_the_fallback_and_the_label_says_so():
+    out = model_view(_rated(3.8, None), season="25/26", live_season="26/27")
+    assert out[MODEL_VIEW].iloc[0] == "Model agrees (25/26)"
+
+
+def test_a_player_rated_only_this_season_is_compared_on_it():
+    out = model_view(_rated(None, 3.9), season="25/26", live_season="26/27")
+    assert out[MODEL_VIEW].iloc[0] == "Model agrees (26/27)"
+
+
+def test_the_rating_used_is_kept_for_sorting():
+    out = model_view(_rated(3.8, 2.7), season="25/26", live_season="26/27")
+    assert out["rating_used"].iloc[0] == 2.7
+
+
+def test_disagreement_is_counted_whichever_season_it_came_from():
+    labels = pd.Series(["Model disagrees (26/27)", "Model disagrees (25/26)",
+                        "Model agrees (26/27)", "Not in our data"])
+    assert disagrees(labels).tolist() == [True, True, False, False]
 
 
 def test_a_monitor_verdict_is_not_forced_into_agreement_or_disagreement():

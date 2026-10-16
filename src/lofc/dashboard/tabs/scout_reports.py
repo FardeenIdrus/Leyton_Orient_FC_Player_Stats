@@ -30,7 +30,9 @@ import streamlit as st
 from lofc.dashboard import theme
 from lofc.config import settings
 from lofc.dashboard.loaders import competition_name_by_id, get_engine
+from lofc.dashboard.seasons import season_name_for
 from lofc.dashboard.session import go_to_player
+from lofc.model.scorecard import MIN_PEERS_FOR_RANKING
 
 # The column the comparison writes. Named once so the page and its tests cannot drift.
 MODEL_VIEW = "Model view"
@@ -48,7 +50,7 @@ WEAK = 3.0
 STALE_AFTER = dt.timedelta(hours=6)
 
 DISPLAY_COLUMNS = ["Watched", "Player", "Club", "Fixture", "Position", "Scout", "Seen",
-                   "Grade", "Verdict", "Rating", MODEL_VIEW]
+                   "Grade", "Verdict", "Rating", "This season", MODEL_VIEW]
 
 
 # --- pure logic ---------------------------------------------------------------------------
@@ -97,7 +99,13 @@ def filter_reports(frame: pd.DataFrame, scout: str | None = None,
     return out
 
 
-def model_view(frame: pd.DataFrame, season: str = "25/26") -> pd.DataFrame:
+def disagrees(labels: pd.Series) -> pd.Series:
+    """Model-view labels that are a disagreement, whichever season's rating it rests on."""
+    return labels.astype(str).str.startswith("Model disagrees")
+
+
+def model_view(frame: pd.DataFrame, season: str = "25/26",
+               live_season: str | None = None) -> pd.DataFrame:
     """`frame` plus a column saying whether the model and the scout agree.
 
     The states without a composite are deliberately NOT a verdict on the player:
@@ -119,10 +127,17 @@ def model_view(frame: pd.DataFrame, season: str = "25/26") -> pd.DataFrame:
 
     Disagreement runs both ways: a player the model likes and a scout rejected is as
     worth discussing as the reverse.
+
+    TWO RATINGS (owner, 2026-10-16). `composite_live` is this season's rating, present only
+    where it is rankable (450+ minutes, peer pool at the floor); `composite` is the last
+    complete season's. The comparison uses this season's where it exists, else last
+    season's, and the label names which -- "Model agrees (26/27)". It switches by itself
+    once the Monday refresh rates the player this season. `rating_used` is kept for sorting.
     """
     out = frame.copy()
     if out.empty:
         out[MODEL_VIEW] = pd.Series(dtype=object)
+        out["rating_used"] = pd.Series(dtype="float64")
         return out
 
     def no_rating(player_id, in_rating, in_live):
@@ -134,24 +149,31 @@ def model_view(frame: pd.DataFrame, season: str = "25/26") -> pd.DataFrame:
             return "New this season"
         return "Not rated"
 
-    def one(verdict, composite, player_id, in_rating, in_live):
+    def one(verdict, composite, player_id, in_rating, in_live, label):
         if composite is None or pd.isna(composite):
             return no_rating(player_id, in_rating, in_live)
         if verdict in POSITIVE_VERDICTS:
-            return "Model agrees" if composite >= STRONG else (
+            word = "Model agrees" if composite >= STRONG else (
                 "Model disagrees" if composite < WEAK else "Model is lukewarm")
-        if verdict in NEGATIVE_VERDICTS:
-            return "Model disagrees" if composite >= STRONG else (
+        elif verdict in NEGATIVE_VERDICTS:
+            word = "Model disagrees" if composite >= STRONG else (
                 "Model agrees" if composite < WEAK else "Model is lukewarm")
-        return "No verdict to compare"
+        else:
+            return "No verdict to compare"
+        return f"{word} ({label})"
 
-    n = len(out)
+    blank = pd.Series([None] * len(out), index=out.index, dtype=object)
+    live = pd.to_numeric(out.get("composite_live", blank), errors="coerce")
+    last = pd.to_numeric(out["composite"], errors="coerce")
+    use_live = live.notna()
+    out["rating_used"] = live.where(use_live, last)
+    labels = [live_season or season if u else season for u in use_live]
     out[MODEL_VIEW] = [
-        one(v, c, p, bool(r) if pd.notna(r) else False, bool(l) if pd.notna(l) else False)
-        for v, c, p, r, l in zip(out["verdict"], out["composite"],
-                                 out.get("player_id", pd.Series([None] * n, index=out.index)),
-                                 out.get("in_rating_season", pd.Series([None] * n, index=out.index)),
-                                 out.get("in_live_season", pd.Series([None] * n, index=out.index)))]
+        one(v, c, p, bool(r) if pd.notna(r) else False, bool(l) if pd.notna(l) else False, lab)
+        for v, c, p, r, l, lab in zip(out["verdict"], out["rating_used"],
+                                      out.get("player_id", blank),
+                                      out.get("in_rating_season", blank),
+                                      out.get("in_live_season", blank), labels)]
     return out
 
 
@@ -499,6 +521,24 @@ def reports_frame(rating_season_id: int) -> pd.DataFrame:
             WHERE s.season_id = %(prev)s AND s.archetype = 'All Metrics'
               AND s.objective_composite IS NOT NULL
             ORDER BY s.player_id, m.minutes DESC NULLS LAST
+        ),
+        -- This season's rating, only where rankable: the same peer-pool floor the Players
+        -- and Squads pages apply (scorecard.pool_is_thin), so a pool-of-one 4.90 cannot
+        -- appear here after being withheld there.
+        live_cards AS (
+            SELECT s.player_id, s.competition_id, s.position_group, s.objective_composite,
+                   COUNT(*) OVER (PARTITION BY s.competition_id, s.position_group) AS pool
+            FROM player_scorecards s
+            WHERE s.season_id = %(live)s AND s.archetype = 'All Metrics'
+              AND s.objective_composite IS NOT NULL
+        ),
+        rated_live AS (
+            SELECT DISTINCT ON (c.player_id) c.player_id, c.objective_composite
+            FROM live_cards c
+            JOIN player_metrics_neutral m ON m.player_id = c.player_id
+             AND m.competition_id = c.competition_id AND m.season_id = %(live)s
+            WHERE c.pool >= %(floor)s
+            ORDER BY c.player_id, m.minutes DESC NULLS LAST
         )
         SELECT r.submission_id, r.scout, r.observation, r.player_name, r.club_name,
                r.foot, r.home_team, r.away_team, r.fixture_date, r.comments,
@@ -506,6 +546,8 @@ def reports_frame(rating_season_id: int) -> pd.DataFrame:
                r.verdict, r.player_id, r.linkable, r.missing_since,
                r.name_from_report,
                b.objective_composite AS composite,
+               CASE WHEN %(live)s <> %(prev)s THEN bl.objective_composite END
+                                     AS composite_live,
                b.competition_id      AS rated_in,
                p.birth_date,
                -- The page's League filter: where he plays THIS season, else last season.
@@ -516,6 +558,7 @@ def reports_frame(rating_season_id: int) -> pd.DataFrame:
                live.competition_id IS NOT NULL AS in_live_season
         FROM scout_reports r
         LEFT JOIN rated b ON b.player_id = r.player_id
+        LEFT JOIN rated_live bl ON bl.player_id = r.player_id
         LEFT JOIN players p ON p.player_id = r.player_id
         LEFT JOIN LATERAL (SELECT competition_id FROM player_metrics_neutral m
                            WHERE m.player_id = r.player_id AND m.season_id = %(live)s
@@ -527,7 +570,8 @@ def reports_frame(rating_season_id: int) -> pd.DataFrame:
         ORDER BY r.fixture_date DESC NULLS LAST, r.player_name
         """,
         get_engine(), params={"prev": rating_season_id,
-                              "live": settings.live_season_id or rating_season_id})
+                              "live": settings.live_season_id or rating_season_id,
+                              "floor": MIN_PEERS_FOR_RANKING})
 
 
 @st.cache_data(ttl=60)
@@ -605,6 +649,8 @@ def _table(frame: pd.DataFrame, names: dict) -> pd.DataFrame:
     out["Grade"] = frame["grade"]
     out["Verdict"] = frame["verdict"]
     out["Rating"] = frame["composite"]
+    out["This season"] = (frame["composite_live"] if "composite_live" in frame.columns
+                          else pd.Series(float("nan"), index=frame.index))
     out[MODEL_VIEW] = frame[MODEL_VIEW]
     return out
 
@@ -628,6 +674,9 @@ def render(rating_season_id: int, rating_label: str) -> None:
 
     frame = reports_frame(rating_season_id)
     sync = last_sync()
+    live_id = settings.live_season_id
+    live_label = (season_name_for(live_id) if live_id and live_id != rating_season_id
+                  else rating_label)
 
     if frame.empty:
         st.info("No scout reports have been synced yet. Run "
@@ -662,12 +711,13 @@ def render(rating_season_id: int, rating_label: str) -> None:
                 st.session_state["scout_sync_result"] = result
                 st.rerun()
 
-    frame = model_view(frame, season=rating_label[2:] if len(rating_label) == 7 else rating_label)
+    short = lambda label: label[2:] if len(label) == 7 else label   # 2025/26 -> 25/26
+    frame = model_view(frame, season=short(rating_label), live_season=short(live_label))
     names = competition_name_by_id()
     frame["league"] = frame["league_id"].map(names)
 
     linked = int(frame["player_id"].notna().sum())
-    disagree = int((frame[MODEL_VIEW] == "Model disagrees").sum())
+    disagree = int(disagrees(frame[MODEL_VIEW]).sum())
 
     browse, disagreements, scouts = st.tabs(
         [f"All reports ({len(frame):,})", f"Where we disagree ({disagree})",
@@ -700,15 +750,15 @@ def render(rating_season_id: int, rating_label: str) -> None:
         st.caption(f"{len(view):,} of {len(frame):,} reports · "
                    f"{frame['player_name'].nunique():,} players · "
                    f"{frame['scout'].nunique()} scouts · {linked:,} matched to our data")
-        _report_table(view, names, rating_label, key="scout_all")
+        _report_table(view, names, rating_label, live_label, key="scout_all")
 
     with disagreements:
         # The reason the page exists. Agreement is reassuring and carries almost no
         # information; these are the players where a recruiter's judgement is needed.
-        view = frame[frame[MODEL_VIEW] == "Model disagrees"]
-        st.caption(f"{len(view)} reports where the scout's verdict and the "
-                   f"{rating_label} rating point opposite ways.")
-        _report_table(view.sort_values("composite"), names, rating_label,
+        view = frame[disagrees(frame[MODEL_VIEW])]
+        st.caption(f"{len(view)} reports where the scout's verdict and the rating "
+                   f"point opposite ways.")
+        _report_table(view.sort_values("rating_used"), names, rating_label, live_label,
                       key="scout_disagree")
 
     with scouts:
@@ -716,7 +766,8 @@ def render(rating_season_id: int, rating_label: str) -> None:
                      height=320, key="scout_activity")
 
 
-def _report_table(view: pd.DataFrame, names: dict, rating_label: str, key: str) -> None:
+def _report_table(view: pd.DataFrame, names: dict, rating_label: str, live_label: str,
+                  key: str) -> None:
     """The reports table, with the full comment shown for whichever row is selected."""
     if view.empty:
         st.info("No reports match these filters.")
@@ -731,6 +782,10 @@ def _report_table(view: pd.DataFrame, names: dict, rating_label: str, key: str) 
                 f"Rating ({rating_label})", format="%.2f", width="small",
                 help="The platform's 1-5 composite from the last complete season. Blank "
                      "is not a poor rating — Model view says why there is none."),
+            "This season": st.column_config.NumberColumn(
+                f"Rating ({live_label})", format="%.2f", width="small",
+                help="This season's rating, where he has 450+ minutes and at least 10 "
+                     "league-position peers do too. Updates every Monday."),
             "Date": st.column_config.DateColumn("Fixture", format="DD MMM YY",
                                                 width="small"),
             "Player": st.column_config.TextColumn(
