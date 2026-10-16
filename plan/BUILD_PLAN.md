@@ -1318,7 +1318,7 @@ sections. Proposals for 1 and 2 sent to the owner; build after approval.
 with "no sideways scrolling" in the same sentence — ask what he means. Not built.
 | Task | Status |
 |---|---|
-| Shared droplet safeguards (colleague has docker = root): `.env` chmod 600 · DO backups weekly→daily · nightly pg_dump of our DB (`scripts/db_backup.sh`, 14 kept, verified, count-based retention) · his containers get `mem_limit` · written rule | `.env` **done 2026-10-16**; db_backup built + tested 2026-10-16 (restore to scratch DB: 28/28 tables identical) — **deployed 31ad876, cron 20:30 UTC installed, first dump 63 MB**; DO backups **daily** (owner); his `mem_limit` + rule message pending |
+| Shared droplet safeguards (colleague has docker = root): `.env` chmod 600 · DO backups weekly→daily · nightly pg_dump of our DB (`scripts/db_backup.sh`, 14 kept, verified, count-based retention) · his containers get `mem_limit` · written rule | `.env` **done 2026-10-16**; db_backup built + tested 2026-10-16 (restore to scratch DB: 28/28 tables identical) — **deployed 31ad876, cron 19:30 UTC installed, first dump 63 MB**; DO backups **daily** (owner); his `mem_limit` + rule message pending |
 | Glossary: content for every metric shown (physical, packing zones, receptions, Impect scores) | **Done 2026-10-11** — tests pass |
 | Glossary: definitions stored in Postgres (prod dashboard cannot read data/; live glossary likely shows "(definition not in glossary pull)") | **Done locally 2026-10-11** — owner to confirm the live symptom |
 | Glossary page: complete content on screen (was 45 Impect only) — 4 tabs, search, compact rows, "In rating" tag on the 40 scored metrics | **Built 2026-10-15** — 98 entries, 40 tagged, 0 scored metrics missing; browser check pending |
