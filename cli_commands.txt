@@ -445,3 +445,6 @@ docker compose exec -T app python -m lofc.ingest.skillcorner_api
 docker compose exec -T app python -m lofc.model.build_neutral --write
 # Re-score after any physical change (the per-90 fix changes stored scores):
 docker compose exec -T app python -m lofc.model.scorecard_run
+
+# Nightly dump of OUR database only (server cron 02:30 UTC); tests run without Docker
+bash scripts/test_db_backup.sh
