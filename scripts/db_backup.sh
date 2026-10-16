@@ -15,7 +15,7 @@
 #   docker compose -f /opt/lofc/docker-compose.prod.yml exec -T db \
 #       pg_restore -U lofc -d lofc --clean --if-exists --no-owner < /opt/lofc/backups/lofc-<stamp>.dump
 #
-# crontab:  30 2 * * * /opt/lofc/scripts/db_backup.sh >> /opt/lofc/backups/backup.log 2>&1
+# crontab:  30 20 * * * /opt/lofc/scripts/db_backup.sh >> /opt/lofc/backups/backup.log 2>&1
 set -uo pipefail
 
 COMPOSE="docker compose -f /opt/lofc/docker-compose.prod.yml exec -T db"
