@@ -25,9 +25,11 @@ TWO HONESTIES THE COMPARISON MUST KEEP:
 import datetime as dt
 
 import pandas as pd
+import pytest
 
 from lofc.dashboard.tabs.scout_reports import (
     MODEL_VIEW,
+    data_vs_scout_group,
     disagrees,
     filter_reports,
     model_view,
@@ -151,13 +153,13 @@ def test_a_sign_the_model_rates_low_is_flagged_as_the_disagreement():
     the 3.00 average for his league and position."""
     out = model_view(REPORTS)
     assert out.loc[out.player_name == "Alfie Gilchrist", MODEL_VIEW].iloc[0] == \
-        "Model disagrees (25/26)"
+        "Data disagrees — rated under 3.0 (25/26)"
 
 
 def test_a_sign_the_model_also_rates_highly_reads_as_agreement():
     out = model_view(REPORTS)
     assert out.loc[out.player_name == "Jayden Wareham", MODEL_VIEW].iloc[0] == \
-        "Model agrees (25/26)"
+        "Data agrees — rated 3.5+ (25/26)"
 
 
 def test_a_dont_sign_the_model_rates_highly_is_also_a_disagreement():
@@ -165,7 +167,7 @@ def test_a_dont_sign_the_model_rates_highly_is_also_a_disagreement():
     just as worth discussing as the reverse."""
     out = model_view(REPORTS)
     assert out.loc[out.player_name == "Will Wright", MODEL_VIEW].iloc[0] == \
-        "Model disagrees (25/26)"
+        "Data disagrees — rated 3.5+ (25/26)"
 
 
 def test_a_player_with_no_rating_says_so_and_is_not_scored_as_zero():
@@ -238,17 +240,17 @@ def _rated(last, this):
 
 def test_this_seasons_rating_is_used_where_it_exists_and_the_label_says_so():
     out = model_view(_rated(3.8, 2.7), season="25/26", live_season="26/27")
-    assert out[MODEL_VIEW].iloc[0] == "Model disagrees (26/27)"
+    assert out[MODEL_VIEW].iloc[0] == "Data disagrees — rated under 3.0 (26/27)"
 
 
 def test_last_seasons_rating_is_the_fallback_and_the_label_says_so():
     out = model_view(_rated(3.8, None), season="25/26", live_season="26/27")
-    assert out[MODEL_VIEW].iloc[0] == "Model agrees (25/26)"
+    assert out[MODEL_VIEW].iloc[0] == "Data agrees — rated 3.5+ (25/26)"
 
 
 def test_a_player_rated_only_this_season_is_compared_on_it():
     out = model_view(_rated(None, 3.9), season="25/26", live_season="26/27")
-    assert out[MODEL_VIEW].iloc[0] == "Model agrees (26/27)"
+    assert out[MODEL_VIEW].iloc[0] == "Data agrees — rated 3.5+ (26/27)"
 
 
 def test_the_rating_used_is_kept_for_sorting():
@@ -257,9 +259,64 @@ def test_the_rating_used_is_kept_for_sorting():
 
 
 def test_disagreement_is_counted_whichever_season_it_came_from():
-    labels = pd.Series(["Model disagrees (26/27)", "Model disagrees (25/26)",
-                        "Model agrees (26/27)", "Not in our data"])
+    labels = pd.Series(["Data disagrees — rated under 3.0 (26/27)",
+                        "Data disagrees — rated 3.5+ (25/26)",
+                        "Data agrees — rated 3.5+ (26/27)", "Not in our data"])
     assert disagrees(labels).tolist() == [True, True, False, False]
+
+
+# --- explicit labels and the "Data vs scout" filter (owner, 2026-10-22) -------------------
+#
+# "Model is lukewarm" was vague and "Model agrees" did not say what the data rated him. Each
+# label now names WHO (the data), WHAT (agrees / disagrees) and the RATING BAND it rests on.
+
+def _one(verdict, rating):
+    return pd.DataFrame([{"player_name": "X", "verdict": verdict, "player_id": 1,
+                          "composite": rating, "in_rating_season": True,
+                          "in_live_season": True}])
+
+
+@pytest.mark.parametrize("verdict,rating,label", [
+    ("Sign", 3.80, "Data agrees — rated 3.5+ (25/26)"),
+    ("Sign", 3.50, "Data agrees — rated 3.5+ (25/26)"),           # boundary: 3.5 is 3.5+
+    ("Sign", 3.49, "Average rating — 3.0 to 3.5 (25/26)"),
+    ("Sign", 3.00, "Average rating — 3.0 to 3.5 (25/26)"),        # boundary: 3.0 is average
+    ("Sign", 2.99, "Data disagrees — rated under 3.0 (25/26)"),
+    ("Don't sign", 2.40, "Data agrees — rated under 3.0 (25/26)"),
+    ("Don't sign", 3.20, "Average rating — 3.0 to 3.5 (25/26)"),
+    ("Don't sign", 3.90, "Data disagrees — rated 3.5+ (25/26)"),
+])
+def test_each_label_names_the_data_the_direction_and_the_band(verdict, rating, label):
+    assert model_view(_one(verdict, rating), season="25/26")[MODEL_VIEW].iloc[0] == label
+
+
+def test_the_column_is_called_data_vs_scout():
+    assert MODEL_VIEW == "Data vs scout"
+
+
+@pytest.mark.parametrize("label,group", [
+    ("Data agrees — rated 3.5+ (26/27)", "Data agrees"),
+    ("Data agrees — rated under 3.0 (25/26)", "Data agrees"),
+    ("Data disagrees — rated under 3.0 (26/27)", "Data disagrees"),
+    ("Average rating — 3.0 to 3.5 (25/26)", "Average rating"),
+    ("No verdict to compare", "No verdict to compare"),
+    ("Under 450 mins (25/26)", "No rating"),
+    ("New this season", "No rating"),
+    ("Not rated", "No rating"),
+    ("Not in our data", "No rating"),
+])
+def test_every_label_falls_in_exactly_one_filter_group(label, group):
+    assert data_vs_scout_group(label) == group
+
+
+def test_the_filter_keeps_only_the_chosen_group():
+    frame = model_view(pd.concat([_one("Sign", 3.9), _one("Sign", 2.1), _one("Sign", 3.2),
+                                  _one("Monitor", 3.9)], ignore_index=True), season="25/26")
+    assert filter_reports(frame, data_vs_scout="Data disagrees")[MODEL_VIEW].tolist() == \
+        ["Data disagrees — rated under 3.0 (25/26)"]
+    assert len(filter_reports(frame, data_vs_scout="All")) == 4
+    assert len(filter_reports(frame, data_vs_scout="Data agrees")) == 1
+    assert len(filter_reports(frame, data_vs_scout="Average rating")) == 1
 
 
 def test_a_monitor_verdict_is_not_forced_into_agreement_or_disagreement():

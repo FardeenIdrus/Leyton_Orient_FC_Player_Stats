@@ -72,8 +72,7 @@ docs/Samson Tovide - Data Report.key
 .gitignore
 
 # Club-supplied reference reports and source artwork: confidential, internal use only.
-# The DESIGN they informed lives in docs/superpowers/specs/, which is tracked; the source
-# files themselves never are.
+# The source files themselves are never tracked.
 docs/*.key
 docs/*.jpg
 docs/*Data Report*

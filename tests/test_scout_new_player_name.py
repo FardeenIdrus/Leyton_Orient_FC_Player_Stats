@@ -17,12 +17,12 @@ THE NAME IS ALWAYS FIRST, in four observed shapes:
     Raphael Borges Rodrigues (#17 played as…    name, then a shirt number in brackets
     52. Reggie Rose - A 21 year old goalkeeper  shirt number, name, dash
 
-WHY THIS IS SAFE TO DISPLAY BUT NOT TO MATCH ON. A recovered name is read from free text a
-scout typed; it is evidence of who was watched, not an identity. It is shown so a recruiter
-can tell twenty different players apart instead of seeing twenty rows called "A New Player",
-and it is labelled as coming from the report. It NEVER feeds `scout_report_link` -- linking
-on a parsed name would attach a rating, an injury history and an assessment to a player on
-the strength of a regular expression.
+HOW A RECOVERED NAME IS USED. It is read from free text a scout typed: evidence of who was
+watched, labelled as coming from the report. It is shown so a recruiter can tell the players
+apart instead of seeing many rows called "A New Player". `scout_report_link` may link it on
+NAME ALONE, and only when exactly one of our players holds that name -- a name held by two or
+more links to none (there is no date of birth for these players). The report itself stays
+`linkable = False`; see the tests below.
 
 SELF-HEALING. Extraction only fires when the Player field still reads "A New Player". The
 moment the Head of Recruitment corrects the row in the sheet, the real name takes over on
@@ -168,3 +168,60 @@ def test_a_placeholder_with_an_unreadable_comment_keeps_the_placeholder():
     assert out["player_name"] == PLACEHOLDER_PLAYER
     assert out["name_from_report"] is False
     assert out["linkable"] is False
+
+
+# --- the name is not always on line 1 (live sheet, 2026-10-22) -----------------------------
+#
+# A newer report template opens with a header line -- position, formation, how and when
+# the match was watched -- and puts the name below it. 2 of the 4 unrecovered "A New
+# Player" reports had a name on line 2. Lines 2-3 are read STRICTLY: only a line that is
+# nothing but a name, or one that opens with a shirt number ("98. Name - ..."), counts.
+
+PLYMOUTH = ("CF (Right Foot) in a 4-4-2 (Live - Match Played on 20/10/26 - Report on "
+            "21/10/26)\n\nBim Pebble\n\nStrong and robust CF profile, who runs channels "
+            "without possessing explosive speed.")
+SUDBURY = ("FAYC - Woodbridge Town v AFC Sudbury\n98. Archie Jolland - A 16 year old right "
+           "footed Centre-Midfielder with  very small build\nHe wants the ball & drops deep")
+DUNDEE = ("Played RCB in 4-4-2 formation and had a really strong performance. Kept Rangers "
+          "striker quiet\nDominant in the air and read the game well.")
+CHELTENHAM = ("CM (Right Foot) in a 4-2-3-1 (Video - Match Played on 12/09/26 - Report on "
+              "18/10/26)\nHe has a lot of energy, he is busy and has a high speed running "
+              "capacity.")
+
+
+def test_a_name_alone_on_line_two_after_a_header_is_recovered():
+    assert name_from_comment(PLYMOUTH, club="Plymouth Argyle") == "Bim Pebble"
+
+
+def test_a_shirt_numbered_name_on_line_two_is_recovered():
+    assert name_from_comment(SUDBURY, club="AFC Sudbury") == "Archie Jolland"
+
+
+@pytest.mark.parametrize("comment", [DUNDEE, CHELTENHAM])
+def test_reports_with_no_name_in_them_still_return_nothing(comment):
+    assert name_from_comment(comment) is None
+
+
+def test_a_sentence_on_line_two_is_not_read_as_a_name():
+    """Line 1 is read loosely (name, then a verb or a stop). Lines 2-3 are not: a sentence
+    there that happens to open with two capitalised words must not become a name."""
+    assert name_from_comment("CM (Right Foot) in a 4-2-3-1\nGood Feet and a nice touch") is None
+    assert name_from_comment("CM (Right Foot) in a 4-2-3-1\nKept Rangers quiet all game") is None
+
+
+def test_the_club_alone_on_line_two_is_not_the_player():
+    assert name_from_comment("CF (Right Foot) in a 4-4-2\nPlymouth Argyle\nStrong runner",
+                             club="Plymouth Argyle") is None
+
+
+def test_a_fixture_line_is_not_a_name():
+    assert name_from_comment("CF in a 4-4-2\nWoodbridge Town v AFC Sudbury") is None
+
+
+def test_only_the_first_three_lines_are_searched():
+    """A name deep in the prose is a mention (an opponent, a team-mate), not the subject."""
+    assert name_from_comment("CF in a 4-4-2\nHe ran well\nHe pressed\nJohn Smith") is None
+
+
+def test_line_one_still_wins_when_it_has_the_name():
+    assert name_from_comment("Teddie Lamb\nBim Pebble") == "Teddie Lamb"

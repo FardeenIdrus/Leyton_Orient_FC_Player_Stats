@@ -580,8 +580,8 @@ class ScoutAssessment(Base):
     approved_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(String, nullable=True)
 
-    # The player report's narrative, written by the assessor and NEVER generated -- see
-    # docs/superpowers/specs/2026-08-28-player-report-design.md section 4. All three are
+    # The player report's narrative, written by the assessor and NEVER generated (template
+    # prose built from percentiles would read as filler to a chairman). All three are
     # optional: a scout assessing a player before a fixture may record bands with no prose,
     # and the report then says no narrative was recorded rather than inventing one.
     summary: Mapped[str | None] = mapped_column(String, nullable=True)

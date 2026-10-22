@@ -1,557 +1,376 @@
 # Methodology
 
-> **STATUS (2026-08-10): current. The LIVE modelling scores on Impect + SkillCorner (zero
-> StatsBomb in scoring).** Players are ranked on the club's real recruitment framework as a **1–5
-> composite** (see §3b); the old invented **Style-fit is retired**. 91 metrics/player across
-> the sources. The composite is computed by a pipeline stage and stored in `player_scorecards`, so the
-> dashboard, the offline shortlist and the BI layer read identical numbers. Metric provenance:
-> **`docs/DATA_ARCHITECTURE.md`**. Sections 1–2 below (per-90
-> normalisation, percentile ranking) are unchanged and still current; §3 describes the older
-> Quality/Fit scores, now superseded by the club composite in §3b.
+How a player goes from provider data to a 1–5 rating, a ranked list and an
+affordability verdict. Every number below is computed by the code named alongside it;
+the dashboard's **Methodology** and **What goes into each rating** pages show the same
+rules. Where each metric comes from is documented in `docs/architecture.md`.
 
-How a player goes from raw match events to a ranked, affordable, on-profile
-recommendation, and where statistics does the work versus where machine learning
-earns its place.
-
-The guiding principle: percentile ranking and regression do the core work;
-scikit-learn is used only where it is the right tool (the valuation regression and
-the archetype clustering). No deep learning, because regression and clustering are
-correct here.
-
-Data basis: **Impect** event data across the EFL (Championship, League One, League Two,
-National League), the Scottish Premiership & Championship, and Premier League 2 — plus
-**SkillCorner** physical/tracking data (EFL + Premier League 2 + Scottish Premiership,
-2025/26) and scraped Transfermarkt market values (EFL).
+The guiding principle: percentile ranking within honest peer groups does the core work.
+Machine learning is used in one place only, the market-value regression (§7).
 
 ---
 
-## 1. Aggregation and per-90 normalisation
+## 1. Data basis
 
-Event data is rolled up to one row per player per league season. Counting stats are
-converted to **per-90-minute** rates so a regular starter and a substitute are
-comparable.
+| Source | What it gives | Leagues | Seasons |
+|---|---|---|---|
+| **Impect** | Event data: the 32 Performance metrics, minutes, position, birth date, foot | Championship, League One, League Two, National League, Scottish Premiership, Scottish Championship, Premier League 2 | 2024/25, 2025/26, 2026/27 |
+| **SkillCorner** | Tracking data: the 8 Physical metrics (and more for display) | The same, **except the Scottish Championship** | 2025/26, 2026/27 |
+| **Transfermarkt** (scraped) | Market value, contract end, loans, injuries, height | Values used for the four English leagues | Values for 2025/26 only |
 
-- **Minutes** are derived from the line-up position spells, correctly handling the
-  fact that the match clock resets at half-time (a naive subtraction would undercount
-  players who span the interval by the first-half stoppage time). Playoff matches are
-  included, which explains one-goal differences against regular-season-only published
-  tables.
-- Players under **450 minutes** (about five full matches) are flagged as small
-  samples and excluded from ranking, so a strong cameo cannot top a chart.
-- A player who moves between tracked leagues mid-season holds **one row per league**,
-  each judged on its own numbers. This is correct data, not duplication; every
-  downstream view keys by player + league + season.
-- **Validation:** season goal totals were spot-checked against published golden-boot
-  tables — exact in the Championship and League One (e.g. the League One top scorer
-  at 23), within one goal in League Two, and National League differences fully
-  explained by playoff inclusion plus the feed's 19 uncollected fixtures (see
-  Honest limitations).
+So a 2024/25 rating has no Physical part, and a Scottish Championship rating never has one.
 
-## 2. Normalisation within position and within league
+## 2. One row per player, per league, per season
 
-A raw per-90 number is meaningless on its own: 2.5 tackles is excellent for a winger
-and ordinary for a defensive midfielder. So each metric is converted to a
-**percentile rank within the player's position group and league** (90th percentile =
-better than 90% of positional peers in that division). Comparing within league avoids
-treating a 90th-percentile League Two striker as identical to a 90th-percentile
-Championship striker; the dashboard's Compare view warns when players from different
-leagues are compared, and the valuation model is where league level is actually
-accounted for (league is a feature there).
+Each player gets one row per league season, built by `model/build_neutral.py` into
+`player_metrics_neutral`. A player who moves between covered leagues mid-season has one
+row per league, each judged on its own numbers.
 
-**Within one season, too.** Scoring and ranking are done for a **single season at a time**
-(a sidebar selector; the latest season, 2025/26, is the default). So a player appears once,
-on that season's form, ranked against that season's peers, with that season's data coverage
-(SkillCorner physical exists for 2025/26 only, so a 2024/25 view has no Physical dimension).
-Earlier seasons stay fully available — switch the selector — and also drive the player
-profile's **trajectory** chart (improving or declining across seasons). Mixing seasons in one
-ranking would both duplicate players and compare last season's form against this season's,
-so it is avoided.
+**Minutes and per-90 rates (Impect).** Minutes are the real time a player was on the
+pitch. Impect reports averages per match for each position he played; these are turned
+back into season totals and divided by his minutes, then multiplied by 90
+(`ingest/impect_translate.py`).
 
-## 3. Two scores: Quality and Fit (superseded — see §3b)
+**Per-90 rates (SkillCorner).** SkillCorner's season figures for distances and effort
+counts are averages **per appearance**, over whatever minutes he played in that
+appearance. They are converted with `to_per90` (`ingest/skillcorner_map.py`):
 
-> **Superseded (2026-07-27).** The invented **Style-fit is retired**, and players are now
-> ranked on the club's real framework — the **1–5 composite** in §3b — not on these two
-> scores. This section is kept as history of the earlier approach. The composite's
-> **Performance dimension** is the current "how good is he" number, measured on the club's
-> chosen metrics rather than the generic list below.
+> per-90 value = per-appearance value ÷ average minutes per appearance × 90
 
-A single blended "good for us" number conflates two questions a recruiter asks
-separately, so we produce two scores, both 0–100, ranked within position and league:
+Without this, a starter would out-run a substitute simply by being on the pitch longer.
+Metres per minute is already a rate, and the two top-speed measures are peaks, so those
+three are left as they are.
 
-- **Quality** = how good the player is. The mean of their percentiles across a broad
-  set of stats relevant to their role (equal weight). Objective, data only.
-- **Fit** = how well the player matches the club's identity. The identity-weighted
-  sum of their percentiles on the profile metrics.
+**Position.** A player's position group is where he played the most minutes. Impect's ten
+positions map to eight groups: Goalkeeper, Centre Back, Full Back (left or right wing-back
+/ full back), Defensive Mid, Central Mid, Attacking Mid, Winger (left or right), Centre
+Forward. Left and right are added together before choosing, so a player who split time
+across both wings counts as a winger.
 
-A lethal finisher who never presses scores high on Quality but lower on Fit for a
-pressing team. Keeping them separate makes that visible. The identity weights are a
-labelled stand-in until the club provides its real profiles (a CSV drop-in).
+**The 450-minute floor.** Only players with **450+ minutes** (about five full matches) are
+*rankable*. Below that a per-90 rate is noise: one goal in a 20-minute cameo reads as 4.5
+per 90. The sidebar's minutes filter never goes below 450.
 
-### Exactly which metrics build each score (full transparency)
+## 3. Percentiles: compare each player with his real peers
 
-Both scores are computed from an explicit, published stat list — nothing is hidden in a
-black box. The dashboard makes this visible in two places: the **Methodology → "Exactly
-which metrics build each score"** panel (pick any position) and a compact **"How Fit and
-Quality are built"** expander on every player profile. The lists there are read straight
-from the live model, so what is shown is what is computed.
+A raw per-90 number means nothing on its own: 2.5 tackles is excellent for a winger and
+ordinary for a defensive midfielder. So every metric becomes a **percentile within the
+same league, the same season and the same position group**, among rankable players
+(`scorecard.metric_percentiles`).
 
-- **Quality** is the equal-weight mean of the percentiles on a position's role stats
-  (`ROLE_METRICS` in `score.py`, mapped to Impect successors in Impect-only mode).
-- **Fit** is the weighted sum of the percentiles on the identity profile's stats
-  (`identity_profiles` table), each stat's weight shown as its share of the score, with an
-  optional minimum-percentile floor used later by the on-profile filter.
+The percentile is a **mid-rank**:
 
-### Honest substitution (naming a stat for what it truly is)
+> percentile = (rank − 0.5) ÷ (number of players in the pool with a value for this metric) × 100
 
-The platform now scores on Impect. Where the club historically tracked a StatsBomb stat
-that Impect has no exact twin for, we score on the nearest measured Impect concept — but we
-**never relabel it as the StatsBomb stat**. Each substitute is named for what it actually
-measures, and both the dashboard **Glossary** and the score panels show the StatsBomb stat
-it stands in for and why. The live substitutions feeding the scores are:
+Ties share the average rank. The mid-rank puts the average percentile at exactly 50 in
+every pool, whatever its size, so the league median really does sit at the club's
+"minimum standard" (§4). The divisor counts only players who have that metric: a player
+with no tracking data is not counted as the bottom of the Physical pool.
 
-| Shown as (Impect) | Stands in for (StatsBomb) | Why it is not a straight rename |
-|---|---|---|
-| Ground duels won | Tackles | Impect has no tackle count; won ground duels is the nearest measured concept. |
-| Ball wins | Interceptions / Ball recoveries | Impect counts possession regains that remove an opponent, not raw interception/recovery events. |
-| Bypassed opponents (packing) | Progressive passes | Counts opponents taken out of the game, not distance-based progressive passes. |
-| Deep progressions | Passes into final third | Counts opponents bypassed into the final third, not passes played. |
-| Dribble & carry value | Progressive carries / Dribbles completed | PxT carry value, not a 1v1 take-on count. |
-| Goals saved above average | Saves | Impect has no save count; GSAA is the shot-value successor. |
-| Shot stopping % | Save % | Quality of shot-stopping (GSAA share of post-shot xG faced), not save volume. |
+For **turnovers**, lower is better, so the percentile is flipped (100 − percentile). Every
+other scored metric is higher-is-better.
 
-The full club framework → Impect mapping (including the metrics agreed with the club for the
-forthcoming scoring rewire) is recorded in `docs/DATA_ARCHITECTURE.md` §4.
+Seasons are never mixed: each season is ranked against its own peers only.
 
-### 3b. The club recruitment scorecard — how a player gets his 1–5 score
+## 4. The club scorecard: how a player gets his 1–5 rating
 
-This is the heart of the platform. Every player is given a single **overall score from 1 to
-5** — his *composite* — and the shortlist is ranked on it. The whole calculation is Leyton
-Orient's own recruitment framework, taken straight from the club's two documents:
+The framework is Leyton Orient's own, taken from two club documents: `Impect Data -
+Positional Metrics.xlsx` (which metrics matter for each position) and `LOFC - Position
+Archetype.docx` (the areas a player is judged on, their weights, and the 1–5 bars). It is
+encoded in `model/club_framework.py` and computed by `model/scorecard.py`.
 
-- **`Impect Data - Positional Metrics.xlsx`** — which stats matter for each position (its
-  `Input` sheet → `PERFORMANCE_METRICS` in [`club_framework.py`](../src/lofc/model/club_framework.py)).
-- **`LOFC - Position Archetype.docx`** — the seven areas a player is judged on, how much each
-  area counts for each position (→ `DIMENSION_WEIGHTS`), the 1–5 scoring, and the "minimum
-  standard" / "elite" bars.
+### Step 1 — the metrics
 
-The engine is [`scorecard.py`](../src/lofc/model/scorecard.py). Nothing here is a black box —
-the dashboard shows every number below for every player, in the **Players** tab's grand table.
+**Performance** uses the club's metric list for the position. Where the club names a
+concept Impect does not measure directly, the nearest Impect measurement is used
+(`CLUB_SUCCESSOR`), and the dashboard names it for what it actually measures. Some club
+entries end up on the same Impect measurement (for example "counterpressures" and
+"pressures in the opposition half" both resolve to counterpressures); that measurement
+**counts once**. One club metric, long-ball %, has no Impect equivalent and is left out.
 
-The club judges a player on **seven areas** ("dimensions"): **Performance** (his football stats),
-**Physical** (how much ground he covers, from tracking data), **Psychological**, **Medical**,
-**Financial** (can we afford him), and **Resale** (could we sell him on for a profit). Today the
-platform scores the two that come straight from real match data — **Performance and Physical** —
-plus, optionally, the two money areas from a model. Psychological and Medical are left for a
-scout to type in. Here is exactly how the score is built, step by step.
+| Position | Performance metrics scored |
+|---|---|
+| Goalkeeper | 6 |
+| Centre Back | 13 |
+| Full Back | 22 |
+| Defensive Mid | 16 |
+| Central Mid (the club's box-to-box midfielder) | 20 |
+| Attacking Mid | 21 |
+| Winger | 21 |
+| Centre Forward | 24 |
 
----
+Across all positions that is **32 distinct Impect metrics**.
 
-**Step 1 — Collect the player's stats, per 90 minutes.** For his position, the club lists the
-stats that matter (for a full back: tackles-and-duels, crosses, assists, expected goals, passing,
-ball retention, and so on). Each is expressed *per 90 minutes* so a regular starter and a
-squad player are compared fairly (see §1).
+**Physical** uses the same **8 SkillCorner metrics** for every outfield position:
+distance, metres per minute, high-speed-running count, high-speed-running distance,
+sprint count, sprint distance, **average match top speed** (`psv99_kmh`) and **top speed
+over his five fastest matches** (`top5_psv99_kmh`). Both speed measures are scored, each as
+one of the eight.
 
-**Step 2 — Turn each stat into a rank out of 100 (a "percentile").** A raw number like "0.24
-assists per 90" means nothing on its own. So each stat is compared against every other player in
-the *same position and same league this season*, and turned into a rank from 0 to 100:
+So the rating draws on **40 metrics: 32 Impect + 8 SkillCorner**.
 
-- **90 means "better than 90% of his positional rivals"** on that stat; 50 means bang average
-  (the league median); 10 means only 10% are worse.
-- For most stats, higher is better. For a few, **lower** is better — for example *turnovers*
-  (losing the ball). Those are flipped, so that a low turnover count correctly gives a *high*
-  rank. (The flipped stats are listed in `LOWER_IS_BETTER`.)
+The **"Top speed"** column on the Players page shows `top5_psv99_kmh`, the average of his
+five fastest matches, in km/h. That column is display only; it is the same value that is
+one of the eight Physical metrics, not an extra one.
 
-**Step 3 — Turn each rank into a score from 1 to 5 (the "band").** This is where the club's own
-bar comes in. The club document says the **league median is the minimum acceptable standard**,
-and the **70th percentile is elite**. We anchor the 1–5 scale on exactly those two points:
+### Step 2 — percentile to a 1–5 band
 
-> **band = 3 + (rank − 50) ÷ 20**, then capped so it never goes below 1 or above 5.
+The club's document sets the **league median as the minimum standard** and the **70th
+percentile as elite**. The band is a straight line through those two points:
 
-That gives a simple, honest conversion — no arbitrary cut-offs:
+> band = 3 + (percentile − 50) ÷ 20, kept between 1 and 5
 
-| Rank (percentile) | 1–5 band | Meaning (the club's words) |
+| Percentile | Band | Meaning |
 |---|---|---|
 | 10 | 1.0 | Well below standard |
-| 30 | 2.0 | Below standard (this is the "veto" line) |
-| **50 (median)** | **3.0** | **Minimum standard** |
+| 30 | 2.0 | Veto line |
+| **50** | **3.0** | **Minimum standard (league median)** |
 | **70** | **4.0** | **Elite** |
-| 90 | 5.0 | Well above elite |
+| 90+ | 5.0 | Top of the scale |
 
-So a player who is exactly league-average on a stat scores 3.0 on it; a genuinely elite one scores 4.0+.
+### Step 3 — average the bands in each area
 
-**Step 4 — Average the stats in each area to get that area's 1–5 score.** For the Performance
-area, we take the 1–5 band of every one of his performance stats and simply average them (each
-stat counts equally — the club lists them as a flat set of "key indicators", so we add no hidden
-preference). Two honest housekeeping rules:
+An area's score is the **plain average** of its metrics' bands. The club lists its metrics
+as a flat set of key indicators with no individual weights, so each counts equally. A
+metric with no value for this player drops out of the average rather than counting as
+zero. Dimension scores are rounded to two decimals.
 
-- **A stat with no data simply drops out** of the average — it never drags the score down. (A
-  player missing, say, crossing data is judged on the stats we *do* have.)
-- **The same underlying measurement is only counted once.** The club sometimes lists two stats
-  that Impect measures with a single number; we de-duplicate so it isn't double-weighted.
+### Step 4 — combine the areas
 
-The Physical area works the same way, averaging his eight tracking stats (distance, high-speed
-running, sprints, top speed, etc.).
+The club weights six areas. Its outfield weights add up to 110% in the document, so each
+position is rescaled to 100%, which keeps the club's relative emphasis exactly:
 
-**Step 5 — Combine the areas into the overall composite, using the club's weights.** The club
-weights the areas differently per position. For an outfielder the club's weights are Performance
-40%, Physical 30%, Psychological 10%, Medical 15%, Financial 10%, Resale 5%. We take a weighted
-average of the area scores. **If an area has no data** (e.g. a player with no market value, so no
-Financial score), it is left out and **the remaining weights are rescaled to fill the gap** — so
-that player still gets a fair composite and stays in the ranking, rather than being penalised for
-missing data.
+| Area | Outfield (as written → rescaled) | Goalkeeper |
+|---|---|---|
+| Performance | 40% → 36.4% | 50% |
+| Physical | 30% → 27.3% | none (folded into Performance, per the club's GK table) |
+| Psychological | 10% → 9.1% | 20% |
+| Medical Risk | 15% → 13.6% | 15% |
+| Financial Fit | 10% → 9.1% | 10% |
+| Resale Potential | 5% → 4.5% | 5% |
 
-**Step 6 — Two composites, so modelled money never quietly moves the rankings.** We publish two:
+A composite is the weighted average of **the areas the player actually has**, with the
+weights rescaled over those areas. A missing area never pulls a player down and never
+removes him from the list.
 
-- **Objective composite (the default ranking)** — Performance + Physical only. 100% real match
-  and tracking data. This is what the shortlist sorts on.
-- **Full composite (opt-in)** — the same, plus the two **modelled** money areas (Financial +
-  Resale, computed in [`financial_resale.py`](../src/lofc/model/financial_resale.py) and clearly
-  labelled as estimates). It only appears when you tick **"Show affordability"** in the sidebar.
+### Step 5 — three composites, kept apart
 
-**The money areas, briefly (both modelled, both 1–5).** Each blends two signals, each ranked
-0–100 within position + league, averaged, then banded exactly as in Step 3:
+| Composite | Areas | Use |
+|---|---|---|
+| **`objective_composite`** (shown as **Composite**) | Performance + Physical | **The ranking.** Real match and tracking data only. |
+| `full_composite` | + Financial Fit + Resale Potential | Shown only with **Show affordability (modelled)** on. Never ranks. |
+| `assessed_composite` (shown as **Scout-verified rating**) | Performance + Physical + Psychological + Medical Risk | Only when a scout has completed **both** Psychological and Medical. Never includes the money areas. |
 
-- **Financial Fit** = **wage headroom** (how far under our wage ceiling his modelled wage sits —
-  cheaper is better) **+ undervaluation** (how far below his Transfermarkt fair value he is priced
-  — a bigger bargain is better).
-- **Resale Potential** = **youth** (younger = more years to sell him on) **+ market value** (a
-  more valuable asset resells better).
+For an outfielder with both data areas, the ranking therefore weights **Performance 57%
+and Physical 43%** (36.4 and 27.3 rescaled to their total). An outfielder with no tracking
+data, and every goalkeeper, is rated on **Performance alone**. Scout input never touches
+`objective_composite`.
 
-Both rely partly on *modelled* inputs (a modelled wage, a modelled wage ceiling), so Financial is
-the softest number on the platform, and both are computed **only for EFL-priced players** (Scottish
-and PL2 players have no market value, so they simply rank on Performance + Physical). They will
-firm up when the club's real wage framework is loaded. Like every dimension, both money bands are
-**ranked within one season** (position + league + season) — never pooling 2024/25 with 2025/26.
-Market values exist for 2025/26 only, so 2024/25 has no money layer at all.
+Psychological and Medical Risk are entered by scouts on a 1–5 scale. The Medical form
+shows injury availability from Transfermarkt as evidence, but the band is the scout's.
 
-**The "do not proceed" and "veto" flags are advisory — they never remove anyone.** The club
-document says *composite below 3.0 = do not proceed* and *any single area below 2.0 = automatic
-veto*. The platform shows these as flags, for honesty, but **never drops a player** because of
-them — every league's players stay in the list, and any filtering is opt-in.
+### Step 6 — the club's gates are advisory flags
 
----
+The club document says a composite below **3.0** means "do not proceed" and any single area
+below **2.0** is an automatic veto. Both are computed (`below_min_composite`, `veto`) and
+shown as flags, but **nobody is ever removed from the list** because of them. The veto
+flag looks at every area the player has, including the modelled money areas; the
+interface names which area tripped it, and only mentions the money areas when
+affordability is switched on.
 
-#### A worked example: one real full back, every number
+### Colours on screen
 
-Here is the full calculation for a real player — **Fraser Murray, full back, League One,
-2025/26** — exactly as the engine computes it. (The dashboard shows this same breakdown for
-every player.)
+Rating cells on the Players page are shaded by the same thresholds
+(`players.band_colour`): **below 2.0** red, **2.0 to under 3.0** amber, **3.0 to under 4.0**
+light green, **4.0 and above** green.
 
-**His Performance stats → rank → 1–5 band** (a selection of his 22 scored stats; each ranked
-against League One full backs):
+### A worked example
 
-| Stat (per 90) | His value | Rank /100 | 1–5 band |
+**Fraser Murray, Full Back, Wigan Athletic, League One 2025/26** (4,092 minutes; 109 rankable
+League One full backs). Recomputed from the current database.
+
+A selection of his 22 Performance metrics:
+
+| Metric (per 90) | Value | Percentile | Band |
 |---|---|---|---|
-| Expected assists | 0.20 | 100 | 5.00 |
-| Passes into the box | 2.07 | 99 | 5.00 |
-| Non-penalty expected goals | 0.11 | 97 | 5.00 |
-| Assists | 0.24 | 93 | 5.00 |
-| Cross completion (bypassing opponents) | 2.92 | 86 | 4.79 |
-| Pressures | 17.6 | 76 | 4.32 |
-| Counterpressures | 2.09 | 65 | 3.75 |
-| Deep progressions | 8.61 | 52 | 3.09 |
-| Ball-carry value | −0.005 | 50 | 3.00 |
-| Ground-duel win % | 50% | 36 | 2.29 |
-| Pass completion % | 59% | 15 | 1.25 |
-| Turnovers *(lower is better → flipped)* | 22.8 | 10 | 1.02 |
-| Aerial win % | 33% | 8 | 1.00 |
+| Expected assists | 0.20 | 99.5 | 5.00 |
+| Passes into the box | 2.05 | 98.6 | 5.00 |
+| Non-penalty xG | 0.11 | 95.9 | 5.00 |
+| Assists | 0.24 | 93.1 | 5.00 |
+| Pass value | 0.094 | 87.6 | 4.88 |
+| Crosses (opponents bypassed) | 2.92 | 85.8 | 4.79 |
+| Pressures | 17.6 | 74.8 | 4.24 |
+| Deep progressions | 8.61 | 50.9 | 3.05 |
+| Ground-duel win % | 50% | 36.2 | 2.31 |
+| Pass completion % | 59% | 15.1 | 1.26 |
+| Ball wins | 12.0 | 14.2 | 1.21 |
+| Turnovers *(lower is better, flipped)* | 22.8 | 11.5 | 1.07 |
+| Aerial win % | 33% | 7.8 | 1.00 |
 
-**Average of all 22 performance bands → Performance = 3.60.** The story is visible in the
-numbers: elite attacking output (assists, expected goals, crossing all 5.0) dragged back toward
-average by weak aerials and ball retention (1.0–1.3). Equal weighting keeps that honest — it
-doesn't let his best stats hide his worst.
+Average of all 22 bands → **Performance 3.59**. Elite attacking output, pulled back by weak
+aerial duels, ball wins and ball retention.
 
-**His Physical stats → 1–5 band** (all eight, ranked against League One full backs):
+All eight Physical metrics:
 
-| Stat (per 90) | Rank /100 | 1–5 band |
-|---|---|---|
-| Total distance | 93 | 5.00 |
-| High-speed-running count | 98 | 5.00 |
-| High-speed-running distance | 97 | 5.00 |
-| Sprint count | 95 | 5.00 |
-| Sprint distance | 93 | 5.00 |
-| Metres per minute | 87 | 4.83 |
-| Top-5% peak speed | 84 | 4.68 |
-| Peak speed | 76 | 4.30 |
+| Metric | Value | Percentile | Band |
+|---|---|---|---|
+| High-speed-running distance (per 90) | 711 m | 93.9 | 5.00 |
+| High-speed-running count (per 90) | 66.6 | 90.1 | 5.00 |
+| Distance (per 90) | 10,184 m | 86.3 | 4.82 |
+| Metres per minute | 113.2 | 86.3 | 4.82 |
+| Sprint count (per 90) | 14.0 | 85.4 | 4.77 |
+| Sprint distance (per 90) | 255 m | 80.7 | 4.53 |
+| Top speed, best 5 matches | 32.0 km/h | 81.1 | 4.56 |
+| Average match top speed | 29.5 km/h | 75.0 | 4.25 |
 
-**Average of the eight physical bands → Physical = 4.85.** A relentless, high-output athlete.
+Average → **Physical 4.72**.
 
-**Combine into the composite.** Full-back weights (the club's 40/30, rescaled to the two areas
-present): Performance 0.3636, Physical 0.2727.
+> Composite = (3.59 × 0.3636 + 4.72 × 0.2727) ÷ (0.3636 + 0.2727) = **4.07**
 
-> Objective composite = (3.60 × 0.3636 + 4.85 × 0.2727) ÷ (0.3636 + 0.2727) = **4.14**
+He also has modelled money bands (Financial Fit 3.15, Resale Potential 3.62), so his
+`full_composite` is 3.94. No area is below 2.0, so no veto.
 
-That **4.14** is his headline score and where he sits in the ranking — a strong attacking,
-high-running full back, held just short of the very top by his defensive and passing numbers.
-No veto flag fires (no area is below 2.0) and he is well above the 3.0 minimum. *(He has no
-market value entry, so the money areas drop out and his Full composite equals his Objective
-composite; a player with money data would see the two differ.)*
+## 5. Peer-pool floor: when a rating is not a ranking
 
----
+A percentile is only as meaningful as the pool behind it. In a pool of three, whoever
+happens to have played decides the order; a player alone in his pool takes the top
+percentile on every metric and scores 4.90.
 
-**Five judgement calls** the club documents left open were settled objectively from the club's
-own numbers (and are documented in the code and the dashboard): (1) each stat counts equally
-within its area; (2) the median→3.0 / 70th→4.0 band anchoring above; (3) a goalkeeper has no
-separate Physical area — it folds into Performance; (4) the money areas are modelled and clearly
-labelled, the two human areas are scout-entered, and the composite is shown in the two honest
-tiers above; (5) the club's outfield weights add up to 110% in the document, so each position is
-rescaled to 100% (which preserves the club's intended relative emphasis exactly).
+So a composite is **withheld from the ranked list** when fewer than
+**`MIN_PEERS_FOR_RANKING` = 10** rankable players share its league + season + position pool
+(`scorecard.pool_is_thin`). The number is still computed and stored. The Players page says
+how many players were withheld and why; **Squads & loans** lists them with current-season
+facts. The pool size is counted from the whole season's scorecards, so narrowing the
+sidebar never makes a pool look thinner than it is.
 
-### 3c. Archetype lens (optional, opt-in)
+A player's true standing ("8th of 13") is quoted only within his own pool
+(`scorecard.rank_in_pool`). The Players list is sorted by composite across whichever leagues
+are selected, and its first column is "#", not "Rank": a composite says how a player
+compares within his own league, not across leagues.
 
-Some positions have **archetypes** — sub-profiles that score the Performance dimension on a
-*subset* of the position's metrics, so a recruiter can rank players **as a specific type**
-(e.g. an *Attacking* full-back vs a *Progressive Build & Recovery* full-back). An archetype =
-the full metric list **minus** the capabilities its column drops in the club's positional
-workbook; the dimension weights and Physical are unchanged. Defined in `ARCHETYPE_DROPS`
-(`club_framework.py`).
+## 6. Archetypes (optional lens)
 
-- **Full Back** — *All Metrics* (default) · *Attacking* (drops deep-defending) · *Progressive
-  Build & Recovery* (drops attacking/carrying). **Winger** — *All Metrics* · *Direct & 1v1*
-  (drops safe-possession + crossing) · *Crossing & Creative* (drops solo carrying).
-- **Default is "All Metrics"** (the full-profile composite); the archetype is opt-in via a
-  sidebar selector, and when chosen the **all-round composite stays visible alongside** the
-  archetype score, so there is never a hidden "which number is real".
-- **Deliberately not invented:** midfield's three club archetypes are genuinely different
-  lists the workbook does not fully specify, so they are left to the club's per-archetype
-  lists rather than fabricated; goalkeepers, centre-backs and centre-forwards have a single
-  club profile by design.
-- *Note:* this is a **scoring lens** ("rank the best attacking full-back"), distinct from the
-  data-driven **playing-style clusters** in §4 ("what style does the data say he plays?").
+**Full Back** and **Winger** have archetypes. An archetype scores Performance on a
+**subset** of the position's metrics, so a recruiter can rank players as a specific type.
+Physical and the weights are unchanged. Defined in `ARCHETYPE_DROPS`
+(`club_framework.py`); drops are matched on the underlying Impect metric, so a dropped
+concept cannot survive under a second club name.
 
-## 4. Playing styles (clustering)
+| Position | Archetype | Drops | Metrics left |
+|---|---|---|---|
+| Full Back | Attacking | Deep defending (tackles/interceptions, aerials, ball wins) | 19 |
+| Full Back | Progressive Build & Recovery | Carrying, dribbling, crossing, box presence, xG | 16 |
+| Winger | Direct & 1v1 Specialist | Safe possession and crossing | 17 |
+| Winger | Crossing & Creative Threat | Solo ball-carrying | 20 |
 
-Within each position, players are grouped by **playing style** using k-means:
+The default is **All Metrics** (the full list). When an archetype is picked in the sidebar,
+the list ranks on the archetype composite and the **All-round** composite stays visible
+beside it. Other positions have a single club profile.
 
-1. Each player's percentiles are **centred on their own average** first, so the
-   clustering captures *relative strengths* (what they do more of) rather than
-   overall quality. Without this step, clusters would just separate good players
-   from bad.
-2. Correlated metrics are reduced with **PCA** (keeping ~90% of the variance).
-3. k-means runs for several values of k; the chosen k is **the largest within 0.02
-   silhouette of the best**, so a position gets a third style only when the data
-   genuinely supports one. On the EFL data this gives centre-forwards and attacking
-   midfielders three football-sensible styles each; other positions honestly stay
-   at two. A fixed random seed makes assignments reproducible.
-4. Each cluster is labelled from the metrics on which it stands out most.
+## 7. Season shown
 
-The grouping is fully data-driven; only the plain-English labels are interpretation.
-Silhouette scores are modest because football styles are a continuum, not cleanly
-separated blobs. A soft-assignment model (Gaussian mixture: "70% goalscorer, 30%
-presser") is the documented next step.
+The Players page **opens on the newest season held, the one being played (2026/27)**
+(`seasons.default_season_id`). Early in a season many pools are below the peer floor;
+those players are withheld (§5) rather than the season being hidden. Earlier seasons stay
+available from the selector and feed the player's trajectory chart.
 
-> **Scope note (honest).** Unlike the scored dimensions, the style clustering is the one place that
-> still **pools both seasons** and reads the older StatsBomb-era metric table (`player_season_metrics`
-> / `ROLE_METRICS`) rather than the Impect neutral layer. The resulting label is stored per
-> season-row (so a player's two seasons can carry different labels), and it is **only a style tag** —
-> it never enters the 1–5 composite or the ranking. Moving it to within-season Impect clustering is a
-> tracked roadmap item.
+## 8. Market value, Financial Fit and Resale Potential (modelled)
 
-## 5. Valuation and the undervaluation score
+All money figures are **modelled estimates**. They appear only when **Show affordability
+(modelled)** is on and never change the ranking.
 
-The target is a player's **market value** (Transfermarkt), which StatsBomb does not
-carry. Values for the four covered leagues are scraped from Transfermarkt's detailed
-club squad pages (2,620 players, 96 clubs), which also supply date of birth, contract
-end, preferred foot, height and the TM profile id.
+### Fair value (`model/valuation.py`)
 
-### Matching a StatsBomb player to his Transfermarkt value
+- Players are matched to their Transfermarkt value by birth date + name: first within their
+  own league, then by name alone (rejected if it contradicts a known birth date), then
+  across all scraped leagues (a loanee's value sits under his parent club), then against a
+  maintained fallback file. Ages outside 16–38 are rejected as mismatches.
+- **Only 2025/26 is valued**, and only in the Championship, League One, League Two and
+  National League: scraped values are today's snapshot, and pairing them with another
+  season's output would be wrong. 2024/25 and 2026/27 have no money layer.
+- The model is a **ridge regression** predicting log(market value) from performance
+  percentiles, age, minutes, position and league. Five-fold cross-validation produces
+  every player's fair value **out of fold**, so no player is priced by a model that saw him.
+- **Undervaluation = (fair value − market value) ÷ fair value.** Positive means the market
+  prices him below what his output, age, position and league imply.
 
-The paid feed's lineups carry birth dates, so matching is **birth date + name**, in
-four stages (each tried only if the previous found nothing):
+How reliable it is, measured on the stored out-of-fold values (1,467 valued players):
 
-1. **In-league, DOB + name** — exact birth date within the player's own league, plus
-   a fuzzy name check (namesakes with the same birthday are the reason the name check
-   exists at all).
-2. **In-league, name only** — for the rare player without a birth date; a name match
-   that *contradicts* a known birth date is rejected as a different player.
-3. **Cross-league, DOB + name** — a loanee's Transfermarkt value is listed under his
-   **parent club**, which can be in a different division from where he is playing
-   (e.g. a Championship club's forward on loan in League One). This stage searches
-   all four scraped leagues. It caught 122 players the league-scoped stages missed.
-4. **Maintained-dataset fallback** — loanees from *outside* the four leagues and
-   January arrivals, matched DOB + name against a maintained public dataset, keeping
-   only rows whose value was updated this season.
-
-Guards: implausible ages (outside 16–38) are rejected and logged; unmatched players
-are listed, not silently dropped. Current match rate: **1,643 of 2,291 rankable
-2025/26 players valued (71.7%)**; the unmatched are dominated by National League
-players (see below) and short-stay January movers.
-
-### The model
-
-- Target is **log(market value)** (values are heavily skewed); predictions are
-  back-transformed to euros.
-- Features are the performance percentiles plus **age, minutes, position and
-  league**. Age matters: omitting it would make the model read old players as
-  "cheap". League matters: it is how a Championship number and a League Two number
-  live in one model honestly.
-- The model is **Ridge regression** (`RidgeCV`, regularisation chosen automatically)
-  for interpretable, stable coefficients. Gradient boosting is the documented upgrade
-  if a linear fit proves too weak.
-- **Cross-validation** produces every player's fair value **out-of-fold**, so no
-  player is priced by a model that trained on him. This is also the honest answer to
-  "what is the test set": every player is held out exactly once.
-- **Undervaluation = fair value minus actual market value.** A positive gap means the
-  market prices the player below what his output, age, position and league imply.
-- **Two eras never mix.** The original 2015/16 demo data and the current EFL data
-  train as separate models; and because scraped values are a *current snapshot*, only
-  the season just played (2025/26) is priced — pricing 2024/25 output with 2026
-  values would be dishonest. Earlier seasons keep scores and styles (trajectory) but
-  no fair value.
-
-### How reliable is the fair value? (measured, not asserted)
-
-Headline: cross-validated **R² ≈ 0.745** on the log scale, median absolute error
-≈ €160k. But the headline flatters, and the per-league breakdown is the honest
-picture (out-of-fold error on the current build):
-
-| League | n valued | median abs error | median abs % error | log-correlation |
+| League | Valued | Median abs. error | Median abs. % error | Log-correlation |
 |---|---|---|---|---|
-| Championship | 554 | €940k | 49% | 0.75 |
-| League One | 531 | €140k | 43% | 0.60 |
-| League Two | 500 | €60k | 37% | 0.62 |
-| National League | 58 | €92k | 75% | 0.06 |
+| Championship | 457 | €1.02m | 52% | 0.69 |
+| League One | 503 | €140k | 41% | 0.56 |
+| League Two | 450 | €61k | 34% | 0.51 |
+| National League | 57 | €90k | 77% | −0.10 |
 
-- Much of the pooled R² is the **league feature** correctly separating four price
-  tiers — the model knowing a Championship player outprices a League Two one.
-- **Within a league, the ordering is real** (log-correlation 0.6–0.75): "this player
-  is priced below peers with his output" is a trustworthy signal.
-- **The point estimate is not a price.** Typical error is ~±40% within a league, and
-  worst for cheap players, where Transfermarkt values are coarse (€25k steps, floor
-  values that ignore output).
-- Reputation, contract situation, potential and selling-club leverage drive prices
-  and are not in the features; that — not sample size — is the accuracy ceiling.
+Pooled R² on the log scale is 0.71, but much of that is the model separating league price
+levels. Within a league the ordering is moderately reliable; the point estimate is not a
+price. In the National League there is no usable signal. **Fair value is a screening signal,
+not a fee quote.**
 
-**So the platform treats fair value as a screening and ranking signal: it orders the
-queue and flags mispricing. It is not a fee quote.** This framing appears wherever
-the number is shown.
+### Financial Fit and Resale Potential (`model/financial_resale.py`)
 
-## 6. Affordability and the final shortlist
+Each blends two signals, each ranked 0–100 within league + season + position, averaged,
+then banded with the same formula as §4:
 
-Two gates decide whether a player is signable, both adjustable from the dashboard:
+- **Financial Fit** = wage headroom (how far his modelled wage sits under the wage ceiling)
+  + undervaluation.
+- **Resale Potential** = youth (younger is better) + market value (higher is better).
 
-- **Fee gate:** real market value within a transfer budget.
-- **Wage gate:** modelled weekly wage within the club's wage-framework ceiling for
-  that position and age band. The estimate is a band (×0.7 to ×1.4 around the central
-  figure) rather than a point: a player passes if the LOW end fits the ceiling, and
-  is flagged **wage-marginal** when the band straddles it, so borderline cases go to
-  human judgement (a call to the agent) instead of being silently dropped.
+Players with no market value have no money bands; the areas drop out of
+`full_composite` and the player is never excluded.
 
-A player must pass **both affordability gates — and nothing else.** The old
-identity-profile "on-profile" minimum-percentile gate is **retired**: the platform ranks
-everyone on the club framework and never excludes a player on a quality threshold (the club's
-own "< 3.0 = do not proceed" and "< 2.0 = veto" rules are advisory flags on the scorecard, not
-filters). Survivors are ranked on the club's **objective composite**; if none qualify, the best
-players by composite are returned as near-misses so the result is never empty.
+## 9. Affordability gates and the stored shortlist
 
-**Both the dashboard and the offline shortlist rank on the same number.** The composite is
-computed once by a pipeline stage (`model/scorecard_run.py`) and persisted to
-`player_scorecards` — one row per player-season per archetype, with the objective and full
-composites in separate columns. The stored `shortlists` table and the BI layer then read that
-table, so there is no second, divergent ranking anywhere. (Before this, the offline shortlist
-still ordered players by the retired Style-fit while the dashboard used the composite.)
+With affordability on, two gates decide whether a player is **signable** (`constrain/filters.py`):
 
-### The contract-expiry filter (the free-transfer market)
+- **Fee gate:** market value ≤ the transfer budget set in the sidebar.
+- **Wage gate:** modelled weekly wage within the wage-framework ceiling for his position and
+  age band. The wage is a band from **×0.70 to ×1.40** of the central estimate. He passes if
+  the **low** end fits, and is flagged **wage-marginal** if the band straddles the ceiling,
+  so borderline cases go to a person rather than being dropped.
 
-A sidebar **Contract expiry** control filters to the out-of-contract market — *Any* (default),
-*Out of contract summer 2027*, *summer 2028*, or *Contract already expired (free agents)*.
+The wage estimate is a league × position × age × performance-tier grid anchored to
+published league wage reporting (`store/reference_data.py`); it is never derived from
+market value. Both the wage grid and the ceiling are stand-ins until the club's real wage
+data is loaded.
 
-Three deliberate design points, each forced by what the data actually says:
+Survivors are ranked on `objective_composite`, the same stored number the dashboard shows
+(`player_scorecards`, written by `model/scorecard_run.py`). If nobody passes at a given
+budget, the five best by composite are returned as near-misses.
 
-- **No "January" option, on purpose.** English contracts effectively all end on 30 June — of the
-  1,381 expiry dates we hold, **1,377 are June, 4 are May, and none are January**. A literal
-  "expiring by January" filter would therefore return only deals that had *already lapsed* the
-  previous summer: a misleading control. The January window matters because a player whose deal
-  ends in summer is inside his **final six months** from that January — which is the same set as
-  the summer horizon, and is read off the **Months left** column (≤ 6).
-- **A forward horizon means "still under contract today, expiring by the cutoff."** Without that
-  lower bound, "summer 2027" would also sweep in every contract that ran out in 2026 (447 rows on
-  the current data) — players who have already left.
-- **An unknown expiry date is excluded, but counted and shown.** Contract dates come only from the
-  Transfermarkt scrape, so coverage is ~60–67% in the top three EFL divisions and **2–5% in the
-  Scottish leagues, PL2 and the National League**. Silence would read as "nobody there is
-  expiring", when the truth is "we do not know", so the Players tab states how many were hidden.
+## 10. Contract-expiry filter
 
-**The data is a dated snapshot, not a live feed.** The UI shows "Contract data as of *<date>*"
-whenever the filter is on. Refreshing it is one command
-(`python -m lofc.ingest.transfermarkt_efl --force`, then `python -m lofc.model.valuation` to push
-the dates onto `players`); no code changes. Impect — our event-data provider — supplies birth
-date, birthplace and preferred foot, but **not** contract dates or height, so Transfermarkt
-remains the only source for this.
+The sidebar **Contract expiry** filter offers *Any*, *Out of contract summer 2027*,
+*summer 2028*, and *Contract already expired (free agents)* (`seasons.contract_mask`).
 
-The wage grid is league-aware (a League One wage differs from a Championship one) and
-each league's anchors cite their published sources (e.g. League One ≈ £4.1k/wk
-average, Capology n=640). The grid is validated in aggregate by
-`python -m lofc.model.wage_check`, which sums modelled wages per squad and reconciles
-them against published payrolls: all eight league-seasons within tolerance, Leyton
-Orient's own modelled bill within ~10% of its published figure. One anchor
-(Championship) was corrected −30% after this reconciliation flagged it — the
-calibration loop working as designed.
+- A forward horizon means **still under contract today and expiring by the cut-off**, so
+  deals that have already ended are not swept in.
+- There is no January option: of the 3,079 contract dates held, 2,981 end in May or June.
+  A player whose deal ends in summer is in his final six months from January.
+- An unknown contract date is excluded and the number hidden is shown. Coverage among
+  rankable 2026/27 players runs from 63% (National League) to 93% (Championship), and is
+  29% in Premier League 2.
+- Contract data is a dated Transfermarkt snapshot, refreshed by hand; the page shows its
+  date. Impect carries no contract data.
 
----
+## 11. Not currently in use
 
-## 7. Physical data (SkillCorner tracking)
+**Playing styles (clustering).** A k-means grouping of players into styles exists in code
+(`model/archetypes.py`) but its page is **hidden from the dashboard** until it is rebuilt
+(register P4). It never fed the rating.
 
-The club provided a SkillCorner export for League One 2025/26: tracking-derived
-physical output (distances, high-speed running, sprints, accelerations, peak speed).
-Its scope defines exactly what it can and cannot do:
+## Known limitations
 
-- **Player-level data covers the Leyton Orient squad only** (21 players with season
-  averages, matched to our StatsBomb ids by birth date + name, 21/21 matched).
-- **Team-level data covers all 24 League One clubs**, as whole-team totals.
-
-So the platform uses it for two things, and refuses a third:
-
-1. **League benchmarking** (team level): where LOFC ranks among the 24 clubs on each
-   physical dimension — the objective picture of the team's physical identity.
-2. **A measured draft identity** (player level): what the current squad actually does
-   physically, presented as evidence for the Director of Football to confirm or
-   override — it describes how the team plays today, not how it should play. Once
-   confirmed, it informs which on-ball traits (which exist for every player in every
-   league) the Fit score weights.
-3. **It never scores recruitment targets.** No tracking data exists for non-LOFC
-   players, so any per-candidate "physical score" would be invented. Physical
-   assessment of targets stays with scouts, using the squad benchmarks as reference
-   points.
-
----
-
-## What is real, and what is a labelled stand-in
-
-| Input | Status | Notes |
-|---|---|---|
-| Player performance | **Real** | Impect event data — EFL, Scottish Prem/Champ, Premier League 2 |
-| Player ages / bio | **Real** | birth dates from the paid lineups (99.6%); contract, foot, height from the TM scrape |
-| Market values | **Real** | Transfermarkt squad pages (current snapshot), matched by birth date + name in four stages |
-| Physical output | **Real, scoped** | SkillCorner: LOFC squad + 24-club team level only |
-| Wage framework (the club's ceiling) | **Stand-in** | anchored to the EFL 50%-of-turnover rule and LOFC's published turnover; position/age shape assumed |
-| Player wages | **Stand-in (modelled)** | league × position × age × tier grid with uncertainty bands; sources cited per league; validated against published payrolls; never derived from market value |
-| Identity profile (what the club wants) | **Stand-in** | a constructed "hard-working, progressive, press-resistant" profile |
-
-Every stand-in is an editable data file and swaps for the club's real document with
-no code change.
-
-## Honest limitations
-
-- **Fair value is a screening signal, not a price.** Within-league point estimates
-  carry ~±40% typical error (see section 5); the within-league *ordering* is the
-  trustworthy part. Improving point accuracy needs new feature classes (contract
-  length, potential), not more of the same data.
-- **Valuation covers 2025/26 only.** Scraped values are a current snapshot; earlier
-  seasons keep scores and styles (trajectory) but no fair value.
-- **National League players are not valued.** Transfermarkt maintains values for only
-  ~2.5% of fifth-tier players, and the measured log-correlation there (~0.06) confirms
-  there is no usable signal; the league appears in scores and styles but not in the
-  value rankings, and its rare valued players carry an uncertainty caption.
-- **Value-match rate is ~72% of rankable players overall** (higher in the valued
-  leagues); the unmatched are mostly National League players, January movers and
-  short-stay loanees. They keep scores and styles but no valuation, and are therefore
-  absent from the shortlist pool (which requires a value to rank affordability).
-- **Event collection has small gaps at the bottom of the pyramid:** 19 of 4,456
-  fixtures (0.4%, almost all National League) have no event data on the feed,
-  slightly undercounting a few players' season totals.
-- **Candidate evaluation is on-ball only.** Event data does not see off-ball
-  movement; the SkillCorner data fills that gap for our own squad and for team-level
-  benchmarking, but not for recruitment targets (section 7).
-- **Modelled wages are a screening prior.** Real asking wages come from agents; the
-  grid orders the queue and classifies affordable / marginal / out of reach.
+- **Within-league only.** A composite compares a player with his own league's peers. There
+  is no league-strength adjustment, so a 4.0 in League Two and a 4.0 in the Championship
+  are not the same standard.
+- **Early-season ratings are thin.** Small pools are withheld (§5); those that pass the
+  floor still rest on fewer matches than a full season.
+- **No physical data** for 2024/25 or the Scottish Championship; those ratings are
+  Performance only.
+- **Money is 2025/26 English leagues only**, and fair value is a screening signal with
+  wide error (§8).
+- **Event data is on-ball.** Off-ball work is seen only through the SkillCorner Physical
+  metrics.
+- **Modelled wages are a prior.** Real asking wages come from agents.

@@ -6,8 +6,8 @@ platform, not a reporting dashboard: the core deliverable is a scoring and ranki
 produces a judgement not already in the data, with a clean Streamlit layer on top. It runs end
 to end as one Docker stack.
 
-> **New to the project?** Read [`plan/BUILD_PLAN.md`](plan/BUILD_PLAN.md) first — it is the
-> master plan and documentation map (current state, where every doc lives, what's next).
+> **Live** at https://lofc-recruitment.duckdns.org (see [`DEPLOY.md`](DEPLOY.md)). What is open:
+> [`plan/TASKS.md`](plan/TASKS.md). Every document and its purpose: [Documentation](#documentation).
 
 ## What it does
 
@@ -64,9 +64,11 @@ underlying code, so the two can never disagree on the rules.
 `python -m lofc.pipeline` runs all stages in order, each idempotent:
 
 ```
-schema → ingest (Impect + SkillCorner) → aggregate → reference data → load
-       → build combined 91-metric table → Transfermarkt values → score
-       → archetypes → valuation → shortlists
+schema → Impect pull (+ its metric definitions) → SkillCorner pull
+       → combined metric table → position shares
+       → Transfermarkt squads/loans (workstation only) → squad loader
+       → percentiles → playing-style clusters → valuation → identity → injuries → player bio
+       → club scorecard (1–5 composite) → shortlists
 ```
 
 Players are then ranked on the club **1–5 composite**, computed by a pipeline stage and stored
@@ -75,8 +77,10 @@ same numbers. You can run any stage on its own (see `cli_commands.txt`).
 
 ## Dashboard tabs
 
-The sidebar groups the ten pages into **Scouting**, **Assessment**, **Analysis**,
-**Reference**, and — for administrators only — **Admin**.
+The sidebar groups the pages into **Scouting** (Players, Squads & loans, Scout reports,
+Compare, Watchlist, Report), **Assessment** (Assess, Sign-off), **Analysis** (Physical),
+**Reference** (What goes into each rating, Glossary) and — for administrators only — **Admin**
+(Users).
 
 - **Players** — the one decision workspace: a composite-ranked list — searchable by name
   across every position and league in the season, accent/case-insensitive — and, on click or
@@ -85,9 +89,9 @@ The sidebar groups the ten pages into **Scouting**, **Assessment**, **Analysis**
   section showing the live season's minutes/goals/assists as plain facts once it exists, never
   as a rating). Merged from the former Shortlist + Club scorecard + Player profile tabs.
   **Money is opt-in** — market value, modelled wages and the affordability gates appear only
-  when "Show affordability" is ticked, and never reorder the default ranking. An opt-in
-  **"Rank on assessed composite"** toggle (off by default) switches the ranking to the
-  scout-assessed composite for players who have one. An advisory flag below the club minimum
+  when "Show affordability (modelled)" is ticked, and never reorder the default ranking. An
+  opt-in **"Rank on scout-verified rating"** toggle (off by default) switches the ranking to
+  the scout-assessed composite for players who have one. Opens on the season being played. An advisory flag below the club minimum
   on any dimension names that dimension and by how much, rather than a generic warning.
 - **Compare** — two or three players head-to-head on the club's Performance metrics, plus a
   raw physical table (raw because physical output *is* comparable across leagues).
@@ -95,7 +99,12 @@ The sidebar groups the ten pages into **Scouting**, **Assessment**, **Analysis**
   injury, contract months remaining, and the real club composite (replacing an old, retired
   0–100 "Quality" figure) — plus an at-a-glance strip of what needs attention (contracts
   expiring within 6 months, players currently injured, players not yet assessed).
-- **Player types · Physical** — playing-style groups, tracking data.
+- **Squads & loans** — every registered squad member: contract, loan status, this season's
+  minutes and rating, last season's rating.
+- **Scout reports** — the club's scouting sheet, read-only, synced every minute; each report
+  beside the player's rating, and whether the model agrees.
+- **Report** — a one-page player report (see below).
+- **Physical** — SkillCorner tracking data.
 - **Assess** — the scout-assessment form: the club's own criteria for that player's position,
   Psychological scored 1–5 per criterion, Medical entered as a band with an injury and
   availability evidence panel beside it. Injury data informs the judgement; it never becomes
@@ -107,10 +116,9 @@ The sidebar groups the ten pages into **Scouting**, **Assessment**, **Analysis**
 - **Users** *(Admin only)* — list every account, create one, reset a password, clear a
   lockout, or deactivate/reactivate. Accounts are never deleted, so every past assessment
   stays attributed.
-- **Glossary** — searchable definitions for every metric (Impect's own wording; substitutes
-  labelled honestly).
-- **Methodology** — how the pipeline works, step by step, including a worked example of the
-  1–5 composite.
+- **What goes into each rating** — per position, the metrics in each rating and their weights.
+- **Glossary** — searchable definitions for every metric, in the providers' own wording;
+  metrics that count towards the rating are tagged.
 
 ## Interfaces
 
@@ -121,28 +129,24 @@ The sidebar groups the ten pages into **Scouting**, **Assessment**, **Analysis**
 
 ## Documentation
 
-The master plan and full documentation map is [`plan/BUILD_PLAN.md`](plan/BUILD_PLAN.md).
-Key deep-dives:
+One file per purpose:
 
-- [`docs/architecture.md`](docs/architecture.md) — the system: pipeline stages, which file
-  does what, data flow, dashboard tabs.
-- [`docs/methodology.md`](docs/methodology.md) — the scoring method: percentiles, the club
-  1–5 composite, and the design decisions.
-- [`docs/DATA_ARCHITECTURE.md`](docs/DATA_ARCHITECTURE.md) — the 91-metric layer: the four data
-  sources and per-metric provenance.
-- [`docs/scaling.md`](docs/scaling.md) — scaling considerations and the wider-BI growth path.
-- [`plan/HISTORY.md`](plan/HISTORY.md) — the frozen build log (the rationale behind past
-  decisions).
+| File | Purpose |
+|---|---|
+| [`plan/TASKS.md`](plan/TASKS.md) | What is open, in order |
+| [`plan/BUILD_PLAN.md`](plan/BUILD_PLAN.md) | Register of known problems + dated work log |
+| [`docs/architecture.md`](docs/architecture.md) | How the system is built: sources, pipeline, code, tables |
+| [`docs/methodology.md`](docs/methodology.md) | How players are scored |
+| [`DEPLOY.md`](DEPLOY.md) | The live server, scheduled jobs, backups, deploying |
+| [`cli_commands.txt`](cli_commands.txt) | The command for each stage |
+| [`plan/HISTORY.md`](plan/HISTORY.md) | Frozen log of earlier decisions (the *why*) |
 
 ## Deployment
 
 `docker compose up` is the whole stack, so deploying is running it on a server. See
 [`DEPLOY.md`](DEPLOY.md) for a production setup (Caddy for HTTPS, database and admin tools
 kept internal — the dashboard's own login gate handles authentication) and a quick tunnel
-option for a demo link. **Deployment has not happened yet** — the platform has only run
-locally so far. The scout-assessment work (including the login gate) has been merged into
-`main`, so cloning `main` today gets the authenticated app — what's missing is a server to
-put it on, not a merge.
+option for a demo link. **It is deployed and in live use** — the live server, its scheduled jobs and backups are described in [`DEPLOY.md`](DEPLOY.md).
 
 ## Tech stack
 

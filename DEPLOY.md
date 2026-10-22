@@ -6,6 +6,82 @@ from your laptop** for a demo (Option B).
 
 ---
 
+## The live server — what runs where (verified 2026-10-16 to 10-22)
+
+| | |
+|---|---|
+| URL | https://lofc-recruitment.duckdns.org (a `leytonorient.com` name is pending with club IT) |
+| Host | DigitalOcean droplet `lofc-platform`, London, Ubuntu 24.04, **2 vCPU / 3.8 GB RAM / 77 GB disk**, IP 165.22.122.157 |
+| Code | `/opt/lofc`, branch `main`, `docker-compose.prod.yml` (db, app, dashboard, caddy) |
+| Network | DigitalOcean Cloud Firewall `lofc-platform-fw`: inbound TCP 22/80/443 only. Postgres is not exposed |
+| Docker logs | Capped in `/etc/docker/daemon.json` (json-file, 10 MB × 3 per container) |
+| OS upgrade | Ubuntu offers 26.04 — **not planned**; do not run `do-release-upgrade` without a snapshot and a plan |
+
+**Scheduled jobs** (root crontab; times UTC):
+
+| When | Job | Does |
+|---|---|---|
+| Every minute | `scripts/scout_sync.sh` | Reads the club's scouting Google Sheet (read-only); writes only changes |
+| Daily 19:30 | `scripts/db_backup.sh` | Dumps OUR database to `/opt/lofc/backups` (14 kept, each verified) |
+| Sunday 03:30 | `docker builder prune -f --filter until=168h` | Clears Docker build cache (it grew 22 GB from deploys) |
+| Monday 04:15 | `scripts/weekly_refresh.sh` | Impect + SkillCorner pull, rebuild, re-score. Result in `data/ops/last_success` / `last_failure` |
+
+**Backups — two layers:**
+
+| | Nightly dump | DigitalOcean backup |
+|---|---|---|
+| Copies | Our database only | The whole server |
+| Stored | On the server, `/opt/lofc/backups` | Off the server, in DigitalOcean |
+| Schedule / kept | 19:30 UTC, 14 | Daily, window 21:00–01:00 UK time, 7 |
+| Use it for | Undoing a data mistake without touching anything else | Losing the server |
+
+Restore our database from a dump (overwrites it):
+```bash
+docker compose -f /opt/lofc/docker-compose.prod.yml exec -T db \
+    pg_restore -U lofc -d lofc --clean --if-exists --no-owner < /opt/lofc/backups/lofc-<stamp>.dump
+```
+
+**A second platform shares this droplet** (a colleague's match-analysis app, since
+2026-10-16): Linux user `matchanalysis` (in the `docker` group — effectively root), code in
+`/opt/match-analysis`, its own Compose project and Postgres. Its web container joins our
+`lofc_default` network with the alias `match-analysis` on port 5050 and publishes no ports; our
+Caddy routes `orient-matchanalysis.duckdns.org` to it (see `Caddyfile`). Our `.env` is
+`chmod 600` so it is not readable without Docker access.
+
+### Two machines, two jobs
+
+| | Server | Workstation (Mac) |
+|---|---|---|
+| Role | Authoritative; the data staff use | Development; **all Transfermarkt scraping** |
+| Refreshes itself | Weekly (above) | Never |
+| `.env` | has `SKIP_TRANSFERMARKT_SCRAPE=true` | does not |
+
+The server's database drifts ahead of the workstation's. **Before any data work on the
+workstation, resync it from the server:**
+```bash
+ssh root@SERVER "docker compose -f /opt/lofc/docker-compose.prod.yml exec -T db pg_dump -U lofc -Fc lofc" > /tmp/prod.dump
+docker compose exec -T db psql -U lofc -d lofc -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+docker compose exec -T db pg_restore -U lofc -d lofc --no-owner < /tmp/prod.dump
+```
+
+### Lessons that cost real time
+
+- **`.env` changes need a recreate, not a restart.** Compose injects `env_file` values when a
+  container is CREATED; `restart` keeps the old values, and they override the file. Use
+  `docker compose -f docker-compose.prod.yml up -d --force-recreate app dashboard` (and
+  `caddy` for `DASHBOARD_DOMAIN` or `Caddyfile` changes), then check with
+  `docker compose ... exec -T app printenv <NAME>`.
+- **`--force-recreate` does not rebuild.** It reuses the existing image; code or dependency
+  changes need `deploy.sh`.
+- **`deploy.sh` does not re-score.** It ships code and runs migrations. A change to stored
+  scores needs the relevant pipeline step afterwards — only when data must be rebuilt.
+- **After a manual `docker compose stop`, containers do NOT come back on reboot**
+  (`restart: unless-stopped` honours the stop). Start them with `up -d`.
+- **`secrets/` never travels with a deploy** (gitignored). Copy the Google service-account key
+  by hand into `/opt/lofc/secrets/`, owned by UID 1000 (the container user).
+
+---
+
 ## ⚠️ Two constraints that decide how a server is set up (read before deploying)
 
 ### 1. Transfermarkt cannot be scraped from a server
@@ -38,6 +114,11 @@ rsync -avz data/reference/transfermarkt/ root@SERVER:/opt/lofc/data/reference/tr
 ```
 
 then on the server, copy into the app volume and re-run the loaders (see below).
+
+> **Loans do not travel this way (found 2026-10-22).** `transfermarkt_loans` writes straight into
+> the workstation's database and creates no CSV, and there is no loans loader on the server — so
+> the rsync above carries contracts, squads and injuries but **not loans**. Fix pending:
+> `plan/TASKS.md` 2.3.
 
 ### 2. `data/` lives in a Docker VOLUME, not on the host
 
@@ -201,13 +282,10 @@ removed — see "Why no Caddy basic-auth" below.)
    dashboard is live, on any device, from anywhere.
 
 ### Keeping data fresh (weekly refresh)
-The scoring data goes stale as the season progresses. `scripts/weekly_refresh.sh` wraps
-`python -m lofc.pipeline` with a lock, timestamped/rotated logs, and success/failure markers
-in `data/ops/` — written and tested, but **not installed anywhere** by default. Add it to the
-server's crontab once the platform is actually live (see the "WEEKLY REFRESH, unattended"
-section of `cli_commands.txt` for the exact line and what each safeguard does). Check
-`data/ops/last_success` / `data/ops/last_failure` to see whether the last scheduled run
-actually worked.
+`scripts/weekly_refresh.sh` wraps `python -m lofc.pipeline` with a lock, rotated logs and
+success/failure markers in `data/ops/`. On a new server, install the cron lines listed under
+"The live server" above. Check `data/ops/last_success` / `data/ops/last_failure` to see
+whether the last run worked.
 
 ### Why no Caddy basic-auth
 Caddy used to also gate the dashboard behind its own shared basic-auth password
@@ -229,8 +307,8 @@ doesn't collide with the app's own login the way a second password does.)
 - **Admin tools** (pgAdmin/Metabase) aren't exposed publicly in prod. Reach them over an SSH
   tunnel, e.g. `ssh -L 3000:localhost:3000 user@server` then open `localhost:3000`. (Add them to
   the Caddyfile on their own subdomain if you want them public — each already has its own login.)
-- **Backups:** the `pgdata` Docker volume holds everything. Snapshot it (or `pg_dump`) regularly.
-- **Updates:** `git pull` then re-run step 3; the schema migrates via the pipeline's first step.
+- **Backups:** see "The live server" above (nightly dump + DigitalOcean backups).
+- **Updates:** `scripts/deploy.sh` (pull, rebuild, migrate) — see section 3 above.
 - **Login-spray throttling:** the app throttles a burst of failed logins across many DIFFERENT
   usernames (`dashboard/login_throttle.py`), not by source address — behind a bare `cloudflared`
   quick tunnel or Caddy's default `reverse_proxy` (neither normalises a trusted client address

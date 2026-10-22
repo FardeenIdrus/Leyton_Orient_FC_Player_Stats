@@ -35,7 +35,10 @@ from lofc.dashboard.session import go_to_player
 from lofc.model.scorecard import MIN_PEERS_FOR_RANKING
 
 # The column the comparison writes. Named once so the page and its tests cannot drift.
-MODEL_VIEW = "Model view"
+MODEL_VIEW = "Data vs scout"
+# The page's filter over that column. Every label falls in exactly one group.
+DATA_VS_SCOUT_GROUPS = ["All", "Data agrees", "Data disagrees", "Average rating",
+                        "No verdict to compare", "No rating"]
 
 # A verdict only counts as a position the model can be compared against if the scout
 # actually committed. "Monitor" and "Monitor Priority" are deliberate non-commitments.
@@ -61,6 +64,7 @@ def filter_reports(frame: pd.DataFrame, scout: str | None = None,
                    position: str | None = None, search: str | None = None,
                    in_our_data: str | None = None, league: str | None = None,
                    max_age: int | None = None, foot: str | None = None,
+                   data_vs_scout: str | None = None,
                    today: dt.date | None = None) -> pd.DataFrame:
     """Reports matching every filter given. "All" and None mean no filter.
 
@@ -96,12 +100,23 @@ def filter_reports(frame: pd.DataFrame, scout: str | None = None,
         out = out[out["player_id"].notna()]
     elif in_our_data == "Not in our data":
         out = out[out["player_id"].isna()]
+    if data_vs_scout and data_vs_scout != "All" and MODEL_VIEW in out.columns:
+        out = out[out[MODEL_VIEW].map(data_vs_scout_group) == data_vs_scout]
     return out
 
 
+def data_vs_scout_group(label) -> str:
+    """The filter group a "Data vs scout" label belongs to."""
+    text = str(label)
+    for group in ("Data agrees", "Data disagrees", "Average rating", "No verdict to compare"):
+        if text.startswith(group):
+            return group
+    return "No rating"
+
+
 def disagrees(labels: pd.Series) -> pd.Series:
-    """Model-view labels that are a disagreement, whichever season's rating it rests on."""
-    return labels.astype(str).str.startswith("Model disagrees")
+    """Labels that are a disagreement, whichever season's rating it rests on."""
+    return labels.astype(str).str.startswith("Data disagrees")
 
 
 def model_view(frame: pd.DataFrame, season: str = "25/26",
@@ -131,7 +146,7 @@ def model_view(frame: pd.DataFrame, season: str = "25/26",
     TWO RATINGS (owner, 2026-10-16). `composite_live` is this season's rating, present only
     where it is rankable (450+ minutes, peer pool at the floor); `composite` is the last
     complete season's. The comparison uses this season's where it exists, else last
-    season's, and the label names which -- "Model agrees (26/27)". It switches by itself
+    season's, and the label names which -- "Data agrees — rated 3.5+ (26/27)". It switches by itself
     once the Monday refresh rates the player this season. `rating_used` is kept for sorting.
     """
     out = frame.copy()
@@ -152,15 +167,17 @@ def model_view(frame: pd.DataFrame, season: str = "25/26",
     def one(verdict, composite, player_id, in_rating, in_live, label):
         if composite is None or pd.isna(composite):
             return no_rating(player_id, in_rating, in_live)
-        if verdict in POSITIVE_VERDICTS:
-            word = "Model agrees" if composite >= STRONG else (
-                "Model disagrees" if composite < WEAK else "Model is lukewarm")
-        elif verdict in NEGATIVE_VERDICTS:
-            word = "Model disagrees" if composite >= STRONG else (
-                "Model agrees" if composite < WEAK else "Model is lukewarm")
-        else:
+        # Each label names WHO (the data), WHAT (agrees / disagrees) and the BAND the rating
+        # sits in (owner, 2026-10-22: "Model is lukewarm" was vague, and "Model agrees" did
+        # not say what the data rated him).
+        if verdict not in POSITIVE_VERDICTS and verdict not in NEGATIVE_VERDICTS:
             return "No verdict to compare"
-        return f"{word} ({label})"
+        if WEAK <= composite < STRONG:
+            return f"Average rating — {WEAK:.1f} to {STRONG:.1f} ({label})"
+        high = composite >= STRONG
+        agrees = high if verdict in POSITIVE_VERDICTS else not high
+        band = f"rated {STRONG:.1f}+" if high else f"rated under {WEAK:.1f}"
+        return f"{'Data agrees' if agrees else 'Data disagrees'} — {band} ({label})"
 
     blank = pd.Series([None] * len(out), index=out.index, dtype=object)
     live = pd.to_numeric(out.get("composite_live", blank), errors="coerce")
@@ -720,7 +737,7 @@ def render(rating_season_id: int, rating_label: str) -> None:
     disagree = int(disagrees(frame[MODEL_VIEW]).sum())
 
     browse, disagreements, scouts = st.tabs(
-        [f"All reports ({len(frame):,})", f"Where we disagree ({disagree})",
+        [f"All reports ({len(frame):,})", f"Data disagrees ({disagree})",
          "Scout activity"])
 
     with browse:
@@ -732,7 +749,7 @@ def render(rating_season_id: int, rating_label: str) -> None:
         max_age = s3.number_input("Max age", min_value=16, max_value=40, value=40, step=1,
                                   key="scout_max_age")
         foot = s4.selectbox("Foot", ["All", "Left", "Right"], key="scout_foot")
-        c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+        c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
         scout = c1.selectbox("Scout", _options(frame, "scout"))
         verdict = c2.selectbox("Verdict", _options(frame, "verdict"))
         grade = c3.selectbox("Grade", _options(frame, "grade"))
@@ -743,10 +760,13 @@ def render(rating_season_id: int, rating_label: str) -> None:
         # halves are worth isolating: "only players I can compare to the model", and
         # "only players the model has never seen", which is the discovery list.
         in_our_data = c7.selectbox("Our data", ["All", "In our data", "Not in our data"])
+        data_vs_scout = c8.selectbox("Data vs scout", DATA_VS_SCOUT_GROUPS,
+                                     key="scout_data_vs_scout")
         view = filter_reports(frame, scout=scout, verdict=verdict, grade=grade,
                               club=club, observation=observation, position=position,
                               search=search, in_our_data=in_our_data, league=league,
-                              max_age=None if max_age >= 40 else int(max_age), foot=foot)
+                              max_age=None if max_age >= 40 else int(max_age), foot=foot,
+                              data_vs_scout=data_vs_scout)
         st.caption(f"{len(view):,} of {len(frame):,} reports · "
                    f"{frame['player_name'].nunique():,} players · "
                    f"{frame['scout'].nunique()} scouts · {linked:,} matched to our data")
@@ -756,8 +776,8 @@ def render(rating_season_id: int, rating_label: str) -> None:
         # The reason the page exists. Agreement is reassuring and carries almost no
         # information; these are the players where a recruiter's judgement is needed.
         view = frame[disagrees(frame[MODEL_VIEW])]
-        st.caption(f"{len(view)} reports where the scout's verdict and the rating "
-                   f"point opposite ways.")
+        st.caption(f"{len(view)} reports: Sign but rated under {WEAK:.1f}, or Don't sign "
+                   f"but rated {STRONG:.1f}+.")
         _report_table(view.sort_values("rating_used"), names, rating_label, live_label,
                       key="scout_disagree")
 
@@ -791,9 +811,10 @@ def _report_table(view: pd.DataFrame, names: dict, rating_label: str, live_label
             "Player": st.column_config.TextColumn(
                 "Player", help="\u2020 = name read from the report text."),
             MODEL_VIEW: st.column_config.TextColumn(
-                MODEL_VIEW, help="Whether the composite points the same way as the "
-                                 "scout's verdict. Only 'Sign' and \"Don't sign\" are "
-                                 "compared — 'Monitor' is the scout declining to commit."),
+                MODEL_VIEW, help=f"The scout's verdict against the player's rating "
+                                 f"(this season's where he has one). Agrees: Sign and "
+                                 f"{STRONG:.1f}+, or Don't sign and under {WEAK:.1f}. "
+                                 f"Monitor is not compared."),
         })
 
     rows = selection.get("selection", {}).get("rows", []) if selection else []

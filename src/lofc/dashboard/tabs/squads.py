@@ -212,8 +212,9 @@ def scraped_squads() -> pd.DataFrame:
     if frame.empty:
         return pd.DataFrame()
     keep = ["competition_id", "club_name", "player_name", "tm_player_id",
-            "date_of_birth", "contract_until", "height_cm", "foot"]
+            "date_of_birth", "contract_until", "height_cm", "foot", "position"]
     d = frame[[c for c in keep if c in frame.columns]].copy()
+    d = d.rename(columns={"position": "tm_position"})
     d["contract_until"] = pd.to_datetime(d["contract_until"], errors="coerce")
     d["date_of_birth"] = pd.to_datetime(d["date_of_birth"], errors="coerce")
     return d
@@ -332,8 +333,10 @@ def registered_squad_frame(season_id: int, rating_season_id: int) -> pd.DataFram
                     on="player_id", how="left")
     out = attach_loans(out, loans)
     out["team_name"] = out["club_name"]
-    # Last known position, marked, where he has not featured yet this season.
+    # Last known position, marked, where he has not featured yet this season; failing
+    # that, the position Transfermarkt registers him under, marked as such (P18).
     out = with_last_season_position(out)
+    out = with_registered_position(out)
     return out
 
 
@@ -350,13 +353,62 @@ def months_left(when, today: datetime.date | None = None) -> float | None:
 # the reader can tell an observed position from an inferred one. The filter must match on the
 # bare position, or "Centre Back" and "Centre Back (last season)" become two separate choices.
 _FALLBACK_SUFFIX = " (last season)"
+_REGISTERED_SUFFIX = " (registered)"
 
 
 def _bare_position(value) -> str | None:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return None
     text = str(value)
-    return text[: -len(_FALLBACK_SUFFIX)] if text.endswith(_FALLBACK_SUFFIX) else text
+    for suffix in (_FALLBACK_SUFFIX, _REGISTERED_SUFFIX):
+        if text.endswith(suffix):
+            return text[: -len(suffix)]
+    return text
+
+
+# P18 (owner, 2026-10-22): Transfermarkt's 16 position names -> our 8 groups. Left/Right
+# Back and Left/Right Winger merge exactly as club_framework does. The owner's calls: Left /
+# Right Midfield -> Winger, Second Striker -> Centre Forward, and the vague "Midfielder" /
+# "Defender" are deliberately ABSENT -- naming a group the source did not state is a guess.
+TM_POSITION_GROUPS = {
+    "Goalkeeper": "Goalkeeper",
+    "Centre-Back": "Centre Back",
+    "Left-Back": "Full Back", "Right-Back": "Full Back",
+    "Defensive Midfield": "Defensive Mid",
+    "Central Midfield": "Central Mid",
+    "Attacking Midfield": "Attacking Mid",
+    "Left Winger": "Winger", "Right Winger": "Winger",
+    "Left Midfield": "Winger", "Right Midfield": "Winger",
+    "Centre-Forward": "Centre Forward", "Striker": "Centre Forward",
+    "Second Striker": "Centre Forward",
+}
+
+
+def registered_position(tm_position) -> str | None:
+    """Our position group for a Transfermarkt position, or None when it cannot be said."""
+    if tm_position is None or (isinstance(tm_position, float) and pd.isna(tm_position)):
+        return None
+    return TM_POSITION_GROUPS.get(str(tm_position).strip())
+
+
+def with_registered_position(frame: pd.DataFrame, column: str = "position_group",
+                             source: str = "tm_position") -> pd.DataFrame:
+    """`frame` with still-blank positions filled from Transfermarkt, MARKED "(registered)".
+
+    The THIRD tier, after this season and last season (owner rule 1: Impect wins wherever it
+    has a position, because it records where a player actually lined up). Reached only by a
+    squad member who has played in neither season -- Impect holds no position for him at all:
+    its player list has no position field, positions come only from matches (verified against
+    the API 2026-10-22). The suffix keeps a registration label visibly different from an
+    observed position; `_bare_position` strips it so one filter covers all three tiers.
+    """
+    out = frame.copy()
+    if out.empty or column not in out.columns or source not in out.columns:
+        return out
+    marked = out[source].map(
+        lambda v: f"{g}{_REGISTERED_SUFFIX}" if (g := registered_position(v)) else None)
+    out[column] = out[column].where(out[column].notna(), marked)
+    return out
 
 
 def best_profile_target(rows: pd.DataFrame) -> tuple[int, int] | None:
@@ -725,7 +777,9 @@ def render(season_id: int, rating_season_id: int, season_label: str,
                      "played 450+ minutes for a ranking to mean anything. Blank = not yet "
                      "rankable, not missing."),
             "Position": st.column_config.TextColumn(
-                "Position", help="Where he has played THIS season. Marked '(last season)' "
+                "Position", help="Where he has played THIS season. '(registered)' = "
+                                 "Transfermarkt's listed position, where he has not played "
+                                 "in either season. Marked '(last season)' "
                                  "where he has not featured yet."),
             "Minutes": st.column_config.NumberColumn(
                 "Minutes", format="%d", width="small",

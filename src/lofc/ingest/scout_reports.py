@@ -102,16 +102,42 @@ def name_from_comment(comment, club=None) -> str | None:
         Raphael Borges Rodrigues (#17 played as...  name, then a shirt number
         52. Reggie Rose - A 21 year old goalkeeper  shirt number, name, dash
 
-    REFUSES RATHER THAN GUESSES. A comment that does not open with something shaped like a
-    name returns None and the row keeps reading "A New Player". Twenty rows honestly saying
+    A newer template puts a header on line 1 and the name on line 2 or 3; those lines are
+    read strictly (see below).
+
+    REFUSES RATHER THAN GUESSES. A comment with no name-shaped line at the top returns None and the row keeps reading "A New Player". Twenty rows honestly saying
     "unknown" is better than one row naming the wrong man -- and a name recovered here is
     never used to match a player (see `reports_frame`).
     """
     if comment is None or (isinstance(comment, float) and pd.isna(comment)):
         return None
-    line = str(comment).strip().split("\n")[0].strip()
-    if not line:
+    lines = [l.strip() for l in str(comment).strip().split("\n") if l.strip()][:3]
+    if not lines:
         return None
+    # Line 1, read loosely: the four shapes above.
+    name = _name_from_line(lines[0], club)
+    if name:
+        return name
+    # Lines 2-3, read STRICTLY (2026-10-22): a newer template opens with a header --
+    # "CF (Right Foot) in a 4-4-2 (Live - Match Played on ...)" -- and puts the name on its
+    # own line below. Only a line that is NOTHING but a name, or one opening with a shirt
+    # number ("98. Archie Jolland - A 16 year old..."), counts; prose that happens to open
+    # with two capitalised words ("Good Feet and...") must not become a player.
+    for line in lines[1:]:
+        if _LEADING_NUMBER.match(line):
+            name = _name_from_line(line, club)
+        elif _NAME.match(line):
+            name = _name_from_line(line, club)
+        else:
+            name = None
+        if name:
+            return name
+    return None
+
+
+def _name_from_line(line: str, club=None) -> str | None:
+    """One line's opening name, or None. The line-1 rules: shirt number stripped, cut at
+    the first verb or punctuation, then it must be shaped like a name."""
     line = _LEADING_NUMBER.sub("", line)
     candidate = _STOP.split(line, maxsplit=1)[0].strip()
     if not candidate or candidate.lower() == PLACEHOLDER_PLAYER.lower():

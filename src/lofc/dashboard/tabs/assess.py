@@ -96,8 +96,8 @@ def _psychological_form(engine, user: CurrentUser, player_id: int, competition_i
     status = rules.psychological_status(scores, position)
     notes = st.text_area("Notes (optional)", key=f"psych_notes_{player_id}")
 
-    # The player report's narrative. Written here, never generated -- see
-    # docs/superpowers/specs/2026-08-28-player-report-design.md section 4. All optional:
+    # The player report's narrative. Written here, never generated: template prose built
+    # from percentiles would read as filler to a chairman. All optional:
     # a scout assessing before a fixture may record bands with no prose, and the report
     # then says no narrative was recorded rather than inventing one.
     with st.expander("Player report narrative (optional)", expanded=False):

@@ -145,7 +145,7 @@ def games_missed_in_window(injuries: pd.DataFrame, season_id: int,
 
     Column contract: a frame with any row surviving the season-label filter
     must have `date_from` and `date_until` columns (real injury rows always
-    do -- see the module's column list in docs/DATA_ARCHITECTURE.md); missing
+    do -- see the `player_injuries` columns in store/models.py); missing
     either raises KeyError. A frame that is empty, or whose rows are all
     outside the window, never reaches the merge step and does not need them.
     """

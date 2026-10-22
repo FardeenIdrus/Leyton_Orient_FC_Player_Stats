@@ -1,51 +1,32 @@
-# BUILD PLAN — master plan & documentation hub
+# BUILD PLAN — register of known problems + work log
 
-> **Read this first.** This file is the single, always-current map of the platform: what it
-> is, where every other document lives, the state today, and what's next. It is kept small
-> and up to date. It is the file to read on a fresh session or when onboarding.
->
-> - **The current state and roadmap** are in this file (below).
-> - **The rationale/history** of every past decision is in `plan/HISTORY.md` (frozen log —
->   read only when you need the *why* behind something).
-> - **Technical deep-dives** are in `docs/` (see the Documentation map below).
->
-> _Last updated: 2026-10-09._
+> **What's open, in order: [`plan/TASKS.md`](TASKS.md).** This file is the detail behind it:
+> the **register** of every known problem (P/R/B/S items, nothing dropped) and the dated
+> **work log** of what was done and why. Server and deployment: `DEPLOY.md`.
+> Older history (frozen): `plan/HISTORY.md`.
 
 ---
 
-## What this is (one paragraph)
+## Documentation map — one file per purpose
 
-The Leyton Orient FC **Player Recruitment Intelligence Platform** turns event and physical
-data into a ranked shortlist of **affordable, undervalued** signings, scored on **the club's
-own recruitment framework**. It is a *decision* platform (the IP is the scoring + ranking
-model), not a reporting dashboard. It runs end to end via `docker compose up` +
-`python -m lofc.pipeline`; the dashboard is at http://localhost:8501.
+| File | Purpose |
+|---|---|
+| `README.md` | Front door: what the platform is, how to run it |
+| `plan/TASKS.md` | **What is open, in order** — read first |
+| `plan/BUILD_PLAN.md` (this file) | Register of known problems + dated work log |
+| `plan/HISTORY.md` | Frozen log of earlier phases and decisions (read for *why*) |
+| `plan/LOFC_Recruitment_Platform_Build_Plan.md` | The original brief (frozen) |
+| `docs/architecture.md` | How the system is built: sources, pipeline, code, tables |
+| `docs/methodology.md` | How players are scored |
+| `DEPLOY.md` | The live server, scheduled jobs, backups, deploying, recurring manual tasks |
+| `cli_commands.txt` | The command for each stage |
 
----
-
-## Documentation map
-
-| Document | What it covers | Read it when… |
-|---|---|---|
-| **`plan/BUILD_PLAN.md`** (this file) | Current state, doc index, roadmap, the **recurring manual tasks (M1/M2)** and the pending register | Always first — the entry point |
-| **`CLAUDE.md`** — ⚠️ **OPERATING MODEL section** | Which of the TWO machines does what; the Transfermarkt/AWS-WAF block (M1); the laptop↔server drift (M2); the per-match roadmap (P11) | **Before touching data, the pipeline or deployment** |
-| `plan/2026-09-28-P17-P18-squads-joins.md` | **The worked plan for P17 + P18** — verified counts, reproducible SQL, duplication checks, the mapping decisions P18 needs, and the tests to write first | **Before starting P17 or P18** |
-| `plan/HISTORY.md` | Frozen append-only build log: every phase + decision + rationale | You need *why* a past decision was made |
-| `plan/LOFC_Recruitment_Platform_Build_Plan.md` | The original client brief (frozen, never edited) | You want the original scope/requirements |
-| `README.md` | Human front door: what it is, how to run it, repo layout | You're a new team member getting started |
-| `docs/architecture.md` | System map: the pipeline stages, which file does what, data flow, dashboard tabs | You want to understand or change the code |
-| `docs/DATA_ARCHITECTURE.md` | The 91-metric layer: the four data sources, per-metric provenance, the club→Impect mapping; §5 the Medical-dimension injury source and availability formula | You're working with metrics / data sources |
-| `docs/methodology.md` | The scoring method: percentiles, the club 1–5 composite, the design decisions | You want to understand how players are scored |
-| `docs/scaling.md` | Scaling considerations | You're planning growth / more leagues |
-| `DEPLOY.md` | Deployment and operations | You're deploying or running in production |
-| `data/reference/README.md` | The drop-in reference CSVs (wages, identity) | You're replacing a modelled input with real club data |
-| `CLAUDE.md` | AI session pointer + working rules (local-only, not in git) | (Claude reads this automatically) |
-
-`analysis/step*/` holds one-off working notes from the build — **historical, not living docs.**
+`CLAUDE.md` (local only, not in git) holds the AI assistant's working rules. `data/reference/README.md`
+describes the drop-in reference CSVs. `analysis/step*/` is historical working notes.
 
 ---
 
-## Current state (2026-08-25)
+## Work log — dated entries (what was done and why)
 
 > **2026-08-25 — security-and-correctness audit, the last pass before recruitment staff get
 > real access.** The platform was reachable over a public tunnel while carrying real
@@ -331,7 +312,7 @@ model), not a reporting dashboard. It runs end to end via `docker compose up` +
 > "assessments conflict — not scored" (badge ⚪, grey — an honest "nobody has decided yet", not an
 > error state). Authority comes from the act of signing off, never from the role: the Head of
 > Recruitment's own entry does not outrank a scout's until it is the one signed off. Full
-> reasoning: Decision 17, `docs/superpowers/specs/2026-08-10-scout-assessment-design.md` §12.
+> reasoning: Decision 17, `docs/superpowers/specs/2026-08-10-scout-assessment-design.md` (removed 2026-10-22; in git history) §12.
 >
 > **Auth gaps closed alongside the login screen:** passwords are scrypt-hashed (Python stdlib
 > only, no new dependency), minimum 12 characters — length is deliberately the only rule, per
@@ -376,7 +357,7 @@ model), not a reporting dashboard. It runs end to end via `docker compose up` +
 > dimensions resolve independently) + `assessed_composite` / `assessed_weight_covered` /
 > `psychological_band` / `medical_band` on `player_scorecards` (migration `5e80ab6fe191`).
 >
-> **The design is fully settled** — `docs/superpowers/specs/2026-08-10-scout-assessment-design.md`
+> **The design is fully settled** — `docs/superpowers/specs/2026-08-10-scout-assessment-design.md` (removed 2026-10-22; in git history)
 > (16 decisions). The load-bearing ones: **Decision 12** — Medical is a **human-entered band**,
 > not computed from injury data. Injury-record coverage is 74% in the Championship but 18% in
 > the National League, so an automatic score rewarded obscurity in exactly the direction this
@@ -530,7 +511,7 @@ only to seed player identity — stable IDs, birth dates, league names — durin
   2026-08-17 notes above and register items R3a-2/R3a-3/R11.
 
 Full detail on the scoring: `docs/methodology.md` §3b. Full metric provenance:
-`docs/DATA_ARCHITECTURE.md`.
+`docs/architecture.md` (DATA_ARCHITECTURE.md merged into it 2026-10-22).
 
 ---
 
@@ -912,9 +893,46 @@ trajectory, methodology) and comes from the dump. Server pipeline is now **16 st
 
 **Verified:** 961 tests pass. Dashboard live over HTTPS, login works, Players opens on 2025/26.
 
+### 2026-10-16 to 10-22 — server hardened, a second platform hosted, 26/27 by default, docs consolidated
+
+**Server.** Resized to 2 vCPU / 3.8 GB, disk 77 GB (permanent). Docker build cache (22.5 GB,
+from deploys' `--build`) was the disk growth, not logs or images: pruned, and a weekly prune
+cron added. Docker log caps. DigitalOcean Cloud Firewall (22/80/443). DigitalOcean backups were
+already on (weekly) — the earlier "no backups" finding (P20) had checked only the server; now
+**daily**. New nightly verified `pg_dump` of our database (`scripts/db_backup.sh`, 14 kept,
+19:30 UTC so each dump is inside that night's DigitalOcean backup) — restore-tested into a
+scratch database, all 28 tables identical. `.env` was world-readable: `chmod 600`.
+
+**A colleague's match-analysis platform now shares the droplet** (own Compose project and
+Postgres, joins `lofc_default` as `match-analysis:5050`, routed by our Caddy at
+orient-matchanalysis.duckdns.org). Its user is in the `docker` group — effectively root; the
+owner accepted that over a separate droplet, with the backups above as the safeguard.
+Memory limits on its containers requested, not confirmed.
+
+**Deployed:** the Players page opens on 2026/27 (server: 1,282 of 3,457 players past 450
+minutes; 13 of 51 league-position pools under 10, 55 players withheld with a notice); Scout
+reports show BOTH ratings and Model view names the season it compared against
+("Model agrees (26/27)"), switching by itself after each Monday refresh; "Not in our data"
+now means only "not linked to a player we hold" — linked-but-unrated reports say why
+(Under 450 mins / New this season / Not rated). Stale "this season is not scored yet"
+captions removed; the season help no longer claims physical data is 25/26-only (82% of
+26/27 rated players have it).
+
+**Built, awaiting deploy:** scout-report names read from lines 2–3 when line 1 is a header
+(Bim Pebble, Archie Jolland; 22 others unchanged); P18 — 405 Squads & loans blanks filled
+with Transfermarkt's position marked "(registered)", 19 vague ones left blank. Verified
+against Impect's API that it holds no position for a player who has not played (its player
+list has no position field).
+
+**Documentation consolidated** (owner: one file per purpose, nothing contradicting).
+`plan/TASKS.md` became the single ordered list of open work. Removed: both STATE files, the
+P17/P18 plan, `docs/superpowers/` (finished designs). `docs/DATA_ARCHITECTURE.md` and
+`docs/scaling.md` merged into `docs/architecture.md`; `docs/methodology.md` refreshed; live
+server facts moved into `DEPLOY.md`; this file reduced to the register + work log.
+
 ### 2026-10-12 to 10-15 — card, glossary and reference pages made correct and consistent
 
-**NOT DEPLOYED.** Tests 1,401 → **1,512**. Full list in `plan/2026-10-15-STATE.md`.
+**NOT DEPLOYED.** Tests 1,401 → **1,512**. Full list in `plan/2026-10-15-STATE.md` (removed 2026-10-22; in git history).
 
 **Errors found and fixed (all display, none in stored scores):**
 - Card showed physical "season totals" that cannot exist (Dan Happe: top speed 995, metres per
@@ -1023,7 +1041,7 @@ reaches 55%" (actually **42%** — estimated, never computed, and it reversed th
 recommendation); and "percentiles averaged 3.03" (percentiles averaged 50.8; 3.03 is the band).
 
 **Next:** work through the Head of Recruitment's comments on the report. See
-`plan/2026-10-02-STATE.md`.
+`plan/2026-10-02-STATE.md` (removed 2026-10-22; in git history).
 
 ### 2026-09-30 — percentile scale centred; every peer pool now averages exactly 3.00
 
@@ -1073,7 +1091,7 @@ Tests 1,226 → **1,248** (`tests/test_percentile_centring.py`, 22).
 
 **Live anchors updated** — CLAUDE.md, the P17 plan's verification query, and register P13's
 "every league averages ~3.03" (now 3.00). Historical work-log entries and the frozen
-`docs/superpowers/` plans were deliberately NOT rewritten: they record what was true then.
+`docs/superpowers/` plans (removed 2026-10-22) were deliberately NOT rewritten: they record what was true then.
 
 ### 2026-09-28 — scout reports: the club's scouting sheet read into the platform
 
@@ -1294,13 +1312,12 @@ within the same pool — adding metrics reshuffles the order rather than inflati
 27 of its 36 lines are shared by all three archetypes and every remainder appears in Defensive or
 Attacking — so there is no fourth list to build.
 
-## 📋 OPEN TASKS — Head of Recruitment review (started 2026-10-02) — keep this list current
+### 2026-10-02 → 10-22 — Head of Recruitment review: task record
 
-**Decision rule:** I bring every decision to the owner with options and a recommendation. The
-owner decides, or batches the football-judgement ones into ONE short list for the Head of
-Recruitment. Nothing is assumed. Nothing here is deployed yet.
+> Status as recorded at the time. Everything still open is in `plan/TASKS.md`.
 
-### Done (local, not deployed)
+
+### Done (all since deployed)
 Info bar counts · Players table cleanup (6 columns out, Top speed in) · metric sliders ·
 physical per-90 defect fixed + re-scored · Squads & loans sidebar filters · Impect scores
 (offensive/defensive + per position) · packing-zones map (Impect names/layout/units; Josh Walker
@@ -1309,7 +1326,7 @@ revisions pulled + re-scored (Scottish Championship 25/26 materially changed) ·
 fixed, StatsBomb lineage removed · Methodology hidden (flag `SHOW_METHODOLOGY`) · Player type
 hidden · profiles spreadsheet deleted by the owner (superseded by the profiles conversation).
 
-### Open — before the Head of Recruitment meeting (owner sets the priority; updated after every task)
+### Task table
 
 **Owner's priority (2026-10-12):** 1 Scout reports: own page filters (NOT the sidebar) → 2 Table: no
 sideways scrolling + cleaner look → 3 Reference page → 4 Player card: merge duplicated physical
@@ -1343,67 +1360,9 @@ with "no sideways scrolling" in the same sentence — ask what he means. Not bui
 | Scout reports: own League / Max age / Foot filters | **Built 2026-10-12** — tested on real data (Left = 155 = 139 left + 16 both); browser check pending |
 | SkillCorner finished seasons: check for revisions | **Done 2026-10-15** — revised (PL2 most); refreshed + re-scored locally; server refreshes on deploy rebuild |
 | Browser check | **Done headlessly 2026-10-15** (Streamlit AppTest: glossary, reference, card for 3 players incl. one under 450 min, scout reports — 0 exceptions). Chrome extension disconnected: owner to eyeball |
-| Documentation (work log, STATE, CLAUDE.md) | **Done 2026-10-15** — `plan/2026-10-15-STATE.md` |
+| Documentation (work log, STATE, CLAUDE.md) | **Done 2026-10-15** — `plan/2026-10-15-STATE.md` (removed 2026-10-22; in git history) |
 | Commit + deploy (owner runs the commands) | Open — owner's call whether he sees it live |
 | Timing "maximum" sliders | Blocked on his slider list |
-
-### Open — needs a decision (owner first; Head of Recruitment only where football judgement)
-| # | Decision |
-|---|---|
-| 9 | Profiles: his definitions + 1–2 example players per style (24 styles) |
-| 10 | His physical sliders per position (3 each, currently placeholders) |
-| 11 | Archetype vs profile: A keep both renamed / B merge / C drop archetypes |
-| 12 | "Individual threat score": which Impect score (likely PxT) |
-| 12b | Table: "add metrics for each position or profile type" — columns by POSITION or by PROFILE? (his words; reading unconfirmed) |
-| 14 | Formula meeting: B1–B5, per-90 fix, distance double-count — **last** |
-
-### Open — external
-| # | Task |
-|---|---|
-| 15 | Impect question document (owner sends): BALL_WIN_NUMBER equals DEFENSIVE_TOUCHES for 80–98% of rows |
-
-### Server facts verified 2026-10-16 (feed the pipeline audit)
-1 vCPU, 1.9 GB RAM (~970 MB available at rest), 2 GB swap; disk 48 GB — 60% used 2026-10-15,
-**66% on 2026-10-16** (growing: likely dangling Docker images from deploys + unlimited container
-logs — no /etc/docker/daemon.json). Docker enabled on boot; all services unless-stopped. ufw
-INACTIVE; listening only 22/80/443 (Postgres not exposed); DigitalOcean Cloud Firewall unchecked.
-DigitalOcean metrics agent present (/opt/digitalocean). No backups (P20).
-A colleague's platform may share this droplet: recommended resize to ≥2 vCPU / 4 GB first, our
-Caddy routes their subdomain (they must not bind 80/443), their own compose project + Postgres.
-
-### Not in this review's scope (still in the register, untouched)
-P12 withdraw an assessment · P14 stale-data indicator · P18 squad positions · P19 architecture doc ·
-P20 backups (DO weekly backups exist — corrected 2026-10-16) · P21 watchlist vs Players of Interest.
-
-## 📦 Branching and deployment (changed 2026-09-18)
-
-**Production runs `main`.** Until 2026-09-18 the deployed branch was `r3a0-injury-scrape`,
-which had become the trunk in practice — 22 commits ahead of `main`, 0 behind — while `main`
-sat at an August state with no Squads & loans, no player report and no peer-pool guard. Anyone
-cloning `main` got a platform weeks out of date. The branch was fast-forward merged into `main`
-and the server switched to it.
-
-**The rule now:** branch for a piece of work, merge to `main`, deploy `main`. Nothing else is
-deployed. The server pulls over **SSH with a read-only deploy key** (register P16) because the
-repository is private.
-
----
-
-## 🔁 RECURRING MANUAL TASKS (nothing automates these — they are a person's job)
-
-The platform is deployed and refreshes itself weekly, but **two things only happen when a human
-does them.** Both were established 2026-09-12; see `CLAUDE.md` for the full operating model.
-
-| # | Task | Where | When | Why it cannot be automated |
-|---|---|---|---|---|
-| M1 | **Transfermarkt scrape** — `transfermarkt_efl --force`, `transfermarkt_loans`, `transfermarkt_injuries`, then rsync `data/reference/transfermarkt/` to the server and re-run the pipeline there | **Workstation only** | Before the January window; occasionally for injuries | Transfermarkt is behind **AWS WAF Bot Control** and blocks datacentre IPs (HTTP 202 + JS challenge). Bypassing it means minting a WAF token by running their JS — **declined deliberately.** The server runs `SKIP_TRANSFERMARKT_SCRAPE=true` |
-| M2 | **Resync the workstation database from the server** before any local data work | Workstation | Whenever picking up local development | The server refreshes weekly and the laptop does not, so they drift. On 2026-09-12 the server already held 4,320 injury rows / 1,318 players against the laptop's 3,772 / 1,176. Reasoning about stale local numbers produces phantom "bugs" |
-
-**What DOES run automatically** (server cron, Monday 04:15 UTC, `scripts/weekly_refresh.sh`):
-Impect pull, SkillCorner pull, `build_neutral`, position shares, squad loader, scoring, archetypes,
-valuation, identity, injury loader, player bio, scorecards, shortlists — 16 steps. Contract, squad,
-loan and injury CONTENT only changes when M1 has been run; the loaders simply re-read whatever CSVs
-were last pushed.
 
 ---
 
@@ -1466,12 +1425,12 @@ last international recognition (held in no ingested source); the cut-out player 
 | P7 | **Player report feature** — a per-player report for the Head of Recruitment, chairman and manager, modelled on the supplied reference. See the spec. | Requested 2026-08-28 |
 | P12 | **No way to withdraw or correct an assessment.** `store/assessments.py` has INSERT-only `save()` plus `sign_off()` and `reject()` — **no update of the prose and no delete, anywhere in the UI or CLI.** A typo, a summary written about the wrong player, or a test entry is PERMANENT and keeps rendering on the profile and on the one-page report stamped "Final". Revising means submitting a whole new assessment, with the wrong one left visible beside it forever. Found 2026-09-12 after test rows ("Testing scout summary") were discovered signed-off on a real player in production and had to be cleared by hand with SQL. **This is not what Decision 17 requires:** that decision forbids OVERWRITING someone's judgement silently, not withdrawing one's own mistake. `reject()` already proves the pattern — mark it, keep the row, stop it scoring. Proposed: a `withdraw` action available to an assessment's own AUTHOR while it is unsigned (and to a sign-off holder afterwards), setting `status='withdrawn'` with a reason; the row stays on record, attributed, and never scores. Needs a migration (status value), `resolve_bands` to ignore it, and a button on the profile. | Open — real gap, small design |
 | P13 | **The platform supports CONFIRMATION better than DISCOVERY — owner's central concern, raised 2026-09-12.** *"Recruiters are using it to check players they already know, rather than let the data help them discover players."* The design currently reinforces that: the default view is ONE position at a time sorted by composite (so you must already know what you are shopping for); search is BY NAME (a player you have already thought of); the watchlist only holds players someone already chose; and there is no surface anywhere that answers "show me something I don't know". Per-match alerting (P11) would INHERIT this flaw if scoped to the watchlist — it would tell a recruiter more about players they had already picked. **Deliberately NOT designed yet.** The owner's own view is that it "will need proper planning and a few iterations of the design to get right", and a first design here is likely to be wrong. Recorded as the problem statement and the evidence, not a proposed solution. Any discovery surface must respect the platform's existing honesty rules: no cross-league ordering without a league-strength adjustment (register: every league's mean composite is 3.00 BY CONSTRUCTION), and no composite from a peer pool below `MIN_PEERS_FOR_RANKING`. | Open — the most valuable open question on the platform |
-| P17 | **108 of 411 loans are invisible on Squads & loans — the data is held, the join drops it.** `squads.py:74` joins `player_loans` on `player_id` ONLY (`LEFT JOIN player_loans l ON l.player_id = n.player_id`). 303 of 411 loan rows carry a `player_id`; the other **108 carry only `tm_player_id`** — a real Transfermarkt player we hold no internal id for. The squad frame itself is built from `transfermarkt_squads`, which is **keyed on `tm_player_id`**, so joining on that key as well would recover all 108. **Verified case: Joel Catesby** — Transfermarkt shows him at Accrington Stanley on loan from Everton FC U21 until 31/05/2027; we hold that exact row in `player_loans` (`tm_player_id 1083709`, `parent_club 'Everton FC U21'`, `loan_ends 2027-05-31`) and the page renders "On loan from" **blank**. His contract DOES show (8 months left), so the row is half-populated from two different joins. **This is the class of defect recruiters notice and lose confidence over — the platform claiming nothing is there when Transfermarkt shows it plainly.** Fix: add `OR l.tm_player_id = <the squad row's tm_player_id>` to the join, or join the loans frame on `tm_player_id` first and fall back to `player_id`. | **DONE 2026-09-28** (not yet deployed) — see `plan/2026-09-28-P17-P18-squads-joins.md`. The cited line was wrong: `squads.py:74` is the fallback frame; the rendered one is `registered_squad_frame`, which filtered `WHERE player_id IS NOT NULL` before merging. `attach_loans` now prefers `player_id` and falls back to `tm_player_id`; `resolve_loan_player_ids` does the same for the Loans table and DROPS a `tm_player_id` claimed by two of our players (David Kamara, 1076889 → 445315 + 2000224875 — a plain join returned 412 rows for 411 loans). Squad frame 3,783 rows, loans attached 303 → **409**. |
+| P17 | **108 of 411 loans are invisible on Squads & loans — the data is held, the join drops it.** `squads.py:74` joins `player_loans` on `player_id` ONLY (`LEFT JOIN player_loans l ON l.player_id = n.player_id`). 303 of 411 loan rows carry a `player_id`; the other **108 carry only `tm_player_id`** — a real Transfermarkt player we hold no internal id for. The squad frame itself is built from `transfermarkt_squads`, which is **keyed on `tm_player_id`**, so joining on that key as well would recover all 108. **Verified case: Joel Catesby** — Transfermarkt shows him at Accrington Stanley on loan from Everton FC U21 until 31/05/2027; we hold that exact row in `player_loans` (`tm_player_id 1083709`, `parent_club 'Everton FC U21'`, `loan_ends 2027-05-31`) and the page renders "On loan from" **blank**. His contract DOES show (8 months left), so the row is half-populated from two different joins. **This is the class of defect recruiters notice and lose confidence over — the platform claiming nothing is there when Transfermarkt shows it plainly.** Fix: add `OR l.tm_player_id = <the squad row's tm_player_id>` to the join, or join the loans frame on `tm_player_id` first and fall back to `player_id`. | **DONE 2026-09-28** (not yet deployed) — see `plan/2026-09-28-P17-P18-squads-joins.md` (removed 2026-10-22; in git history). The cited line was wrong: `squads.py:74` is the fallback frame; the rendered one is `registered_squad_frame`, which filtered `WHERE player_id IS NOT NULL` before merging. `attach_loans` now prefers `player_id` and falls back to `tm_player_id`; `resolve_loan_player_ids` does the same for the Loans table and DROPS a `tm_player_id` claimed by two of our players (David Kamara, 1076889 → 445315 + 2000224875 — a plain join returned 412 rows for 411 loans). Squad frame 3,783 rows, loans attached 303 → **409**. |
 | P17b | **"On loan only" silently discarded the Position filter.** Owner-reported 2026-09-28: set Position to Centre Forward on Squads, contracts and loans, click "On loan only", and every position comes back. "On loan only" does not filter the squad view — it REPLACES it with a separately built loans frame (135 linked loanees have not appeared in league data and are absent from the squad frame). League and Club were re-applied to the replacement; **Position never was**. Fixing only that would have caused a second complaint: `loans_frame` sourced position from the current season alone with no `"(last season)"` fallback, and `filter_by_position` excludes rows with no position — so the filter would have dropped 131 of 411 loanees whose position the platform knows. Both fixed together: `loan_view` re-applies all three filters, `with_last_season_position` gives the Loans table the same three position tiers as the squad table. Position present on loans 280 → **379 of 411**. | **DONE 2026-09-28** (not yet deployed) |
 | P21 | **The platform's own scouting features are effectively unused, and duplicate the club's spreadsheet.** Measured 2026-09-28 across **22 registered users**: platform `watchlist` **5 rows**, `scout_assessments` **10 rows** (7 signed off, 2 rejected, 1 submitted, some of it test data). Against that, the club's JotForm/Sheet workflow holds **437 reports from 6 scouts**, filed daily, and a **223-row "Players of Interest" list**. Two distinct problems. (a) DUPLICATION — watchlist and Players of Interest answer the same question, "who are we interested in"; the spreadsheet's version is 45x bigger and is the one people maintain. (b) CONTRADICTION — an assessment scores a player-season and moves `assessed_composite`; a scout report is a per-match verdict. A player can be signed off at 4.5 and carry a "Don't sign" report, and nothing on screen says which is the club's view. **Do not delete either — FREEZE both** (stop investing) until the workflow is written down. Note `assessed_composite` is currently a scored feature fed by ten rows. Proposed ownership rule: *every piece of data has exactly one owning system; the platform owns what it COMPUTES, the scouting workflow owns what a human OBSERVED or DECIDED.* | Open — needs a written workflow, then a decision |
 | P19 | **`docs/architecture.md` needs a rewrite — it is stale and teaches nothing.** Its own status block says `STATUS (2026-08-25): current` while claiming "1,771 players" for 2026/27 against the server's **3,351**. No diagrams. Organised by code MODULE, which is the right axis for maintaining a file and the wrong one for understanding a system. Rewrite structured **by flow**: topology → physical placement → pipeline DAG → data model → identity → DB-to-screen → scheduling → failure modes → an end-to-end trace of one player → a decisions-and-alternatives table. Mermaid diagrams (render on GitHub). Concept sidebars for generic ideas, marked, so the reference spine stays clean. **Do not create a second doc** — two files describing one system drift within a month. Driver: a second engineer joins the codebase w/c 2026-10-05. | Open — deferred 2026-09-28 |
 | P20 | **[CORRECTED 2026-10-16: DigitalOcean weekly Backups ARE enabled on the droplet — the check below looked only at the server. Nightly pg_dump deferred by the owner.]** **NO AUTOMATED BACKUP of the production database.** Found 2026-09-28 while gathering facts for P19. `crontab -l` on the droplet holds only the Monday refresh; `/opt/lofc/backups` does not exist; DEPLOY.md:232 says "Snapshot it (or `pg_dump`) regularly" and nothing does. Every other table can be rebuilt by re-running the pipeline — **`scout_assessments` cannot.** It is human judgement, it exists in exactly one place (the `pgdata` Docker volume on one droplet), and a volume loss destroys it permanently. Fix: a nightly `pg_dump -Fc` to a second location with rotation, and a documented restore drill. | Open — found 2026-09-28 |
-| P18 | **518 squad members show no position, though the scrape has one for all 3,783.** The Position column uses IMPECT's position (derived from minutes played), falling back to last season's Impect position labelled "(last season)" — 2,650 observed, 615 fallback, **518 blank**. `transfermarkt_squads.position` is populated for **100% of rows** and is never read. So a registered player who has appeared in neither season reads as position-unknown while the scrape says e.g. "Left Winger". Joel Catesby again shows the mismatch from the other side: the scrape says **Left Winger**, the page shows **Centre Forward** (Impect's, from 144 minutes). Fix: fall back to `transfermarkt_squads.position` as a third tier, labelled by source so an inferred position is never mistaken for an observed one — the same honesty rule "(last season)" already follows. **Decide first** whether Impect's minutes-based position should still win where both exist; it probably should, since it reflects where he actually played. | Open — fills 518 blanks |
+| P18 | **[BUILT LOCALLY 2026-10-22 — see plan/TASKS.md 1.2: 424 blanks → 405 "(registered)", 19 vague left blank; owner's 4 rules]** **518 squad members show no position, though the scrape has one for all 3,783.** The Position column uses IMPECT's position (derived from minutes played), falling back to last season's Impect position labelled "(last season)" — 2,650 observed, 615 fallback, **518 blank**. `transfermarkt_squads.position` is populated for **100% of rows** and is never read. So a registered player who has appeared in neither season reads as position-unknown while the scrape says e.g. "Left Winger". Joel Catesby again shows the mismatch from the other side: the scrape says **Left Winger**, the page shows **Centre Forward** (Impect's, from 144 minutes). Fix: fall back to `transfermarkt_squads.position` as a third tier, labelled by source so an inferred position is never mistaken for an observed one — the same honesty rule "(last season)" already follows. **Decide first** whether Impect's minutes-based position should still win where both exist; it probably should, since it reflects where he actually played. | Open — fills 518 blanks |
 | P15 | **~15 captions on the Players page assert facts that nothing re-checks.** Two have already gone stale and contradicted the data beside them: the current-form caption claimed no composite existed while one sat above it, and the ranked-list caption named 450 minutes as the only exclusion after the peer-pool gate added a second. Both are fixed; the class is not. **The principle established 2026-09-18: a fact belongs in a LABEL or a COLUMN, never in a paragraph — wherever a caption explains an adjacency, the adjacency is the defect.** A label built from the data cannot drift; a hard-coded sentence can. Worth a deliberate audit pass rather than fixing one at a time as they are noticed. | Open — UX debt |
 | P16 | **The GitHub repository is now PRIVATE, which broke server deploys.** It was public when the droplet was provisioned, so `git clone`/`git pull` worked anonymously over HTTPS; after it was made private the server had no credentials and `deploy.sh` failed at the pull with "Password authentication is not supported". Resolved 2026-09-18 with a **read-only deploy key** (`/root/.ssh/id_ed25519` on the server, registered under the repo's Deploy keys, write access NOT granted) and the remote switched from HTTPS to SSH. **`DEPLOY.md` documents this now** — a rebuilt server needs the same steps or it cannot pull. | Resolved, documented |
 | P14 | **STALE DATA IS INVISIBLE — no freshness date on screen, and nobody is told when a refresh fails.** Two distinct failures, both costly, logged together because both end as "the platform confidently shows old numbers". **(a) PASSIVE:** nothing on the dashboard says when the scoring data was last refreshed. Only CONTRACT dates carry an "as of" (`tabs/players.py:766` via `seasons.contract_data_date`). Verified 2026-09-12: `transfermarkt_squads.scraped_at`, `player_loans.scraped_at` and `player_injuries.created_at` all exist — so the MANUALLY refreshed data can report its age — while `player_metrics_neutral` and `player_scorecards`, which every score is built on and which refresh WEEKLY AND AUTOMATICALLY, carry **no timestamp at all**. **(b) ACTIVE:** `scripts/weekly_refresh.sh` writes `data/ops/last_failure` on failure and **nothing reads it**. A failed Monday cron leaves the dashboard serving last week's data, looking entirely normal. **This has already happened once:** on 2026-09-07 the 26/27 Impect data was three weeks stale while every figure computed from it was correct, and it was caught only because the Head of Recruitment noticed League One clubs had played five matches while the platform showed one — on a laptop, where someone at least knew when they last ran it. On a self-running server nobody holds that mental model. **Fix needs a decision, not just code:** one "last refreshed" date would itself be misleading, because Impect/SkillCorner now refresh weekly and automatically while Transfermarkt refreshes only when a human scrapes (M1) — so the date must be PER SOURCE. Impect/SkillCorner have no timestamp to read, so this needs a `pipeline_runs` record (stage, finished_at, rows) written by the pipeline. **Do before January**: that is when it matters most and when it will be watched least. | Open — do before the January window |
@@ -1613,7 +1572,7 @@ loader joins on `players.tm_player_id`). **The real scrape has finished and is l
   **The scoring machinery (`assessed_composite`) is built, and the interface to populate it
   (R3a-2) is now also built (2026-08-17)** — see the Current state note above.
 
-Full detail: `docs/DATA_ARCHITECTURE.md` §5.
+Full detail: `docs/architecture.md` (DATA_ARCHITECTURE.md merged into it 2026-10-22).
 
 **Task 0 identity fix (landed 2026-08-10):** `load_efl_values()` was discarding a player's
 Transfermarkt id, birth date, foot and contract date whenever he had no market value on file.
@@ -1660,13 +1619,13 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
 | R1 | **Full pipeline re-run** (`python -m lofc.pipeline`) | a clean end-to-end recompute; now covers the new scorecard stage. NB it *fetches nothing* — every ingest step skips existing files, so it is a recompute, not a refresh |
 | R2 | ✅ **Refactor `dashboard/app.py` (DONE 2026-08-10)** | 2,560 lines → **191**, split into 15 focused modules (`theme` · `labels` · `charts` · `seasons` · `loaders` · `controls` + `tabs/` one per tab), dependencies strictly one-way so there are no import cycles. **337 lines of dead code deleted** (`_club_scorecard`, `_scorecard_player_detail`, `_profile`, `_render_score_composition`, `percentile_vector`, `_dimension_metric_labels`) plus the retired Style-fit helpers `score_composition`/`load_fit_profiles` and their 3 tests. Done in verified phases against a captured behaviour snapshot: **the final output is byte-for-byte identical to before the refactor**; 191 tests passed at the time — that had grown to 301 by the 2026-08-03 audit, and stands at **365 now** (2026-08-14), after the scout-assessment branch added tests |
 | R3a-0 | ✅ **DONE (branch `r3a0-injury-scrape`, not pushed) — Transfermarkt injury data** | scraper (`ingest/transfermarkt_injuries.py`), loader (`store/injuries.py`), `player_injuries` table, `model/medical.py` availability with honest `MEASURED`/`CONFIRMED_BY_MINUTES`/`UNKNOWN` states (never a confident 1.0 for an unknown record). **3,766 injury rows for 1,176 players** loaded. See R8/R9 above for the two evidence-quality fixes made on top of this |
-| R3a-1 | ✅ **DONE (same branch) — scout-assessment foundation, 5 tasks** | `model/club_criteria.py` (club's per-position Psychological/Medical criteria, transcribed verbatim), `users`/`scout_assessments`/`scout_criterion_scores` tables (migration `a3fd42bcb2c2`), `dashboard/auth.py` (scrypt hashing) + `admin.py` (`create-user` CLI, at `src/lofc/admin.py`), `model/scout_scores.py` (`resolve_bands()`), `assessed_composite`/`assessed_weight_covered`/`psychological_band`/`medical_band` on `player_scorecards` (migration `5e80ab6fe191`). Design settled at the time: `docs/superpowers/specs/2026-08-10-scout-assessment-design.md` (up to Decision 16; Decision 17 followed with R3a-2). **At this point `assessed_composite` was NULL for every player and `scout_assessments` was empty — no UI existed yet to create one. Superseded by R3a-2 below, which built that UI.** |
+| R3a-1 | ✅ **DONE (same branch) — scout-assessment foundation, 5 tasks** | `model/club_criteria.py` (club's per-position Psychological/Medical criteria, transcribed verbatim), `users`/`scout_assessments`/`scout_criterion_scores` tables (migration `a3fd42bcb2c2`), `dashboard/auth.py` (scrypt hashing) + `admin.py` (`create-user` CLI, at `src/lofc/admin.py`), `model/scout_scores.py` (`resolve_bands()`), `assessed_composite`/`assessed_weight_covered`/`psychological_band`/`medical_band` on `player_scorecards` (migration `5e80ab6fe191`). Design settled at the time: `docs/superpowers/specs/2026-08-10-scout-assessment-design.md` (removed 2026-10-22; in git history) (up to Decision 16; Decision 17 followed with R3a-2). **At this point `assessed_composite` was NULL for every player and `scout_assessments` was empty — no UI existed yet to create one. Superseded by R3a-2 below, which built that UI.** |
 | R3a-2 | ✅ **DONE (2026-08-17) — the scout-assessment user interface** | login gate (`dashboard/session.py`), assessment form (`dashboard/tabs/assess.py`), evidence panel (`dashboard/evidence.py` — injury data + screening-criteria warnings, which warn but never override per Decision 13), status badges (`dashboard/badges.py`: 🟠 assessed / 🟢 signed off / ⚪ conflict — colour **and** words), a sign-off queue (`dashboard/tabs/signoff.py`) that also resolves conflicts (Decision 17, new — replaced the earlier "most recent submitted wins" tiebreak: a signed-off assessment is never in conflict, two or more unsigned ones score nothing until someone decides), watchlist integration, and an opt-in "Rank on assessed composite" toggle on the Players list. Navigation rebuilt from `st.tabs` to `st.navigation` so "Assess this player" carries the player across pages. Auth gaps closed alongside it: password strength (12-char minimum, length-only), login throttling (5 attempts / 15-minute lock), session expiry (12 hours); `set-password`/`list-users` added to `lofc.admin`. **Still no self-service or email password reset** (`users` holds no email — an admin resets in person) — **superseded 2026-08-24 below (R3a-3): deactivate/reactivate is now built** |
 | R3a-3 | ✅ **DONE (2026-08-24) — reject, admin user management, regrouped navigation, live-but-unscored 2026/27** | Sign-off queue gained **reject** (`store/assessments.py::reject`, migration `19ac464d556d` — nullable `rejection_reason`, the reason is optional). New **Users admin page** (`dashboard/tabs/users.py`, gated on `manage_users`) plus `deactivate-user`/`reactivate-user` on the `lofc.admin` CLI (`model/user_admin.py::guard_deactivate` stops an admin locking themselves out); accounts are never deleted (assessments reference `users.id`). Navigation regrouped into Scouting/Assessment/Analysis/Reference + Admin section headers. Chrome: slim info bar + top-right signed-in identity/sign-out (`theme.py`, `session.py::topbar_identity`), replacing the sidebar identity block. Scorecard-reading caches shortened to 60s so a saved assessment appears in the assessed ranking promptly. **2026/27 (season 319) is loaded — 1,771 players, 6 leagues (PL2 not started), 85 min average — and deliberately not scored**; the profile shows it as a "Current form" plain-facts section (`loaders.load_current_form`) beside the 2025/26 scored season. Five bugs fixed: Assess page losing its selected player on every widget interaction; watchlist blank club/position/age for Scottish/PL2 players; injury source reading "Scraped" instead of "Transfermarkt"; mid-season transfers showing the wrong club (now picked by total minutes per squad, not per-position match share); the "not yet rankable" banner appearing on every page instead of only the ones the season selector drives. **604 tests pass** (was 511) |
 | R3c | **NOT STARTED — player report export** | export gated on sign-off (Decision 14: sign-off is non-blocking for scoring, but gates what may be exported as final) |
 | R3a-review | **NOT RUN — final whole-branch review** | each commit on `r3a0-injury-scrape` (including R3a-2) was reviewed individually as it landed; the cross-cutting review across the whole branch has not happened |
 | R3a-gap1 | **No loan status captured anywhere** | affects how a contract date should be read (a loanee's parent-club contract is not the club he is playing for); not modelled by any table today |
-| R3a-gap2 | **Two metrics are empty for every player in every league:** `pressured_pass_pct` and `xg_buildup_p90` (0 of 9,451 `player_metrics_neutral` rows for both, verified) | StatsBomb-era leftovers with no Impect equivalent; harmless to the composite because bands renormalise over the metrics actually present, but the columns and their `DATA_ARCHITECTURE.md` entries are dead weight |
+| R3a-gap2 | **Two metrics are empty for every player in every league:** `pressured_pass_pct` and `xg_buildup_p90` (0 of 9,451 `player_metrics_neutral` rows for both, verified) | StatsBomb-era leftovers with no Impect equivalent; harmless to the composite because bands renormalise over the metrics actually present, but the columns and their documentation entries are dead weight |
 | R4 | **Full StatsBomb retirement** (roadmap #6) | seed identity from Impect, delete the ingest + ~21 GB raw events + 22 dead all-NULL columns |
 | R5 | **Playing-style clusters: season split + move onto Impect** (roadmap #8) | the last season-mixing and last StatsBomb read; style label only, never touches the composite |
 | R6 | **Extend the Transfermarkt squad scrape to Scottish Premiership, Scottish Championship and Premier League 2** | those three leagues carry **low Transfermarkt coverage today** — 2025/26 `tm_player_id` coverage is **Premier League 2 182/1,141 (16%), Scottish Premiership 28/385 (7%), Scottish Championship 8/284 (3%)** — so almost no market value, contract-expiry data, or injury history (the injury loader only ever sees players with a `tm_player_id`, and none of the three has a `SCHEDULED_GAMES` constant for availability either way). Needs a squad-page scrape built for those competitions (`transfermarkt_efl`-equivalent); not started |
@@ -1690,88 +1649,6 @@ is skipped cleanly, not treated as an error. **Update `LIVE_SEASON_ID` each Augu
 - **Persist per-metric percentiles** — `load_scorecard_percentiles` is still computed live (player
   detail + Compare only). Only worth doing if opening player cards feels slow.
 - **Optional polish** — fold the Player-types and Physical tabs into the Players workspace.
-
----
-
-## Roadmap
-
-**Done** (Phases 0–11 core):
-- ✅ Phases 0–9 (demo build) · Phase 10 (real EFL data + SkillCorner) · panel demo
-- ✅ Phase 11 (Impect migration): provider-neutral metric layer, EFL flipped to Impect-only,
-  6 new leagues added, Impect's exact definitions displayed
-- ✅ Club recruitment scorecard (1–5 composite) built and made the primary ranking; Style-fit
-  retired; 4 club-framework metrics added (91 total); physical extended to PL2 + Scottish Prem
-- ✅ Within-season scoring (Season selector); archetype lens for Full Back + Winger;
-  UX fixes (season-specific "Players analysed", all-round shown alongside archetype composite,
-  excluded archetype metrics struck through, clickable scorecard rows, clear-selection buttons)
-- ✅ Documentation reorganised (this hub + frozen history + deep-dive spokes)
-- ✅ Scout-assessment foundation, R3a-0 + R3a-1 (branch `r3a0-injury-scrape`, not pushed):
-  Transfermarkt injury data, the club's Psychological/Medical criteria, `users`/
-  `scout_assessments`/`scout_criterion_scores` tables, auth + scoring resolution,
-  `assessed_composite` on `player_scorecards` (schema — see register R3a-1)
-- ✅ Scout-assessment interface, R3a-2 (same branch, 2026-08-17): login gate, assessment form,
-  evidence panel, status badges, sign-off queue (with Decision 17 conflict resolution),
-  watchlist integration, opt-in assessed-composite ranking — see register R3a-2
-- ✅ Reject, admin user management, regrouped navigation, R3a-3 (same branch, 2026-08-24):
-  sign-off reject with an optional reason, an admin Users page + CLI deactivate/reactivate,
-  `st.navigation` grouped into Scouting/Assessment/Analysis/Reference/Admin, top-right signed-in
-  identity, 60s scorecard caches, 2026/27 loaded (not scored) with a "Current form" profile
-  section, five UI bugs fixed — see register R3a-3
-- ✅ Security-and-correctness audit, R10 (same branch, 2026-08-25): traceback suppression, an
-  XSS sweep, engine `hide_parameters`, a behaviour-based login-spray throttle, the season-
-  pooling percentile bug fixed in four functions (composite ranking verified unaffected),
-  goalkeeper-metric masking, 12 dead metrics removed, the veto advisory naming its dimension,
-  the injury loader rewritten to merge instead of replace, cookie-persisted logins, a global
-  player search, watchlist enrichment, and a formatting fix for ~24 "None"/"nan" display
-  defects — see register R10. Also reported (not independently verifiable from the repo): 76
-  split player identities merged — see register R11 and gap G4
-
-**Next** (in rough priority order):
-
-1. ✅ **Unified "Players" workspace (DONE)** — merged the three overlapping tabs (Shortlist +
-   Club scorecard + Player profile) into ONE master-detail workspace: a composite-ranked list
-   (objective composite default, within-season) with Minutes + dimension bands + Measured %, and
-   on click/search a full player detail (bio + score tiles + trajectory + the club-framework
-   **grand table**: Source · Season total · Per-90 · Percentile · 1–5 Band, archetype-aware +
-   charts re-pointed to the club per-position/archetype metrics + an "all tracked metrics"
-   expander). **Money is an opt-in secondary layer** ("Show affordability (modelled)", off by
-   default) — never affects the default ranking. Dead code left for the app.py refactor (#7):
-   the old `_shortlist`/`_club_scorecard`/`_profile`/`_scorecard_player_detail` functions.
-   *Follow-up polish:* fold Player-types/Physical into the workspace if wanted (deferred).
-
-2. ✅ **Persist scorecards to the database (DONE)** — a `player_scorecards` table written by a new
-   pipeline stage (`model/scorecard_run.py`, runs after Valuation, before the shortlist).
-   One row per player-season **per archetype** ('All Metrics' for everyone + the Full Back /
-   Winger lenses), storing both composites in separate columns. **This retired Style-fit from the
-   offline path:** `constrain/filters.py` now ranks the `shortlists` table on
-   `objective_composite` (was `fit_score`), and the old identity-profile "on-profile" gate no
-   longer excludes anyone — matching the dashboard. The dashboard now **reads** the stored table
-   (with a live-compute fallback if it is empty), so every consumer sees identical numbers.
-   Verified: stored == live to 0.0, writer idempotent, 160 tests pass.
-3. **Midfield archetypes** (DM / Box-to-Box / AM) — await the club's per-archetype metric lists
-   (the workbook doesn't fully specify them; not fabricated).
-4. ✅ **Scout-entry fields (DONE 2026-08-17).** Both the foundation (R3a-0 injury data + R3a-1
-   club criteria/tables/auth/scoring resolution) and the interface (R3a-2: login, assessment
-   form, evidence panel, badges, sign-off queue, watchlist integration) are built — see register
-   R3a-0/R3a-1/R3a-2. `assessed_composite` fills in as staff assess players. **Still
-   outstanding:** the player-report export (R3c) and the final whole-branch review.
-5. **Real financial models (deferred, a separate workstream):** the club's real **wage framework**
-   (CSV drop-in) + a better **valuation model**. The current wage grid (±10% vs payrolls) and
-   valuation regression (CV R² ~0.75, but ±40% median error within league) are honest *screening*
-   placeholders, not decision-grade — fine to defer; they firm up the money layer when ready.
-6. **Full StatsBomb retirement** — seed player identity from Impect, then delete the StatsBomb
-   ingest and its ~21 GB of raw events.
-7. ✅ **Refactor `dashboard/app.py` (DONE 2026-08-10)** — 2,560 lines → 191, split into 15
-   focused modules with one-way dependencies; 337 lines of dead code removed. See register R2.
-8. **Playing-style clusters: split by season + move off StatsBomb** — the k-means (`model/archetypes.py`)
-   currently pools 2024/25 + 2025/26 and reads the StatsBomb-era `player_season_metrics` with `ROLE_METRICS`.
-   It should cluster within season on the Impect neutral layer. Style label only (never touches the
-   composite), so low priority — but it is the last season-mixing and StatsBomb-read in the app.
-
-**Data re-runs:** a full data *fetch* is only needed for a new season or a new league — EXCEPT the
-season currently being played, which is always re-pulled (`config.LIVE_SEASON_ID`, see the in-season
-model above). Everything else (metric or formula changes) is a fast local rebuild from data already
-on disk — no fetch.
 
 ---
 
