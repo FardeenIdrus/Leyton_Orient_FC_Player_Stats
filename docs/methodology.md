@@ -286,8 +286,8 @@ Head of Recruitment's 24 styles; rules in `model/styles.py`.
   styles are added. Wingers are labelled twice: *where* (In behind · Pocket · Wide) and
   *what* (1v1 · Creator). Thresholds are fixed, so a label means the same for every user.
 
-Shown as a Style filter in the sidebar, a Style column, and a Style fit section on the
-player card. Never read by the rating or the ranking. Team style influences receptions
+Shown as a Style filter in the sidebar, a Style column, a Style fit section on the player
+card, and explained to recruiters on Reference → How playing styles work. Never read by the rating or the ranking. Team style influences receptions
 (a winger in a direct side receives more in behind) — accepted.
 
 ## 7. Season shown

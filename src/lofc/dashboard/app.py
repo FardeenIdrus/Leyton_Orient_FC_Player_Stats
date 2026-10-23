@@ -424,6 +424,13 @@ def main() -> None:
         with st.container():
             rating_reference.render()
 
+    def _style_reference_page():
+        # Example drawn from the last COMPLETE season, so it rests on a full season of data.
+        from lofc.dashboard import style_reference
+        _sid = last_complete_season_id(seasons, settings.live_season_id)
+        with st.container():
+            style_reference.render(_sid, season_name_for(_sid))
+
     def _glossary_page():
         _glossary(st.container())
 
@@ -485,6 +492,8 @@ def main() -> None:
         "glossary": st.Page(_glossary_page, title="Glossary", url_path="glossary"),
         "rating_reference": st.Page(_rating_reference_page, title="What goes into each rating",
                                     url_path="rating-reference"),
+        "style_reference": st.Page(_style_reference_page, title="How playing styles work",
+                                   url_path="playing-styles"),
         "methodology": st.Page(_methodology_page, title="Methodology", url_path="methodology"),
     }
     # The Users page (admin account management -- create, reset a password, deactivate/
@@ -514,7 +523,7 @@ def main() -> None:
                      pages["compare"], pages["watchlist"], pages["report"]],
         "Assessment": [pages["assess"], pages["signoff"]],
         "Analysis": [pages["physical"]],
-        "Reference": [pages["rating_reference"], pages["glossary"]]
+        "Reference": [pages["rating_reference"], pages["style_reference"], pages["glossary"]]
                      + ([pages["methodology"]] if SHOW_METHODOLOGY else []),
     }
     # A tenth page, but its own section: it is not scouting/assessment/analysis/reference

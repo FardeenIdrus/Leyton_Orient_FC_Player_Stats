@@ -1219,7 +1219,9 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             "Style": st.column_config.ListColumn(
                 "Style", width="medium",
                 help="How he plays, not how well: his best-fitting style, against players in "
-                     "the same position, league and season. \"(leans)\" = a weaker fit."),
+                     "the same position, league and season. \"(leans)\" = a weaker fit. "
+                     "\"No standout style\" = below average at every style for his position. "
+                     "Reference → How playing styles work."),
             "Mins": st.column_config.NumberColumn("Mins", format="%d", width=60,
                                                   help="Minutes played this season."),
             "Composite": band(composite_label, composite_help),
