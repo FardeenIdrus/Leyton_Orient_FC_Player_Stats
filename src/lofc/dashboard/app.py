@@ -37,13 +37,14 @@ import datetime
 import streamlit as st
 
 from lofc.config import settings
+from lofc.model import styles as styles_mod
 from lofc.constrain.filters import apply_gates
 from lofc.dashboard.auth import can
 from lofc.dashboard.controls import synced_budget, synced_min_minutes, synced_wage_budget
 from lofc.dashboard.loaders import (
     available_seasons, get_engine, league_names, load_candidates, load_metric_values,
     load_percentiles, load_scorecards, load_scorecards_archetype, load_wage_framework,
-    load_loan_status, max_minutes, player_context_lookup, player_names,
+    load_loan_status, load_style_labels, max_minutes, player_context_lookup, player_names,
     position_and_league_for)
 from lofc.dashboard.seasons import (
     CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, LOAN_ANY, LOAN_FILTERS, contract_mask,
@@ -169,6 +170,20 @@ def main() -> None:
     st.session_state.setdefault(
         "sidebar_position", carry.position_group if carry and carry.position_group else "Centre Forward")
     position = st.sidebar.selectbox("Position", POSITION_ORDER, key="sidebar_position")
+    # Playing style (model/styles.py): how a player plays, never how well. Fixed thresholds,
+    # so a label means the same for every user. Keyed by style group, so changing position
+    # resets the choice to that position's own styles.
+    style_choice, strong_only = "All styles", False
+    _style_options = styles_mod.style_options(position)
+    if _style_options:
+        with st.sidebar.container(border=True, key="sidebar_style_box"):
+            style_choice = st.selectbox(
+                "Style", ["All styles"] + _style_options,
+                key=f"sidebar_style_{styles_mod.style_group(position)}",
+                help="How he plays, not how well — measured from what he attempts and where "
+                     "he plays, against the same position, league and season.")
+            strong_only = st.checkbox("Strong only", key="sidebar_style_strong",
+                                      help="Off: includes players who lean to the style.")
     # Archetype lens (Full Back / Winger only): rank players AS a specific type. Default
     # "All Metrics" leaves the all-round composite as the ranking; the all-round score stays
     # visible alongside whichever archetype is chosen.
@@ -176,10 +191,10 @@ def main() -> None:
     archetype = cf.DEFAULT_ARCHETYPE
     if len(archetype_options) > 1:
         archetype = st.sidebar.selectbox(
-            "Archetype", archetype_options,
-            help="Rank players as a specific archetype for this position. The Performance "
-                 "dimension is then scored on that archetype's metrics; the all-round composite "
-                 "stays visible alongside. 'All Metrics' is the full-profile default.")
+            "Rank as", archetype_options,
+            help="Re-weights the rating for a type of player: the Performance dimension is "
+                 "scored on that type's metrics; the all-round composite stays visible "
+                 "alongside. 'All Metrics' is the default. (Style labels are separate.)")
     min_minutes = synced_min_minutes(max(max_minutes(), 900))
     max_age = st.sidebar.slider(
         "Maximum age", 18, 40, 40,
@@ -324,6 +339,15 @@ def main() -> None:
     # honest position for him inside a list whose order is itself a quality claim. Squads &
     # loans carries him with current-season facts and no score, which is the page built for
     # that question. NaN (no scorecard) counts as thin -- `pool_is_thin` treats it that way.
+    # Style labels joined LEFT, so a player without one is never dropped from the list.
+    _style = load_style_labels(season_id)
+    if not _style.empty:
+        _style_cols = keys3 + ["style_label", "tier", "strong_styles", "leans_styles"] + \
+            [c for c in _style.columns if c.startswith("fit.")]
+        pool = pool.merge(_style[_style_cols], on=keys3, how="left")
+        if style_choice != "All styles":
+            pool = pool[[styles_mod.has_style(r, style_choice, strong_only)
+                         for r in pool.to_dict("records")]]
     thin = pool["peer_count"].isna() | (pool["peer_count"] < MIN_PEERS_FOR_RANKING)
     withheld = int(thin.sum())
     pool = pool[~thin]
@@ -406,6 +430,14 @@ def main() -> None:
     def _methodology_page():
         _methodology(st.container(), candidates, budget_eur, min_minutes)
 
+    def _style_lab_page():
+        # Workstation-only (SHOW_STYLE_LAB): tune the playing-style rules before they go live.
+        from lofc.dashboard import style_lab
+        from lofc.dashboard.loaders import competition_name_by_id, load_style_inputs
+        with st.container():
+            style_lab.render(load_style_inputs(season_id), competition_name_by_id(),
+                             season_name_for(season_id))
+
     def _users_page():
         with st.container():
             _users_render(engine, user)
@@ -464,6 +496,8 @@ def main() -> None:
     # its own as a second line of defence -- never trust registration alone.
     if can(user.role, "manage_users"):
         pages["users"] = st.Page(_users_page, title="Users", url_path="users")
+    if settings.show_style_lab:
+        pages["style_lab"] = st.Page(_style_lab_page, title="Style lab", url_path="style-lab")
     # Registered BEFORE .run(): a page's own render call (e.g. "Assess this player") can
     # trigger `session.switch_to`/`go_to_assess` while `.run()` is still executing below, so
     # the lookup must already be in place. `register_pages` keeps the flat name -> Page lookup
@@ -489,6 +523,8 @@ def main() -> None:
     # added when the page itself was -- an admin-less `pages` dict never produces this key.
     if "users" in pages:
         nav_sections["Admin"] = [pages["users"]]
+    if "style_lab" in pages:
+        nav_sections["Lab"] = [pages["style_lab"]]
     st.navigation(nav_sections).run()
 
     st.caption(f"Impect event data (+ SkillCorner physical), {season_name_for(season_id)} season. Player market values are "

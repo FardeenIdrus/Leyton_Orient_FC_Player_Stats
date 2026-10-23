@@ -29,9 +29,10 @@ def test_removed_columns_never_appear(lens, show_money, loan_column):
 
 
 def test_default_columns_in_order():
-    """2026-10-12: 'Mins' for Minutes; League stays its own column (owner)."""
+    """2026-10-12: 'Mins' for Minutes; League stays its own column (owner). 2026-10-23:
+    Style after League (approved design)."""
     assert players_table_columns(lens=False, show_money=False, loan_column=False) == [
-        "#", "Player", "Club", "League", "Age", "Mins", "Composite",
+        "#", "Player", "Club", "League", "Style", "Age", "Mins", "Composite",
         "Performance", "Physical", "Top speed", "Scouts"]
 
 
@@ -77,8 +78,12 @@ def test_list_caption_drops_the_money_sentence():
     assert "Money is off" not in inspect.getsource(players)
 
 
-def test_playing_style_is_hidden_on_the_card():
-    assert "Playing style" not in inspect.getsource(players._render_profile_body)
+def test_the_card_uses_the_new_styles_not_the_retired_clusters():
+    """2026-10-23: the k-means "Player type" clusters stay hidden (register P4); the card
+    shows the rule-based styles from model/styles.py instead."""
+    source = inspect.getsource(players._render_profile_body)
+    assert "cluster_label" not in source
+    assert "style_card.fit_html" in source
 
 
 def test_player_types_page_is_not_offered():

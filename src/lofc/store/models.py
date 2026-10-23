@@ -980,6 +980,25 @@ class PlayerDetailMetric(Base):
     total: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
+class PlayerStyleSignal(Base):
+    """Raw playing-style signals per player-season (`model/styles.py`), stored long so a new
+    signal needs no migration. Percentiles are taken at read time, within league + season +
+    position over 450+ minute players. Labels only -- NEVER read by scoring."""
+    __tablename__ = "player_style_signals"
+    __table_args__ = (
+        UniqueConstraint("player_id", "competition_id", "season_id", "signal",
+                         name="uq_style_player_comp_season_signal"),
+        Index("ix_style_pool", "competition_id", "season_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_id: Mapped[int] = mapped_column(BigInteger)
+    competition_id: Mapped[int] = mapped_column(Integer)
+    season_id: Mapped[int] = mapped_column(Integer)
+    signal: Mapped[str] = mapped_column(String)
+    value: Mapped[float] = mapped_column(Float)
+
+
 class ImpectDefinition(Base):
     """Impect's official KPI definitions (its glossary), for the dashboard's glossary.
 

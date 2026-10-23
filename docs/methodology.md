@@ -248,7 +248,7 @@ A player's true standing ("8th of 13") is quoted only within his own pool
 are selected, and its first column is "#", not "Rank": a composite says how a player
 compares within his own league, not across leagues.
 
-## 6. Archetypes (optional lens)
+## 6. Archetypes — "Rank as" in the sidebar (optional lens)
 
 **Full Back** and **Winger** have archetypes. An archetype scores Performance on a
 **subset** of the position's metrics, so a recruiter can rank players as a specific type.
@@ -263,9 +263,32 @@ concept cannot survive under a second club name.
 | Winger | Direct & 1v1 Specialist | Safe possession and crossing | 17 |
 | Winger | Crossing & Creative Threat | Solo ball-carrying | 20 |
 
-The default is **All Metrics** (the full list). When an archetype is picked in the sidebar,
-the list ranks on the archetype composite and the **All-round** composite stays visible
-beside it. Other positions have a single club profile.
+The default is **All Metrics** (the full list). When an archetype is picked in the sidebar
+("**Rank as**"), the list ranks on the archetype composite and the **All-round** composite
+stays visible beside it. Other positions have a single club profile.
+
+## 6b. Playing styles (labels, never ratings)
+
+Each outfield player gets a **playing-style label** — how he plays, **not how well**. The
+Head of Recruitment's 24 styles; rules in `model/styles.py`.
+
+- **Signals** are what a player *attempts* and *where* he plays: pass attempts (successful +
+  unsuccessful + neutral), shares of his own actions, touches and receptions by pitch zone,
+  duels contested, presses. Quality is used only where no alternative exists, and declared:
+  aerial duels **won** (Aerial) and **successful** dribbles (1v1 — Impect records no failed
+  dribbles). Every other signal correlates under 0.3 with the Performance rating (2025/26).
+- **Fit** for a style = the average percentile of its signals, against players in the same
+  position, league and season (450+ minutes; pools under 10 get none). Defensive and central
+  midfielders are compared together for style ("Central midfield") — Impect labels a
+  two-man midfield as two defensive midfielders.
+- **Label:** best fit ≥ 70 with no signal below 50 → **Strong** (e.g. "Playmaker"); best fit
+  ≥ 50 otherwise → **Leans**; below 50 at every style → **No standout style**. Other Strong
+  styles are added. Wingers are labelled twice: *where* (In behind · Pocket · Wide) and
+  *what* (1v1 · Creator). Thresholds are fixed, so a label means the same for every user.
+
+Shown as a Style filter in the sidebar, a Style column, and a Style fit section on the
+player card. Never read by the rating or the ranking. Team style influences receptions
+(a winger in a direct side receives more in behind) — accepted.
 
 ## 7. Season shown
 
@@ -356,9 +379,8 @@ The sidebar **Contract expiry** filter offers *Any*, *Out of contract summer 202
 
 ## 11. Not currently in use
 
-**Playing styles (clustering).** A k-means grouping of players into styles exists in code
-(`model/archetypes.py`) but its page is **hidden from the dashboard** until it is rebuilt
-(register P4). It never fed the rating.
+**Style clusters (k-means).** The automatic grouping in `model/archetypes.py` is hidden
+and superseded by the rule-based playing styles in §6b. It never fed the rating.
 
 ## Known limitations
 

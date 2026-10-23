@@ -41,6 +41,7 @@ from lofc.model.score import POSITION_ROLE
 from lofc.report.render import ordinal
 from lofc.model import scorecard as scorecard_mod
 from lofc.model import scout_scores
+from lofc.model.styles import style_pills
 from lofc.store import assessments as store_assess
 from lofc.store import watchlist
 
@@ -472,7 +473,7 @@ def band_colour(value) -> str:
 def players_table_columns(lens: bool, show_money: bool, loan_column: bool) -> list[str]:
     """The ranked list's columns, in order. Contract, months left and peer rank are on the
     player card, not here."""
-    cols = ["#", "Player", "Club", "League", "Age", "Mins", "Composite"]
+    cols = ["#", "Player", "Club", "League", "Style", "Age", "Mins", "Composite"]
     if lens:
         cols.append("All-round")
     # "Assessed" hidden for now (owner, 2026-10-12): assessments are not in use.
@@ -579,7 +580,24 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
     # are on screen.
     player_header.render(row, shares, load_loan_for_player(pid))
 
-    # No playing-style label: the clustering is hidden until rebuilt (register P4).
+    # Playing style (model/styles.py): pills under the header, then the Style fit bars.
+    if "strong_styles" in row.index:
+        from lofc.dashboard import style_card
+        from lofc.dashboard.loaders import competition_name_by_id
+        _label = row.get("style_label")
+        _pills = style_card.pills_html(
+            [x for x in (row.get("strong_styles") if isinstance(row.get("strong_styles"), list) else [])],
+            [x for x in (row.get("leans_styles") if isinstance(row.get("leans_styles"), list) else [])],
+            label=_label if isinstance(_label, str) else None)
+        if _pills:
+            st.markdown(f'{style_card.CSS}<div style="display:flex;align-items:center;gap:10px;'
+                        f'margin:2px 0 6px"><span style="font-size:.75rem;font-weight:700;'
+                        f'letter-spacing:.05em;text-transform:uppercase;color:#6B6B6B">Style'
+                        f'</span>{_pills}</div>', unsafe_allow_html=True)
+        _fit = style_card.fit_html(row, competition_name_by_id().get(cid, ""),
+                                   season_name_for(sid))
+        if _fit:
+            st.markdown(_fit, unsafe_allow_html=True)
 
     # The label names ONE position. For roughly one player in ten it covers under half his
     # season, and every percentile below is against that group's peers -- said plainly
@@ -1125,6 +1143,10 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             ["player_id", "competition_id"])
         view = view.merge(_speed, on=["player_id", "competition_id"], how="left")
         view["Top speed"] = numeric_or_dash(view["top5_psv99_kmh"], "{:.1f}")
+        # Playing style (model/styles.py): how he plays, never how well. Pills; Leans is
+        # said in words because the table draws every pill alike.
+        view["Style"] = [style_pills(r) for r in view.to_dict("records")] \
+            if "strong_styles" in view.columns else [[] for _ in range(len(view))]
         # Whether a scout has assessed this player. DISPLAY ONLY -- it never reorders the list
         # and never touches a score; scout input must not influence objective_composite, which
         # is the ranking. The card has always shown the full assessment; the list showed
@@ -1194,6 +1216,10 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             "Player": st.column_config.TextColumn("Player", width="medium"),
             "Club": st.column_config.TextColumn("Club", width="medium"),
             "League": st.column_config.TextColumn("League", width="small"),
+            "Style": st.column_config.ListColumn(
+                "Style", width="medium",
+                help="How he plays, not how well: his best-fitting style, against players in "
+                     "the same position, league and season. \"(leans)\" = a weaker fit."),
             "Mins": st.column_config.NumberColumn("Mins", format="%d", width=60,
                                                   help="Minutes played this season."),
             "Composite": band(composite_label, composite_help),

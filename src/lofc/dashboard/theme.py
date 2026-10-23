@@ -91,6 +91,10 @@ def style() -> None:
           [data-testid="stDataFrame"] [role="columnheader"] {{
             background: #FAFAFA; font-weight: 700; color: {DARK};
           }}
+          /* The sidebar Style box (playing styles): white card, club-red outline. */
+          .st-key-sidebar_style_box {{
+            background: #FFFFFF; border: 1.5px solid {RED} !important; border-radius: 10px;
+          }}
         </style>
         """,
         unsafe_allow_html=True,

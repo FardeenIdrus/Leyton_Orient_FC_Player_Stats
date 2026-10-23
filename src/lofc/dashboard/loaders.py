@@ -654,3 +654,37 @@ def load_loan_status() -> pd.DataFrame:
     frame["on_loan"] = True
     frame["loan_ends"] = pd.to_datetime(frame["loan_ends"], errors="coerce")
     return frame
+
+
+@st.cache_data(ttl=300)
+def load_style_inputs(season_id: int) -> pd.DataFrame:
+    """Every player of a season with his raw style signals and his rating, for the Style lab.
+    Signals are stored long (player_style_signals) and pivoted here; percentiles are taken by
+    the caller so they always use the current minutes and positions."""
+    engine = get_engine()
+    base = pd.read_sql(
+        "SELECT n.player_id, n.competition_id, n.season_id, n.position_group, n.rankable, "
+        "       n.player_name, n.team_name, s.objective_composite, s.performance_band "
+        "FROM player_metrics_neutral n LEFT JOIN player_scorecards s "
+        "  ON s.player_id = n.player_id AND s.competition_id = n.competition_id "
+        " AND s.season_id = n.season_id AND s.archetype = 'All Metrics' "
+        "WHERE n.season_id = %(s)s", engine, params={"s": int(season_id)})
+    sig = pd.read_sql("SELECT player_id, competition_id, signal, value FROM player_style_signals "
+                      "WHERE season_id = %(s)s", engine, params={"s": int(season_id)})
+    if sig.empty:
+        return base
+    wide = sig.pivot_table(index=["player_id", "competition_id"], columns="signal",
+                           values="value").reset_index()
+    return base.merge(wide, on=["player_id", "competition_id"], how="left")
+
+
+@st.cache_data(ttl=300)
+def load_style_labels(season_id: int) -> pd.DataFrame:
+    """Every player's playing-style labels for a season (model/styles.py): `style_label`,
+    `tier`, `strong_styles`, `leans_styles` and `fit.<style>`. Fixed thresholds -- the same
+    label for every user; tuning happens in the Style lab only."""
+    from lofc.model import styles
+    frame = load_style_inputs(season_id)
+    if frame.empty or not set(styles.SIGNALS) & set(frame.columns):
+        return pd.DataFrame(columns=styles.KEY)
+    return styles.assign_styles(styles.signal_percentiles(frame))

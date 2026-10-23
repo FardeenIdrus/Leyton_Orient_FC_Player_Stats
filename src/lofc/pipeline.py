@@ -90,6 +90,10 @@ def build_steps() -> list[tuple[str, list[str]]]:
     # DISPLAY ONLY -- the assigned position group and every score are untouched.
     steps.append(("Position shares: minutes per position group (display only)",
                   [sys.executable, "-m", "lofc.model.position_shares"]))
+    # Playing-style signals (model/styles.py): attempts, shares and zones from the same
+    # landed Impect files, linked through the same identities. LABELS ONLY -- never scoring.
+    steps.append(("Style signals: playing-style labels (display only)",
+                  [sys.executable, "-m", "lofc.model.style_run"]))
 
     # 5. Transfermarkt market values (the valuation target).
     if comp_ids & set(LEAGUE_CODE):

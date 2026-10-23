@@ -397,6 +397,11 @@ class Settings(BaseSettings):
     # Left FALSE on a workstation, where scraping works normally.
     skip_transfermarkt_scrape: bool = Field(default=False)
 
+    # The Style lab page: a workstation-only page to test and tune the playing-style rules
+    # (model/styles.py) before they go live. OFF unless SHOW_STYLE_LAB=true is set, so the
+    # server never shows it by accident.
+    show_style_lab: bool = Field(default=False)
+
     # --- Paths --------------------------------------------------------------
     raw_data_dir: str = Field(default="data/raw")
     reference_data_dir: str = Field(default="data/reference")
