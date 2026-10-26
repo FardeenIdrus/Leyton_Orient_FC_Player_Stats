@@ -370,6 +370,10 @@ def main(argv: list[str] | None = None) -> None:
     if saved is not None:
         print(f"Backed up the previous CSV to {saved}")
 
+    # Every row carries WHEN it was scraped, so the platform's "Contract data as of" date is
+    # the scrape date however often the pipeline reloads the file.
+    all_rows = stamp_rows(all_rows, datetime.utcnow())
+
     # Atomic write so an interrupted run never leaves a half-file behind.
     tmp = out.with_suffix(".csv.tmp")
     with open(tmp, "w", newline="") as f:
@@ -379,6 +383,12 @@ def main(argv: list[str] | None = None) -> None:
     tmp.rename(out)
     valued = sum(1 for r in all_rows if r["market_value_eur"])
     print(f"\nWrote {len(all_rows)} players ({valued} with a market value) to {out}")
+
+
+def stamp_rows(rows: list[dict], when) -> list[dict]:
+    """Each row plus `scraped_at` (ISO, seconds)."""
+    stamp = when.replace(microsecond=0).isoformat()
+    return [{**r, "scraped_at": stamp} for r in rows]
 
 
 if __name__ == "__main__":

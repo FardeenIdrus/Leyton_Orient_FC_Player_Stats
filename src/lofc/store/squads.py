@@ -79,6 +79,15 @@ def squad_frame_from_csv(path: Path | None = None) -> pd.DataFrame:
 
     raw = pd.read_csv(path)
     out = pd.DataFrame({c: raw[c] if c in raw.columns else None for c in COLUMNS})
+    # When the scrape was TAKEN, carried to the loader. The scraper writes it into every row
+    # (since 2026-10-26); an older file has no such column, so its own modification time --
+    # the moment the scraper wrote it, preserved by rsync and docker cp -- stands in.
+    stamp = None
+    if "scraped_at" in raw.columns:
+        stamp = pd.to_datetime(raw["scraped_at"], errors="coerce").max()
+    if stamp is None or pd.isna(stamp):
+        stamp = pd.Timestamp(datetime.datetime.fromtimestamp(path.stat().st_mtime))
+    out.attrs["scraped_at"] = stamp.to_pydatetime()
 
     # dtype=object on every rewritten column, deliberately. Assigning a list containing
     # None into a float64 column does NOT store None -- pandas re-infers a float dtype and
@@ -92,6 +101,7 @@ def squad_frame_from_csv(path: Path | None = None) -> pd.DataFrame:
         out[column] = _column([_date(v) for v in out[column]])
     for column in ("league_code", "position", "foot", "height_cm", "market_value_eur"):
         out[column] = _column([_value(v) for v in out[column]])
+    out.attrs["scraped_at"] = stamp.to_pydatetime()
     return out
 
 
@@ -128,8 +138,11 @@ def load_squads(engine, frame: pd.DataFrame, allow_shrink: bool = False) -> int:
     if problem:
         print(f"WARNING: {problem}")
 
-    now = datetime.datetime.now()
-    records = [{**row, "scraped_at": now}
+    # The SCRAPE time, never the load time: the weekly pipeline reloads the same file every
+    # Monday, and stamping "now" told recruiters a 7-September scrape was "as of 26 Oct"
+    # (fixed 2026-10-26). Only a frame built without a file (tests) falls back to now.
+    stamp = frame.attrs.get("scraped_at") or datetime.datetime.now()
+    records = [{**row, "scraped_at": stamp}
                for row in frame.to_dict(orient="records")]
     with engine.begin() as conn:
         conn.execute(_TABLE.delete())

@@ -1021,16 +1021,17 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
                 line += f" **{contract_unknown} hidden** (no known contract date)."
             st.caption(line)
         if lens:
-            st.caption(f"Archetype lens: ranking as **{archetype}** — the Composite is scored on this "
+            st.caption(f"Rank as **{archetype}** — the Composite is scored on this "
                        "archetype's metrics; **All-round** shows the full-profile composite for context.")
-        with st.expander("About this list — contract data, archetype lens, minutes threshold"):
+        with st.expander("About this list — contract data, Rank as, minutes threshold"):
             as_of = contract_data_date()
             if as_of:
                 st.caption(f"Contract data as of **{as_of}** — a scraped snapshot, not live, so a "
                            "recent extension or new signing may not be reflected yet. Contract "
-                           "dates are largely EFL-only; the number hidden for having none known "
-                           "is shown above when a contract-expiry filter is active.")
-            st.caption("The **Archetype** lens (Full Back / Winger only, sidebar) reranks on that "
+                           "dates come from Transfermarkt and cover the original seven leagues "
+                           "only; the number hidden for having none known is shown above when a "
+                           "contract-expiry filter is active.")
+            st.caption("**Rank as** (Full Back / Winger only, sidebar) reranks on that "
                        "archetype's Performance metrics; the all-round composite stays visible "
                        "alongside as the guardrail against overfitting to one lens.")
             # TWO exclusions, not one. This said 450 minutes was the only filter, which was

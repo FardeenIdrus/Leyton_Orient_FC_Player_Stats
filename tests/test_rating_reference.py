@@ -72,3 +72,41 @@ def test_html_escapes_text():
                       "How it's measured": ["a & b"]})
     out = rr.ingredients_html(t)
     assert "<b>x</b>" not in out and "&lt;b&gt;" in out and "a &amp; b" in out
+
+
+# --- "Download as Excel" (Head of Recruitment, 2026-10-26) ------------------------------------
+#
+# One tab per position, the same rows and columns as the page plus an empty Comments column for
+# his review, and a Weights tab. Built from the same function as the page, so the two cannot
+# disagree. Excel rather than CSV: a CSV file cannot hold one tab per position.
+
+import io
+
+import openpyxl
+
+
+def _book():
+    data = rr.ingredients_workbook(definitions={})
+    return openpyxl.load_workbook(io.BytesIO(data))
+
+
+def test_one_tab_per_position_plus_weights():
+    assert _book().sheetnames == ["Weights"] + list(cf.PERFORMANCE_METRICS)
+
+
+@pytest.mark.parametrize("position", list(cf.PERFORMANCE_METRICS))
+def test_each_tab_matches_the_page_and_adds_a_comments_column(position):
+    ws = _book()[position]
+    header = [c.value for c in ws[1]]
+    page = rr.rating_ingredients(position, definitions={}).drop(columns="key")
+    assert header == list(page.columns) + ["Comments"]
+    metrics = [ws.cell(row=r, column=1).value for r in range(2, ws.max_row + 1)]
+    assert metrics == page["Metric"].tolist()
+
+
+def test_the_weights_tab_states_each_positions_split():
+    ws = _book()["Weights"]
+    rows = {ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value
+            for r in range(2, ws.max_row + 1)}
+    for position in cf.PERFORMANCE_METRICS:
+        assert rows[position] == rr.weights_line(position)

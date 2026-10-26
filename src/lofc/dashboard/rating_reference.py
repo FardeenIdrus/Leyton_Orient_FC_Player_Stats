@@ -93,8 +93,43 @@ def ingredients_html(table: pd.DataFrame) -> str:
             + "</table>")
 
 
+def ingredients_workbook(definitions: dict[str, str] | None = None) -> bytes:
+    """The page as an Excel file for review (Head of Recruitment, 2026-10-26): a Weights tab,
+    then one tab per position with exactly the page's columns plus an empty Comments column.
+    Excel, not CSV: a CSV file cannot hold one tab per position. Opens in Google Sheets."""
+    import datetime
+    import io
+    defs = _definitions() if definitions is None else definitions
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as xl:
+        weights = pd.DataFrame(
+            [{"Position": p, "Rating weights": weights_line(p),
+              "Archetypes": ", ".join(cf.archetypes_for(p)[1:]) or "—"}
+             for p in cf.PERFORMANCE_METRICS])
+        weights.to_excel(xl, sheet_name="Weights", index=False)
+        ws = xl.sheets["Weights"]
+        ws.cell(row=len(weights) + 3, column=1,
+                value=f"Generated {datetime.date.today():%d %b %Y} from the platform's scoring code.")
+        for position in cf.PERFORMANCE_METRICS:
+            table = rating_ingredients(position, defs).drop(columns="key")
+            table["Comments"] = ""
+            table.to_excel(xl, sheet_name=position, index=False)
+        for sheet in xl.sheets.values():                     # readable column widths
+            for col in sheet.columns:
+                width = max(len(str(c.value or "")) for c in col)
+                sheet.column_dimensions[col[0].column_letter].width = min(max(width + 2, 10), 70)
+            sheet.freeze_panes = "A2"
+    return buffer.getvalue()
+
+
 def render() -> None:
     st.markdown("### What goes into each rating")
+    st.download_button(
+        "Download as Excel", data=ingredients_workbook(),
+        file_name="LOFC - what goes into each rating.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        help="One tab per position, with an empty Comments column for review. "
+             "Opens in Excel or Google Sheets.")
     position = st.segmented_control("Position", list(cf.PERFORMANCE_METRICS),
                                     default="Centre Back", key="ref_position")
     if not position:

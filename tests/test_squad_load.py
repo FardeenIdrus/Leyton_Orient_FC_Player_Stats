@@ -159,3 +159,45 @@ def test_scraped_at_is_stamped_so_the_ui_can_show_the_snapshot_age(tmp_path):
     load_squads(engine, squad_frame_from_csv(_csv(tmp_path)))
     stamp = pd.read_sql("SELECT scraped_at FROM transfermarkt_squads", engine)["scraped_at"]
     assert stamp.notna().all()
+
+
+# --- the "Contract data as of" date is the SCRAPE date, not the load date (2026-10-26) --------
+#
+# Bug: the weekly pipeline reloads the same CSV every Monday and stamped scraped_at = now, so
+# the page said "Contract data as of 26 Oct 2026" for a scrape taken on 7 Sep.
+
+import datetime as _dt
+import os as _os
+
+from lofc.store import squads as _squads
+
+
+def test_the_scrape_time_in_the_file_is_what_is_stored(tmp_path):
+    rows = [{**r, "scraped_at": "2026-09-07T10:34:00"} for r in ROWS]
+    engine = _engine()
+    load_squads(engine, squad_frame_from_csv(_csv(tmp_path, rows)))
+    assert _squads.scraped_at(engine) == _dt.datetime(2026, 9, 7, 10, 34)
+
+
+def test_an_older_file_without_the_column_uses_the_file_date(tmp_path):
+    path = _csv(tmp_path)
+    when = _dt.datetime(2026, 9, 7, 10, 34).timestamp()
+    _os.utime(path, (when, when))
+    engine = _engine()
+    load_squads(engine, squad_frame_from_csv(path))
+    assert _squads.scraped_at(engine).date() == _dt.date(2026, 9, 7)
+
+
+def test_reloading_the_same_file_does_not_move_the_date(tmp_path):
+    rows = [{**r, "scraped_at": "2026-09-07T10:34:00"} for r in ROWS]
+    path = _csv(tmp_path, rows)
+    engine = _engine()
+    load_squads(engine, squad_frame_from_csv(path))
+    load_squads(engine, squad_frame_from_csv(path))
+    assert _squads.scraped_at(engine) == _dt.datetime(2026, 9, 7, 10, 34)
+
+
+def test_the_scraper_writes_the_scrape_time_into_every_row():
+    from lofc.ingest.transfermarkt_efl import stamp_rows
+    out = stamp_rows([{"a": 1}, {"a": 2}], _dt.datetime(2026, 10, 26, 9, 0))
+    assert [r["scraped_at"] for r in out] == ["2026-10-26T09:00:00"] * 2
