@@ -448,3 +448,7 @@ docker compose exec -T app python -m lofc.model.scorecard_run
 
 # Nightly dump of OUR database only (server cron 19:30 UTC, before the DO backup window 20:00–00:00 UTC); tests run without Docker
 bash scripts/test_db_backup.sh
+
+# Database integrity check: orphan player_ids, key duplicates, possible duplicate identities (read-only; exit 1 on orphans/duplicates)
+docker compose exec -T app python -m lofc.store.integrity
+# Weekly VACUUM (ANALYZE) of the pipeline-rewritten tables, server cron Sun 04:00 UTC; tests run without Docker: bash scripts/test_db_maintenance.sh

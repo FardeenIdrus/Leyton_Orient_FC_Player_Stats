@@ -154,12 +154,37 @@ def build_steps() -> list[tuple[str, list[str]]]:
 
 
 def main() -> None:
+    """Run every step. A step whose league-by-league work had a failing league exits
+    runs.PARTIAL_EXIT: the run carries on (the failed league keeps last week's data) and
+    finishes as partial, naming the leagues. Any other failure stops the run -- the steps
+    after it would build on wrong data. Every step is recorded in `pipeline_runs`."""
+    import datetime as dt
+    import os
+    from lofc.store import runs
+
+    run_id = os.environ.get(runs.RUN_ID_ENV) or runs.new_run_id()
+    env = {**os.environ, runs.RUN_ID_ENV: run_id}
     steps = build_steps()
+    partial = False
+    print(f"Pipeline run {run_id}", flush=True)
     for i, (label, command) in enumerate(steps, start=1):
         print(f"\n{'=' * 70}\n[{i}/{len(steps)}] {label}\n{'=' * 70}", flush=True)
-        result = subprocess.run(command)
-        if result.returncode != 0:
+        started = dt.datetime.utcnow()
+        result = subprocess.run(command, env=env)
+        if result.returncode == 0:
+            runs.record(step=label, status="success", started_at=started, run_id=run_id)
+        elif result.returncode == runs.PARTIAL_EXIT:
+            partial = True
+            runs.record(step=label, status="partial", started_at=started, run_id=run_id)
+        else:
+            runs.record(step=label, status="failed", started_at=started, run_id=run_id,
+                        error=f"exit {result.returncode}")
             sys.exit(f"\nPipeline stopped: step '{label}' failed (exit {result.returncode}).")
+    if partial:
+        failed = runs.failed_leagues(run_id)
+        print("\nPipeline finished with failed leagues (they keep last week's data):\n  "
+              + "\n  ".join(failed or ["(see pipeline_runs for this run)"]))
+        sys.exit(runs.PARTIAL_EXIT)
     print("\nPipeline complete. The dashboard at http://localhost:8501 is ready.")
 
 

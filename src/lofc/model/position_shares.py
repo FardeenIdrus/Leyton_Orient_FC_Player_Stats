@@ -146,18 +146,25 @@ def main() -> None:
     from lofc.config import settings
     from lofc.store.load import get_engine
 
+    from lofc.store import runs
     engine = get_engine()
-    total = 0
-    for target in settings.impect_targets:
+    totals = {"rows": 0}
+
+    def one(target) -> int:
         shares = collect(engine, target)
         if shares.empty:
             print(f"  (skipped {target.label}: no data)")
-            continue
+            return 0
         n = load(engine, shares, target.competition_id, target.season_id)
-        players = shares["player_id"].nunique()
-        print(f"  {target.label}: {players} players, {n} position rows")
-        total += n
-    print(f"position shares loaded: {total} rows")
+        print(f"  {target.label}: {shares['player_id'].nunique()} players, {n} position rows")
+        totals["rows"] += n
+        return n
+
+    failures = runs.for_each_league("Position shares", settings.impect_targets,
+                                    label=lambda t: t.label,
+                                    keys=lambda t: (t.competition_id, t.season_id), fn=one)
+    print(f"position shares loaded: {totals['rows']} rows")
+    runs.finish_step("Position shares", failures)
 
 
 if __name__ == "__main__":

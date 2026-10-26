@@ -139,10 +139,11 @@ LIVE_SEASON_ID: int | None = 319          # 2026/27
 # age. Lives here (not in the dashboard layer) because both the dashboard and the plain,
 # headless store layer (e.g. `store/watchlist.py`) need it, and this is the lowest layer both
 # already import; `dashboard/seasons.py` re-exports it so its existing callers are unaffected.
-SEASON_REF_DATE: dict[int, pd.Timestamp] = {
-    317: pd.Timestamp("2025-01-01"), 318: pd.Timestamp("2026-01-01"),
-    319: pd.Timestamp("2027-01-01"),
-}
+# Generated from the season rule in lofc/leagues.py (2025/26 -> 2026-01-01), so a new season
+# needs no edit here. Covers 2014/15 to 2049/50.
+from lofc.leagues import season_midpoint as _season_midpoint   # noqa: E402
+
+SEASON_REF_DATE: dict[int, pd.Timestamp] = {sid: _season_midpoint(sid) for sid in range(307, 343)}
 
 
 def parse_impect_targets(raw: str) -> list[ImpectTarget]:
@@ -433,10 +434,31 @@ class Settings(BaseSettings):
 
     @property
     def impect_targets(self) -> list[ImpectTarget]:
-        """Impect iterations to ingest; IMPECT_ITERATIONS overrides the defaults."""
+        """Impect iterations to ingest.
+
+        IMPECT_ITERATIONS overrides everything. Otherwise they are derived from the league
+        registry (lofc/leagues.py) and Impect's own licence catalogue, which `ingest.impect`
+        saves on every run -- so a new season, or a competition added to the registry,
+        arrives without editing this file. Before the first catalogue is saved,
+        DEFAULT_IMPECT_TARGETS (the previous hand-typed list, reproduced exactly by the
+        registry -- tests/test_leagues.py) is the fallback."""
         if self.impect_iterations:
             return parse_impect_targets(self.impect_iterations)
-        return DEFAULT_IMPECT_TARGETS
+        import json
+        from lofc import leagues
+        from lofc.ingest.impect import iterations_catalogue_path
+        path = iterations_catalogue_path()
+        if not path.exists():
+            return DEFAULT_IMPECT_TARGETS
+        try:
+            catalogue = json.loads(path.read_text())
+        except (OSError, ValueError) as exc:
+            # A damaged file must not stop every step: fall back, loudly. The next Impect
+            # pull rewrites it.
+            print(f"WARNING: the Impect catalogue at {path} could not be read ({exc}); "
+                  f"using the built-in league list until the next pull rewrites it.")
+            return DEFAULT_IMPECT_TARGETS
+        return leagues.targets_from_catalogue(catalogue)
 
     @property
     def live_season_id(self) -> int | None:

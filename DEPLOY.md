@@ -24,6 +24,7 @@ from your laptop** for a demo (Option B).
 | Every minute | `scripts/scout_sync.sh` | Reads the club's scouting Google Sheet (read-only); writes only changes |
 | Daily 19:30 | `scripts/db_backup.sh` | Dumps OUR database to `/opt/lofc/backups` (14 kept, each verified) |
 | Sunday 03:30 | `docker builder prune -f --filter until=168h` | Clears Docker build cache (it grew 22 GB from deploys) |
+| Sunday 04:00 | `scripts/db_maintenance.sh` | `VACUUM (ANALYZE)` on the tables the pipeline rewrites weekly (reclaims dead rows) |
 | Monday 04:15 | `scripts/weekly_refresh.sh` | Impect + SkillCorner pull, rebuild, re-score. Result in `data/ops/last_success` / `last_failure` |
 
 **Backups — two layers:**

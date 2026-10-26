@@ -29,6 +29,7 @@ import pandas as pd
 
 from lofc.config import ImpectTarget, settings
 from lofc.ingest import landing
+from lofc.ingest.retry import with_retries
 
 
 def impect_root() -> Path:
@@ -66,7 +67,9 @@ def _token() -> str:
             "in .env (containers read .env at start: `docker compose up -d`)."
         )
     import impectPy as ip
-    return ip.getAccessToken(settings.impect_username, settings.impect_password)
+    return with_retries(
+        lambda: ip.getAccessToken(settings.impect_username, settings.impect_password),
+        what="Impect token")
 
 
 def is_live(target: ImpectTarget) -> bool:
@@ -97,7 +100,7 @@ def _pull(target: ImpectTarget, path: Path, fetch, what: str, force: bool = Fals
         return False
 
     try:
-        frame = fetch()
+        frame = with_retries(fetch, what=f"Impect {what} [{target.label}]")
     except Exception as exc:
         # A live season configured before kick-off legitimately has nothing yet: skip it
         # quietly and try again next run. Any other failure -- and any failure on a season
@@ -143,39 +146,51 @@ def main() -> None:
                         help="pull one iteration id only (must be a configured target)")
     args = parser.parse_args()
 
+    token = _token()
+
+    # Land the licence's iteration catalogue FIRST: the targets are derived from it
+    # (lofc/leagues.py via settings.impect_targets), so a new season -- or a competition just
+    # added to the registry -- is pulled on the run that first sees it, not a week later.
+    import impectPy as ip
+    catalogue = with_retries(lambda: ip.getIterations(token), what="Impect iteration catalogue")
+    landing.write_json(iterations_catalogue_path(),
+                       catalogue.to_dict(orient="records"), force=True)
+
     targets = settings.impect_targets
     if args.iteration is not None:
         targets = [t for t in targets if t.iteration_id == args.iteration]
         if not targets:
             raise SystemExit(f"iteration {args.iteration} is not a configured Impect target")
 
-    token = _token()
+    from lofc.store import runs
+    counts = {"pulled": 0, "skipped": 0}
 
-    # Land the licence's iteration catalogue alongside the data for traceability
-    # (which competitions/seasons the account could see at pull time).
-    import impectPy as ip
-    catalogue = ip.getIterations(token)
-    landing.write_json(iterations_catalogue_path(),
-                       catalogue.to_dict(orient="records"), force=True)
-
-    pulled = skipped = 0
-    for target in targets:
+    def one(target) -> int | None:
+        rows = None
         if pull_iteration(target, token, force=args.force):
-            pulled += 1
+            counts["pulled"] += 1
             frame = pd.read_parquet(averages_path(target.iteration_id))
+            rows = len(frame)
             print(f"  [{target.label}] pulled: {frame['playerId'].nunique()} players, "
                   f"{len(frame)} position rows, {len(frame.columns)} columns")
         else:
-            skipped += 1
+            counts["skipped"] += 1
             if not is_live(target):
                 print(f"  [{target.label}] already present, skipped")
         if pull_scores(target, token, force=args.force):
             print(f"  [{target.label}] scores pulled")
+        return rows
+
+    # One league failing (e.g. Impect has no data for it) must not stop the others.
+    failures = runs.for_each_league("Pull Impect", targets, label=lambda t: t.label,
+                                    keys=lambda t: (t.competition_id, t.season_id), fn=one)
+    pulled, skipped = counts["pulled"], counts["skipped"]
     live_ids = sorted({t.season_id for t in targets if is_live(t)})
     note = (f" | live season {settings.live_season_id} always re-pulled" if live_ids
             else " | no live season configured (all skip-if-exists)")
     print(f"Done: {pulled} pulled, {skipped} skipped "
           f"({len(targets)} iterations under {impect_root()}/){note}")
+    runs.finish_step("Pull Impect", failures)
 
 
 if __name__ == "__main__":

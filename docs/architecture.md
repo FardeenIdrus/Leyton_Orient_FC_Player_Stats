@@ -128,7 +128,8 @@ Docker: it drives headless Chromium through Playwright.
 ## Code layout (`src/lofc/`)
 
 **Top level**
-- `config.py` — settings, Impect/SkillCorner targets per league-season, `LIVE_SEASON_ID`, season reference dates, feature flags (`IMPECT_ONLY`, `SCORING_SOURCE`, `SKIP_TRANSFERMARKT_SCRAPE`).
+- `config.py` — settings, Impect targets (derived from the registry + catalogue), SkillCorner targets, `LIVE_SEASON_ID`, feature flags (`IMPECT_ONLY`, `SCORING_SOURCE`, `SKIP_TRANSFERMARKT_SCRAPE`).
+- `leagues.py` — the league registry: one line per competition, the season rule, id rules, names.
 - `pipeline.py` — the ordered stage list and runner.
 - `admin.py` — user-administration CLI (`create-user`, `set-password`, deactivate/reactivate, list); no self-service sign-up.
 
@@ -326,10 +327,11 @@ a pipeline rebuild immediately.
 
 ## Adding a league
 
-1. **Event data** — add an `ImpectTarget` per season to `DEFAULT_IMPECT_TARGETS` in
-   `config.py` with a new `competition_id` (900s range) and `spine_source="impect"`. Use the
-   code list, not `IMPECT_ITERATIONS`: an env entry for an unknown iteration carries no
-   internal keys. The league name comes from the target's label.
+1. **Event data** — add ONE line to `LEAGUES` in `lofc/leagues.py`:
+   `Competition("<name>", <Impect competitionId>, new_competition_id(<Impect competitionId>))`.
+   Its seasons (2024/25 on) come from Impect's catalogue on the next pull; ids, labels and
+   names are derived from the registry. The competition must appear in the licence catalogue
+   (`ip.getIterations`); calendar-year seasons ("2025") are skipped until a rule is agreed.
 2. **Physical** — add a `SkillCornerTarget` per season if SkillCorner holds data for it
    (check it actually returns rows; the Scottish Championship lists editions but has none).
    Without it the league is scored on Performance alone.
@@ -346,8 +348,20 @@ a pipeline rebuild immediately.
 6. Re-run the pipeline. Percentiles, bands and peer pools are computed within whatever
    leagues exist; no scoring code changes.
 
-A new season follows steps 1–3 for each league, plus a `SEASON_REF_DATE` entry and an
-update to `LIVE_SEASON_ID` in `config.py`.
+A new season needs no change for Impect: the catalogue brings it in and the season rule
+(`leagues.season_id_for`, 2024/25 = 317) gives its id, label and age date. Update
+`LIVE_SEASON_ID` in `config.py`, and steps 2–3 for SkillCorner and Transfermarkt.
+
+## Failures and the run record
+
+Every pipeline step, and every league inside a league-by-league step, writes a row to
+`pipeline_runs` (`store/runs.py`; one `run_id` per weekly run). In the Impect and SkillCorner
+pulls, the combined table, position shares and style signals, a failing league is recorded
+and the other leagues carry on (`runs.for_each_league`); the step exits 3 ("partial"), the run
+continues and finishes partial, naming the failed leagues. A failed league keeps last week's
+rows. Any other failure (migrations, ratings) stops the run. Provider calls retry transient
+failures with backoff (`ingest/retry.py`). `python -m lofc.store.integrity` checks for orphan
+rows, duplicate keys and possible duplicate player identities.
 
 ## Growth notes still relevant
 

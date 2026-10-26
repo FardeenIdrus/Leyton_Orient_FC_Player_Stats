@@ -999,6 +999,31 @@ class PlayerStyleSignal(Base):
     value: Mapped[float] = mapped_column(Float)
 
 
+class PipelineRun(Base):
+    """One row per pipeline step, and per league inside a league-by-league step.
+
+    Written by `store/runs.py`. A league that fails is recorded here and the other leagues
+    carry on; the step and the run then finish as "partial". This is what tells a person
+    WHICH league failed and when each league last refreshed (register P14)."""
+    __tablename__ = "pipeline_runs"
+    __table_args__ = (
+        Index("ix_pipeline_runs_run_id", "run_id"),
+        Index("ix_pipeline_runs_league", "competition_id", "season_id", "step"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String)
+    step: Mapped[str] = mapped_column(String)
+    league: Mapped[str | None] = mapped_column(String, nullable=True)
+    competition_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    season_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String)          # success | failed | partial
+    started_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    rows: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class ImpectDefinition(Base):
     """Impect's official KPI definitions (its glossary), for the dashboard's glossary.
 

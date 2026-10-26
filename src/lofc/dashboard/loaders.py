@@ -506,10 +506,9 @@ def max_minutes() -> int:
 def competition_name_by_id() -> dict[int, str]:
     """competition_id -> clean league name, across BOTH StatsBomb-spined (EFL) and
     Impect-spined (Scottish/PL2) leagues, so every league in the combined table names."""
-    names = {c.competition_id: c.label.rsplit(" ", 1)[0] for c in settings.competitions}
-    for t in settings.impect_targets:            # adds the Impect-only leagues (901/902/903)
-        names.setdefault(t.competition_id, t.competition_name)
-    return names
+    # One source for every league name: the registry (lofc/leagues.py).
+    from lofc.leagues import league_names
+    return league_names()
 
 
 @st.cache_data(ttl=600)

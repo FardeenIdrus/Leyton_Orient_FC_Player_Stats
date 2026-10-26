@@ -16,11 +16,10 @@ from sqlalchemy import text as sa_text
 
 from lofc.config import SEASON_REF_DATE, settings  # SEASON_REF_DATE re-exported for callers
 
-SEASON_LABELS = {317: "2024/25", 318: "2025/26", 319: "2026/27"}
-
-
 def season_name_for(season_id: int) -> str:
-    return SEASON_LABELS.get(int(season_id), str(season_id))
+    """'2025/26' for 318 -- one rule for every season (lofc/leagues.py)."""
+    from lofc.leagues import is_season_id, season_label
+    return season_label(int(season_id)) if is_season_id(season_id) else str(season_id)
 
 
 

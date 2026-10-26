@@ -88,7 +88,11 @@ def test_impect_targets_override_via_env(monkeypatch):
     monkeypatch.delenv("IMPECT_ITERATIONS", raising=False)
     s = Settings(_env_file=None, impect_iterations="1465:League One 2025/26")
     assert [t.iteration_id for t in s.impect_targets] == [1465]
-    # Unset falls back to the full default set (3 seasons across the seven leagues).
+    # Unset, with no catalogue saved yet, falls back to the previous fixed list. (With a
+    # catalogue, targets come from the league registry -- tests/test_leagues.py.)
+    from lofc.ingest import impect as impect_ingest
+    monkeypatch.setattr(impect_ingest, "iterations_catalogue_path",
+                        lambda: __import__("pathlib").Path("/nonexistent/iterations.json"))
     assert len(Settings(_env_file=None).impect_targets) == len(DEFAULT_IMPECT_TARGETS)
 
 

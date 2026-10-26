@@ -25,6 +25,7 @@ import pandas as pd
 from lofc.config import settings
 from lofc.ingest import landing
 from lofc.ingest.impect import _token, impect_root
+from lofc.ingest.retry import with_retries
 
 KPI_ENDPOINT = "https://api.impect.com/v5/customerapi/kpis"
 
@@ -43,9 +44,13 @@ def pull_definitions(token: str, force: bool = False) -> bool:
     if landing.exists(path) and not force:
         return False
     import requests
-    resp = requests.get(KPI_ENDPOINT, headers={"Authorization": f"Bearer {token}"}, timeout=60)
-    resp.raise_for_status()
-    payload = resp.json()
+
+    def _get():
+        resp = requests.get(KPI_ENDPOINT, headers={"Authorization": f"Bearer {token}"}, timeout=60)
+        resp.raise_for_status()
+        return resp.json()
+
+    payload = with_retries(_get, what="Impect KPI definitions")
     kpis = payload.get("data", payload) if isinstance(payload, dict) else payload
     if not kpis:
         raise RuntimeError("Impect KPI endpoint returned no definitions; not persisting.")

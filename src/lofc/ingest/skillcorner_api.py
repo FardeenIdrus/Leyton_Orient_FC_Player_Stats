@@ -29,6 +29,7 @@ import pandas as pd
 
 from lofc.config import SkillCornerTarget, settings
 from lofc.ingest import landing
+from lofc.ingest.retry import with_retries
 from lofc.ingest.impect import write_parquet  # shared atomic parquet writer
 
 
@@ -96,7 +97,8 @@ def pull_edition(target: SkillCornerTarget, client, force: bool = False,
         params = {"competition_edition": target.edition_id, "group_by": "player"}
         if phase is not None:
             params["possession"] = phase
-        response = client.get_physical(params=params)
+        response = with_retries(lambda: client.get_physical(params=params),
+                                what=f"SkillCorner physical [{target.label}]")
     except Exception as exc:
         # A live edition configured before kick-off (or before SkillCorner has processed any
         # matches) legitimately has nothing yet: skip and try again next run. Every other
@@ -132,26 +134,37 @@ def main() -> None:
         if not targets:
             raise SystemExit(f"edition {args.edition} is not a configured SkillCorner target")
 
+    from lofc.store import runs
     client = _client()
-    pulled = skipped = 0
-    for target in targets:
+    counts = {"pulled": 0, "skipped": 0}
+
+    def one(target) -> int | None:
+        rows = None
         if pull_edition(target, client, force=args.force):
-            pulled += 1
+            counts["pulled"] += 1
             frame = pd.read_parquet(physical_path(target.edition_id))
+            rows = len(frame)
             print(f"  [{target.label}] pulled: {frame['player_id'].nunique()} players, "
                   f"{len(frame.columns)} columns")
         else:
-            skipped += 1
+            counts["skipped"] += 1
             if not is_live(target):
                 print(f"  [{target.label}] already present, skipped")
         for phase in ("tip", "otip"):
             if pull_split(target, client, phase, force=args.force):
                 print(f"  [{target.label}] {phase} pulled")
+        return rows
+
+    # One edition failing must not stop the others.
+    failures = runs.for_each_league("Pull SkillCorner", targets, label=lambda t: t.label,
+                                    keys=lambda t: (t.competition_id, t.season_id), fn=one)
+    pulled, skipped = counts["pulled"], counts["skipped"]
     note = (f" | live season {settings.live_season_id} always re-pulled"
             if any(is_live(t) for t in targets)
             else " | no live season configured (all skip-if-exists)")
     print(f"Done: {pulled} pulled, {skipped} skipped "
           f"({len(targets)} editions under {skillcorner_root()}/){note}")
+    runs.finish_step("Pull SkillCorner", failures)
 
 
 if __name__ == "__main__":

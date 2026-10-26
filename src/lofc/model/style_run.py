@@ -69,22 +69,30 @@ def main() -> None:
     from lofc.model.position_shares import _linked_ids
     from lofc.store.load import get_engine
 
+    from lofc.store import runs
     engine = get_engine()
-    for target in settings.impect_targets:
+
+    def one(target) -> int:
         path = landing.averages_path(target.iteration_id)
         if not path.exists():
             print(f"{target.label}: no landed Impect file; skipped")
-            continue
+            return 0
         totals, minutes = season_totals(pd.read_parquet(path))
         ids = _linked_ids(engine, target)
         if ids is None or ids.empty:
             print(f"{target.label}: no linked players; skipped")
-            continue
+            return 0
         long = to_long(season_signals(totals, minutes), ids, target.competition_id,
                        target.season_id, minutes=minutes)
         n = write_for(engine, long, target.competition_id, target.season_id)
         print(f"{target.label}: {n:,} style signal rows "
               f"({long['player_id'].nunique():,} players)")
+        return n
+
+    failures = runs.for_each_league("Style signals", settings.impect_targets,
+                                    label=lambda t: t.label,
+                                    keys=lambda t: (t.competition_id, t.season_id), fn=one)
+    runs.finish_step("Style signals", failures)
 
 
 if __name__ == "__main__":

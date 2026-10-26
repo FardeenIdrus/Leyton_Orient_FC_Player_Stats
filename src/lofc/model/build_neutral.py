@@ -313,8 +313,11 @@ def main() -> None:
                  for t in settings.impect_targets if t.spine_source == "impect"
                  and averages_path(t.iteration_id).exists()]
 
-    total = 0
-    for label, competition_id, season_id, spine_source, target in jobs:
+    from lofc.store import runs
+    totals = {"rows": 0}
+
+    def one(job) -> int:
+        label, competition_id, season_id, spine_source, target = job
         table = (build_for_impect_league(engine, target) if spine_source == "impect"
                  else build_for(engine, competition_id, season_id))
         rankable = table[table["rankable"]]
@@ -324,16 +327,23 @@ def main() -> None:
             cov = rankable[cols].notna().any(axis=1).mean() * 100 if len(rankable) else 0
             line.append(f"{source.split('_')[-1]}: {cov:.0f}%")
         if args.write:
-            total += write_for(engine, table, competition_id, season_id)
+            totals["rows"] += write_for(engine, table, competition_id, season_id)
             line.append("written")
             if spine_source == "impect":
                 detail = build_detail_for_impect_league(engine, target)
                 line.append(f"detail {write_detail_for(engine, detail, competition_id, season_id):,}")
         print("  " + " | ".join(line))
+        return len(table)
+
+    # A league that fails keeps last week's rows; the others are rebuilt (owner, 2026-10-26).
+    failures = runs.for_each_league("Build combined table", jobs, label=lambda j: j[0],
+                                    keys=lambda j: (j[1], j[2]), fn=one)
+    total = totals["rows"]
     if args.write:
         print(f"\nplayer_metrics_neutral: wrote {total} rows across {len(jobs)} league seasons.")
     print("\nCoverage = % of rankable players with at least one value from that source.")
     print("Impect-spined leagues have 0% StatsBomb (computed/advanced) by design.")
+    runs.finish_step("Build combined table", failures)
 
 
 if __name__ == "__main__":

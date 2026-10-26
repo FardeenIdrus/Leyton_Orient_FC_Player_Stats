@@ -44,11 +44,16 @@ STAMP_FINAL = "Final"
 
 RANKABLE_MINUTES = 450
 
-_SEASON_LABELS: dict[int, str] = {317: "24/25", 318: "25/26", 319: "26/27"}
-_LEAGUE_NAMES: dict[int, str] = {
-    3: "Championship", 4: "League One", 5: "League Two", 65: "National League",
-    901: "Scottish Premiership", 902: "Scottish Championship", 903: "Premier League 2",
-}
+# League names and season labels come from the league registry (lofc/leagues.py), so a new
+# competition or season needs no edit here.
+def league_name(competition_id: int) -> str:
+    from lofc.leagues import league_name as _name
+    return _name(competition_id)
+
+
+def season_short(season_id: int) -> str:
+    from lofc.leagues import is_season_id, season_label
+    return season_label(season_id, short=True) if is_season_id(season_id) else str(season_id)
 
 _N = PlayerMetricNeutral.__table__
 _S = PlayerScorecard.__table__
@@ -290,8 +295,8 @@ def build(engine, player_id: int, competition_id: int, season_id: int) -> Report
             comp = card["objective_composite"]
             flags.append(f"Composite {comp:.2f} is below the club's 3.00 minimum standard")
 
-    league = _LEAGUE_NAMES.get(competition_id, f"Competition {competition_id}")
-    season_label = _SEASON_LABELS.get(season_id, str(season_id))
+    league = league_name(competition_id)
+    season_label = season_short(season_id)
 
     # --- how his minutes actually split across positions ------------------------------
     # The page names ONE position and scores him against that group's peers. For a
@@ -328,7 +333,7 @@ def build(engine, player_id: int, competition_id: int, season_id: int) -> Report
         benchmark = {c: float(sub[c].median()) for c in sub.columns if sub[c].notna().any()}
         squad_comps = squad["competition_id"].unique()
         if len(squad_comps) == 1:
-            benchmark_league = _LEAGUE_NAMES.get(int(squad_comps[0]))
+            benchmark_league = league_name(int(squad_comps[0]))
 
     return ReportData(
         player_name=str(row["player_name"]),

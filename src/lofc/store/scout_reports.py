@@ -41,6 +41,12 @@ from lofc.store.models import ScoutPlayerLookup, ScoutReport, ScoutSync
 # refused because the alternative -- flagging live reports as missing -- is worse.
 MIN_VOLUME_RATIO = 0.80
 
+# scout_sync gets a row every minute (the cron records unchanged runs too, so the dashboard
+# can say when the sheet was last CHECKED). Unpruned it reached 32,686 rows. Seven days is
+# ample for the freshness read, which only needs the newest row; the newest changed row is
+# kept regardless of age, so "last changed" never disappears.
+SYNC_HISTORY_DAYS = 7
+
 REPORT_COLUMNS = [
     "submission_id", "scout", "observation", "report_type", "player_name", "club_name",
     "foot", "home_team", "away_team", "fixture_date", "comments", "positions_played",
@@ -167,6 +173,30 @@ def load_player_lookup(engine, frame: pd.DataFrame, allow_shrink: bool = False) 
         return incoming
 
 
+def _prune_sync_history(conn) -> int:
+    """Delete sync rows older than SYNC_HISTORY_DAYS, keeping the two the platform reads.
+
+    The newest row (the change detector's digest and the dashboard's "last checked" time)
+    and the newest CHANGED row (the dashboard's "last actually changed" time) survive
+    whatever their age. Returns how many rows were deleted.
+    """
+    table = ScoutSync.__table__
+    keep = [i for i in (
+        conn.execute(select(func.max(table.c.id))).scalar(),
+        conn.execute(select(func.max(table.c.id)).where(table.c.changed.is_(True))).scalar(),
+    ) if i is not None]
+    cutoff = dt.datetime.now() - dt.timedelta(days=SYNC_HISTORY_DAYS)
+    result = conn.execute(delete(table).where(
+        table.c.synced_at < cutoff, table.c.id.not_in(keep)))
+    return result.rowcount
+
+
+def prune_sync_history(engine) -> int:
+    """Public wrapper for the retention rule, so it can be run on its own."""
+    with engine.begin() as conn:
+        return _prune_sync_history(conn)
+
+
 def record_sync(engine, digest: str, reports_seen: int, reports_written: int,
                 changed: bool = True) -> None:
     """Record that a sync completed, whether or not anything moved.
@@ -175,11 +205,16 @@ def record_sync(engine, digest: str, reports_seen: int, reports_written: int,
     changed for three hours" and "the sync died three hours ago" are indistinguishable
     without it. That is register P14 in miniature, and the reason this is the first table
     in the platform that can state its own freshness.
+
+    The cron runs this every minute, so the table would grow by ~1,440 rows a day. Each
+    write therefore also prunes history older than SYNC_HISTORY_DAYS, in the same
+    transaction. Nothing reads further back than the newest row and newest change.
     """
     with engine.begin() as conn:
         conn.execute(insert(ScoutSync.__table__).values(
             digest=digest, synced_at=dt.datetime.now(), reports_seen=reports_seen,
             reports_written=reports_written, changed=changed))
+        _prune_sync_history(conn)
 
 
 def last_digest(engine) -> str | None:
