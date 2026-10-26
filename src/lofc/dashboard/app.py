@@ -535,11 +535,9 @@ def main() -> None:
     if "style_lab" in pages:
         nav_sections["Lab"] = [pages["style_lab"]]
     st.navigation(nav_sections).run()
-
-    st.caption(f"Impect event data (+ SkillCorner physical), {season_name_for(season_id)} season. Player market values are "
-               "real (Transfermarkt, EFL only — Scottish/PL2 have none, so those players are scouted on quality "
-               "and style but can't be affordability-gated). Wages and the club identity profile are clearly-"
-               "labelled modelled estimates, swappable for the club's real data with no code change.")
+    # No page-wide footer (owner, 2026-10-26): the old one repeated the "wages are modelled"
+    # fact the affordability switch already states, and named a retired feature. This spot is
+    # reserved for the per-source "data as of" line (TASKS 2.2).
 
 
 if __name__ == "__main__":
