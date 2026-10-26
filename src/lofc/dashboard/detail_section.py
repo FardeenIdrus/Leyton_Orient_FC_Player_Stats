@@ -315,6 +315,23 @@ def split_physical(table: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     return rated.reset_index(drop=True), other.reset_index(drop=True)
 
 
+def physical_gap(league_has_physical: bool, position: str) -> str | None:
+    """The one line shown when a card has no physical data: whether the league or the player
+    is missing it. Nothing for goalkeepers -- physical never counts in their rating."""
+    if position == "Goalkeeper":
+        return None
+    return "no physical data for this " + ("player" if league_has_physical else "league")
+
+
+@st.cache_data(ttl=600)
+def _league_has_physical(competition_id: int, season_id: int) -> bool:
+    from lofc.dashboard.loaders import get_engine
+    return bool(pd.read_sql(
+        "SELECT EXISTS (SELECT 1 FROM player_metrics_neutral WHERE competition_id = %(c)s "
+        "AND season_id = %(s)s AND distance_p90 IS NOT NULL) AS has",
+        get_engine(), params={"c": int(competition_id), "s": int(season_id)})["has"].iloc[0])
+
+
 def like_prefix(prefix: str) -> str:
     """A SQL LIKE pattern matching `prefix` literally (`_` is a LIKE wildcard)."""
     return prefix.replace("\\", "\\\\").replace("_", "\\_").replace("%", "\\%") + "%"
@@ -426,3 +443,8 @@ def render(row: pd.Series, neutral: pd.Series | None, league: str, key_prefix: s
                 st.dataframe(other, hide_index=True, width="stretch", column_config=cfg,
                              key=f"{key_prefix}_phys_other")
             st.caption("Per 90 minutes played. Metres per minute is a rate.")
+        else:
+            gap = physical_gap(_league_has_physical(int(row["competition_id"]),
+                                                    int(row["season_id"])), position)
+            if gap:
+                st.markdown(f"##### Physical — *{gap}*")

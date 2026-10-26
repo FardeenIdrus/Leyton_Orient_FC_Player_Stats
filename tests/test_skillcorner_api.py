@@ -12,18 +12,24 @@ def test_default_targets_map_covered_editions_to_our_leagues():
     tracked = [t for t in DEFAULT_SKILLCORNER_TARGETS if t.competition_id is not None]
     # The four EFL leagues plus Scottish Premiership (901) and Premier League 2 (903) carry
     # our competition/season keys, so their physical data joins onto those league players.
-    assert {t.competition_id for t in tracked} == {3, 4, 5, 65, 901, 903}
+    assert {t.competition_id for t in tracked} == {3, 4, 5, 65, 901, 903, 10189}
     assert all(t.season_id in {318, 319} for t in tracked)   # 2025/26 + the live 2026/27
-    # Editions with no league mapping (e.g. Irish Premier Division) are pulled but not joined.
-    untracked = [t for t in DEFAULT_SKILLCORNER_TARGETS if t.competition_id is None]
-    assert any("Irish" in t.label for t in untracked)
+    assert all(t.competition_id is not None for t in DEFAULT_SKILLCORNER_TARGETS)
+
+
+def test_irish_premier_division_maps_by_the_calendar_season_rule():
+    """Calendar season 2025 is the season starting in 2025 (318); 2026 is 319 (owner,
+    2026-10-26). Edition ids from the SkillCorner licence catalogue."""
+    irish = {t.edition_id: (t.competition_id, t.season_id)
+             for t in DEFAULT_SKILLCORNER_TARGETS if "Irish" in t.label}
+    assert irish == {1081: (10189, 318), 1416: (10189, 319)}
 
 
 def test_live_season_covers_every_physically_tracked_league():
     """A league missing from the live season silently loses its Physical dimension."""
     live = [t for t in DEFAULT_SKILLCORNER_TARGETS if t.season_id == 319]
-    assert {t.competition_id for t in live} == {3, 4, 5, 65, 901, 903}
-    assert len(live) == 6
+    assert {t.competition_id for t in live} == {3, 4, 5, 65, 901, 903, 10189}
+    assert len(live) == 7
 
 
 def test_scottish_championship_is_deliberately_not_a_skillcorner_target():

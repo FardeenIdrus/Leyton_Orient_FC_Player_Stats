@@ -210,7 +210,10 @@ DEFAULT_SKILLCORNER_TARGETS: list[SkillCornerTarget] = [
                       competition_id=903, season_id=318),
     SkillCornerTarget(edition_id=1213, label="Scottish Premiership 2025/26",
                       competition_id=901, season_id=318),
-    SkillCornerTarget(edition_id=1081, label="Irish Premier Division 2025"),
+    # Irish Premier Division: a calendar-year league, so 2025 is the season starting in 2025
+    # (318) and 2026 the one starting in 2026 (319) -- the same rule as its Impect seasons.
+    SkillCornerTarget(edition_id=1081, label="Irish Premier Division 2025",
+                      competition_id=10189, season_id=318),
     # --- 2026/27 (season_id 319): the LIVE season. ------------------------------------
     # Edition ids verified against the SkillCorner catalogue on 2026-08-10. Like the Impect
     # targets these are safe to configure before kick-off: the live season is always
@@ -232,6 +235,8 @@ DEFAULT_SKILLCORNER_TARGETS: list[SkillCornerTarget] = [
                       competition_id=903, season_id=319),
     SkillCornerTarget(edition_id=1683, label="Scottish Premiership 2026/27",
                       competition_id=901, season_id=319),
+    SkillCornerTarget(edition_id=1416, label="Irish Premier Division 2026",
+                      competition_id=10189, season_id=319),
 ]
 
 

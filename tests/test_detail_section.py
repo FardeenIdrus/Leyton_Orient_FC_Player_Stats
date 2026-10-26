@@ -274,3 +274,24 @@ def test_card_headings_say_what_counts():
     assert "Physical — in the rating" in src_ds and "Other physical metrics" in src_ds
     assert "Performance — in the rating" in src_p
     assert "the stats behind the composite" not in src_p
+
+
+# --- a card with no physical data says why, in one line (owner, 2026-10-26) ---------------
+
+def test_no_physical_line_names_the_league_when_the_league_has_none():
+    from lofc.dashboard.detail_section import physical_gap
+    assert physical_gap(league_has_physical=False, position="Centre Back") == \
+        "no physical data for this league"
+
+
+def test_no_physical_line_names_the_player_when_the_league_has_it():
+    from lofc.dashboard.detail_section import physical_gap
+    assert physical_gap(league_has_physical=True, position="Winger") == \
+        "no physical data for this player"
+
+
+def test_goalkeepers_get_no_line():
+    """Physical never counts for goalkeepers, so a missing section says nothing."""
+    from lofc.dashboard.detail_section import physical_gap
+    assert physical_gap(league_has_physical=True, position="Goalkeeper") is None
+    assert physical_gap(league_has_physical=False, position="Goalkeeper") is None
