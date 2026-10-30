@@ -32,9 +32,18 @@ def new_run_id() -> str:
     return dt.datetime.utcnow().strftime("run-%Y%m%dT%H%M%SZ")
 
 
+_MANUAL_RUN_ID: str | None = None
+
+
 def current_run_id() -> str:
-    """The run this process belongs to; a manual run of one step gets its own id."""
-    return os.environ.get(RUN_ID_ENV) or ("manual-" + new_run_id()[4:])
+    """The run this process belongs to; a manual run of one step gets ONE id, made the first
+    time it is asked for (not re-made from the clock on every call)."""
+    global _MANUAL_RUN_ID
+    if os.environ.get(RUN_ID_ENV):
+        return os.environ[RUN_ID_ENV]
+    if _MANUAL_RUN_ID is None:
+        _MANUAL_RUN_ID = "manual-" + new_run_id()[4:]
+    return _MANUAL_RUN_ID
 
 
 def error_text(exc: BaseException) -> str:

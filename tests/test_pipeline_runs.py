@@ -181,3 +181,13 @@ def test_ctrl_c_still_stops_the_run(recorded):
         raise KeyboardInterrupt
     with pytest.raises(KeyboardInterrupt):
         runs.for_each_league("s", [1], label=str, keys=lambda x: (1, 1), fn=fn)
+
+
+def test_a_manual_step_keeps_one_run_id_for_all_its_leagues(monkeypatch):
+    """Found 2026-10-30: a manual `python -m lofc.ingest.impect` recorded 38 run ids for one
+    pull, because the id was re-made from the clock on every call."""
+    monkeypatch.delenv(runs.RUN_ID_ENV, raising=False)
+    first = runs.current_run_id()
+    import time
+    time.sleep(1.1)
+    assert runs.current_run_id() == first
