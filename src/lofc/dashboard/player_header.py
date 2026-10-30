@@ -89,6 +89,16 @@ _CSS = f"""
 
 
 
+def with_current_club(row: pd.Series, clubs: pd.DataFrame) -> pd.Series:
+    """A copy of `row` carrying his current club, looked up by player_id -- so the card shows
+    it however he was opened (table, search, watchlist)."""
+    out = row.copy()
+    match = clubs.loc[clubs["player_id"] == row.get("player_id"), "current_club"] \
+        if not clubs.empty else pd.Series(dtype=object)
+    out["current_club"] = match.iloc[0] if not match.empty else None
+    return out
+
+
 def club_text(team: str, current) -> str:
     """The club his stats are from, plus where he is now when that differs (Impect's current
     club): "Dundalk FC · now FC Portsmouth". Both names are Impect's, so they compare as-is."""

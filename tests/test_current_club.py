@@ -83,3 +83,23 @@ def test_the_pipeline_records_current_clubs_after_the_style_signals():
     current = next(i for i, n in enumerate(names) if n.startswith("Current club"))
     style = next(i for i, n in enumerate(names) if n.startswith("Style signals"))
     assert current == style + 1
+
+
+def test_the_card_gets_the_current_club_whichever_way_he_was_opened():
+    """Found 2026-10-30: opened from the search box, the card's row came from the search
+    index, which carries no current club -- so "now" never showed there."""
+    from lofc.dashboard.player_header import with_current_club
+    row = pd.Series({"player_id": 2_000_161_271, "team_name": "Dundalk FC"})
+    clubs = pd.DataFrame({"player_id": [2_000_161_271], "current_club": ["FC Portsmouth"]})
+    assert with_current_club(row, clubs)["current_club"] == "FC Portsmouth"
+    assert row.get("current_club") is None                      # the caller's row is untouched
+    assert pd.isna(with_current_club(row, clubs.iloc[0:0]).get("current_club"))
+
+
+def test_the_table_label_never_changes_the_club_the_card_reads():
+    """The table's Club text is built on its own column: the card must not receive
+    'Dundalk FC · now FC Portsmouth' as the club and add '· now' a second time."""
+    from lofc.dashboard.tabs.players import club_column
+    view = pd.DataFrame({"team_name": ["Dundalk FC"], "current_club": ["FC Portsmouth"]})
+    assert club_column(view).tolist() == ["Dundalk FC · now FC Portsmouth"]
+    assert view["team_name"].tolist() == ["Dundalk FC"]

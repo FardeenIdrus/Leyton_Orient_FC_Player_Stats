@@ -23,7 +23,8 @@ from lofc.dashboard.formatting import numeric_or_dash
 from lofc.dashboard.units import season_total
 from lofc.dashboard.labels import LABELS, _metric_source, metric_label
 from lofc.dashboard.loaders import (
-    get_engine, headline, league_names, load_assessment_status, load_current_form,
+    get_engine, headline, league_names, load_assessment_status, load_current_clubs,
+    load_current_form,
     competition_name_by_id, load_loan_for_player, load_other_league_seasons,
     load_position_shares,
     load_scorecard_percentiles,
@@ -470,6 +471,15 @@ def band_colour(value) -> str:
     return f"background-color: {fill}; color: #1A1A1A"
 
 
+def club_column(view: pd.DataFrame) -> pd.Series:
+    """The table's Club text: "Dundalk FC · now FC Portsmouth" where he has moved. Built as a
+    new series -- `team_name` itself is left alone, because the card reads it."""
+    if "current_club" not in view.columns:
+        return view["team_name"]
+    return pd.Series([player_header.club_text(t, c)
+                      for t, c in zip(view["team_name"], view["current_club"])], index=view.index)
+
+
 def players_table_columns(lens: bool, show_money: bool, loan_column: bool) -> list[str]:
     """The ranked list's columns, in order. Contract, months left and peer rank are on the
     player card, not here."""
@@ -578,7 +588,8 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
     # Loan status is deliberately NOT scoped to the season being viewed: whether he is
     # on loan today is what a January decision turns on, whichever season's numbers
     # are on screen.
-    player_header.render(row, shares, load_loan_for_player(pid))
+    player_header.render(player_header.with_current_club(row, load_current_clubs()), shares,
+                         load_loan_for_player(pid))
 
     # Playing style (model/styles.py): pills under the header, then the Style fit bars.
     if "strong_styles" in row.index:
@@ -1194,10 +1205,7 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             view["Est. wage"] = numeric_or_dash(view["estimated_weekly_wage_gbp"] / 1000, "£{:.1f}k")
             view["Below fair value"] = numeric_or_dash(view["undervaluation_pct"] * 100, "{:.0f}%")
 
-        if "current_club" in view.columns:
-            view["team_name"] = [player_header.club_text(t, c) for t, c in
-                                 zip(view["team_name"], view["current_club"])]
-        table = view.rename(columns={
+        table = view.assign(team_name=club_column(view)).rename(columns={
             "player_name": "Player", "team_name": "Club", "league": "League",
             rank_column: "Composite", "performance_band": "Performance",
             "physical_band": "Physical",
