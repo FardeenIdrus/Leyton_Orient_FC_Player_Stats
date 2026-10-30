@@ -39,7 +39,30 @@ def _keys(entries):
 
 def test_groups_are_the_four_short_sections(entries):
     assert {e["group"] for e in entries} == set(gd.GROUPS)
-    assert gd.GROUPS == ["Performance", "Physical", "Packing zones", "Impect scores"]
+    assert gd.GROUPS == ["Performance", "Physical", "Packing zones", "Playing styles",
+                         "Impect scores"]
+
+
+def test_every_style_signal_has_an_entry_built_from_impects_words():
+    """The Playing styles tab (2026-10-30): one entry per signal any style uses, giving the
+    Impect metrics it is built from and Impect's definition of each."""
+    from lofc.model import styles as st
+    defs = {"PXT_DRIBBLE": {"label": "Dribbles", "definition": "The change in goal threat."},
+            "SUCCESSFUL_PASSES_BY_ACTION_LOW_CROSS": {
+                "label": "Successful Passes", "definition": "Any pass that reaches a teammate.",
+                "context_label": "Low Cross", "context_definition": "A low cross from wide."}}
+    by_key = {e["key"]: e for e in gd.glossary_entries(defs)}
+    used = {s for g in st.STYLES.values() for styles in g.values() for sigs in styles.values()
+            for s in sigs}
+    assert {f"style.{s}" for s in used} <= set(by_key)
+    carry = by_key["style.carry_value_p90"]
+    assert carry["group"] == "Playing styles" and carry["source"] == "Impect"
+    assert "**Built from (Impect):**" in carry["text"]
+    assert "**Dribbles**: The change in goal threat." in carry["text"]
+    cross = by_key["style.cross_attempts_per_touch"]["text"]
+    assert "**Low Cross**: A low cross from wide." in cross
+    assert "measures success" in by_key["style.xa_p90"]["text"]
+    assert "measures success" not in cross
 
 
 def test_every_scored_metric_has_an_entry(entries):

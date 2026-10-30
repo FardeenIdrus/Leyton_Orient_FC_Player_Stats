@@ -13,7 +13,7 @@ def _winger():
     return {"position_group": "Winger", "style_label": "Wide · 1v1",
             "strong_styles": ["Wide", "1v1"], "leans_styles": [],
             "fit.In behind": 52.3, "fit.Pocket": 9.8, "fit.Wide": 92.4,
-            "fit.1v1": 90.2, "fit.Creator": 55.3}
+            "fit.1v1": 90.2, "fit.Creator": 55.3, "fit.Goalscorer": 40.0}
 
 
 def test_strong_pills_are_solid_and_leans_pills_are_outlined():

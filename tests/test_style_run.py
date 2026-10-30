@@ -32,7 +32,7 @@ def test_totals_are_value_times_match_share_summed_over_position_rows():
 def test_signals_come_from_the_season_totals():
     totals, minutes = style_run.season_totals(_raw())
     sig = style_run.season_signals(totals, minutes)
-    assert sig.loc[7, "shots_per_touch"] == pytest.approx(8 / 90)
+    assert sig.loc[7, "np_shots_per_touch"] == pytest.approx(8 / 90)
     assert sig.loc[7, "aerial_contested_p90"] == pytest.approx((3 + 2) * 90 / 270)
 
 

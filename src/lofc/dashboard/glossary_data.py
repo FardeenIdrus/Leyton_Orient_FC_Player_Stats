@@ -1,6 +1,6 @@
 """The glossary's content: one short entry for every metric the platform shows.
 
-Four groups -- Performance, Physical, Packing zones, Impect scores. Wording rules:
+Five groups -- Performance, Physical, Packing zones, Playing styles, Impect scores. Wording rules:
   * the provider's own definition where one exists (Impect's catalogue, read from Postgres;
     SkillCorner's published articles), first sentence only outside Performance;
   * facts we verified ourselves are stated plainly (e.g. HSR is 20-25 km/h and excludes
@@ -20,7 +20,7 @@ from lofc.dashboard.labels import clean_definition, metric_glossary
 from lofc.ingest.impect_detail import (AVAILABILITY, FAMILY_LABELS, MAP_FAMILIES, SCORES,
                                        ZONE_FAMILIES, ZONE_LABELS, ZONES)
 
-GROUPS = ["Performance", "Physical", "Packing zones", "Impect scores"]
+GROUPS = ["Performance", "Physical", "Packing zones", "Playing styles", "Impect scores"]
 
 NOT_PUBLISHED = "Not published by {provider} in the data or documentation we hold."
 
@@ -120,12 +120,39 @@ def glossary_entries(defs: dict | None = None) -> list[dict]:
                     "source": "Impect",
                     "text": first_sentence(text) if text else NOT_PUBLISHED.format(provider="Impect")})
 
+    out += style_entries(defs)
+
     for key in ("offensive", "defensive"):
         side = "attacking" if key == "offensive" else "defensive"
         out.append({"key": f"score.{key}", "group": "Impect scores", "label": SCORES[key][1],
                     "source": "Impect",
                     "text": f"Impect's rating of his {side} actions. Impect does not publish "
                             "how it is calculated."})
+    return out
+
+
+def style_entries(defs: dict) -> list[dict]:
+    """Playing styles: one entry per signal a style uses -- the Impect metrics it is built
+    from, then Impect's definition of each metric and of each context (e.g. Low Cross), once."""
+    from lofc.model import styles as st
+    used = [s for g in st.STYLES.values() for styles in g.values() for sigs in styles.values()
+            for s in sigs]
+    out = []
+    for sig in dict.fromkeys(used):
+        built, columns = st.SIGNAL_SOURCES[sig]
+        parts, seen = [f"**Built from (Impect):** {built}"], set()
+        for col in columns:
+            d = defs.get(col) or {}
+            for label, text in ((d.get("label"), d.get("definition")),
+                                (d.get("context_label"), d.get("context_definition"))):
+                if label and text and label not in seen:
+                    seen.add(label)
+                    parts.append(f"**{label}**: {clean_definition(text)}")
+        if sig in st.QUALITY_SIGNALS:
+            parts.append("⚑ This signal measures success, not only what he attempts.")
+        out.append({"key": f"style.{sig}", "group": "Playing styles",
+                    "label": st.SIGNAL_LABELS[sig], "source": "Impect",
+                    "text": "\n\n".join(parts)})
     return out
 
 

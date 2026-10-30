@@ -19,24 +19,26 @@ from lofc.model import styles as st
 # One plain sentence per style, describing what its signals measure. Wording to be confirmed
 # with the Head of Recruitment; the signals themselves are the definition.
 STYLE_DESCRIPTIONS = {
-    "Attacking": "Gets forward into advanced wide areas and supplies the box",
+    "Attacking": "Gets forward, crosses and creates chances",
     "Defending": "Stays in the full-back zone and engages in ground duels",
     "Inside": "Receives in central lanes and between the lines",
     "Aerial": "Contests a lot of headers, and wins them",
-    "Ball-playing": "Looks to pass long and forward rather than safe",
+    "Ball-playing": "Passes forward and on the ground, and breaks lines",
     "Aggressive": "Steps out to press and to contest ground duels",
-    "Destroyer": "Contests duels and makes many defensive touches",
-    "Playmaker": "Looks to pass forward and long, into the final third",
+    "Destroyer": "Contests duels, makes defensive touches and presses",
+    "Playmaker": "Receives, and passes forward on the ground and through lines",
     "Box-to-box": "Defends and also gets into the box",
     "Runner": "Makes deep runs and arrives in the box",
     "Pocket": "Receives between the lines",
+    "Dribbler": "Carries the ball and beats players",
     "In behind": "Gets on the ball behind the defence",
     "Wide": "Holds the width and receives on the touchline",
     "1v1": "Takes defenders on",
-    "Creator": "Looks to supply the box",
+    "Creator": "Crosses, supplies the box and creates chances",
+    "Goalscorer": "Shoots often, gets into the box and scores",
     "Target man": "Contests aerial duels and holds the ball up",
     "Presser": "Presses the opponent's build-up and counter-presses",
-    "Scorer": "Shoots often and gets on the ball in the box",
+    "Scorer": "Shoots often, gets into the box and scores",
 }
 
 _GROUP_LABELS = {"Where": "Where he plays", "What": "What he does"}
@@ -113,8 +115,8 @@ _PAGE_CSS = """<style>
 
 
 def _steps_html() -> str:
-    steps = [("1 · Signals", "What he <b>attempts</b> and <b>where</b> he plays, e.g. his share "
-              "of receptions out wide. Not whether it worked."),
+    steps = [("1 · Signals", "Mostly what he <b>attempts</b> and <b>where</b> he plays, e.g. his "
+              "share of receptions out wide. ⚑ marks the ones that measure success."),
              ("2 · Compared with peers", "Each signal becomes a percentile (0–100) against the "
               "<b>same position, league and season</b>, 450+ minutes."),
              ("3 · Fit", "A style's <b>fit</b> is the average of its signals' percentiles. His "
@@ -161,8 +163,8 @@ def render(season_id: int, season_label: str) -> None:
     from lofc.dashboard.loaders import load_style_inputs
 
     st_.markdown("### How playing styles work")
-    st_.markdown("A style describes **how a player plays**, not how well. A poor playmaker is "
-                 "still a playmaker. Styles never change a player's rating.")
+    st_.markdown("A style describes **how a player plays**. Styles never change a player's "
+                 "rating.")
     st_.markdown(_PAGE_CSS + _steps_html(), unsafe_allow_html=True)
 
     st_.markdown("##### What the labels mean")
@@ -200,7 +202,6 @@ def render(season_id: int, season_label: str) -> None:
 
     st_.markdown("##### Styles and their signals")
     st_.markdown(_table_html(style_table(group)), unsafe_allow_html=True)
-    st_.markdown('<div class="sr-note">⚑ = measures success, used only where Impect offers no '
-                 'alternative. Team style affects receptions: a winger in a direct side receives '
+    st_.markdown('<div class="sr-note">⚑ = measures success, not only what he attempts. Team style affects receptions: a winger in a direct side receives '
                  'more balls in behind. Defensive and central midfielders are compared together '
                  'for style.</div>', unsafe_allow_html=True)

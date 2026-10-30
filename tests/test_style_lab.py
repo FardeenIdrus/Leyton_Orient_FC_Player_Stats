@@ -59,7 +59,7 @@ def test_the_checks_report_each_signals_correlation_with_quality_and_flag_qualit
     row = checks.set_index("Signal").loc[st.SIGNAL_LABELS["dribbles_per_touch"]]
     assert row["Quality metric"] == "yes"
     assert -1 <= row["Correlation with rating"] <= 1
-    assert set(checks["Style"]) == {"In behind", "Pocket", "Wide", "1v1", "Creator"}
+    assert set(checks["Style"]) == {"In behind", "Pocket", "Wide", "1v1", "Creator", "Goalscorer"}
 
 
 def test_central_midfield_lab_takes_defensive_and_central_midfielders():

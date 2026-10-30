@@ -1,19 +1,24 @@
-"""Playing-style labels: WHAT a player tries and WHERE he plays -- never how well.
+"""Playing-style labels: WHAT a player tries and WHERE he plays -- and, since 2026-10-30, a
+few outcomes the Head of Recruitment asked for.
 
-The Head of Recruitment's 24 styles (owner, 2026-10-23). A poor playmaker still ATTEMPTS a
-playmaker's passes, so every signal is built from attempts (successful + unsuccessful +
-neutral), shares of the player's own actions, or pitch locations. Quality is used only where
-no alternative exists, and named in QUALITY_SIGNALS: aerial duels WON (for "Aerial"), and
-successful dribbles (Impect records no failed dribbles).
+The Head of Recruitment's 24 styles (owner, 2026-10-23), plus Dribbler for attacking
+midfielders, Goalscorer for wingers and his additions of 2026-10-30 (Playing_Profiles_Tweaks_2). A poor playmaker
+still ATTEMPTS a playmaker's passes, so most signals are attempts (successful + unsuccessful
++ neutral), shares of the player's own actions, or pitch locations. The owner accepted the
+additions WITH their quality signals (assists, xA, goals, xG, carry value, line-breaking
+passes, receptions): every signal that measures success is named in QUALITY_SIGNALS and
+flagged on the reference page and in the glossary.
+
+Closest Impect metrics, where the request had no exact match (checked against Impect's
+catalogue, 2026-10-30): "short passes" -> low passes (Impect: a flat pass, any length; it has
+no pass length); "line-breaking passes" -> passes that bypass opponents (completed only);
+"received passes" -> receptions that bypass opponents (Impect counts no other receptions);
+"attempted dribbles" -> successful dribbles (Impect records no failed dribble count);
+"ball carry value" -> PxT Dribbles; "non-penalty / open-play assists" -> assists outside set
+pieces (Impect has no penalty split for assists); "open-play xA" -> all xA (no split).
 
 Why not Impect's own 32 player profiles: measured on 2025/26, several track quality -- Deep-
-Lying Playmaker correlates 0.69 with our Performance rating, Ball-Playing CB 0.61 -- so a
-poor playmaker would fail the label he plays to. "Passes per 90" was rejected for the same
-reason (0.67): better players see more of the ball.
-
-Every signal below passed, on 2025/26 (3,356 rated players, 7 leagues): correlation with the
-Performance rating under 0.3 (the two quality signals 0.21 and 0.28), no two signals of a
-style over 0.7, coverage 100% in every league.
+Lying Playmaker correlates 0.69 with our Performance rating, Ball-Playing CB 0.61.
 
 Pure: no database, no Streamlit. `style_run` computes and stores the signals; the dashboard
 applies `assign_styles`, so a threshold change is instant.
@@ -91,8 +96,18 @@ SIGNALS = {
     "long_pass_attempt_share": lambda t, m: _share(attempts(t, "_BY_ACTION_DIAGONAL_PASS") + attempts(t, "_BY_ACTION_CHIPPED_PASS"), attempts(t, "")),
     "forward_pass_attempt_share": lambda t, m: _share(attempts(t, "_TO_PITCH_POSITION_FINAL_THIRD") + attempts(t, "_TO_PITCH_POSITION_OPPONENT_BOX"), attempts(t, "")),
     "box_pass_attempts_per_touch": lambda t, m: _share(attempts(t, "_TO_PITCH_POSITION_OPPONENT_BOX"), _col(t, _OT)),
-    "shots_per_touch": lambda t, m: _share(_col(t, "SHOT_AT_GOAL_NUMBER"), _col(t, _OT)),
+    "cross_attempts_per_touch": lambda t, m: _share(attempts(t, "_BY_ACTION_LOW_CROSS") + attempts(t, "_BY_ACTION_HIGH_CROSS"), _col(t, _OT)),
+    "low_pass_attempt_share": lambda t, m: _share(attempts(t, "_BY_ACTION_LOW_PASS"), attempts(t, "")),
+    "line_breaking_pass_share": lambda t, m: _share(_col(t, "BYPASSED_OPPONENTS_NUMBER") - _col(t, "BYPASSED_OPPONENTS_NUMBER_BY_ACTION_DRIBBLE"), attempts(t, "")),
+    "np_shots_per_touch": lambda t, m: _share(_col(t, "SHOT_AT_GOAL_NUMBER") - _col(t, "SHOT_AT_GOAL_NUMBER_BY_ACTION_PENALTY_KICK"), _col(t, _OT)),
     "dribbles_per_touch": lambda t, m: _share(_col(t, "BYPASSED_OPPONENTS_NUMBER_BY_ACTION_DRIBBLE"), _col(t, _OT)),
+    # what comes of it (outcomes the Head of Recruitment asked for, 2026-10-30), per 90
+    "assists_non_set_piece_p90": lambda t, m: _p90(_col(t, "ASSISTS") - _col(t, "ASSISTS_AT_PHASE_SET_PIECE"), m),
+    "xa_p90": lambda t, m: _p90(_col(t, "EXPECTED_GOAL_ASSISTS"), m),
+    "receptions_bypassing_p90": lambda t, m: _p90(_col(t, "BYPASSED_OPPONENTS_RECEIVING_NUMBER"), m),
+    "carry_value_p90": lambda t, m: _p90(_col(t, "PXT_DRIBBLE"), m),
+    "np_goals_p90": lambda t, m: _p90(_col(t, "GOALS") - _col(t, "GOALS_BY_ACTION_PENALTY_KICK"), m),
+    "np_xg_p90": lambda t, m: _p90(_col(t, "SHOT_XG") - _col(t, "SHOT_XG_BY_ACTION_PENALTY_KICK"), m),
     # what he does without the ball (involvement, per 90)
     "defensive_touches_p90": lambda t, m: _p90(_col(t, "DEFENSIVE_TOUCHES"), m),
     "ground_contested_p90": lambda t, m: _p90(_col(t, "WON_GROUND_DUELS") + _col(t, "LOST_GROUND_DUELS"), m),
@@ -119,8 +134,17 @@ SIGNAL_LABELS = {
     "long_pass_attempt_share": "Long and diagonal passes, share of his attempts",
     "forward_pass_attempt_share": "Passes into the final third, share of his attempts",
     "box_pass_attempts_per_touch": "Passes into the box attempted, per touch",
-    "shots_per_touch": "Shots attempted, per touch",
+    "cross_attempts_per_touch": "Crosses attempted, per touch",
+    "low_pass_attempt_share": "Low passes, share of his attempts",
+    "line_breaking_pass_share": "Passes that bypass opponents, share of his attempts",
+    "np_shots_per_touch": "Non-penalty shots, per touch",
     "dribbles_per_touch": "Successful dribbles, per touch",
+    "assists_non_set_piece_p90": "Assists outside set pieces per 90",
+    "xa_p90": "Expected assists (xA) per 90",
+    "receptions_bypassing_p90": "Receptions that bypass opponents per 90",
+    "carry_value_p90": "Ball carry value (PxT) per 90",
+    "np_goals_p90": "Non-penalty goals per 90",
+    "np_xg_p90": "Non-penalty xG per 90",
     "defensive_touches_p90": "Defensive touches per 90",
     "ground_contested_p90": "Ground duels contested per 90",
     "aerial_contested_p90": "Aerial duels contested per 90",
@@ -130,38 +154,123 @@ SIGNAL_LABELS = {
     "counter_presses_p90": "Counter-presses per 90",
 }
 
-QUALITY_SIGNALS = {"aerial_won_share", "dribbles_per_touch"}
+QUALITY_SIGNALS = {"aerial_won_share", "dribbles_per_touch", "assists_non_set_piece_p90",
+                   "xa_p90", "line_breaking_pass_share", "receptions_bypassing_p90",
+                   "carry_value_p90", "np_goals_p90", "np_xg_p90"}
+
+
+def _att(suffix: str) -> list[str]:
+    return [f"{o}_PASSES{suffix}" for o in ("SUCCESSFUL", "UNSUCCESSFUL", "NEUTRAL")]
+
+
+_ATTEMPTS = "(Successful + Unsuccessful + Neutral Passes)"
+_TOUCHES = "Offensive Touches"
+_REC_NAME = "Bypassed Opponents Receiving Number"
+
+# signal -> (how it is built, in Impect's own names; the Impect columns whose definitions the
+# glossary shows). The only words that are ours are the arithmetic.
+SIGNAL_SOURCES: dict[str, tuple[str, list[str]]] = {
+    "touch_box_share": (f"{_TOUCHES} · Opponent Box ÷ {_TOUCHES}",
+                        ["OFFENSIVE_TOUCHES_IN_PITCH_POSITION_OPPONENT_BOX", _OT]),
+    "touch_wide_share": (f"{_TOUCHES} · Wide zones (left + right) ÷ {_TOUCHES}",
+                         ["OFFENSIVE_TOUCHES_IN_PACKING_ZONE_WL", "OFFENSIVE_TOUCHES_IN_PACKING_ZONE_WR", _OT]),
+    "touch_advanced_wide_share": (f"{_TOUCHES} · Wide + In-Behind Wide zones ÷ {_TOUCHES}",
+                                  ["OFFENSIVE_TOUCHES_IN_PACKING_ZONE_WL", "OFFENSIVE_TOUCHES_IN_PACKING_ZONE_IBWL", _OT]),
+    "touch_am_share": (f"{_TOUCHES} · Attacking Midfield zone ÷ {_TOUCHES}",
+                       ["OFFENSIVE_TOUCHES_IN_PACKING_ZONE_AM", _OT]),
+    "touch_fb_zone_share": (f"{_TOUCHES} · Full-back zones ÷ {_TOUCHES}",
+                            ["OFFENSIVE_TOUCHES_IN_PACKING_ZONE_FBL", _OT]),
+    "rec_in_behind_share": (f"{_REC_NAME} · In-Behind zones ÷ {_REC_NAME}",
+                            [f"{_REC}_TO_PACKING_ZONE_IB", _REC]),
+    "rec_central_share": (f"{_REC_NAME} · Centre + half-space lanes ÷ {_REC_NAME}",
+                          [f"{_REC}_TO_LANE_CENTER", f"{_REC}_TO_LANE_LEFT_HALF_SPACE", _REC]),
+    "rec_btl_share": (f"{_REC_NAME} · Between the lines ÷ {_REC_NAME}",
+                      [f"{_REC}_BY_ACTION_AVAILABILITY_BTL", _REC]),
+    "rec_wide_share": (f"{_REC_NAME} · Out wide ÷ {_REC_NAME}",
+                       [f"{_REC}_BY_ACTION_AVAILABILITY_OUT_WIDE", _REC]),
+    "rec_deep_run_share": (f"{_REC_NAME} · Deep runs ÷ {_REC_NAME}",
+                           [f"{_REC}_BY_ACTION_AVAILABILITY_FDR", _REC]),
+    "rec_holdup_share": (f"{_REC_NAME} · Hold-up play ÷ {_REC_NAME}",
+                         [f"{_REC}_BY_ACTION_HOLD_UP_PLAY", _REC]),
+    "long_pass_attempt_share": (f"{_ATTEMPTS} · Diagonal + Chipped ÷ {_ATTEMPTS}",
+                                _att("_BY_ACTION_DIAGONAL_PASS")[:1] + _att("_BY_ACTION_CHIPPED_PASS")[:1] + _att("")),
+    "forward_pass_attempt_share": (f"{_ATTEMPTS} · Final Third + Opponent Box ÷ {_ATTEMPTS}",
+                                   _att("_TO_PITCH_POSITION_FINAL_THIRD")[:1] + _att("")),
+    "box_pass_attempts_per_touch": (f"{_ATTEMPTS} · Opponent Box ÷ {_TOUCHES}",
+                                    _att("_TO_PITCH_POSITION_OPPONENT_BOX")[:1] + _att("") + [_OT]),
+    "cross_attempts_per_touch": (f"{_ATTEMPTS} · Low Cross + High Cross ÷ {_TOUCHES}",
+                                 _att("_BY_ACTION_LOW_CROSS")[:1] + _att("_BY_ACTION_HIGH_CROSS")[:1] + _att("") + [_OT]),
+    "low_pass_attempt_share": (f"{_ATTEMPTS} · Low Pass ÷ {_ATTEMPTS}",
+                               _att("_BY_ACTION_LOW_PASS")[:1] + _att("")),
+    "line_breaking_pass_share": (f"(Bypassed Opponents Number − Bypassed Opponents Number · Dribble) ÷ {_ATTEMPTS}",
+                                 ["BYPASSED_OPPONENTS_NUMBER", "BYPASSED_OPPONENTS_NUMBER_BY_ACTION_DRIBBLE"] + _att("")),
+    "np_shots_per_touch": (f"(Total Shots − Total Shots · Penalty) ÷ {_TOUCHES}",
+                           ["SHOT_AT_GOAL_NUMBER", "SHOT_AT_GOAL_NUMBER_BY_ACTION_PENALTY_KICK", _OT]),
+    "dribbles_per_touch": (f"Bypassed Opponents Number · Dribble ÷ {_TOUCHES}",
+                           ["BYPASSED_OPPONENTS_NUMBER_BY_ACTION_DRIBBLE", _OT]),
+    "assists_non_set_piece_p90": ("(Assists − Assists · Set Piece Phase), per 90",
+                                  ["ASSISTS", "ASSISTS_AT_PHASE_SET_PIECE"]),
+    "xa_p90": ("Expected Goal Assists, per 90", ["EXPECTED_GOAL_ASSISTS"]),
+    "receptions_bypassing_p90": (f"{_REC_NAME}, per 90", [_REC]),
+    "carry_value_p90": ("Dribbles (PxT), per 90", ["PXT_DRIBBLE"]),
+    "np_goals_p90": ("(Goals − Goals · Penalty), per 90",
+                     ["GOALS", "GOALS_BY_ACTION_PENALTY_KICK"]),
+    "np_xg_p90": ("(Shot-based xG − Shot-based xG · Penalty), per 90",
+                  ["SHOT_XG", "SHOT_XG_BY_ACTION_PENALTY_KICK"]),
+    "defensive_touches_p90": ("Defensive Touches, per 90", ["DEFENSIVE_TOUCHES"]),
+    "ground_contested_p90": ("(Won Ground Duels + Lost Ground Duels), per 90",
+                             ["WON_GROUND_DUELS", "LOST_GROUND_DUELS"]),
+    "aerial_contested_p90": ("(Won Aerial Duels + Lost Aerial Duels), per 90",
+                             ["WON_AERIAL_DUELS", "LOST_AERIAL_DUELS"]),
+    "aerial_won_share": ("Won Aerial Duels ÷ (Won Aerial Duels + Lost Aerial Duels)",
+                         ["WON_AERIAL_DUELS", "LOST_AERIAL_DUELS"]),
+    "presses_p90": ("Number of presses, per 90", ["NUMBER_OF_PRESSES"]),
+    "presses_build_up_p90": ("Number of presses in build-up, per 90", ["NUMBER_OF_PRESSES_BUILD_UP"]),
+    "counter_presses_p90": ("Number of presses in counter press, per 90",
+                            ["NUMBER_OF_PRESSES_COUNTER_PRESS"]),
+}
 
 # style group -> label group -> style -> signals. Most groups have one label group; wingers
 # are labelled twice, WHERE they play and WHAT they do (the Head of Recruitment's wording).
 STYLES: dict[str, dict[str, dict[str, list[str]]]] = {
     "Full Back": {"Style": {
-        "Attacking": ["touch_advanced_wide_share", "box_pass_attempts_per_touch"],
+        "Attacking": ["touch_advanced_wide_share", "box_pass_attempts_per_touch",
+                      "cross_attempts_per_touch", "assists_non_set_piece_p90", "xa_p90"],
         "Defending": ["touch_fb_zone_share", "ground_contested_p90"],
         "Inside": ["rec_central_share", "rec_btl_share"]}},
     "Centre Back": {"Style": {
         "Aerial": ["aerial_contested_p90", "aerial_won_share"],
-        "Ball-playing": ["long_pass_attempt_share", "forward_pass_attempt_share"],
+        # Long passes left Ball-playing and Playmaker (owner, 2026-10-30): they pull against
+        # low passes (r -0.53 CB, -0.60 CM), and with both almost nobody was Strong.
+        "Ball-playing": ["forward_pass_attempt_share", "low_pass_attempt_share",
+                         "line_breaking_pass_share"],
         "Aggressive": ["presses_p90", "ground_contested_p90"]}},
     "Central midfield": {"Style": {
-        "Destroyer": ["ground_contested_p90", "defensive_touches_p90"],
-        "Playmaker": ["forward_pass_attempt_share", "long_pass_attempt_share"],
+        "Destroyer": ["ground_contested_p90", "defensive_touches_p90", "presses_p90",
+                      "counter_presses_p90"],
+        "Playmaker": ["forward_pass_attempt_share", "receptions_bypassing_p90",
+                      "low_pass_attempt_share", "line_breaking_pass_share"],
         "Box-to-box": ["touch_box_share", "defensive_touches_p90"]}},
     "Attacking Mid": {"Style": {
         "Box-to-box": ["touch_box_share", "defensive_touches_p90"],
         "Runner": ["rec_deep_run_share", "touch_box_share"],
-        "Pocket": ["rec_btl_share", "touch_am_share"]}},
+        "Pocket": ["rec_btl_share", "touch_am_share"],
+        "Dribbler": ["dribbles_per_touch", "carry_value_p90"]}},
     "Winger": {
         "Where": {"In behind": ["rec_in_behind_share"],
                   "Pocket": ["rec_btl_share", "rec_central_share"],
                   "Wide": ["rec_wide_share", "touch_wide_share"]},
         "What": {"1v1": ["dribbles_per_touch"],
-                 "Creator": ["box_pass_attempts_per_touch"]}},
+                 "Creator": ["box_pass_attempts_per_touch", "cross_attempts_per_touch",
+                             "xa_p90", "touch_box_share", "assists_non_set_piece_p90"],
+                 # Requested by the Head of Recruitment; the Scorer's signals (owner, 2026-10-30)
+                 "Goalscorer": ["np_shots_per_touch", "touch_box_share", "np_goals_p90",
+                                "np_xg_p90"]}},
     "Centre Forward": {"Style": {
         "Target man": ["aerial_contested_p90", "rec_holdup_share"],
         "In behind": ["rec_in_behind_share"],
         "Presser": ["presses_build_up_p90", "counter_presses_p90"],
-        "Scorer": ["shots_per_touch", "touch_box_share"]}},
+        "Scorer": ["np_shots_per_touch", "touch_box_share", "np_goals_p90", "np_xg_p90"]}},
 }
 
 

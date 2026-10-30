@@ -20,7 +20,8 @@ def test_every_style_has_a_plain_description():
 
 def test_the_table_lists_every_style_of_the_group_with_its_signals():
     table = ref.style_table("Winger")
-    assert table["Style"].tolist() == ["In behind", "Pocket", "Wide", "1v1", "Creator"]
+    assert table["Style"].tolist() == ["In behind", "Pocket", "Wide", "1v1", "Creator",
+                                       "Goalscorer"]
     assert table["Label"].tolist()[:3] == ["Where he plays"] * 3
     wide = table.set_index("Style").loc["Wide", "Signals"]
     assert st.SIGNAL_LABELS["rec_wide_share"] in wide and st.SIGNAL_LABELS["touch_wide_share"] in wide
@@ -29,7 +30,14 @@ def test_the_table_lists_every_style_of_the_group_with_its_signals():
 def test_quality_signals_are_flagged_in_the_table():
     table = ref.style_table("Winger").set_index("Style")
     assert "⚑" in table.loc["1v1", "Signals"]
-    assert "⚑" not in table.loc["Creator", "Signals"]
+    assert "⚑" not in table.loc["Wide", "Signals"]
+    creator = table.loc["Creator", "Signals"]
+    assert st.SIGNAL_LABELS["xa_p90"] + " ⚑" in creator
+    assert st.SIGNAL_LABELS["cross_attempts_per_touch"] + " ⚑" not in creator
+
+
+def test_the_new_dribbler_style_is_on_the_page():
+    assert "Dribbler" in ref.style_table("Attacking Mid")["Style"].tolist()
 
 
 def test_a_single_group_position_shows_no_label_column_values():
