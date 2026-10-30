@@ -452,3 +452,6 @@ bash scripts/test_db_backup.sh
 # Database integrity check: orphan player_ids, key duplicates, possible duplicate identities (read-only; exit 1 on orphans/duplicates)
 docker compose exec -T app python -m lofc.store.integrity
 # Weekly VACUUM (ANALYZE) of the pipeline-rewritten tables, server cron Sun 04:00 UTC; tests run without Docker: bash scripts/test_db_maintenance.sh
+
+# Current club: where each player is NOW (Impect currentSquadId), shown as "Dundalk FC · now FC Portsmouth". Display only. Needs the player lists + club names landed by `python -m lofc.ingest.impect`
+docker compose exec -T app python -m lofc.model.current_club

@@ -677,6 +677,17 @@ def load_style_inputs(season_id: int) -> pd.DataFrame:
     return base.merge(wide, on=["player_id", "competition_id"], how="left")
 
 
+@st.cache_data(ttl=600)
+def load_current_clubs() -> pd.DataFrame:
+    """player_id -> `current_club`: where he is NOW (Impect), named clubs only. Empty if the
+    table is not there yet, so the page never fails over a display extra."""
+    try:
+        return pd.read_sql("SELECT player_id, club_name AS current_club FROM player_current_club "
+                           "WHERE club_name IS NOT NULL", get_engine())
+    except Exception:                                         # noqa: BLE001
+        return pd.DataFrame(columns=["player_id", "current_club"])
+
+
 @st.cache_data(ttl=300)
 def load_style_labels(season_id: int) -> pd.DataFrame:
     """Every player's playing-style labels for a season (model/styles.py): `style_label`,

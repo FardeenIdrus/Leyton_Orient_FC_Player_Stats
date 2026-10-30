@@ -60,6 +60,8 @@ def test_impect_pull(monkeypatch, quiet_record):
     seen = []
     monkeypatch.setattr(m, "pull_iteration", _fail_on_second(seen, lambda t: t.label))
     monkeypatch.setattr(m, "pull_scores", lambda *a, **k: False)
+    monkeypatch.setattr(m, "pull_players", lambda *a, **k: False)
+    monkeypatch.setattr(m, "fetch_squad_names", lambda *a, **k: {})
     _assert_partial(m.main, seen, quiet_record)
 
 

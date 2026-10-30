@@ -999,6 +999,18 @@ class PlayerStyleSignal(Base):
     value: Mapped[float] = mapped_column(Float)
 
 
+class PlayerCurrentClub(Base):
+    """Each player's club NOW, from Impect's `currentSquadId` (`model/current_club.py`).
+    The club on a stats row is the club of that league-season; this is where he is today.
+    `club_name` is empty where Impect names the club in no season we can see. Display only."""
+    __tablename__ = "player_current_club"
+
+    player_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    impect_squad_id: Mapped[int] = mapped_column(Integer)
+    club_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class PipelineRun(Base):
     """One row per pipeline step, and per league inside a league-by-league step.
 

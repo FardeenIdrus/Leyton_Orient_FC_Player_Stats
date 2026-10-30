@@ -201,6 +201,8 @@ def test_the_impect_pull_reads_the_fresh_catalogue_before_choosing_what_to_pull(
     pulled = []
     monkeypatch.setattr(ing, "pull_iteration", lambda t, tok, force=False: pulled.append(t.iteration_id) or False)
     monkeypatch.setattr(ing, "pull_scores", lambda t, tok, force=False: False)
+    monkeypatch.setattr(ing, "pull_players", lambda t, tok, force=False: False)
+    monkeypatch.setattr(ing, "fetch_squad_names", lambda ids, tok: {})
     monkeypatch.setattr(sys, "argv", ["impect"])
     ing.main()
     assert 2999 in pulled and calls["n"] == 2

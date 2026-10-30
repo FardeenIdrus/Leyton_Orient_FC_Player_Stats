@@ -1194,6 +1194,9 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             view["Est. wage"] = numeric_or_dash(view["estimated_weekly_wage_gbp"] / 1000, "£{:.1f}k")
             view["Below fair value"] = numeric_or_dash(view["undervaluation_pct"] * 100, "{:.0f}%")
 
+        if "current_club" in view.columns:
+            view["team_name"] = [player_header.club_text(t, c) for t, c in
+                                 zip(view["team_name"], view["current_club"])]
         table = view.rename(columns={
             "player_name": "Player", "team_name": "Club", "league": "League",
             rank_column: "Composite", "performance_band": "Performance",

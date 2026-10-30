@@ -44,7 +44,7 @@ from lofc.dashboard.controls import synced_budget, synced_min_minutes, synced_wa
 from lofc.dashboard.loaders import (
     available_seasons, get_engine, league_names, load_candidates, load_metric_values,
     load_percentiles, load_scorecards, load_scorecards_archetype, load_wage_framework,
-    load_loan_status, load_style_labels, max_minutes, player_context_lookup, player_names,
+    load_current_clubs, load_loan_status, load_style_labels, max_minutes, player_context_lookup, player_names,
     position_and_league_for)
 from lofc.dashboard.seasons import (
     CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, LOAN_ANY, LOAN_FILTERS, contract_mask,
@@ -348,6 +348,10 @@ def main() -> None:
         if style_choice != "All styles":
             pool = pool[[styles_mod.has_style(r, style_choice, strong_only)
                          for r in pool.to_dict("records")]]
+    # Where he is now (Impect), for "Dundalk FC · now FC Portsmouth". LEFT join, display only.
+    _current = load_current_clubs()
+    if not _current.empty:
+        pool = pool.merge(_current, on="player_id", how="left")
     thin = pool["peer_count"].isna() | (pool["peer_count"] < MIN_PEERS_FOR_RANKING)
     withheld = int(thin.sum())
     pool = pool[~thin]

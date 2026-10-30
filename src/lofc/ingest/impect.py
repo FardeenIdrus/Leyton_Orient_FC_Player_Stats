@@ -139,6 +139,54 @@ def pull_scores(target: ImpectTarget, token: str, force: bool = False) -> bool:
                  "scores", force)
 
 
+def players_path(iteration_id: int) -> Path:
+    return impect_root() / f"players_{iteration_id}.parquet"
+
+
+def squad_names_path() -> Path:
+    return impect_root() / "squad_names.json"
+
+
+_API = "https://api.impect.com/v5/customerapi"
+
+
+def _api_frame(path: str, token: str, endpoint: str) -> pd.DataFrame:
+    """One Impect API list as a frame, through impectPy's rate-limited session."""
+    from impectPy.helpers import ImpectSession, RateLimitedAPI
+    conn = RateLimitedAPI(ImpectSession())
+    conn.session.headers.update({"Authorization": f"Bearer {token}"})
+    return conn.make_api_request_limited(url=f"{_API}{path}", method="GET") \
+        .process_response(endpoint=endpoint)
+
+
+def fetch_iteration_players(iteration_id: int, token: str) -> pd.DataFrame:
+    """Impect's player list for one season: his id and `currentSquadId` -- the club he is at
+    NOW, not the club of that season (verified for Eoin Kenny, 2026-10-30)."""
+    frame = _api_frame(f"/iterations/{iteration_id}/players", token, "Players")
+    return frame[["id", "currentSquadId"]]
+
+
+def pull_players(target: ImpectTarget, token: str, force: bool = False) -> bool:
+    """Land one season's player list (current clubs). Display only -- never scoring."""
+    return _pull(target, players_path(target.iteration_id),
+                 lambda: fetch_iteration_players(target.iteration_id, token), "players", force)
+
+
+def fetch_squad_names(iteration_ids, token: str) -> dict[int, str]:
+    """Club id -> Impect's club name, from every season the licence can see. Impect has no
+    look-up of a single club, so a current club is named only if it plays in one of them.
+    A season that fails is skipped: a missing name shows nothing, never a wrong one."""
+    names: dict[int, str] = {}
+    for it in iteration_ids:
+        try:
+            squads = _api_frame(f"/iterations/{int(it)}/squads", token, "Squads")
+        except Exception as exc:                              # noqa: BLE001 -- see docstring
+            print(f"  club names for iteration {it} skipped: {type(exc).__name__}")
+            continue
+        names.update({int(i): str(n) for i, n in zip(squads["id"], squads["name"])})
+    return names
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--force", action="store_true", help="re-pull even if files exist")
@@ -179,6 +227,8 @@ def main() -> None:
                 print(f"  [{target.label}] already present, skipped")
         if pull_scores(target, token, force=args.force):
             print(f"  [{target.label}] scores pulled")
+        if pull_players(target, token, force=args.force):
+            print(f"  [{target.label}] player list pulled (current clubs)")
         return rows
 
     # One league failing (e.g. Impect has no data for it) must not stop the others.
@@ -190,6 +240,16 @@ def main() -> None:
             else " | no live season configured (all skip-if-exists)")
     print(f"Done: {pulled} pulled, {skipped} skipped "
           f"({len(targets)} iterations under {impect_root()}/){note}")
+    # Club names for the current-club label, from every season the licence can see. A
+    # failure here must not fail the pull: the last landed names stay in use.
+    try:
+        names = fetch_squad_names(catalogue["id"].tolist(), token)
+        if names:
+            landing.write_json(squad_names_path(), {str(k): v for k, v in names.items()},
+                               force=True)
+            print(f"  club names: {len(names):,}")
+    except Exception as exc:                                  # noqa: BLE001
+        print(f"  club names not refreshed: {type(exc).__name__}: {exc}")
     runs.finish_step("Pull Impect", failures)
 
 

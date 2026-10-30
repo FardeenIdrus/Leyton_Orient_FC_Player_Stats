@@ -88,6 +88,14 @@ _CSS = f"""
 """
 
 
+
+def club_text(team: str, current) -> str:
+    """The club his stats are from, plus where he is now when that differs (Impect's current
+    club): "Dundalk FC · now FC Portsmouth". Both names are Impect's, so they compare as-is."""
+    if isinstance(current, str) and current and current != team:
+        return f"{team} · now {current}"
+    return team
+
 def _cell(label: str, value: str | None) -> str:
     """One labelled cell. An absent value says so in words; it never renders as 0 or '-'."""
     if value:
@@ -214,7 +222,7 @@ def build(row: pd.Series, shares: pd.DataFrame | None = None,
         _cell("Minutes", text("minutes", lambda v: f"{float(v):,.0f}")),
     ]
     name = html.escape(str(row.get("player_name", "")))
-    club = html.escape(str(row.get("team_name", "") or ""))
+    club = html.escape(club_text(row.get("team_name", "") or "", row.get("current_club")))
     position = html.escape(str(row.get("position_group", "") or ""))
     league = html.escape(str(row.get("league", "") or ""))
 

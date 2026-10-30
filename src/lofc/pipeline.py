@@ -94,6 +94,10 @@ def build_steps() -> list[tuple[str, list[str]]]:
     # landed Impect files, linked through the same identities. LABELS ONLY -- never scoring.
     steps.append(("Style signals: playing-style labels (display only)",
                   [sys.executable, "-m", "lofc.model.style_run"]))
+    # Each player's club NOW (Impect currentSquadId), for "Dundalk FC · now FC Portsmouth".
+    # Same linkage as the two steps above. DISPLAY ONLY.
+    steps.append(("Current club: where each player is now (display only)",
+                  [sys.executable, "-m", "lofc.model.current_club"]))
 
     # 5. Transfermarkt market values (the valuation target).
     if comp_ids & set(LEAGUE_CODE):
