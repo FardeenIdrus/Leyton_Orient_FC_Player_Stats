@@ -340,6 +340,26 @@ def category_strip(name: str, score: float, peers: list[float],
     return "".join(out)
 
 
+def style_bar(fit: float, strong: float, floor: float) -> str:
+    """One style's fit as a thin bar with a marker at the Leans and Strong lines.
+
+    SVG, not CSS boxes: browsers drop background colours when printing unless told
+    otherwise, and a bar that prints as an empty track would read as "no fit". Shading
+    mirrors the player card (dark = Strong, mid grey = Leans, light = below).
+    The viewBox stretches to the column (preserveAspectRatio none), so markers are drawn
+    as thin rects rather than strokes, which would stretch unevenly.
+    """
+    fit = max(0.0, min(100.0, float(fit)))
+    colour = "#1A1A1A" if fit >= strong else ("#9A9AA2" if fit >= floor else "#D3D3D8")
+    return ('<svg class="style-bar" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 6" '
+            'preserveAspectRatio="none" role="img">'
+            '<rect x="0" y="1.5" width="100" height="3" fill="#EFEFF1"/>'
+            f'<rect x="0" y="1.5" width="{fit:.1f}" height="3" fill="{colour}"/>'
+            f'<rect x="{floor - 0.25:.2f}" y="0" width="0.5" height="6" fill="#8A8A8A"/>'
+            f'<rect x="{strong - 0.4:.2f}" y="0" width="0.8" height="6" fill="#1A1A1A"/>'
+            '</svg>')
+
+
 def physical_band_legend(league: str) -> str:
     """The band key as ONE inline run, for the footer.
 

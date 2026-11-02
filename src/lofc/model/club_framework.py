@@ -185,8 +185,12 @@ PERFORMANCE_METRICS: dict[str, list[str]] = {
 
 # --- the club's Physical list (SkillCorner), shared by every outfield position ---------
 # GK has no Physical dimension (folded into Performance, decision 3), so gets an empty list.
+# meters_per_minute is NOT scored (B7, owner 2026-11-02): it is distance_p90 / 90 -- correlation
+# 0.999999 on live data, within 0.15 m/min -- so scoring both counted one measurement twice.
+# It stays stored, in the glossary and as a Players filter. Physical is equal-weighted, so the
+# remaining seven each carry 1/7.
 _OUTFIELD_PHYSICAL = [
-    "distance_p90", "meters_per_minute", "hsr_count_p90", "hsr_distance_p90",
+    "distance_p90", "hsr_count_p90", "hsr_distance_p90",
     "sprint_count_p90", "sprint_distance_p90", "psv99_kmh", "top5_psv99_kmh",
 ]
 PHYSICAL_METRICS: dict[str, list[str]] = {

@@ -69,7 +69,8 @@
         <p>{{ para }}</p>
         {% endfor %}
       {% else %}
-        <p class="absent">No scout assessment recorded — this report presents data only.</p>
+        {% if d.authored %}<p class="absent">No summary written.</p>
+        {% else %}<p class="absent">No scout assessment recorded — this report presents data only.</p>{% endif %}
       {% endif %}
 
       {% if d.narrative and d.narrative.why_sign %}
@@ -107,11 +108,19 @@
 
       <dl class="bands">
         {% for name, band in d.dimension_bands.items() %}
+        {% set theirs = d.authored and name in ("Psychological", "Medical") %}
         <div><dt>{{ name }}</dt>
           {% if band is not none %}<dd>{{ "%.2f"|format(band) }}</dd>
+          {% elif theirs %}<dd class="absent">&mdash;</dd>
           {% else %}<dd class="absent">not assessed</dd>{% endif %}</div>
         {% endfor %}
       </dl>
+
+      {% if d.authored and d.authored.screening %}
+      <div class="screening">Medical checks:
+        {% for text, answer in d.authored.screening.items() %}{% if not loop.first %} · {% endif %}{{ "✓" if answer == "Meets" else "✗" }} {{ text }}{% endfor %}
+      </div>
+      {% endif %}
 
       {% if d.flags %}
       {# One compact line per flag, no heading and no list: in a 58mm column a heading plus
@@ -150,10 +159,25 @@
       {{ bars|safe }}
     </div>
 
+    {# Playing style: the Head of Recruitment's profiles (model/styles.py), the same bars as
+       the player card. Omitted for goalkeepers, who have none. The column stays in the
+       grid either way so Technical and Physical keep their widths. #}
     <div>
-      <div class="panel-head"><h2>Style</h2>
-        <span class="sub">{{ d.peer_count }} peers</span></div>
-      {{ scatter|safe }}
+      {% if style %}
+      <div class="panel-head"><h2>Playing style</h2>
+        <span class="sub">vs {{ d.position }}s in {{ d.league }}</span></div>
+      <div class="style-label">{{ style.label }}</div>
+      {% for g in style.groups %}
+      {% if g.title %}<div class="style-group">{{ g.title }}</div>{% endif %}
+      {% for r in g.rows %}
+      <div class="style-row">
+        <div class="style-head"><span>{{ r.name }}</span><span class="tag">{{ r.tag }}</span></div>
+        {{ r.bar|safe }}
+        <div class="style-sig">{{ r.signals }}</div>
+      </div>
+      {% endfor %}
+      {% endfor %}
+      {% endif %}
     </div>
 
     <div>
@@ -177,17 +201,16 @@
 
   </section>
 
-  <section class="strips">
-    {% for strip in strips %}{{ strip|safe }}{% endfor %}
-  </section>
-
   <footer class="footer">
     <span>{{ d.comparison_text }} · flags are advisory and never exclude a player<br/>
+        {% if style %}Playing style: fit = average percentile of the style’s signals vs the same position, league and season; Strong ≥ 70, Leans ≥ 50.{% endif %}
         {% if d.position_shares and d.position_shares[0][2] < 0.5 %}
         Scored as {{ d.position }}, his largest position, though under half his minutes.
         {% endif %}
         {{ assist_definition }}
         {% if band_key %}<br/>{{ band_key|safe }}{% endif %}
+        {% if d.authored %}<br/>Psychological, Medical and medical checks are
+        {{ d.authored.author_name }}'s assessment and do not change any rating.{% endif %}
         {% if d.benchmark_n and d.benchmark_league and d.benchmark_league != d.league %}
         Percentiles are within a league: the Leyton Orient median is the squad's standing
         in {{ d.benchmark_league }}, his is his standing in {{ d.league }}.

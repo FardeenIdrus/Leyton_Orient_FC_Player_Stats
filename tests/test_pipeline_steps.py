@@ -3,7 +3,7 @@
 Three stages exist only to rebuild `player_season_metrics` from 21 GB of raw StatsBomb
 events: the ingest, the aggregation, and the load that writes the result to Postgres. Under
 `impect_only` every league -- the EFL included -- is built from Impect instead
-(`build_neutral`: "so StatsBomb is not needed at all"), and all 40 metrics the composite uses
+(`build_neutral`: "so StatsBomb is not needed at all"), and all 39 metrics the composite uses
 come from Impect and SkillCorner. The stages are vestigial.
 
 They were invisible locally, because the raw files are already on disk and the ingest is

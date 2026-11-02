@@ -33,8 +33,8 @@ def build_steps() -> list[tuple[str, list[str]]]:
     # SKIPPED ENTIRELY UNDER `impect_only`. These three stages exist only to rebuild
     # `player_season_metrics` from raw StatsBomb events, and under impect_only every league
     # -- the EFL included -- is spined on Impect instead (see build_neutral's job list:
-    # "so StatsBomb is not needed at all"). Verified: all 40 metrics the club composite uses
-    # come from Impect (32) and SkillCorner (8), and the neutral table's EFL minutes match
+    # "so StatsBomb is not needed at all"). Verified: all 39 metrics the club composite uses
+    # come from Impect (32) and SkillCorner (7), and the neutral table's EFL minutes match
     # the StatsBomb spine on 1 row in 2,940 -- they are Impect's numbers, not StatsBomb's.
     #
     # Leaving them in was invisible here, where data/raw already holds the files and the

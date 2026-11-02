@@ -20,9 +20,7 @@ def _fixture(**overrides):
                          "Psychological": None, "Medical": None},
         rank=7, peer_count=102,
         percentiles={"pass_value_p90": 70.0, "turnovers_p90": 40.0},
-        category_scores={"Pressing": 62.0, "Progression": 71.0},
         physical={"distance_p90": 55.0},
-        peers=[("A Player", 60.0, 62.0), ("B Player", 30.0, 40.0)],
         availability=0.92, availability_status="measured", matches_missed=3,
         injuries=[], narrative=None,
         stamp=data.STAMP_DATA_ONLY, snapshot_date="28 Aug 2026",
@@ -216,3 +214,196 @@ def test_physical_percentiles_are_printed_as_numbers():
     """The whole point of the rebuild: readable figures, not a polygon to eyeball."""
     out = render.to_html(_fixture(physical={"distance_p90": 72.4}))
     assert "72.4" in out
+
+
+# --- authored reports ---------------------------------------------------------------------
+
+def _authored_fixture(**overrides):
+    author = data.Authored(author_name="Scout One", author_role="scout",
+                           created_at=dt.datetime(2026, 11, 2, 9, 0), summary="Mine.",
+                           why_sign=None, considerations=None, psych_band=3.5,
+                           medical_band=None)
+    base = dict(stamp="Report by Scout One · 02 Nov 2026", authored=author,
+                narrative=data.Narrative(summary="Mine.", why_sign=None,
+                                         considerations=None, assessor=None,
+                                         assessor_role=None, approver=None,
+                                         approved_at=None),
+                dimension_bands={"Performance": 4.1, "Physical": 3.6,
+                                 "Psychological": 3.5, "Medical": None})
+    base.update(overrides)
+    return _fixture(**base)
+
+
+def test_authored_report_labels_tiles_and_footer():
+    out = render.to_html(_authored_fixture())
+    assert "Report by Scout One" in out
+    # the stamp names the author once; the footer once; tiles are plain
+    assert "<dt>Psychological</dt>" in out and "<dt>Medical</dt>" in out
+    body = out.split("</head>")[1]
+    assert "'s view" not in body and "&#39;s view" not in body
+    flat = " ".join(__import__("html").unescape(body).split())
+    assert ("Psychological, Medical and medical checks are Scout One's assessment "
+            "and do not change any rating.") in flat
+    assert flat.count("Scout One's assessment") == 1   # footer names him once
+    assert "Mine." in out
+
+
+def test_authored_blank_band_shows_dash_not_assessed_wording():
+    out = render.to_html(_authored_fixture())
+    medical = out.split("<dt>Medical</dt>")[1].split("</div>")[0]
+    assert "&mdash;" in medical and "not assessed" not in medical
+
+
+def test_non_authored_report_has_no_author_labels():
+    out = render.to_html(_fixture())
+    assert "Psychological (" not in out and "Medical (" not in out
+    assert "Medical checks" not in out and "assessment and do not" not in out
+    assert "do not change any rating" not in out
+
+
+def test_authored_text_is_escaped():
+    evil = "<script>alert(1)</script>"
+    author = data.Authored(author_name="Eve <b>", author_role="scout",
+                           created_at=dt.datetime(2026, 11, 2), summary=evil,
+                           why_sign=evil, considerations=evil, psych_band=None,
+                           medical_band=None)
+    nar = data.Narrative(summary=evil, why_sign=evil, considerations=evil, assessor=None,
+                         assessor_role=None, approver=None, approved_at=None)
+    out = render.to_html(_fixture(authored=author, narrative=nar,
+                                  stamp="Report by Eve <b> · 02 Nov 2026"))
+    assert "<script>alert(1)" not in out
+    assert "&lt;script&gt;" in out
+    assert "Eve <b>" not in out
+
+
+def test_screening_answers_render_with_marks_and_escape():
+    author = data.Authored(author_name="Scout One", author_role="scout",
+                           created_at=dt.datetime(2026, 11, 2), summary="x",
+                           why_sign=None, considerations=None, psych_band=None,
+                           medical_band=None,
+                           screening={"Ankle stability clear": "Meets",
+                                      "No <i>hamstring</i> injury": "Does not meet"})
+    out = render.to_html(_fixture(authored=author))
+    assert "Medical checks:" in out and "Screening" not in out
+    assert "✓ Ankle stability clear" in out
+    assert "✗ No &lt;i&gt;hamstring&lt;/i&gt; injury" in out
+    assert "<i>hamstring" not in out
+
+
+def test_no_screening_section_when_none_answered_or_data_only():
+    assert "Medical checks" not in render.to_html(_fixture())
+    author = data.Authored(author_name="S", author_role=None,
+                           created_at=dt.datetime(2026, 11, 2), summary="x",
+                           why_sign=None, considerations=None, psych_band=None,
+                           medical_band=None)
+    assert "Medical checks:" not in render.to_html(_fixture(authored=author))
+
+
+# --- playing style (replaces the category strips and the category scatter) ---------------
+
+def _style(position, label, strong=(), leans=(), **fits):
+    """What data.build stores for a player: the style row of model/styles.assign_styles."""
+    return {"position_group": position, "style_label": label,
+            "strong_styles": list(strong), "leans_styles": list(leans),
+            **{f"fit.{k}": v for k, v in fits.items()}}
+
+
+def _winger():
+    from lofc.model import styles as st
+    fits = {s: 40.0 for g in st.STYLES["Winger"].values() for s in g}
+    fits.update({"Wide": 82.0, "1v1": 75.0, "Pocket": 55.0})
+    return _fixture(position="Winger", style=_style(
+        "Winger", "Wide \u00b7 1v1", strong=["Wide", "1v1"], **fits))
+
+
+def test_winger_style_section_has_both_groups_and_one_bar_per_style():
+    from lofc.model import styles as st
+    out = render.to_html(_winger())
+    assert "Playing style" in out
+    assert "Where he plays" in out and "What he does" in out
+    n = sum(len(g) for g in st.STYLES["Winger"].values())
+    assert out.count('class="style-row"') == n
+    assert "Wide \u00b7 1v1" in out
+
+
+def test_centre_back_style_section_has_one_bar_per_style_and_signals():
+    from lofc.model import styles as st
+    fits = {s: 60.0 for s in st.STYLES["Centre Back"]["Style"]}
+    out = render.to_html(_fixture(position="Centre Back", style=_style(
+        "Centre Back", "Leans " + next(iter(fits)), leans=[next(iter(fits))], **fits)))
+    assert out.count('class="style-row"') == len(st.STYLES["Centre Back"]["Style"])
+    assert "Where he plays" not in out
+    first = next(iter(st.STYLES["Centre Back"]["Style"].values()))[0]
+    assert st.SIGNAL_LABELS[first] in out
+    assert f"{next(iter(fits))} (leans)" in out
+
+
+def test_quality_signals_carry_a_flag_and_others_do_not():
+    from lofc.model import styles as st
+    out = render.to_html(_winger())
+    quality = next(s for g in st.STYLES["Winger"].values() for sg in g.values()
+                   for s in sg if s in st.QUALITY_SIGNALS)
+    assert f"\u2691 {st.SIGNAL_LABELS[quality]}" in out or "\u2691" in out
+    plain = next(s for g in st.STYLES["Winger"].values() for sg in g.values()
+                 for s in sg if s not in st.QUALITY_SIGNALS)
+    assert f"\u2691 {st.SIGNAL_LABELS[plain]}" not in out
+
+
+def test_goalkeeper_has_no_style_section():
+    out = render.to_html(_fixture(position="Goalkeeper"))
+    assert "<h2>Playing style</h2>" not in out
+
+
+def test_no_style_data_omits_the_section():
+    assert "Playing style" not in render.to_html(_fixture())
+
+
+def test_unrated_player_reads_not_enough_minutes_without_bars():
+    out = render.to_html(_fixture(position="Winger", style=_style(
+        "Winger", "Not enough minutes")))
+    assert "Not enough minutes" in out
+    assert 'class="style-row"' not in out
+
+
+def test_no_standout_style_still_shows_the_bars():
+    out = render.to_html(_fixture(position="Centre Back", style=_style(
+        "Centre Back", "No standout style", **{"Ball-playing": 30.0})))
+    assert "No standout style" in out and 'class="style-row"' in out
+
+
+def test_style_text_is_escaped(monkeypatch):
+    from lofc.model import styles as st
+    sig = next(iter(next(iter(st.STYLES["Centre Back"]["Style"].values()))))
+    monkeypatch.setitem(st.SIGNAL_LABELS, sig, "<b>x</b> & y")
+    fits = {s: 60.0 for s in st.STYLES["Centre Back"]["Style"]}
+    out = render.to_html(_fixture(position="Centre Back", style=_style(
+        "Centre Back", "No standout style", **fits)))
+    assert "<b>x</b>" not in out and "&lt;b&gt;x&lt;/b&gt; &amp; y" in out
+
+
+def test_data_only_report_keeps_the_style_section():
+    """Style is measured data, not a scout's opinion, so a data-only report keeps it."""
+    base = _winger()
+    out = render.to_html(data.as_data_only(base))
+    assert "Playing style" in out
+
+
+def test_footer_explains_style_fit_and_strips_are_gone():
+    out = render.to_html(_winger())
+    assert ("Playing style: fit = average percentile of the style\u2019s signals vs the "
+            "same position, league and season; Strong \u2265 70, Leans \u2265 50.") in out
+    assert "weighted as in the rating" not in out
+    assert "Category strips" not in out
+
+
+def test_categories_strips_and_scatter_are_gone():
+    out = render.to_html(_winger())
+    assert 'class="strip' not in out and "Also in the rating" not in out
+    assert "<h2>Style</h2>" not in out and "peers</span>" not in out
+    assert 'class="scatter' not in out
+
+
+def test_report_no_longer_imports_report_categories():
+    import inspect
+    assert "report_categories" not in inspect.getsource(render)
+    assert "report_categories" not in inspect.getsource(data)

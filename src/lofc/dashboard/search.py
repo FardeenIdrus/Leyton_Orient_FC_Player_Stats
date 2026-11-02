@@ -17,6 +17,18 @@ _INDEX_COLUMNS = ["player_id", "competition_id", "season_id", "player_name", "te
                   "position_group", "league"]
 
 
+# Letters NFKD does not decompose into base + mark, so they would stay non-ASCII.
+_ASCII_EXTRA = str.maketrans({"ø": "o", "Ø": "O", "ł": "l", "Ł": "L", "đ": "d", "Đ": "D",
+                              "ð": "d", "Ð": "D", "ß": "ss", "æ": "ae", "Æ": "AE",
+                              "œ": "oe", "Œ": "OE", "þ": "th", "Þ": "Th", "ı": "i"})
+
+
+def ascii_fold(text: str) -> str:
+    """Strip diacritics but keep case, spaces and hyphens ("Méndez-Laing" -> "Mendez-Laing")."""
+    decomposed = unicodedata.normalize("NFKD", str(text).translate(_ASCII_EXTRA))
+    return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+
+
 def build_search_index(candidates: pd.DataFrame) -> pd.DataFrame:
     """One row per (player, competition, season), labelled for a search dropdown.
 
@@ -30,7 +42,12 @@ def build_search_index(candidates: pd.DataFrame) -> pd.DataFrame:
     idx = idx.drop_duplicates(subset=["player_id", "competition_id", "season_id"])
     idx = idx.reset_index(drop=True)
     club = idx["team_name"].fillna("Unknown club")
-    idx["label"] = (idx["player_name"] + " — " + club + "  ·  " + idx["position_group"]
+    # Streamlit's selectbox type-ahead matches the visible text and is accent-sensitive, so an
+    # accented name also carries its plain spelling: typing "Mendez" finds "Méndez-Laing".
+    plain = idx["player_name"].map(ascii_fold)
+    shown = idx["player_name"].where(plain == idx["player_name"],
+                                     idx["player_name"] + " (" + plain + ")")
+    idx["label"] = (shown + " — " + club + "  ·  " + idx["position_group"]
                     + "  ·  " + idx["league"].fillna("—"))
     return idx.sort_values("player_name", kind="stable").reset_index(drop=True)
 

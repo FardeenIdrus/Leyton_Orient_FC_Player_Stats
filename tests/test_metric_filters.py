@@ -12,7 +12,8 @@ counted, never dropped silently (Scottish Championship has no physical data at a
 import pandas as pd
 import pytest
 
-from lofc.dashboard.metric_filters import (PHYSICAL_SLIDERS, PHYSICAL_LABELS, apply_metric_filters,
+from lofc.dashboard.metric_filters import (LOWER_IS_BETTER_PHYSICAL, PHYSICAL_GROUPS, PHYSICAL_SLIDERS,
+                                           PHYSICAL_LABELS, apply_metric_filters,
                                            performance_slider_metrics)
 from lofc.model import club_framework as cf
 from lofc.model.scorecard import _resolved_performance
@@ -34,10 +35,91 @@ def test_every_physical_slider_is_a_physical_metric_with_a_label():
             assert m in PHYSICAL_LABELS
 
 
-def test_no_position_gets_distance_and_metres_per_minute_together():
-    """Per 90 they are one measurement (r = 1.00): two sliders would be one filter twice."""
-    for metrics in PHYSICAL_SLIDERS.values():
-        assert not {"distance_p90", "meters_per_minute"} <= set(metrics)
+def test_every_outfield_position_gets_every_physical_metric():
+    """Recruiters asked for every physical metric as a filter (2026-11-02). Distance and
+    metres per minute are one measurement per 90, but the owner chose to offer both."""
+    every = [m for ms in PHYSICAL_GROUPS.values() for m in ms]
+    assert len(every) == len(set(every)) == 23
+    for position, metrics in PHYSICAL_SLIDERS.items():
+        assert metrics == ([] if position == "Goalkeeper" else every)
+
+
+def test_groups_are_in_the_agreed_order():
+    assert list(PHYSICAL_GROUPS) == ["Distance", "Speed", "Intensity", "Acceleration",
+                                     "Time to speed", "Agility"]
+
+
+def test_every_grouped_metric_has_a_glossary_entry_and_a_label():
+    from lofc.dashboard.glossary_data import PHYSICAL
+    from lofc.dashboard.labels import SC_METRIC_LABELS  # noqa: F401 (labels module imports)
+    for ms in PHYSICAL_GROUPS.values():
+        for m in ms:
+            assert m in PHYSICAL and m in PHYSICAL_LABELS
+
+
+def test_lower_is_better_is_exactly_the_time_and_agility_metrics():
+    assert set(LOWER_IS_BETTER_PHYSICAL) == {
+        "time_to_hsr", "time_to_hsr_post_cod", "time_to_sprint", "time_to_sprint_post_cod",
+        "agility_505_90", "agility_505_180"}
+    assert set(LOWER_IS_BETTER_PHYSICAL) == set(PHYSICAL_GROUPS["Time to speed"]) | \
+        set(PHYSICAL_GROUPS["Agility"])
+
+
+def test_seconds_are_shown_to_two_decimals():
+    for m in LOWER_IS_BETTER_PHYSICAL:
+        assert PHYSICAL_LABELS[m][1] == "%.2f" and PHYSICAL_LABELS[m][0].endswith("(s)")
+
+
+def _timed():
+    pool = pd.DataFrame({"player_id": [1, 2, 3, 4], "competition_id": [4] * 4,
+                         "season_id": [318] * 4, "position_group": ["Winger"] * 4})
+    raw = pool[["player_id", "competition_id"]].assign(
+        time_to_sprint=[3.9, 4.4, None, 4.1], distance_p90=[9000.0, 11000.0, 10000.0, 10500.0])
+    return pool, pool[KEY], raw
+
+
+def test_a_raw_maximum_keeps_lower_values_and_drops_higher():
+    pool, pcts, raw = _timed()
+    out, unknown = apply_metric_filters(pool, pcts, raw, {}, {}, raw_maxs={"time_to_sprint": 4.2})
+    assert out["player_id"].tolist() == [1, 4]
+    assert unknown == 1                      # player 3 has no value: excluded and counted
+
+
+def test_a_maximum_is_inclusive():
+    pool, pcts, raw = _timed()
+    out, _ = apply_metric_filters(pool, pcts, raw, {}, {}, raw_maxs={"time_to_sprint": 4.1})
+    assert out["player_id"].tolist() == [1, 4]
+
+
+def test_minimum_and_maximum_combine():
+    pool, pcts, raw = _timed()
+    out, unknown = apply_metric_filters(pool, pcts, raw, {}, {"distance_p90": 10200.0},
+                                        raw_maxs={"time_to_sprint": 4.2})
+    assert out["player_id"].tolist() == [4] and unknown == 1
+
+
+def test_old_call_without_raw_maxs_still_works():
+    pool, pcts, raw = _timed()
+    out, unknown = apply_metric_filters(pool, pcts, raw, {}, {"distance_p90": 10200.0})
+    assert out["player_id"].tolist() == [2, 4] and unknown == 0
+    out, unknown = apply_metric_filters(pool, pcts, raw, {}, {}, None)
+    assert len(out) == 4 and unknown == 0
+
+
+def test_a_max_filter_on_a_column_the_pool_already_carries_does_not_crash():
+    key = {"competition_id": 4, "season_id": 318, "position_group": "Winger"}
+    pool = pd.DataFrame([{**key, "player_id": i, "time_to_sprint": 0.0} for i in range(3)])
+    raw = pd.DataFrame([{"player_id": i, "competition_id": 4,
+                         "time_to_sprint": [3.8, 4.2, 4.6][i]} for i in range(3)])
+    out, _ = apply_metric_filters(pool, pool.iloc[0:0], raw, {}, {}, raw_maxs={"time_to_sprint": 4.3})
+    assert out["player_id"].tolist() == [0, 1]
+    assert list(out.columns) == list(pool.columns)
+
+
+def test_hi_metrics_are_defined_in_the_glossary():
+    from lofc.dashboard.glossary_data import PHYSICAL
+    for m in ("hi_distance_p90", "hi_count_p90"):
+        assert m in PHYSICAL and "high-speed" in PHYSICAL[m][1] and "sprint" in PHYSICAL[m][1].lower()
 
 
 @pytest.mark.parametrize("position", list(cf.PERFORMANCE_METRICS))
@@ -126,3 +208,10 @@ def test_a_raw_filter_on_a_column_the_pool_already_carries_does_not_crash():
                          "distance_p90": [9000.0, 10000.0, 11000.0][i]} for i in range(3)])
     out, _ = mf.apply_metric_filters(pool, pool.iloc[0:0], raw, {}, {"distance_p90": 9500.0})
     assert out["player_id"].tolist() == [1, 2]
+
+
+def test_slider_bounds_round_out_to_the_display_precision():
+    from lofc.dashboard.metric_filters import slider_bounds
+    assert slider_bounds(pd.Series([4.371, 5.019]), "%.2f") == (4.37, 5.02, 0.01)
+    assert slider_bounds(pd.Series([30.04, 35.51]), "%.1f") == (30.0, 35.6, 0.1)
+    assert slider_bounds(pd.Series([8123.4, 11890.2]), "%.0f") == (8123.0, 11891.0, 1.0)

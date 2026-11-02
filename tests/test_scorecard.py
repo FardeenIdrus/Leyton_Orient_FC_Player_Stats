@@ -314,3 +314,20 @@ def test_build_scorecards_assessed_composite_null_with_neither_scout_dimension()
 
     assert pd.isna(row_irrelevant.iloc[0]["assessed_composite"])
     pd.testing.assert_frame_equal(row_none, row_irrelevant)
+
+
+def test_physical_rating_is_seven_metrics_without_metres_per_minute():
+    """B7 (owner 2026-11-02): metres per minute is distance per 90 / 90 (r 0.999999), so it is
+    not scored; distance_p90 carries that signal."""
+    for pos, metrics in cf.PHYSICAL_METRICS.items():
+        if pos == "Goalkeeper":
+            assert metrics == []
+        else:
+            assert len(metrics) == 7
+            assert "meters_per_minute" not in metrics
+            assert "distance_p90" in metrics
+
+
+def test_players_filter_still_offers_metres_per_minute():
+    from lofc.dashboard.metric_filters import PHYSICAL_SLIDERS
+    assert "meters_per_minute" in PHYSICAL_SLIDERS["Centre Back"]

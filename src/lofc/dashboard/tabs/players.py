@@ -8,7 +8,6 @@ ranking."""
 
 from __future__ import annotations
 
-import math
 
 import pandas as pd
 import streamlit as st
@@ -19,7 +18,7 @@ from lofc.constrain.filters import RANK_COLUMN
 from lofc.dashboard import (assessment_detail, badges, detail_section, evidence, metric_filters,
                             player_header)
 from lofc.dashboard.charts import PLOTLY_CONFIG, bar_chart, radar_chart
-from lofc.dashboard.formatting import numeric_or_dash
+from lofc.dashboard.formatting import dash_blanks, numeric_or_dash
 from lofc.dashboard.units import season_total
 from lofc.dashboard.labels import LABELS, _metric_source, metric_label
 from lofc.dashboard.loaders import (
@@ -28,9 +27,12 @@ from lofc.dashboard.loaders import (
     competition_name_by_id, load_loan_for_player, load_other_league_seasons,
     load_position_shares,
     load_scorecard_percentiles,
-    load_scorecards, load_scorecards_archetype, load_trajectory, season_label,
+    load_candidates, load_scorecards, load_scorecards_archetype, load_style_labels,
+    load_trajectory, season_label,
     _stored_scorecards)
-from lofc.dashboard.search import filter_labels, search_options
+from lofc.dashboard.search import search_options
+from lofc.dashboard.search_target import (
+    choose_detail_row, clear_all_table_selections, resolve_search_target, search_caption)
 from lofc.dashboard.seasons import (
     CONTRACT_EXPIRED, CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, contract_data_date,
     season_name_for)
@@ -145,9 +147,12 @@ def _trajectory(player_id: int, role: str, key_prefix: str) -> None:
         view["npxG/90"] = rows["np_xg_p90"].round(2)
         view["xA/90"] = rows["xa_p90"].round(2)
     st.markdown("**Season by season**")
+    # Score as "x.xx" text so an unscored season reads "—" (a number column draws "None");
+    # the per-90 / % columns stay numeric (text would mis-sort them).
+    view = dash_blanks(view, {"Score": "{:.2f}"})
     st.dataframe(view, hide_index=True, width="stretch", key=f"{key_prefix}_trajectory",
-                 column_config={"Score": st.column_config.NumberColumn(
-                     "Score", format="%.2f",
+                 column_config={"Score": st.column_config.TextColumn(
+                     "Score",
                      help="The club composite that season, in that league. Blank = not scored "
                           "(under 450 minutes). Each is a rank against THAT league's peers, so "
                           "two seasons in different leagues are not like-for-like.")})
@@ -421,33 +426,47 @@ def _metric_filter_panel(pool: pd.DataFrame, position: str, archetype: str,
         for k in [k for k in st.session_state if str(k).startswith(prefix)]:
             del st.session_state[k]
 
+    # Slider range and default per physical metric. Higher-is-better -> a Min slider that rests
+    # at the floor; lower-is-better (seconds) -> a Max slider that rests at the ceiling.
+    # A filter is active only once its slider has moved off that resting value.
+    lower = set(metric_filters.LOWER_IS_BETTER_PHYSICAL)
+    bounds = {m: metric_filters.slider_bounds(raw[m], metric_filters.PHYSICAL_LABELS[m][1])
+              for m in phys_metrics}
+    rest = {m: (bounds[m][1] if m in lower else bounds[m][0]) for m in phys_metrics}
     active = sum(1 for k, v in st.session_state.items()
                  if str(k).startswith(prefix + "pct_") and v)
     active += sum(1 for m in phys_metrics
-                  if st.session_state.get(prefix + "raw_" + m, None) not in
-                  (None, float(math.floor(raw[m].min()))))
+                  if st.session_state.get(prefix + "raw_" + m, None) not in (None, rest[m]))
     title = f"Metric filters · {active} active" if active else "Metric filters"
     pct_mins: dict[str, float] = {}
     raw_mins: dict[str, float] = {}
+    raw_maxs: dict[str, float] = {}
     with st.expander(title, expanded=bool(active)):
         if phys_metrics:
             st.markdown("**Physical** · raw values")
-            cols = st.columns(3)
-            for i, m in enumerate(phys_metrics):
-                label, fmt = metric_filters.PHYSICAL_LABELS[m]
-                lo, hi = float(math.floor(raw[m].min())), float(math.ceil(raw[m].max()))
-                step = 0.1 if fmt.endswith("1f") else 1.0
-                value = cols[i % 3].slider(f"Min {label}", lo, hi, lo, step=step,
-                                           format=fmt, key=prefix + "raw_" + m)
-                if value > lo:
-                    raw_mins[m] = value
+            groups = [(g, [m for m in ms if m in phys_metrics])
+                      for g, ms in metric_filters.PHYSICAL_GROUPS.items()]
+            groups = [(g, ms) for g, ms in groups if ms]
+            for tab, (_, ms) in zip(st.tabs([g for g, _ in groups]), groups):
+                with tab:
+                    cols = st.columns(3)
+                    for i, m in enumerate(ms):
+                        label, fmt = metric_filters.PHYSICAL_LABELS[m]
+                        lo, hi, step = bounds[m]
+                        is_max = m in lower
+                        value = cols[i % 3].slider(
+                            f"{'Max' if is_max else 'Min'} {label}", lo, hi, rest[m],
+                            step=step, format=fmt, key=prefix + "raw_" + m)
+                        if value != rest[m]:
+                            (raw_maxs if is_max else raw_mins)[m] = value
         st.markdown("**Performance** · minimum percentile in league and position")
         cols = st.columns(4)
         for i, m in enumerate(perf_metrics):
             pct_mins[m] = cols[i % 4].slider(metric_label(m), 0, 100, 0, step=5,
                                              key=prefix + "pct_" + m)
         st.button("Reset metric filters", on_click=_reset, key=prefix + "reset")
-    filtered, unknown = metric_filters.apply_metric_filters(pool, pcts, raw, pct_mins, raw_mins)
+    filtered, unknown = metric_filters.apply_metric_filters(pool, pcts, raw, pct_mins, raw_mins,
+                                                         raw_maxs)
     if unknown:
         st.caption(f"{unknown} hidden: no data for an active metric filter.")
     return filtered
@@ -457,6 +476,22 @@ def _metric_filter_panel(pool: pd.DataFrame, position: str, archetype: str,
 # minimum standard (the league median); any dimension below 2.0 = veto; 4.0 = elite (70th
 # percentile). Pale fills so the number stays readable.
 _BAND_FILLS = [(2.0, "#F6D5D8"), (3.0, "#FBE7C6"), (4.0, "#E2F0E4"), (99.0, "#BFE0C5")]
+
+
+def styled_ratings(table: pd.DataFrame, rating_cols: list[str]):
+    """The ranked table with its rating cells coloured on the club's thresholds. Missing
+    ratings read "—", not "None" (the Styler prints a missing value as None; manager visual
+    check, 2026-11-02), and ratings keep two decimals."""
+    # Streamlit's number column draws ANY missing value as a grey "None", whatever a Styler
+    # says, so the rating columns are shown as text ("4.48" / "—"); colour still comes from
+    # the numbers, and "x.xx" text sorts the same as the numbers it shows.
+    numeric = table[rating_cols].apply(pd.to_numeric, errors="coerce")
+    # Every other text cell (Club, League, On loan at ...) reads "—" too; Mins stays numeric.
+    display = dash_blanks(table)
+    for c in rating_cols:
+        display[c] = numeric[c].map(lambda v: "—" if pd.isna(v) else f"{v:.2f}")
+    return display.style.apply(lambda _: numeric.map(band_colour), axis=None,
+                               subset=rating_cols)
 
 
 def band_colour(value) -> str:
@@ -496,6 +531,38 @@ def players_table_columns(lens: bool, show_money: bool, loan_column: bool) -> li
     return cols
 
 
+# st.dataframe cuts text at the column edge and Streamlit's "small/medium/large" are fixed
+# pixel sizes, so a long "2 Sign · 1 Monitor" or "Dundalk FC · now FC Portsmouth" was
+# truncated and users resized by hand. Widths are therefore derived from the content.
+_PX_PER_CHAR, _PX_PAD, _PX_MIN, _PX_MAX = 7.5, 28, 60, 360
+
+
+def column_widths(view: pd.DataFrame, columns: list[str]) -> dict[str, int | str]:
+    """Pixel width per TEXT column: the longest cell (or header, plus room for the help icon)
+    at ~7.5 px a character plus padding, clamped to 60-360 px. Numeric/bool columns get
+    "small"; columns absent from `view` are skipped. List cells (Style pills) count each
+    item plus pill padding. Null-safe."""
+    out: dict[str, int | str] = {}
+    for col in columns:
+        if col not in view.columns:
+            continue
+        series = view[col]
+        if pd.api.types.is_numeric_dtype(series) or pd.api.types.is_bool_dtype(series):
+            out[col] = "small"
+            continue
+        longest = len(col) + 3
+        for v in series:
+            if isinstance(v, (list, tuple)):
+                n = sum(len(str(i)) + 3 for i in v)
+            elif v is None or v is pd.NA or (isinstance(v, float) and v != v):
+                continue
+            else:
+                n = len(str(v))
+            longest = max(longest, n)
+        out[col] = int(max(_PX_MIN, min(_PX_MAX, longest * _PX_PER_CHAR + _PX_PAD)))
+    return out
+
+
 def infobar_count_items(players: int, rated: int) -> list[str]:
     """The info bar's two player counts: everyone with data, and the rated subset the table
     lists. Both are shown so neither is read as the denominator of the other."""
@@ -526,6 +593,8 @@ def _kpi_strip(pool: pd.DataFrame, season_label_text: str | None = None,
 
 def _sc_pct_series(sc_pcts: pd.DataFrame, pid: int, cid: int, sid: int) -> pd.Series | None:
     """The scorecard-percentile row (wide) for one player-season, or None."""
+    if sc_pcts is None or sc_pcts.empty or "player_id" not in sc_pcts.columns:
+        return None                                 # a player with no scorecard (unrated)
     m = sc_pcts[(sc_pcts["player_id"] == pid) & (sc_pcts["competition_id"] == cid)
                 & (sc_pcts["season_id"] == sid)]
     return m.iloc[0] if not m.empty else None
@@ -823,7 +892,7 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
     if not grand.empty:
         st.markdown("##### Performance — in the rating")
         st.dataframe(
-            grand, hide_index=True, width="stretch", key=f"{key_prefix}_grand",
+            dash_blanks(grand), hide_index=True, width="stretch", key=f"{key_prefix}_grand",
             column_config={
                 "Source": st.column_config.TextColumn("Source", help="Which provider supplies this metric."),
                 "Percentile": st.column_config.ProgressColumn(
@@ -852,7 +921,7 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
     if stats_table is not None and not stats_table.empty:
         with st.expander("All tracked metrics (every stat the platform holds — season total, per 90, percentile)"):
             st.dataframe(
-                stats_table, hide_index=True, width="stretch", key=f"{key_prefix}_fullstats",
+                dash_blanks(stats_table), hide_index=True, width="stretch", key=f"{key_prefix}_fullstats",
                 column_config={
                     "Source": st.column_config.TextColumn(
                         "Source", help="Which data provider supplies this metric."),
@@ -900,6 +969,28 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
     _scout_section(get_engine(), row)
 
 
+def _season_wide_row(key: tuple[int, int, int]):
+    """(row, reason) for a searched player who is not in the sidebar-filtered list.
+
+    Built from the cached season-wide loaders (the same frames app.py builds the pool from),
+    with style labels added so the card matches. Money columns use the default wage
+    multiplier (1.0, as with Show affordability off); the card shows them only when the
+    sidebar's money layer is on.
+    """
+    sid = key[2]
+    row, reason = resolve_search_target(load_candidates(1.0, sid), load_scorecards(sid), key)
+    if row is not None:
+        style = load_style_labels(sid)
+        if not style.empty:
+            hit = style[(style["player_id"] == key[0]) & (style["competition_id"] == key[1])
+                        & (style["season_id"] == sid)]
+            if not hit.empty:
+                for col in ["style_label", "tier", "strong_styles", "leans_styles"] + \
+                        [c for c in style.columns if c.startswith("fit.")]:
+                    row[col] = hit.iloc[0][col]
+    return row, reason
+
+
 def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, metrics: list[str],
              metric_values: pd.DataFrame, search_index: pd.DataFrame,
              archetype: str = cf.DEFAULT_ARCHETYPE,
@@ -940,23 +1031,6 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
                 # its widgets exist.
                 st.session_state["global_player_search"] = label
 
-        # The dropdown widget below does its own live filtering as you type, but that
-        # filtering happens entirely in the browser against the literal displayed text --
-        # it has no idea "Mendez" and "Méndez" are the same name, and (worse) can fall back
-        # to an unrelated fuzzy guess rather than finding nobody. So the actual narrowing
-        # happens here in Python instead, via `filter_labels` (accent-, case- and
-        # punctuation-insensitive, see `search.py::fold`) against a plain text box; the
-        # dropdown below is only ever offered the pre-matched subset. A blank query leaves
-        # every player browsable, same as before this existed.
-        query = st.text_input(
-            "Search any player — every position and league, this season",
-            key="global_player_search_query", placeholder="Type a player's name…",
-            help="Not limited to the current Position filter. Matches ignore accents, case, "
-                 "hyphens and apostrophes, so \"Mendez\" finds \"Méndez-Laing\" and "
-                 "\"OConnor\" finds \"O'Connor\". Choosing a result switches the sidebar to "
-                 "his position and opens his profile below.")
-        filtered_labels = filter_labels(labels, query)
-
         def _on_search_pick() -> None:
             # An on_change callback, NOT body code: the sidebar's Position/Leagues widgets
             # (app.py::main, keys "sidebar_position"/"sidebar_leagues") already instantiated
@@ -968,6 +1042,10 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             picked_now = st.session_state.get("global_player_search")
             if not picked_now or picked_now not in by_label:
                 return
+            # The search wins over any earlier table click: a stale row selection used to
+            # outrank the searched player and open somebody else. A click AFTER this still
+            # wins over the search (see choose_detail_row).
+            clear_all_table_selections(st.session_state)
             trow = search_index.iloc[by_label[picked_now]]
             target_position = str(trow["position_group"])
             if target_position != position:
@@ -980,42 +1058,36 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
                 if trow["league"] not in current_leagues and trow["league"] != "—":
                     st.session_state["sidebar_leagues"] = current_leagues + [trow["league"]]
 
+        # ONE box: click it for every player, type to narrow. Streamlit filters by the visible
+        # label and ignores nothing, so accented names carry their plain spelling in the label
+        # (search.build_search_index) and "Mendez" finds "Méndez-Laing".
         sc1, sc2 = st.columns([6, 1], vertical_alignment="bottom")
         picked = sc1.selectbox(
-            (f"{len(filtered_labels)} matching player(s) — pick one" if query.strip()
-             else "Or browse every player"),
-            filtered_labels, index=None, placeholder="Choose a player…",
-            key="global_player_search", on_change=_on_search_pick,
-            help="Choosing a result switches the sidebar to his position and opens his "
-                 "profile below.")
+            "Find a player — every position and league, this season", labels, index=None,
+            placeholder="Search a player…", key="global_player_search",
+            on_change=_on_search_pick, label_visibility="collapsed",
+            help="Not limited to the current Position filter. Choosing a result switches the "
+                 "sidebar to his position and opens his profile below.")
         sc2.button("✕ Clear", key="global_player_search_clear", width="stretch",
-                   on_click=lambda: st.session_state.update(
-                       {"global_player_search": None, "global_player_search_query": ""}),
-                   disabled=not (st.session_state.get("global_player_search")
-                                 or st.session_state.get("global_player_search_query")))
-        if query.strip() and not filtered_labels:
-            st.caption(f"No player matches “{query.strip()}”. The search already ignores "
-                       "accents, case, hyphens and apostrophes — check the spelling.")
+                   on_click=lambda: st.session_state.update({"global_player_search": None}),
+                   disabled=not st.session_state.get("global_player_search"))
 
-        search_detail_row, search_notice = None, None
+        # The searched player is resolved season-wide, NOT against the sidebar-filtered pool:
+        # the search index spans every position and league, so a pick must open whatever the
+        # Position / age / league / contract / foot / loan / minutes filters say.
+        search_detail_row, search_reason, search_from_pool = None, None, False
         if picked and picked in by_label:
             trow = search_index.iloc[by_label[picked]]
-            target_position = str(trow["position_group"])
-            if target_position == position:
-                pid, cid, sid = int(trow["player_id"]), int(trow["competition_id"]), int(trow["season_id"])
-                match = full_pool[(full_pool["player_id"] == pid) & (full_pool["competition_id"] == cid)
-                                  & (full_pool["season_id"] == sid)]
-                if not match.empty:
-                    search_detail_row = match.iloc[0]
-                else:
-                    search_notice = (
-                        f"**{trow['player_name']}** ({target_position}, {trow['league']}) isn't in "
-                        "this list under the current filters — check the maximum age, contract-"
-                        "expiry horizon, preferred foot or the 450-minute minimum in the sidebar.")
-            # else: a mismatch here means the pick hasn't gone through _on_search_pick yet on
-            # this exact run (Streamlit runs on_change callbacks BEFORE the script body, so in
-            # the ordinary case `position` already matches by the time this line runs) -- doing
-            # nothing is safe either way, since the very next run resolves it.
+            key = (int(trow["player_id"]), int(trow["competition_id"]), int(trow["season_id"]))
+            match = full_pool[(full_pool["player_id"] == key[0])
+                              & (full_pool["competition_id"] == key[1])
+                              & (full_pool["season_id"] == key[2])]
+            if not match.empty:        # in the list: exactly the row the table would show
+                search_detail_row, search_reason, search_from_pool = match.iloc[0], "ok", True
+            else:
+                search_detail_row, search_reason = _season_wide_row(key)
+                if search_detail_row is None:
+                    st.warning(f"**{trow['player_name']}** could not be loaded for this season.")
         st.divider()
 
         pool = _metric_filter_panel(pool, position, archetype, metric_values)
@@ -1221,8 +1293,8 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             lens=lens, show_money=show_money,
             loan_column=loan_filter_active and "On loan at" in view.columns)
 
-        band = lambda lbl, hlp: st.column_config.NumberColumn(lbl, help=hlp, format="%.2f",
-                                                               width="small")
+        # Text, not NumberColumn: see styled_ratings (a missing rating must read "—").
+        band = lambda lbl, hlp: st.column_config.TextColumn(lbl, help=hlp, width="small")
         composite_help = ("Performance + Physical + Psychological + Medical (1-5) — the "
                           "assessed ranking, opt-in.") if assessed_mode else \
                          "The club's objective composite (1-5) — the ranking."
@@ -1277,6 +1349,15 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             }
             st.caption("Affordable = both **Fee in budget** and **Wages in budget** are checked below.")
 
+        # Content-sized widths for the text columns, so no cell is cut mid-text. Numeric
+        # columns keep their compact fixed widths above; the table scrolls sideways if the
+        # total exceeds the page, which beats truncation. (Age is a fixed-width text column.)
+        for _c, _w in column_widths(table, display_cols).items():
+            if isinstance(_w, int) and _c in col_cfg and _c != "Age":
+                # Scouts floor: a player can gain a verdict mid-session, so room for the
+                # typical worst case "2 Sign · 1 Monitor · 1 Watch" even if none show now.
+                col_cfg[_c]["width"] = max(_w, 240) if _c == "Scouts" else _w
+
         # Byte-for-byte identical to the pre-existing key when assessed_mode is off (Rule A):
         # the suffix only appears once the opt-in ranking mode is engaged.
         mode_suffix = f"_{assessed_mode}_{signed_only}" if assessed_mode else ""
@@ -1303,7 +1384,7 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             # shown too, so colour never carries the meaning alone.
             rating_cols = [c for c in ("Composite", "All-round", "Performance", "Physical")
                            if c in display_cols and c in table.columns]
-            styled = table.style.map(lambda v: band_colour(v), subset=rating_cols)
+            styled = styled_ratings(table, rating_cols)
             selection = st.dataframe(
                 styled, column_order=display_cols, hide_index=True, width="stretch",
                 height=table_height, on_select="rerun", selection_mode="single-row",
@@ -1317,11 +1398,8 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
 
         # --- detail: a clicked row takes priority over a searched player ----------------
         rows = list(selection.selection.rows) if selection and selection.selection else []
-        detail_row = None
-        if rows and rows[0] < len(view):
-            detail_row = view.iloc[rows[0]]
-        elif search_detail_row is not None:
-            detail_row = search_detail_row
+        detail_row = choose_detail_row(rows, view, search_detail_row)
+        from_search = detail_row is search_detail_row and search_detail_row is not None
 
         if detail_row is not None:
             st.divider()
@@ -1329,11 +1407,18 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
             pc1.markdown("#### Player detail")
             with pc2:
                 _clear_selection_button(base_key, label="✕ Close")
+            if from_search:
+                in_view = bool(((view["player_id"] == detail_row["player_id"])
+                                & (view["competition_id"] == detail_row["competition_id"])).any())
+                note = search_caption(search_reason, in_view, detail_row.get("minutes"))
+                if note:
+                    st.caption(note)
+            # A season-wide row carries the all-round composite, so it is shown under the
+            # default archetype -- never labelled as the lens it was not scored on.
+            _lens = archetype if (not from_search or search_from_pool) else cf.DEFAULT_ARCHETYPE
             _render_profile_body(detail_row, percentiles, metrics, metric_values, key_prefix="detail",
-                                 archetype=archetype, show_money=show_money)
+                                 archetype=_lens, show_money=show_money)
         else:
-            if search_notice:
-                st.warning(search_notice)
             st.caption("⬆️ Click a player in the table, or search above, to open their full detail.")
 
 

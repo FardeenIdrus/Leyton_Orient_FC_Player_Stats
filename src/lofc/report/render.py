@@ -13,7 +13,8 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from lofc.model import report_categories as rc
+from lofc.model import club_framework as cf
+from lofc.model import styles as st
 from lofc.model.scorecard import _resolved_performance
 from lofc.report import svg
 from lofc.report.data import ASSIST_DEFINITION, ReportData
@@ -32,6 +33,48 @@ _PHYSICAL_AXES: list[tuple[str, str]] = [
     ("psv99_kmh", "PSV-99"),
     ("top5_psv99_kmh", "Top 5 PSV-99"),
 ]
+
+
+# Metrics where a HIGH percentile is BAD: the bar is drawn on the flipped value so a long
+# green bar always means "good at the thing named". (Carried over from the retired category grouping.)
+_LOWER_IS_BETTER = frozenset({"turnovers_p90"})
+
+_GROUP_TITLES = {"Where": "Where he plays", "What": "What he does"}
+
+
+def style_view(d: ReportData) -> dict | None:
+    """The Playing style section as plain data, or None when the position has no styles
+    (goalkeepers) or no style row could be computed. Mirrors dashboard/style_card.py."""
+    groups = st.STYLES.get(st.style_group(d.position))
+    row = d.style
+    if not groups or not row:
+        return None
+    label = row.get("style_label")
+    strong = list(row.get("strong_styles") or [])
+    leans = list(row.get("leans_styles") or [])
+    if strong or leans:
+        label = " \u00b7 ".join(strong + [f"{s} (leans)" for s in leans])
+    fits = {s: row.get(f"fit.{s}") for g in groups.values() for s in g}
+    rated = {s: v for s, v in fits.items() if v is not None and v == v}
+    cols = []
+    for gname, styles in groups.items():
+        rows = []
+        for style, sigs in styles.items():
+            v = rated.get(style)
+            if v is None:
+                continue
+            rows.append({
+                "name": style, "fit": v,
+                "tag": f"{v:.0f} \u00b7 Strong" if v >= st.STRONG else
+                       (f"{v:.0f} \u00b7 Leans" if v >= st.FLOOR else f"{v:.0f}"),
+                "bar": svg.style_bar(v, st.STRONG, st.FLOOR),
+                "signals": " \u00b7 ".join(
+                    ("\u2691 " if s in st.QUALITY_SIGNALS else "") + st.SIGNAL_LABELS[s]
+                    for s in sigs)})
+        title = _GROUP_TITLES.get(gname, "") if len(groups) > 1 else ""
+        if rows:
+            cols.append({"title": title, "rows": rows})
+    return {"label": label or st.NO_STYLE, "groups": cols}
 
 
 def ordinal(n: int) -> str:
@@ -53,14 +96,14 @@ def _environment() -> Environment:
 def to_html(d: ReportData) -> str:
     """One player's report as a complete HTML document."""
     metrics = (_resolved_performance(d.position, "All Metrics")
-               if d.position in rc.CATEGORIES else [])
+               if d.position in cf.PERFORMANCE_METRICS else [])
     from lofc.dashboard.labels import LABELS
     labels = [LABELS.get(m, m.replace("_p90", "").replace("_", " ").capitalize())
               for m in metrics]
     values = [d.percentiles.get(m) for m in metrics]
     # Indexes of metrics where a high raw percentile is bad, so the bar is drawn on the
     # flipped value: a long green bar must always mean the player is good at the thing named.
-    inverted = {i for i, m in enumerate(metrics) if m in rc.INVERTED}
+    inverted = {i for i, m in enumerate(metrics) if m in _LOWER_IS_BETTER}
     # The club's own squad median for this position, drawn as a tick on each bar. Only
     # when the club actually HAS players in the position -- otherwise there is no
     # benchmark to draw and a missing tick is the honest rendering.
@@ -86,16 +129,6 @@ def to_html(d: ReportData) -> str:
                                # the worst case; 300 does not.
                                max_height=250)
 
-    if d.position in rc.SCATTER_AXES and d.peers:
-        x_cat, y_cat = rc.SCATTER_AXES[d.position]
-        # 280, not 330: the scatter is the TALLEST element in the evidence band and
-        # therefore sets that band's height for every position -- measured, a
-        # goalkeeper's bars are 34mm while the band is 94mm, all of it scatter. The
-        # bars' max_height is not the lever it looks like; this is.
-        scatter = svg.scatter(d.peers, d.player_name, x_cat, y_cat, size=280)
-    else:
-        scatter = ""
-
     axes = [label for _key, label in _PHYSICAL_AXES]
     player_line = [d.physical.get(key) for key, _label in _PHYSICAL_AXES]
     series = [("This player", player_line, svg.RED)]
@@ -118,17 +151,12 @@ def to_html(d: ReportData) -> str:
     band_key = svg.physical_band_legend(d.league) if any(
         v is not None for v in player_line) else ""
 
-    strips = [svg.category_strip(name, score,
-                                 [p[1] for p in d.peers] if d.peers else [])
-              for name, score in d.category_scores.items()]
-
     whence = goals_by_position(d.position_shares)
 
     css = (_TEMPLATES / "report.css").read_text()
     body = _environment().get_template("report.html.j2").render(
-        d=d, bars=bars, scatter=scatter, radar=radar, band_key=band_key,
+        d=d, bars=bars, style=style_view(d), radar=radar, band_key=band_key,
         whence=whence,
-        strips=strips,
         assist_definition=ASSIST_DEFINITION)
 
     # The name is escaped explicitly here: this f-string is OUTSIDE Jinja, so the

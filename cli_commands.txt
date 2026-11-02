@@ -458,3 +458,9 @@ docker compose exec -T app python -m lofc.model.current_club
 
 # Load the Transfermarkt loan file (reference/transfermarkt/loans.csv, written by the loan scrape) into player_loans -- the server side of the loan refresh; runs every weekly pipeline. --allow-shrink at season end, when most loans end
 docker compose exec -T app python -m lofc.store.loans
+
+# PRE-DEPLOY SMOKE TEST (read-only; drives the real dashboard with Streamlit AppTest against the local DB; no credentials, no provider calls). Checks every page, every position x season, every Players metric slider, global search, Compare, Report, data sanity and render times. Prints a table and "SMOKE: PASS" / "SMOKE: FAIL (n)"; exit 1 on any FAIL. WARN = slow, does not fail. Run before every push (Mac) and after deploy.sh (server). ~ a few minutes; --quick = one season, two positions.
+# NB scripts/ is baked into the image, not mounted: on the Mac run `docker compose build app && docker compose up -d app` (or `docker compose cp scripts/smoke_test.py app:/app/scripts/`) after editing it. deploy.sh rebuilds on the server.
+docker compose exec -T app python scripts/smoke_test.py
+docker compose exec -T app python scripts/smoke_test.py --quick
+# Server: docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python scripts/smoke_test.py

@@ -42,7 +42,7 @@ from lofc.constrain.filters import apply_gates
 from lofc.dashboard.auth import can
 from lofc.dashboard.controls import synced_budget, synced_min_minutes, synced_wage_budget
 from lofc.dashboard.loaders import (
-    available_seasons, get_engine, league_names, load_candidates, load_metric_values,
+    available_seasons, get_engine, start_warmup_if_needed, league_names, load_candidates, load_metric_values,
     load_percentiles, load_scorecards, load_scorecards_archetype, load_wage_framework,
     load_current_clubs, load_loan_status, load_style_labels, max_minutes, player_context_lookup, player_names,
     position_and_league_for)
@@ -91,6 +91,9 @@ def main() -> None:
                        page_icon=str(LOGO) if LOGO.exists() else None,
                        layout="wide", initial_sidebar_state="expanded")
     style()
+    # Fill the heavy caches in the background on a fresh process or a new data version, so
+    # the first user does not wait ~17 s. Non-blocking, one at a time, never raises.
+    start_warmup_if_needed()
     if force_reload_after_logout():
         return          # a hard reload is already on its way; nothing else should render
 
@@ -353,7 +356,8 @@ def main() -> None:
     if not _current.empty:
         pool = pool.merge(_current, on="player_id", how="left")
     thin = pool["peer_count"].isna() | (pool["peer_count"] < MIN_PEERS_FOR_RANKING)
-    withheld = int(thin.sum())
+    # Who was withheld (name, club, league), for the one-line notice.
+    withheld = pool.loc[thin, ["player_name", "team_name", "league"]].copy()
     pool = pool[~thin]
     pool = pool.sort_values("objective_composite", ascending=False, na_position="last").reset_index(drop=True)
     metrics = role_metrics_for(position)
@@ -377,13 +381,13 @@ def main() -> None:
         # 2026/27 was in -- a blank table and no explanation. Both decisions now live in
         # `seasons.ranking_notice`, which is pure and unit-tested.
         notice = ranking_notice(
-            n_ranked=len(pool), n_withheld=withheld,
+            n_ranked=len(pool), withheld=withheld,
             season=season_name_for(season_id),
             complete_season=season_name_for(last_complete_season_id(seasons, settings.live_season_id)),
             position=position)
         if notice is not None:
             level, text = notice
-            (st.warning if level == "warning" else st.info)(text)
+            (st.caption if level == "caption" else st.info)(text)
 
     _kpi_strip(pool, season_name_for(season_id), season_id, show_money)
 
@@ -403,7 +407,8 @@ def main() -> None:
 
     def _compare_page():
         _season_banner()
-        _compare(st.container(), pool, position, archetype, season_id, show_money, metric_values)
+        _compare(st.container(), pool, position, archetype, season_id, show_money, metric_values,
+                 search_index)
 
     def _watchlist_page():
         _watchlist(st.container())

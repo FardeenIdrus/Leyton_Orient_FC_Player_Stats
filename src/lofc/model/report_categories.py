@@ -9,14 +9,16 @@ reader average sixteen bars themselves. It is not a new model and produces no ne
 actually resolves, so a category can never drift into measuring something the club did not
 ask for.
 
-A category is the MEAN of its members' percentiles, renormalised over the members actually
-present, so a metric with no data drops out rather than counting as zero -- the same rule
-`scorecard._composite` already applies to dimensions.
+A category is the WEIGHTED mean of its members' percentiles, using the same per-metric
+weights as the Performance rating (`performance_weights`, All Metrics), so a strip moves
+the way the rating does: a metric the club weights at 7% counts more than one at 4%.
+Weights are renormalised over the members actually present, so a metric with no data drops
+out rather than counting as zero -- the same rule the rating applies.
 
-Metrics deliberately left out of every category (they still appear in the report's bar
-chart, which shows the full resolved list): Goals for the two central-midfield groups, and
-Touches in box for a Centre Back. Both are real and worth seeing, but a one-metric category
-is a bar with a heading, not a summary.
+Every metric in the rating is shown. Central Mid has a Scoring category for that reason.
+Where a position has a rated metric that does not belong in any category (Goals for a
+Defensive Mid, Touches in box for a Centre Back) we do NOT invent a one-metric strip;
+`unlisted_metrics` returns them and the report prints "Also in the rating: ...".
 """
 
 from __future__ import annotations
@@ -62,16 +64,15 @@ CATEGORIES: dict[str, dict[str, list[str]]] = {
         "Pressing": ["counterpressures_p90", "pressures_p90", "ball_wins_p90"],
         "Duels": ["ground_duel_win_pct", "aerial_win_pct"],
     },
-    
-    #-----
     "Central Mid": {
         "Progression": ["packing_bypassed_opponents_p90", "deep_progressions_p90",
-                        "pass_value_p90", "dribble_carry_value_p90"],
+                        "pass_value_p90", "dribble_carry_value_p90", "dribble_count_p90"],
         "Creation": ["xa_p90", "passes_into_box_p90", "assists_p90",
-                     "open_play_assists_p90"],
+                     "open_play_assists_p90", "cross_bypassed_opponents_p90"],
         "Retention": ["pass_completion_pct", "turnovers_p90"],
         "Pressing": ["counterpressures_p90", "pressures_p90", "ball_wins_p90"],
         "Duels": ["ground_duel_win_pct", "aerial_win_pct"],
+        "Scoring": ["goals_p90", "shots_p90", "touches_in_box_p90"],
     },
     "Attacking Mid": {
         "Scoring": ["goals_p90", "shots_p90", "np_xg_p90", "np_xg_xa_p90"],
@@ -126,9 +127,19 @@ SCATTER_AXES: dict[str, tuple[str, str]] = {
 
 
 
-def category_score(percentiles: dict[str, float], position: str,
-                   category: str) -> float | None:
-    """The mean percentile across a category's members, or None if none are measurable.
+def _default_weights(position: str) -> dict[str, float] | None:
+    from lofc.model.performance_weights import weights_for
+    return weights_for(position, "All Metrics")
+
+
+def category_score(percentiles: dict[str, float], position: str, category: str,
+                   weights: dict[str, float] | None = None) -> float | None:
+    """The weighted mean percentile across a category's members, or None if none are
+    measurable.
+
+    `weights` is metric -> weight; default is the Performance rating's All Metrics weights
+    for the position. Only the ratios matter (renormalised over present members). With no
+    weights at all for a position, or all-zero present weights, it is a plain mean.
 
     Raises KeyError for an unknown position or category -- a player must never be scored
     against categories that do not exist for his position, and returning None there would
@@ -138,11 +149,25 @@ def category_score(percentiles: dict[str, float], position: str,
     not a category the player scored zero in.
     """
     members = CATEGORIES[position][category]
-    present = [(100.0 - percentiles[m]) if m in INVERTED else percentiles[m]
+    if weights is None:
+        weights = _default_weights(position)
+    present = [((100.0 - percentiles[m]) if m in INVERTED else percentiles[m],
+                weights.get(m, 0.0) if weights else 1.0)
                for m in members if percentiles.get(m) is not None]
     if not present:
         return None
-    return round(sum(present) / len(present), 1)
+    total = sum(w for _, w in present)
+    if total <= 0:
+        return round(sum(v for v, _ in present) / len(present), 1)
+    return round(sum(v * w for v, w in present) / total, 1)
+
+
+def unlisted_metrics(position: str) -> list[str]:
+    """Rated metrics (All Metrics) that sit in no category, so the report can name them
+    instead of leaving them silently invisible."""
+    from lofc.model.scorecard import _resolved_performance
+    shown = {m for ms in CATEGORIES[position].values() for m in ms}
+    return [m for m in _resolved_performance(position, "All Metrics") if m not in shown]
 
 
 def category_scores(percentiles: dict[str, float], position: str) -> dict[str, float]:
@@ -152,8 +177,9 @@ def category_scores(percentiles: dict[str, float], position: str) -> dict[str, f
     draw a strip it has no data for.
     """
     out: dict[str, float] = {}
+    weights = _default_weights(position)
     for category in CATEGORIES[position]:
-        score = category_score(percentiles, position, category)
+        score = category_score(percentiles, position, category, weights)
         if score is not None:
             out[category] = score
     return out

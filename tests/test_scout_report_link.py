@@ -213,3 +213,130 @@ def test_the_caller_frame_is_not_mutated():
     reports = _reports("Idris El Mizouni")
     resolve_links(reports, LOOKUP, OURS)
     assert "player_id" not in reports.columns
+
+
+# --- tolerant second tier: the sheet's date of birth is often mistyped -----------------------
+#
+# Measured live: 726 reports, 524 linked, ~75 fixable misses. The name is unique among OUR
+# players, so the date only has to be "not contradictory" -- see `_compatible`.
+
+def _ours(*rows):
+    return pd.DataFrame([{"player_id": pid, "player_name": n, "birth_date": b}
+                         for pid, n, b in rows])
+
+
+def _lookup(*rows):
+    return pd.DataFrame([{"player_name": n, "date_of_birth": b} for n, b in rows])
+
+
+def _link(name, ours, lookup, **kw):
+    out = resolve_links(_reports(name, **kw), lookup, ours)
+    return out["player_id"].iloc[0], out["link_method"].iloc[0]
+
+
+def test_leavy_year_off_by_two_links_on_a_unique_name():
+    ours = _ours((2000103826, "Kian Leavy", dt.date(2002, 3, 21)))
+    pid, how = _link("Kian Leavy", ours, _lookup(("Kian Leavy", dt.date(2004, 3, 21))))
+    assert pid == 2000103826 and how == "name+dob (tolerant: year)"
+
+
+def test_year_off_by_three_does_not_link():
+    ours = _ours((1, "Kian Leavy", dt.date(2002, 3, 21)))
+    pid, _ = _link("Kian Leavy", ours, _lookup(("Kian Leavy", dt.date(2005, 3, 21))))
+    assert pd.isna(pid)
+
+
+def test_day_month_swap_links():
+    ours = _ours((7, "Ali McCann", dt.date(1999, 12, 4)))
+    pid, how = _link("Ali McCann", ours, _lookup(("Ali McCann", dt.date(1999, 4, 12))))
+    assert pid == 7 and how == "name+dob (tolerant: swapped)"
+
+
+def test_tolerant_tier_refuses_when_two_of_our_players_share_the_name():
+    ours = _ours((1, "Kian Leavy", dt.date(2002, 3, 21)), (2, "Kian Leavy", dt.date(1990, 1, 1)))
+    pid, _ = _link("Kian Leavy", ours, _lookup(("Kian Leavy", dt.date(2004, 3, 21))))
+    assert pd.isna(pid)
+
+
+def test_wildly_different_date_does_not_link():
+    ours = _ours((1, "Kian Leavy", dt.date(2002, 3, 21)))
+    pid, how = _link("Kian Leavy", ours, _lookup(("Kian Leavy", dt.date(1995, 8, 2))))
+    assert pd.isna(pid) and pd.isna(how)
+
+
+def test_duplicate_dropdown_rows_exact_match_links_via_strict_tier():
+    ours = _ours((5, "Conor Coventry", dt.date(2000, 3, 25)))
+    look = _lookup(("Conor Coventry", dt.date(2000, 3, 25)), ("Conor Coventry", dt.date(1999, 1, 1)))
+    assert _link("Conor Coventry", ours, look) == (5, "name+dob")
+
+
+def test_duplicate_dropdown_rows_neither_exact_but_one_compatible_links():
+    ours = _ours((5, "Conor Coventry", dt.date(2000, 3, 25)))
+    look = _lookup(("Conor Coventry", dt.date(1990, 1, 1)), ("Conor Coventry", dt.date(2001, 3, 25)))
+    assert _link("Conor Coventry", ours, look) == (5, "name+dob (tolerant: year)")
+
+
+def test_duplicate_dropdown_rows_none_compatible_does_not_link():
+    ours = _ours((5, "Conor Coventry", dt.date(2000, 3, 25)))
+    look = _lookup(("Conor Coventry", dt.date(1990, 1, 1)), ("Conor Coventry", dt.date(1985, 6, 6)))
+    assert pd.isna(_link("Conor Coventry", ours, look)[0])
+
+
+def test_duplicate_dropdown_rows_exact_match_pinning_one_of_two_namesakes_links():
+    ours = _ours((1, "Sam Roe", dt.date(2000, 1, 1)), (2, "Sam Roe", dt.date(2003, 2, 2)))
+    look = _lookup(("Sam Roe", dt.date(2000, 1, 1)), ("Sam Roe", dt.date(1999, 9, 9)))
+    assert _link("Sam Roe", ours, look) == (1, "name+dob")
+
+
+def test_missing_dropdown_date_with_unique_name_links():
+    ours = _ours((9, "Some Body", dt.date(2001, 5, 5)))
+    assert _link("Some Body", ours, _lookup(("Some Body", None))) == (
+        9, "name+dob (tolerant: missing)")
+
+
+def test_implausible_dropdown_date_counts_as_missing():
+    ours = _ours((9, "Some Body", dt.date(2001, 5, 5)))
+    for bad in (dt.date(2026, 6, 30), dt.date(1900, 1, 1)):
+        assert _link("Some Body", ours, _lookup(("Some Body", bad)))[0] == 9
+
+
+def test_missing_date_of_ours_with_unique_name_links():
+    ours = _ours((9, "Some Body", None))
+    assert _link("Some Body", ours, _lookup(("Some Body", dt.date(2001, 5, 5))))[0] == 9
+
+
+def test_missing_date_does_not_link_a_name_held_by_two_players():
+    ours = _ours((1, "Some Body", dt.date(2001, 5, 5)), (2, "Some Body", dt.date(2002, 5, 5)))
+    assert pd.isna(_link("Some Body", ours, _lookup(("Some Body", None)))[0])
+
+
+def test_name_absent_from_dropdown_is_not_linked_by_the_tolerant_tier():
+    ours = _ours((9, "Some Body", dt.date(2001, 5, 5)))
+    assert pd.isna(_link("Some Body", ours, _lookup(("Other Person", None)))[0])
+
+
+def test_tolerant_tier_never_links_a_non_linkable_report():
+    ours = _ours((9, "A New Player", dt.date(2001, 5, 5)))
+    pid, _ = _link("A New Player", ours, _lookup(("A New Player", None)), linkable=False)
+    assert pd.isna(pid)
+
+
+def test_recovered_name_rows_do_not_use_the_tolerant_tier():
+    """Recovered-name rows keep their name-only rule: method says so, and a namesake pair
+    still refuses even though the dropdown (irrelevant to them) would be 'missing'."""
+    ours = _ours((9, "Some Body", dt.date(2001, 5, 5)))
+    rep = _reports("Some Body", linkable=False)
+    rep["name_from_report"] = True
+    out = resolve_links(rep, _lookup(("Some Body", dt.date(1950, 1, 1))), ours)
+    assert out["player_id"].iloc[0] == 9
+    assert out["link_method"].iloc[0] == "name only (report text)"
+
+
+def test_link_method_is_recorded_and_row_count_unchanged():
+    ours = _ours((9, "Some Body", dt.date(2001, 5, 5)), (4, "Kian Leavy", dt.date(2002, 3, 21)))
+    look = _lookup(("Some Body", dt.date(2001, 5, 5)), ("Kian Leavy", dt.date(2004, 3, 21)))
+    rep = _reports("Some Body", "Kian Leavy", "Nobody Known")
+    out = resolve_links(rep, look, ours)
+    assert len(out) == 3
+    assert list(out["link_method"][:2]) == ["name+dob", "name+dob (tolerant: year)"]
+    assert pd.isna(out["link_method"].iloc[2])

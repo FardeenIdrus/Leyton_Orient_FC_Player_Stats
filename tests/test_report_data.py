@@ -119,3 +119,104 @@ def test_unknown_player_raises_rather_than_returning_an_empty_report(engine):
     """An empty report is worse than an error -- it looks like a player with no data."""
     with pytest.raises(ValueError, match="999999"):
         data.build(engine, 999999, 4, 318)
+
+
+# --- authored override (a saved report: the author's words and views) -------------------
+
+def _authored(**overrides):
+    base = dict(author_name="Scout One", author_role="scout",
+                created_at=dt.datetime(2026, 11, 2, 9, 0),
+                summary="Mine.", why_sign="Pace", considerations="Light",
+                psych_band=3.5, medical_band=None)
+    base.update(overrides)
+    return data.Authored(**base)
+
+
+def test_authored_override_sets_stamp_narrative_and_bands(engine):
+    # A scout assessment exists too; the author's report must not use it.
+    _assess(engine, band=4.0, summary="Scout assessment prose.")
+    r = data.build(engine, 1, 4, 318, authored=_authored())
+    assert r.stamp == "Report by Scout One · 02 Nov 2026"
+    assert r.narrative.summary == "Mine."
+    assert r.narrative.why_sign == "Pace"
+    assert r.dimension_bands["Psychological"] == 3.5
+    assert r.dimension_bands["Medical"] is None
+    assert r.authored.author_name == "Scout One"
+    # objective bands are untouched
+    assert r.dimension_bands["Performance"] == 4.1
+
+
+def test_no_override_is_unchanged(engine):
+    _assess(engine, band=4.0, summary="Scout assessment prose.")
+    a = data.build(engine, 1, 4, 318)
+    assert a.authored is None
+    assert a.stamp == data.STAMP_PROVISIONAL
+    assert a.narrative.summary == "Scout assessment prose."
+    assert a.dimension_bands["Psychological"] == 4.0
+
+
+def test_data_only_has_no_narrative_or_author_values(engine):
+    _assess(engine, band=4.0, summary="Scout assessment prose.")
+    r = data.build(engine, 1, 4, 318, data_only=True)
+    assert r.stamp == data.STAMP_DATA_ONLY
+    assert r.narrative is None and r.authored is None
+    assert r.dimension_bands["Psychological"] is None
+    assert r.dimension_bands["Medical"] is None
+
+
+def test_authored_from_inputs_blank_is_none_and_band_is_mean_of_scored():
+    kw = dict(author_name="S", author_role="scout")
+    assert data.authored_from_inputs(**kw, summary="  ", psych_scores={"a": None}) is None
+    a = data.authored_from_inputs(**kw, summary=" Hi ", psych_scores={"a": 5, "b": 2, "c": None},
+                                  medical_band=3)
+    assert a.summary == "Hi" and a.psych_band == 3.5 and a.medical_band == 3.0
+    assert data.authored_from_inputs(**kw, medical_band=2).medical_band == 2.0
+
+
+def test_authored_render_never_writes_assessments_or_scorecards(engine):
+    """The override only shapes rendering: no assessment rows appear, no rating moves."""
+    from sqlalchemy import func, select
+    from lofc.store.models import ScoutAssessment
+
+    def snap():
+        with Session(engine) as s:
+            return (s.scalar(select(func.count()).select_from(ScoutAssessment)),
+                    [(c.performance_band, c.physical_band, c.objective_composite,
+                      c.assessed_composite) for c in s.scalars(select(PlayerScorecard))])
+    before = snap()
+    data.build(engine, 1, 4, 318, authored=_authored(psych_band=1.0, medical_band=1.0))
+    assert snap() == before
+
+
+def test_derived_variants_equal_build_variants(engine):
+    _assess(engine, band=4.0, summary="Scout prose.")
+    base = data.build(engine, 1, 4, 318)
+    a = _authored(screening={"Ankle clear": "Meets"})
+    assert data.with_authored(base, a) == data.build(engine, 1, 4, 318, authored=a)
+    assert data.as_data_only(base) == data.build(engine, 1, 4, 318, data_only=True)
+
+
+def test_deriving_a_variant_reads_no_database(engine):
+    base = data.build(engine, 1, 4, 318)
+
+    class Boom:
+        def __getattr__(self, name):
+            raise AssertionError("database touched")
+    # Variants take no engine at all; also make any loader blow up if reached.
+    import lofc.report.data as d
+    orig = (d.pd.read_sql, d.store_assess.load_all)
+    d.pd.read_sql = lambda *a, **k: (_ for _ in ()).throw(AssertionError("db read"))
+    d.store_assess.load_all = lambda *a, **k: (_ for _ in ()).throw(AssertionError("db read"))
+    try:
+        data.with_authored(base, _authored())
+        data.as_data_only(base)
+    finally:
+        d.pd.read_sql, d.store_assess.load_all = orig
+
+
+def test_authored_from_inputs_keeps_only_answered_screening():
+    a = data.authored_from_inputs(author_name="S", author_role="scout",
+                                  screening={"A": "Meets", "B": None, "C": "Does not meet"})
+    assert a.screening == {"A": "Meets", "C": "Does not meet"}
+    assert data.authored_from_inputs(author_name="S", author_role="scout",
+                                     screening={"A": None}) is None

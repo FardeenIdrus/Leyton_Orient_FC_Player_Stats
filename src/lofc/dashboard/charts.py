@@ -55,15 +55,24 @@ def radar_chart(traces: list[tuple[str, list[float]]], metrics: list[str]) -> go
     fig = go.Figure()
     for i, (name, values) in enumerate(traces):
         colour = COMPARE_COLOURS[i % len(COMPARE_COLOURS)]
+        # A None value (the player has no figure for that axis) sits at the centre and says
+        # so on hover, so a metric one player lacks is still an axis.
+        shown = [0 if v is None else v for v in values]
+        hover = ["— no value" if v is None else f"{v:.0f} percentile" for v in values]
         fig.add_trace(go.Scatterpolar(
-            r=values + [values[0]], theta=labels + [labels[0]], fill="toself", name=name,
+            r=shown + [shown[0]], theta=labels + [labels[0]], fill="toself", name=name,
             line_color=colour, opacity=0.55 if len(traces) > 1 else 0.8,
-            hovertemplate="%{theta}: %{r:.0f} percentile<extra>" + name + "</extra>",
+            customdata=hover + [hover[0]],
+            hovertemplate="%{theta}: %{customdata}<extra>" + name + "</extra>",
         ))
+    # Larger, darker type (owner, 2026-11-02: the radar labels were hard to read).
     fig.update_layout(
-        polar=dict(radialaxis=dict(range=[0, 100], tickfont_size=9)),
-        showlegend=len(traces) > 1, legend=dict(orientation="h", y=-0.08),
-        height=470, margin=dict(l=50, r=50, t=40, b=40), dragmode=False,
+        font=dict(size=14, color="#14161A"),
+        polar=dict(radialaxis=dict(range=[0, 100], tickfont=dict(size=11, color="#5A5F68")),
+                   angularaxis=dict(tickfont=dict(size=14, color="#14161A"))),
+        showlegend=len(traces) > 1,
+        legend=dict(orientation="h", y=-0.1, font=dict(size=14)),
+        height=520, margin=dict(l=90, r=90, t=50, b=50), dragmode=False,
     )
     return fig
 

@@ -61,7 +61,7 @@ def _glossary(tab) -> None:
     with tab:
         st.markdown("### Glossary")
         st.caption("Every metric on the platform, in the provider's own words. "
-                   "\"In rating\" marks the 40 metrics that build the rating.")
+                   "\"In rating\" marks the 39 metrics that build the rating.")
         query = st.text_input("Search", placeholder="e.g. ball wins, sprint, in-behind",
                               key="glossary_search", label_visibility="collapsed")
         entries = search(_entries(), query)

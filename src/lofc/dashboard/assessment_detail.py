@@ -17,6 +17,8 @@ exercises directly.
 from __future__ import annotations
 
 import pandas as pd
+
+from lofc.dashboard.formatting import dash_blanks
 import streamlit as st
 
 from lofc.dashboard import badges
@@ -113,13 +115,13 @@ def entries_table(rows: pd.DataFrame) -> pd.DataFrame:
         approved_at = row["approved_at"] if "approved_at" in row and pd.notna(row["approved_at"]) else None
         return badges.for_status(row["status"], row["author_name"], approver, approved_at).text
 
-    return pd.DataFrame({
+    return dash_blanks(pd.DataFrame({
         "Entered by": rows["author_name"].tolist(),
         "Role": rows["author_role"].tolist(),
         "Band": [("—" if pd.isna(b) else f"{b:.2f}") for b in rows["band"]],
         "Status": [_status_text(row) for _, row in rows.iterrows()],
         "Date": rows["created_at"].dt.strftime("%d %b %Y").tolist(),
-    })
+    }))
 
 
 # --- Streamlit rendering (not unit-tested; see the module docstring) -------------------

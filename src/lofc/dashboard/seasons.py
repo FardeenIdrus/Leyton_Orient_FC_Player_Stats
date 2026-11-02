@@ -94,11 +94,16 @@ def last_complete_season_id(available: list[int], live_season_id: int | None) ->
     return max(complete) if complete else max(available)
 
 
-def ranking_notice(n_ranked: int, n_withheld: int, season: str, complete_season: str,
-                   position: str) -> tuple[str, str] | None:
+_MAX_NAMED = 6      # players named in the not-ranked line before "+N more"
+
+
+def ranking_notice(n_ranked: int, withheld: pd.DataFrame, season: str,
+                   complete_season: str, position: str) -> tuple[str, str] | None:
     """What the Players page must say above a ranked list that is short or empty.
 
-    Returns (level, text) for `st.warning`/`st.info`, or None when the list is healthy.
+    Returns (level, text) -- level "caption" (a quiet one-liner) or "info" (explains an empty
+    table) -- or None when the list is healthy. `withheld` holds the withheld players, one
+    row each, with player_name, team_name and league.
 
     Two separate causes produce a thin or blank list, and a recruiter cannot tell them apart
     from the table alone:
@@ -106,30 +111,41 @@ def ranking_notice(n_ranked: int, n_withheld: int, season: str, complete_season:
         (a composite there ranks a player against almost nobody);
       * nobody has reached 450 minutes yet, so no composite exists at all.
     Before this existed, selecting 2026/27 rendered an empty table with no message of any
-    kind -- `ranking` was non-empty so the "season under way" notice never fired, while the
-    candidate pool was empty. Silence reads as a broken page.
-
-    Both messages point at Squads & loans, which answers "who is at this club right now" with
-    current facts and no score -- the question the ranking cannot answer early in a season.
+    kind -- silence reads as a broken page. Kept to ONE line: it shows on
+    several pages and a yellow paragraph read as an error.
     """
-    plural = f"{position.lower()}s"
+    from lofc.model.scorecard import MIN_PEERS_FOR_RANKING
+    plural = f"{position}s"
+    n_withheld = len(withheld)
     if n_ranked == 0:
         alternative = ("" if season == complete_season else
-                       f" **{complete_season}** is complete and fully ranked.")
+                       f" {complete_season} is fully ranked.")
+        if n_withheld:
+            # They HAVE 450+ minutes; what is missing is peers (smoke test, 2026-11-02:
+            # "too few have 450+ minutes" was shown here, which was false).
+            noun = position if n_withheld == 1 else plural
+            counts = withheld["league"].fillna("Unknown league").value_counts()
+            where = " · ".join(f"{lg} ({n})" for lg, n in sorted(counts.items()))
+            return ("info",
+                    f"No {plural} ranked in {season} yet — {n_withheld} {noun} rated, but "
+                    f"fewer than {MIN_PEERS_FOR_RANKING} per league: {where}." + alternative)
         return ("info",
-                f"**No {plural} can be ranked in {season} yet.** A rating is a comparison "
-                f"against players in the same league and position, and too few have played "
-                f"enough of this season for that comparison to mean anything. "
-                f"**Squads & loans** shows who is at each club right now — contract, loan "
-                f"status and this season's minutes.{alternative}")
+                f"No {plural} ranked in {season} yet — too few have 450+ minutes."
+                + alternative)
     if n_withheld:
-        return ("warning",
-                f"**{n_withheld} {plural} are not ranked here.** They have played 450+ "
-                f"minutes, but fewer than 10 players in their league and position have — and "
-                f"a rating compares a player against those peers, so with a pool that small "
-                f"the number would say more about who has played than about the player. "
-                f"**Squads & loans** lists them with this season's minutes and last season's "
-                f"rating.")
+        noun = position if n_withheld == 1 else plural
+        rows = withheld.assign(
+            team_name=withheld["team_name"].fillna("Unknown club"),
+            league=withheld["league"].fillna("Unknown league")
+        ).sort_values(["player_name", "team_name"], kind="stable")   # stable between reruns
+        shown = [f"{r.player_name} ({r.team_name}, {r.league})"
+                 for r in rows.head(_MAX_NAMED).itertuples()]
+        if n_withheld > _MAX_NAMED:
+            shown.append(f"+{n_withheld - _MAX_NAMED} more")
+        scope = "the league" if n_withheld == 1 else "their league"
+        return ("caption",
+                f"{n_withheld} {noun} not ranked (fewer than {MIN_PEERS_FOR_RANKING} rated in "
+                f"{scope}): " + " · ".join(shown) + ("" if n_withheld > _MAX_NAMED else "."))
     return None
 
 

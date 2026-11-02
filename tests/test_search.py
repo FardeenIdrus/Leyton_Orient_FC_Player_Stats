@@ -147,3 +147,35 @@ def test_filter_labels_no_match_returns_empty_not_an_unrelated_guess():
     nothing."""
     labels = ["Emmanuel Fernandez — Glasgow Rangers  ·  Centre Back  ·  Scottish Premiership"]
     assert filter_labels(labels, "Mendez") == []
+
+
+# --- one search box: Streamlit's own type-ahead is accent-sensitive, so the label carries
+# the plain spelling -----------------------------------------------------------------------
+
+def test_accented_name_label_carries_its_plain_spelling():
+    from lofc.dashboard.search import ascii_fold
+    idx = build_search_index(_candidates([
+        (1, 4, 318, "Nathaniel Méndez-Laing", "Cardiff City", "Winger", "Championship"),
+        (2, 4, 318, "Sam Smith", "Town FC", "Winger", "Championship"),
+    ]))
+    labels = dict(zip(idx["player_name"], idx["label"]))
+    assert labels["Nathaniel Méndez-Laing"] == (
+        "Nathaniel Méndez-Laing (Nathaniel Mendez-Laing) — Cardiff City  ·  Winger  ·  Championship")
+    assert "(" not in labels["Sam Smith"]          # plain names are left alone
+    assert ascii_fold("Łukasz Škoda Øvrebø") == "Lukasz Skoda Ovrebo"
+
+
+def test_plain_spelling_matches_the_label_as_a_browser_substring_filter_would():
+    idx = build_search_index(_candidates([
+        (1, 4, 318, "Nathaniel Méndez-Laing", "Cardiff City", "Winger", "Championship"),
+    ]))
+    assert "mendez-laing" in idx.loc[0, "label"].lower()
+
+
+def test_namesakes_with_accents_keep_unique_labels():
+    idx = build_search_index(_candidates([
+        (1, 4, 318, "José Silva", "Town FC", "Winger", "League One"),
+        (2, 5, 318, "José Silva", "City FC", "Winger", "League Two"),
+    ]))
+    labels, by_label = search_options(idx)
+    assert len(by_label) == len(labels) == 2

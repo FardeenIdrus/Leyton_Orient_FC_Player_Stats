@@ -25,7 +25,10 @@ import datetime
 import pandas as pd
 import streamlit as st
 
+from lofc.dashboard.formatting import dash_blanks
 from lofc.dashboard.loaders import competition_name_by_id, get_engine
+from lofc.dashboard.search import fold
+from lofc.dashboard.seasons import contract_data_date, loan_data_date
 from lofc.dashboard.session import go_to_player
 from lofc.dashboard.sidebar_filters import SidebarFilters, apply_sidebar_filters
 from lofc.model.scorecard import peer_pool_sizes, pool_is_thin
@@ -707,12 +710,53 @@ def sidebar_view(frame: pd.DataFrame, filters: SidebarFilters) -> pd.DataFrame:
     return out.drop(columns=["_on_loan"])
 
 
+# Missing cells must read "—": st.dataframe draws any None/NaN/NaT as a grey "None" (see
+# formatting.py). Ratings ("x.xx") and age ("xx.x") sort the same as text; Minutes,
+# Months left and the two dates stay typed (as text they would mis-sort) and keep "None".
+_DISPLAY_FORMATS = {"Age": "{:.1f}", "This season": "{:.2f}", "Last season": "{:.2f}",
+                    "Also rated": "{:.2f}"}
+
+
+def squad_display(table: pd.DataFrame) -> pd.DataFrame:
+    """The table as shown: a copy, row order unchanged so a click still indexes `view`."""
+    return dash_blanks(table, _DISPLAY_FORMATS)
+
+
+def transfermarkt_asof(squads_date: str | None, loans_date: str | None) -> str | None:
+    """One line saying how old the Transfermarkt data is. Dates arrive as "07 Sep 2026"
+    (the seasons.py helpers) and are shown without the zero pad. None when both unknown."""
+    squads_date, loans_date = (d.lstrip("0") if d else None for d in (squads_date, loans_date))
+    if squads_date and loans_date and squads_date != loans_date:
+        return (f"Transfermarkt data as of {squads_date} (squads & contracts) · "
+                f"{loans_date} (loans).")
+    if squads_date and loans_date:
+        return f"Transfermarkt data as of {squads_date}."
+    if squads_date:
+        return f"Transfermarkt data as of {squads_date} (squads & contracts)."
+    if loans_date:
+        return f"Transfermarkt data as of {loans_date} (loans)."
+    return None
+
+
+def filter_by_name(frame: pd.DataFrame, query: str) -> pd.DataFrame:
+    """Rows whose Player contains the query, accent-, case- and punctuation-insensitive
+    (same folding as the global search). Blank query = no filter."""
+    key = fold(query)
+    if not key or frame.empty:
+        return frame
+    return frame[frame["Player"].map(lambda n: key in fold(n))]
+
+
 def render(season_id: int, rating_season_id: int, season_label: str,
            rating_label: str, filters: SidebarFilters | None = None) -> None:
     filters = filters or SidebarFilters()
     st.subheader("Squads, contracts and loans")
     st.caption(f"Every registered squad member, {season_label}. Click a row to open the "
                f"player.")
+
+    asof = transfermarkt_asof(contract_data_date(), loan_data_date())
+    if asof:
+        st.caption(asof)
 
     frame = prepare(registered_squad_frame(season_id, rating_season_id))
     # This season's rating where it is rankable -- gated by the same peer-pool floor the
@@ -730,7 +774,9 @@ def render(season_id: int, rating_season_id: int, season_label: str,
 
     frame = sidebar_view(frame, filters)
     names = competition_name_by_id()
-    c1, c2, c3, c4 = st.columns([2, 2, 2, 3])
+    # Bottom-aligned so every control (and the radio, whose label sits above it) shares a baseline;
+    # the radio gets the widest column so its three options do not wrap or squash.
+    c1, c2, c3, c4, c5 = st.columns([2, 2, 2, 2.4, 4.6], vertical_alignment="bottom")
     league = c1.selectbox("League", ["All"] + sorted(frame["League"].unique()))
     view = frame if league == "All" else frame[frame["League"] == league]
     club = c2.selectbox("Club", ["All"] + sorted(view["Club"].dropna().unique()))
@@ -738,7 +784,9 @@ def render(season_id: int, rating_season_id: int, season_label: str,
         view = view[view["Club"] == club]
     position = c3.selectbox("Position", position_options(view))
     view = filter_by_position(view, position)
-    show = c4.radio("Show", ["Everyone", "On loan only", "Contract expiring (under 12 months)"],
+    query = c4.text_input("Player", placeholder="Search a player…")
+    view = filter_by_name(view, query)
+    show = c5.radio("Show", ["Everyone", "On loan only", "Contract expiring (under 12 months)"],
                     horizontal=True, label_visibility="visible")
 
     if show == "On loan only":
@@ -750,8 +798,9 @@ def render(season_id: int, rating_season_id: int, season_label: str,
         loans = prepare(loans_frame(season_id, rating_season_id))
         if not loans.empty:
             loans["League"] = loans["competition_id"].map(names).fillna("\u2014")
-            loans = sidebar_view(loan_view(loans, league=league, club=club, position=position),
-                                 filters)
+            loans = sidebar_view(filter_by_name(
+                loan_view(loans, league=league, club=club, position=position), query),
+                filters)
         view = loans
     elif show.startswith("Contract expiring"):
         # Expired dates are INCLUDED deliberately: a lapsed date is a live question --
@@ -765,14 +814,14 @@ def render(season_id: int, rating_season_id: int, season_label: str,
     expiring = int((view["Months left"].notna() & (view["Months left"] < 12)).sum())
     m4.metric("Expiring < 12 months", f"{expiring:,}")
 
-    table = view[DISPLAY_COLUMNS].reset_index(drop=True)
+    table = squad_display(view[DISPLAY_COLUMNS].reset_index(drop=True))
     selection = st.dataframe(
         table, hide_index=True, width="stretch", height=560,
         on_select="rerun", selection_mode="single-row", key="squads_table",
         column_config={
-            "Age": st.column_config.NumberColumn("Age", format="%.1f", width="small"),
-            "This season": st.column_config.NumberColumn(
-                "This season", format="%.2f",
+            "Age": st.column_config.TextColumn("Age", width="small"),
+            "This season": st.column_config.TextColumn(
+                "This season",
                 help="This season's rating, where enough of his league-position peers have "
                      "played 450+ minutes for a ranking to mean anything. Blank = not yet "
                      "rankable, not missing."),
@@ -784,12 +833,11 @@ def render(season_id: int, rating_season_id: int, season_label: str,
             "Minutes": st.column_config.NumberColumn(
                 "Minutes", format="%d", width="small",
                 help="This season, in our seven leagues only."),
-            "Minutes": st.column_config.NumberColumn("Minutes", format="%d", width="small"),
-            "Last season": st.column_config.NumberColumn(
-                f"{rating_label} rating", format="%.2f", width="small",
+            "Last season": st.column_config.TextColumn(
+                f"{rating_label} rating", width="small",
                 help="The club composite from the last complete season."),
-            "Also rated": st.column_config.NumberColumn(
-                "Also rated", format="%.2f", width="small",
+            "Also rated": st.column_config.TextColumn(
+                "Also rated", width="small",
                 help="A second rating, where the player appeared in two leagues last "
                      "season — the level-step reading."),
             "Contract to": st.column_config.DateColumn(

@@ -36,6 +36,9 @@ PHYSICAL: dict[str, tuple[str, str]] = {
     "running_distance_p90": ("Running distance", "Distance at running speed, below 20 km/h, per 90. SkillCorner does not publish the lower bound."),
     "hsr_distance_p90": ("High-speed running distance", "Distance at 20–25 km/h, per 90. Excludes sprinting."),
     "hsr_count_p90": ("High-speed runs", "Number of runs at 20–25 km/h, per 90."),
+    # hi = HSR + sprint, checked 2026-11-02 on 5,809 player-seasons with all four figures:
+    # distance never differs by more than 0.09 m, count by more than 0.09 (rounding).
+    "hi_distance_p90": ("High-intensity distance", "Distance above 20 km/h (high-speed running plus sprinting), per 90."),
     "sprint_distance_p90": ("Sprint distance", "Distance above 25 km/h, per 90."),
     "sprint_count_p90": ("Sprints", "Number of runs above 25 km/h, per 90."),
     "medium_accel_count_p90": ("Medium accelerations", "Accelerations SkillCorner classes as medium, per 90. Threshold not published."),
@@ -44,6 +47,7 @@ PHYSICAL: dict[str, tuple[str, str]] = {
     "high_decel_count_p90": ("High decelerations", "Decelerations SkillCorner classes as high, per 90. Threshold not published."),
     "explosive_accel_to_hsr_p90": ("Explosive accelerations to HSR", "High accelerations (3 m/s² for over 0.7 s) from below 9 km/h that reach 20 km/h, per 90."),
     "explosive_accel_to_sprint_p90": ("Explosive accelerations to sprint", "High accelerations (3 m/s² for over 0.7 s) from below 9 km/h that reach 25 km/h, per 90."),
+    "hi_count_p90": ("High-intensity runs", "Number of runs above 20 km/h (high-speed runs plus sprints), per 90."),
     "cod_count_p90": ("Changes of direction", "Intense changes of direction, whatever the movement, per 90."),
     "time_to_hsr": ("Time to HSR", "Seconds to reach 20 km/h, average of his 3 quickest. Lower is better."),
     "time_to_sprint": ("Time to sprint", "Seconds to reach 25 km/h, average of his 3 quickest. Lower is better."),
@@ -157,7 +161,7 @@ def style_entries(defs: dict) -> list[dict]:
 
 
 def rating_metrics() -> set[str]:
-    """The 40 metrics that build the rating: every position's Performance metrics (as the
+    """The 39 metrics that build the rating: every position's Performance metrics (as the
     scoring resolves them) plus the Physical ones. Straight from the scoring code."""
     from lofc.model import club_framework as cf
     from lofc.model.scorecard import _resolved_performance

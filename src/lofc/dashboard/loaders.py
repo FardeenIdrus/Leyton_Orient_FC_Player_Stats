@@ -4,9 +4,20 @@ All Streamlit @cache_data loaders live here so the data layer is separate from p
 the tabs receive DataFrames and never open a connection themselves. Restart the dashboard
 container after a pipeline run to pick up fresh data (the caches are time-limited, not
 event-driven).
+
+Two kinds of loader (classified in the "Cache policy" block below `get_engine`):
+  * PIPELINE data -- long-lived (24 h) and keyed on `data_version()`, so a pipeline write is a
+    new cache key and a cache can never outlive the data it holds;
+  * USER-written / frequently synced data -- short TTL, not version-keyed (unchanged).
 """
 
 from __future__ import annotations
+
+import functools
+import hashlib
+import logging
+import threading
+import time
 
 import pandas as pd
 import streamlit as st
@@ -15,7 +26,7 @@ from sqlalchemy import create_engine
 from lofc.config import settings
 from lofc.constrain.filters import build_candidates
 from lofc.dashboard.labels import LABELS
-from lofc.dashboard.seasons import SEASON_REF_DATE, age_reference_date
+from lofc.dashboard.seasons import SEASON_REF_DATE, age_reference_date, default_season_id
 from lofc.model import assessment_status
 from lofc.model import club_framework as cf
 from lofc.model import metric_registry as reg
@@ -35,6 +46,162 @@ def get_engine():
     return create_engine(settings.database_url, hide_parameters=True)
 
 
+# --- cache policy: data-version keyed long caches ---------------------------------------
+# Measured on the server (2026-11-02): a warm cache hit is <15 ms, a cold miss costs ~17 s
+# across the Players path -- and with a 60-600 s TTL and few users almost every visit was
+# cold, as was the first visit after every deploy. Pipeline-written tables change only when
+# the pipeline runs, so those loaders now cache for a day, but under a key that includes
+# `data_version()`: the moment any table they read is written, the key changes and the next
+# call re-reads. The cache can therefore never serve data older than the database.
+#
+# Classification (see the report / tests/test_loader_cache.py):
+#   version-keyed   available_seasons, player_names, load_candidates, load_scorecard_percentiles,
+#                   load_percentiles, load_metric_values, player_context_lookup,
+#                   load_injuries_for_players, load_wage_framework, load_sc_teams,
+#                   load_sc_players, headline*, load_trajectory, load_current_form, season_label,
+#                   max_minutes, league_names, load_position_shares, load_other_league_seasons*,
+#                   load_previous_ratings*,
+#                   load_loans, load_loan_for_player, position_and_league_for, load_loan_status,
+#                   load_style_inputs*, load_style_labels*, load_current_clubs, _scorecard_meta
+#                   (* also reads player_scorecards -> uses the scorecard version)
+#   short TTL kept  load_scorecards, load_scorecards_archetype, _stored_scorecards (carry
+#                   `assessed_composite`, rewritten on every assessment save),
+#                   load_assessment_status (user-written)
+_LONG_TTL = 24 * 3600
+_MAX_ENTRIES = 16          # a few seasons x a few wage multipliers; older versions age out
+
+# Tables the version-keyed loaders read. `player_scorecards` is split out because scout
+# assessments UPDATE it (assessed_composite): tracking it for every loader would empty the
+# 8-second candidate cache on each assessment save for no reason.
+_CORE_TABLES = (
+    "player_metrics_neutral", "player_season_metrics", "player_scores", "player_percentiles",
+    "valuations", "archetypes", "players", "wage_estimates", "wage_framework",
+    "identity_profiles", "player_style_signals", "player_current_club", "player_loans",
+    "player_injuries", "player_position_shares", "skillcorner_team_season",
+    "skillcorner_player_season",
+)
+_SCORECARD_TABLES = _CORE_TABLES + ("player_scorecards",)
+
+
+def _hash_stats(stats: pd.DataFrame, postmaster_start: str, tables) -> str:
+    """Short token from the write counters of `tables` plus the server start time (a stats
+    reset after a restart/crash could otherwise bring a counter back to an old value)."""
+    wanted = set(tables)
+    # relfilenode: the table's file id, which changes when it is dropped and recreated or
+    # truncated (a database restore) -- the write counter restarts then, and equal counts
+    # must not keep an old token (verifier, 2026-11-02).
+    files = stats["relfilenode"] if "relfilenode" in stats.columns else [0] * len(stats)
+    counts = sorted((str(r), int(w), int(f)) for r, w, f in
+                    zip(stats["relname"], stats["writes"], files) if r in wanted)
+    return hashlib.sha1(repr((counts, str(postmaster_start))).encode()).hexdigest()[:12]
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _table_stats() -> tuple[pd.DataFrame, str]:
+    """(write counters per tracked table, postmaster start time): one tiny query, at most
+    every 30 s per process. Postgres bumps n_tup_ins/upd/del on every write to a table."""
+    engine = get_engine()
+    names = ", ".join(f"'{t}'" for t in _SCORECARD_TABLES)
+    stats = pd.read_sql(
+        "SELECT s.relname, (s.n_tup_ins + s.n_tup_upd + s.n_tup_del) AS writes, "
+        "c.relfilenode FROM pg_stat_user_tables s JOIN pg_class c ON c.oid = s.relid "
+        f"WHERE s.relname IN ({names})", engine)
+    start = pd.read_sql("SELECT pg_postmaster_start_time() AS t", engine)["t"][0]
+    return stats, str(start)
+
+
+def _compute_data_version(with_scorecards: bool = False) -> str:
+    try:
+        stats, start = _table_stats()
+        tables = _SCORECARD_TABLES if with_scorecards else _CORE_TABLES
+        # The date is in the token because age is derived from today for the live season.
+        return _hash_stats(stats, start, tables) + time.strftime("-%Y%m%d", time.gmtime())
+    except Exception:                                       # noqa: BLE001
+        # Degrade to a short-TTL-like behaviour, never to stale-forever: the token changes
+        # every 10 minutes.
+        logging.getLogger(__name__).warning("data_version query failed; using time window",
+                                            exc_info=True)
+        return f"fallback-{int(time.time() // 600)}"
+
+
+def data_version(with_scorecards: bool = False) -> str:
+    """Token that changes whenever a pipeline-written table the long caches read is written.
+    The underlying query is cached 30 s (`_table_stats`), so this costs one tiny query at
+    most every 30 s. `with_scorecards=True` also tracks `player_scorecards`."""
+    return _compute_data_version(with_scorecards)
+
+
+def _versioned(with_scorecards: bool = False, max_entries: int = _MAX_ENTRIES):
+    """Cache a loader for a day, keyed on `data_version()` (plus its own arguments)."""
+    def deco(fn):
+        def inner(version, *args, **kwargs):
+            return fn(*args, **kwargs)
+        # Streamlit keys a cache on the function's module + qualified name (+ source), and
+        # every `inner` has identical source -- give each its own name or they would collide.
+        inner.__module__ = fn.__module__
+        inner.__qualname__ = f"{fn.__qualname__}._versioned"
+        inner.__name__ = fn.__name__
+        cached = st.cache_data(ttl=_LONG_TTL, max_entries=max_entries,
+                               show_spinner=False)(inner)
+
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            return cached(data_version(with_scorecards), *args, **kwargs)
+        wrapper.clear = cached.clear
+        wrapper._is_versioned = True
+        return wrapper
+    return deco
+
+
+# --- warm-up -------------------------------------------------------------------------
+_warm_lock = threading.Lock()
+_last_warmed_version: str | None = None
+
+
+def _warm_caches() -> None:
+    """Fill the heavy Players-path caches for the default and live seasons, so the first user
+    after a restart or a pipeline run does not pay the ~17 s cold cost. Never raises."""
+    try:
+        seasons = available_seasons()
+        wanted = {default_season_id(seasons, settings.live_season_id), settings.live_season_id}
+        for sid in sorted(s for s in wanted if s in seasons):
+            # 1.0 = the wage multiplier app.py uses with the affordability layer off (default)
+            for fn, args in ((load_candidates, (1.0, sid)), (load_percentiles, (sid,)),
+                             (load_metric_values, (sid,)), (load_scorecard_percentiles, (sid,)),
+                             (load_style_labels, (sid,)), (load_scorecards, (sid,))):
+                try:
+                    fn(*args)
+                except Exception:                           # noqa: BLE001
+                    logging.getLogger(__name__).warning("warm-up of %s failed", fn.__name__,
+                                                        exc_info=True)
+    except Exception:                                       # noqa: BLE001
+        logging.getLogger(__name__).warning("cache warm-up failed", exc_info=True)
+
+
+def start_warmup_if_needed() -> threading.Thread | None:
+    """Start a background warm-up when the data version differs from the last one warmed
+    (always true on a fresh process). One at a time per process; returns the thread, or None
+    if nothing was started. Cheap to call on every rerun, never raises, never blocks."""
+    global _last_warmed_version
+    try:
+        version = data_version(with_scorecards=True)
+        if version == _last_warmed_version or not _warm_lock.acquire(blocking=False):
+            return None
+        _last_warmed_version = version
+
+        def run():
+            try:
+                _warm_caches()
+            finally:
+                _warm_lock.release()
+        thread = threading.Thread(target=run, name="lofc-cache-warmup", daemon=True)
+        thread.start()
+        return thread
+    except Exception:                                       # noqa: BLE001
+        logging.getLogger(__name__).warning("could not start warm-up", exc_info=True)
+        return None
+
+
 # --- season selection --------------------------------------------------------------
 # The platform holds multiple seasons of Impect data. Scoring/ranking is done WITHIN one
 # season at a time (so a player appears once, on that season's form, ranked against that
@@ -51,7 +218,7 @@ def get_engine():
 # summer is then inside his final six months, which is the same set as the summer horizon --
 # read it off the "Months left" column (<= 6) rather than a separate filter.
 
-@st.cache_data(ttl=600)
+@_versioned()
 def available_seasons() -> list[int]:
     """Season ids present in the data, latest first (the default is the first)."""
     df = pd.read_sql("SELECT DISTINCT season_id FROM player_metrics_neutral ORDER BY season_id DESC",
@@ -59,7 +226,7 @@ def available_seasons() -> list[int]:
     return df["season_id"].astype(int).tolist()
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def player_names() -> dict[int, str]:
     """Every player's display name, keyed by player_id, across EVERY competition and season.
 
@@ -71,7 +238,7 @@ def player_names() -> dict[int, str]:
     return dict(zip(df["player_id"].astype(int), df["player_name"]))
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def load_candidates(wage_ceiling_multiplier: float, season_id: int | None = None) -> pd.DataFrame:
     engine = get_engine()
     # all_leagues: keep EVERY scored player (EFL + Scottish/PL2). Non-EFL players carry
@@ -186,6 +353,16 @@ def _stored_scorecards(season_id: int | None = None) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@_versioned()
+def _scorecard_meta(season_id: int | None = None) -> pd.DataFrame:
+    """Names/teams to attach to the (short-TTL) scorecard frame. Pipeline data, so it is
+    version-cached and read for the one season rather than the whole table every 60 s."""
+    where = "WHERE season_id = %(s)s" if season_id is not None else ""
+    return pd.read_sql("SELECT player_id, competition_id, season_id, player_name, team_name "
+                       f"FROM player_metrics_neutral {where}", get_engine(),
+                       params={"s": int(season_id)} if season_id is not None else None)
+
+
 def _build_scorecard_frame(archetype_by_position: dict[str, str] | None = None,
                            season_id: int | None = None) -> pd.DataFrame:
     """One scorecard row per player for the requested archetype per position.
@@ -206,9 +383,7 @@ def _build_scorecard_frame(archetype_by_position: dict[str, str] | None = None,
             lambda p: by_position.get(p, cf.DEFAULT_ARCHETYPE))
         sc = stored[stored["archetype"] == wanted].drop(columns=["id", "archetype"],
                                                         errors="ignore")
-        meta = pd.read_sql("SELECT player_id, competition_id, season_id, player_name, team_name "
-                           "FROM player_metrics_neutral", engine)
-        return _attach_scorecard_meta(sc.reset_index(drop=True), meta)
+        return _attach_scorecard_meta(sc.reset_index(drop=True), _scorecard_meta(season_id))
 
     # Fallback: no persisted scorecards yet -> compute them live, exactly as before.
     neutral = pd.read_sql("SELECT * FROM player_metrics_neutral", engine)
@@ -231,17 +406,22 @@ def load_scorecards_archetype(position: str, archetype: str, season_id: int | No
     return _build_scorecard_frame(archetype_by_position={position: archetype}, season_id=season_id)
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def load_scorecard_percentiles(season_id: int | None = None) -> pd.DataFrame:
     """Each player's direction-aware percentile per metric (within season + position + league),
     so a selected player's scorecard can show the metric-by-metric detail behind each dimension."""
-    neutral = pd.read_sql("SELECT * FROM player_metrics_neutral", get_engine())
+    # One season only: this used to read the whole table (every season, ~3 s) and filter in
+    # pandas. SELECT * for that season, not a column list: `metric_percentiles` ranks every
+    # column that is not a key/meta column, so the set of columns is the set of metrics.
     if season_id is not None:
-        neutral = neutral[neutral["season_id"] == season_id]
+        neutral = pd.read_sql("SELECT * FROM player_metrics_neutral WHERE season_id = %(s)s",
+                              get_engine(), params={"s": int(season_id)})
+    else:
+        neutral = pd.read_sql("SELECT * FROM player_metrics_neutral", get_engine())
     return scorecard_mod.metric_percentiles(neutral).reset_index()
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def load_percentiles(season_id: int | None = None) -> pd.DataFrame:
     # One season, keyed by player AND league: a mid-season mover (e.g. League Two to National
     # League in January) legitimately has one row per league. Other seasons stay in the DB
@@ -292,7 +472,7 @@ def _mask_goalkeeper_only_metrics(frame: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def load_metric_values(season_id: int | None = None) -> pd.DataFrame:
     """Raw per-90 (and rate) values for every metric, for the profile's full-stats table,
     for one season. Reads the combined table so it covers ALL leagues (including the
@@ -329,7 +509,7 @@ def load_assessment_status(season_id: int | None = None) -> pd.DataFrame:
     return assessment_status.per_player(frame)
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def player_context_lookup() -> pd.DataFrame:
     """position_group and minutes for every (player, competition, season) row that has
     Impect data, unfiltered by the sidebar -- for the sign-off queue's conflict view
@@ -345,7 +525,7 @@ _INJURY_COLUMNS = ["player_id", "date_from", "date_until", "injury_category",
                    "injury_type_raw", "days_out", "games_missed"]
 
 
-@st.cache_data(ttl=600)
+@_versioned(max_entries=256)  # keyed per player
 def load_injuries_for_players(player_ids: tuple[int, ...]) -> pd.DataFrame:
     """Every recorded Transfermarkt injury spell for a set of players, for the watchlist's
     injury-record column.
@@ -369,7 +549,7 @@ def load_injuries_for_players(player_ids: tuple[int, ...]) -> pd.DataFrame:
         return pd.DataFrame(columns=_INJURY_COLUMNS)
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def load_wage_framework() -> pd.DataFrame:
     return pd.read_sql("SELECT position_group, age_band, weekly_wage_ceiling_gbp FROM wage_framework",
                        get_engine())
@@ -377,7 +557,7 @@ def load_wage_framework() -> pd.DataFrame:
 
 # The 8 club Physical metrics with a short label + unit, for the raw cross-league comparison.
 
-@st.cache_data(ttl=600)
+@_versioned()
 def load_sc_teams() -> pd.DataFrame:
     """Team-level SkillCorner physical output: all 24 League One clubs."""
     try:
@@ -388,7 +568,7 @@ def load_sc_teams() -> pd.DataFrame:
     return teams
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def load_sc_players() -> pd.DataFrame:
     """Player-level SkillCorner physical output: LOFC's own squad, with positions."""
     engine = get_engine()
@@ -407,7 +587,7 @@ def load_sc_players() -> pd.DataFrame:
     return players.merge(positions, on="player_id", how="left")
 
 
-@st.cache_data(ttl=600)
+@_versioned(with_scorecards=True)
 def headline(season_id: int | None = None) -> tuple[int, int, int]:
     """Top-level counts for the KPI strip, for ONE season (from the combined table, so all 7
     leagues — not the EFL-only spine): (players with any data, players with a rating, leagues).
@@ -428,7 +608,7 @@ def headline(season_id: int | None = None) -> tuple[int, int, int]:
     return int(players), int(rated), int(leagues)
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def load_trajectory() -> pd.DataFrame:
     """Every season row per player, for the profile's season-by-season view.
 
@@ -448,7 +628,7 @@ _CURRENT_FORM_COLUMNS = ["player_id", "competition_id", "season_id", "minutes",
                          "goals_p90", "assists_p90"]
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def load_current_form() -> pd.DataFrame:
     """Every player's row(s) for the LIVE season (`settings.live_season_id`) -- minutes and
     the rates the counting stats are derived from -- for the profile's "current form" section.
@@ -483,7 +663,7 @@ def load_current_form() -> pd.DataFrame:
         f"WHERE season_id = {int(live)}", get_engine())
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def season_label() -> str:
     """The season shown in the KPI strip: the latest one in the data (e.g. '2025/26')."""
     name = pd.read_sql(
@@ -493,7 +673,7 @@ def season_label() -> str:
     return str(name[0]).replace("/20", "/") if len(name) else "—"
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def max_minutes() -> int:
     """Data-driven top of the minutes slider (a season's real maximum, not a guess)."""
     value = pd.read_sql(
@@ -511,7 +691,7 @@ def competition_name_by_id() -> dict[int, str]:
     return league_names()
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def league_names() -> list[str]:
     """ALL league names present in the combined table (EFL + Scottish/PL2). The Shortlist
     spans every league; players with no market value simply can't pass the money gates."""
@@ -521,7 +701,7 @@ def league_names() -> list[str]:
     return [name_by_id.get(int(i), f"League {int(i)}") for i in sorted(ids)]
 
 
-@st.cache_data(ttl=600)
+@_versioned(max_entries=256)  # keyed per player
 def load_position_shares(player_id: int, competition_id: int, season_id: int):
     """How this player's minutes split across position groups, largest first.
 
@@ -541,7 +721,42 @@ def load_position_shares(player_id: int, competition_id: int, season_id: int):
                               "s": int(season_id)})
 
 
-@st.cache_data(ttl=600)
+@_versioned(with_scorecards=True)
+def load_previous_ratings(season_id: int) -> pd.DataFrame:
+    """Each player's rating in the PREVIOUS season (season_id - 1), one row per player.
+
+    Columns: player_id, prev_composite (objective_composite), prev_physical (physical_band),
+    prev_league (league name), prev_position (position group), prev_performance
+    (performance_band; appended last so existing positional readers are unaffected). Merge on player_id ONLY: a
+    player may have changed club, league or position since, and that is the point. Players
+    with no previous-season rating are simply absent -- callers show a blank.
+
+    A player who played in two leagues that season (a loan) has two scorecards; the one with
+    the MOST minutes is kept (the same row the platform treats as his main season). Uses the
+    'All Metrics' scorecard, as the Players list does. Reused by the Compare and Players pages.
+    """
+    df = pd.read_sql(
+        "SELECT s.player_id, s.competition_id, s.objective_composite, s.physical_band, "
+        "       s.performance_band, s.position_group, n.minutes "
+        "FROM player_scorecards s "
+        "JOIN player_metrics_neutral n ON n.player_id = s.player_id "
+        " AND n.competition_id = s.competition_id AND n.season_id = s.season_id "
+        "WHERE s.season_id = %(s)s AND s.archetype = 'All Metrics'",
+        get_engine(), params={"s": int(season_id) - 1})
+    cols = ["player_id", "prev_composite", "prev_physical", "prev_league", "prev_position",
+            "prev_performance"]
+    if df.empty:
+        return pd.DataFrame(columns=cols)
+    df = (df.sort_values("minutes", ascending=False, na_position="last", kind="stable")
+          .drop_duplicates(subset="player_id", keep="first"))
+    df["prev_league"] = df["competition_id"].map(competition_name_by_id())
+    df = df.rename(columns={"objective_composite": "prev_composite",
+                            "physical_band": "prev_physical", "position_group": "prev_position",
+                            "performance_band": "prev_performance"})
+    return df[cols].reset_index(drop=True)
+
+
+@_versioned(with_scorecards=True, max_entries=256)  # keyed per player
 def load_other_league_seasons(player_id: int, competition_id: int, season_id: int):
     """The SAME player's other league-seasons in this season, with their composites.
 
@@ -573,7 +788,7 @@ def load_other_league_seasons(player_id: int, competition_id: int, season_id: in
 _competition_name_by_id = competition_name_by_id
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def load_loans(season_id: int | None = None):
     """Every loan we hold, club by club, with parent club and loan end date.
 
@@ -588,7 +803,7 @@ def load_loans(season_id: int | None = None):
         get_engine(), params={"s": season_id} if season_id else None)
 
 
-@st.cache_data(ttl=600)
+@_versioned(max_entries=256)  # keyed per player
 def load_loan_for_player(player_id: int):
     """This player's CURRENT loan, or None.
 
@@ -604,7 +819,7 @@ def load_loan_for_player(player_id: int):
     return None if d.empty else d.iloc[0]
 
 
-@st.cache_data(ttl=600)
+@_versioned(max_entries=256)  # keyed per player
 def position_and_league_for(player_id: int, season_id: int):
     """(position_group, league) for a carried player in the RANKED season, or (None, None).
 
@@ -630,7 +845,7 @@ def position_and_league_for(player_id: int, season_id: int):
         int(row["competition_id"]))
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def load_loan_status() -> pd.DataFrame:
     """One row per player currently on loan: `on_loan` and `loan_ends`, for the sidebar filter.
 
@@ -655,7 +870,7 @@ def load_loan_status() -> pd.DataFrame:
     return frame
 
 
-@st.cache_data(ttl=300)
+@_versioned(with_scorecards=True)
 def load_style_inputs(season_id: int) -> pd.DataFrame:
     """Every player of a season with his raw style signals and his rating, for the Style lab.
     Signals are stored long (player_style_signals) and pivoted here; percentiles are taken by
@@ -677,7 +892,7 @@ def load_style_inputs(season_id: int) -> pd.DataFrame:
     return base.merge(wide, on=["player_id", "competition_id"], how="left")
 
 
-@st.cache_data(ttl=600)
+@_versioned()
 def load_current_clubs() -> pd.DataFrame:
     """player_id -> `current_club`: where he is NOW (Impect), named clubs only. Empty if the
     table is not there yet, so the page never fails over a display extra."""
@@ -688,7 +903,7 @@ def load_current_clubs() -> pd.DataFrame:
         return pd.DataFrame(columns=["player_id", "current_club"])
 
 
-@st.cache_data(ttl=300)
+@_versioned(with_scorecards=True)
 def load_style_labels(season_id: int) -> pd.DataFrame:
     """Every player's playing-style labels for a season (model/styles.py): `style_label`,
     `tier`, `strong_styles`, `leans_styles` and `fit.<style>`. Fixed thresholds -- the same

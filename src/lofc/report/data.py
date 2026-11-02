@@ -22,12 +22,11 @@ bands come from one computation and cannot disagree.
 from __future__ import annotations
 
 import datetime
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import select, text
 
-from lofc.model import report_categories as rc
 from lofc.model import scout_scores
 from lofc.model.medical import (AVAILABILITY_SEASONS, availability_with_evidence,
                                 games_missed_in_window)
@@ -74,6 +73,58 @@ class Narrative:
     approved_at: datetime.datetime | None
 
 
+@dataclass(frozen=True)
+class Authored:
+    """A report written by a user (a saved report, or the live draft). When present it
+    REPLACES the scout assessment's narrative and Psychological / Medical bands on the page,
+    and the stamp and footer name the author. The figures never feed any
+    rating -- see store/saved_reports.py."""
+
+    author_name: str
+    author_role: str | None
+    created_at: datetime.datetime
+    summary: str | None
+    why_sign: str | None
+    considerations: str | None
+    psych_band: float | None
+    medical_band: float | None
+    # Answered screening criteria only: criterion text -> "Meets" / "Does not meet".
+    screening: dict[str, str] = field(default_factory=dict)
+
+
+def authored_from_inputs(*, author_name: str, author_role: str | None,
+                         summary: str | None = None, why_sign: str | None = None,
+                         considerations: str | None = None,
+                         psych_scores: dict | None = None,
+                         medical_band: float | None = None,
+                         screening: dict | None = None,
+                         now: datetime.datetime | None = None) -> Authored | None:
+    """The form's inputs as an Authored override, or None when every field is blank (so an
+    untouched form gives exactly today's report).
+
+    The Psychological band is the mean of the criteria actually scored -- not
+    assessment_rules.psychological_band, which needs every criterion. Here every field is
+    optional. Nothing is stored anywhere; this only shapes what is rendered.
+    """
+    def clean(t):
+        t = (t or "").strip()
+        return t or None
+
+    scored = [int(v) for v in (psych_scores or {}).values() if v is not None]
+    psych = sum(scored) / len(scored) if scored else None
+    answered = {k: v for k, v in (screening or {}).items() if v}
+    fields = (clean(summary), clean(why_sign), clean(considerations), psych, medical_band,
+              answered or None)
+    if all(f is None for f in fields):
+        return None
+    return Authored(author_name=author_name, author_role=author_role,
+                    created_at=now or datetime.datetime.now(),
+                    summary=fields[0], why_sign=fields[1], considerations=fields[2],
+                    psych_band=psych,
+                    medical_band=float(medical_band) if medical_band is not None else None,
+                    screening=answered)
+
+
 # Impect counts four things as an assist; Transfermarkt counts only the first. That is why
 # a player can read as 5 here and 0 there -- both are correct under their own definition.
 # Verified against Impect's own glossary (data/raw/impect/kpi_definitions.json, KPI 77).
@@ -108,9 +159,7 @@ class ReportData:
     rank: int | None
     peer_count: int
     percentiles: dict[str, float]
-    category_scores: dict[str, float]
     physical: dict[str, float]
-    peers: list[tuple[str, float, float]]
     availability: float | None
     availability_status: str
     matches_missed: int
@@ -134,6 +183,40 @@ class ReportData:
     benchmark: dict[str, float] = field(default_factory=dict)
     benchmark_n: int = 0
     benchmark_league: str | None = None
+    # Set only for an authored report; None leaves the report exactly as it always was.
+    authored: Authored | None = None
+    # The player's playing-style row (model/styles.assign_styles): position_group,
+    # style_label, strong_styles, leans_styles and fit.<style>. {} when it cannot be
+    # computed. Measured data, not opinion, so a data-only report keeps it.
+    style: dict = field(default_factory=dict)
+
+
+def _style_row(engine, player_id: int, competition_id: int, season_id: int,
+               position: str) -> dict:
+    """His playing-style row, built exactly as the dashboard's load_style_labels does
+    (loaders.py) but without Streamlit, which this module must not import. Percentiles
+    are over the whole season's pool, so the full frame is needed, not just his row."""
+    from lofc.model import styles
+    base = pd.read_sql(
+        text("SELECT n.player_id, n.competition_id, n.season_id, n.position_group, "
+             "n.rankable, n.player_name, n.team_name "
+             "FROM player_metrics_neutral n WHERE n.season_id = :s"),
+        engine, params={"s": int(season_id)})
+    sig = pd.read_sql(text("SELECT player_id, competition_id, signal, value FROM "
+                           "player_style_signals WHERE season_id = :s"),
+                      engine, params={"s": int(season_id)})
+    if base.empty or sig.empty:
+        return {}
+    wide = sig.pivot_table(index=["player_id", "competition_id"], columns="signal",
+                           values="value").reset_index()
+    frame = base.merge(wide, on=["player_id", "competition_id"], how="left")
+    if not set(styles.SIGNALS) & set(frame.columns):
+        return {}
+    labels = styles.assign_styles(styles.signal_percentiles(frame))
+    mine = labels[(labels.player_id == player_id)
+                  & (labels.competition_id == competition_id)
+                  & (labels.position_group == position)]
+    return mine.iloc[0].to_dict() if not mine.empty else {}
 
 
 def _age(birth_date, season_id: int) -> float | None:
@@ -180,8 +263,44 @@ def _stamp_and_narrative(assessments: pd.DataFrame) -> tuple[str, Narrative | No
     return stamp, narrative
 
 
-def build(engine, player_id: int, competition_id: int, season_id: int) -> ReportData:
+def _without_author_flags(flags: list[str]) -> list[str]:
+    """Drop the Psychological / Medical band flags: an author's own view (or no view at all)
+    is not a club rating, so those bands raise no club-minimum flag."""
+    return [f for f in flags if not f.startswith(("Psychological ", "Medical "))]
+
+
+def as_data_only(base: ReportData) -> ReportData:
+    """The report with no narrative and no Psychological / Medical value. Pure -- derived
+    from an already-built report, so it does no database read."""
+    bands = {**base.dimension_bands, "Psychological": None, "Medical": None}
+    return replace(base, stamp=STAMP_DATA_ONLY, narrative=None, authored=None,
+                   dimension_bands=bands, flags=_without_author_flags(base.flags))
+
+
+def with_authored(base: ReportData, authored: Authored) -> ReportData:
+    """The report with a user's own narrative and Psychological / Medical figures in place of
+    the scout assessment's. Pure -- no database read."""
+    bands = {**base.dimension_bands, "Psychological": authored.psych_band,
+             "Medical": authored.medical_band}
+    # No assessor/approver: the stamp already names the author, and the byline reads
+    # "Assessed by", which this is not.
+    narrative = Narrative(summary=authored.summary, why_sign=authored.why_sign,
+                          considerations=authored.considerations, assessor=None,
+                          assessor_role=None, approver=None, approved_at=None)
+    return replace(base, stamp=f"Report by {authored.author_name} · "
+                               f"{authored.created_at:%d %b %Y}",
+                   narrative=narrative, authored=authored, dimension_bands=bands,
+                   flags=_without_author_flags(base.flags))
+
+
+def build(engine, player_id: int, competition_id: int, season_id: int, *,
+          authored: Authored | None = None, data_only: bool = False) -> ReportData:
     """Everything one player's report needs.
+
+    `authored` swaps in a user's own narrative and Psychological / Medical figures for the
+    scout assessment's; `data_only` drops all of them (no narrative, no Psychological or
+    Medical value, stamp "Data only"). With neither, the report is built from the scout
+    assessments as before.
 
     Raises ValueError naming the player when the player-season does not exist: an empty
     report is worse than an error, because it reads as a player about whom nothing is known.
@@ -206,7 +325,6 @@ def build(engine, player_id: int, competition_id: int, season_id: int) -> Report
     if key in pcts_wide.index:
         percentiles = {k: float(v) for k, v in pcts_wide.loc[key].items()
                        if pd.notna(v)}
-    categories = rc.category_scores(percentiles, position) if position in rc.CATEGORIES else {}
 
     # --- the scorecard ---------------------------------------------------------------
     cards = pd.read_sql(
@@ -257,21 +375,7 @@ def build(engine, player_id: int, competition_id: int, season_id: int) -> Report
     ranked = ranked.dropna(subset=["objective_composite"])
     rank, _peers = rank_in_pool(ranked, player_id, competition_id, season_id, position)
 
-    # --- scatter peers, in category units ---------------------------------------------
-    peers: list[tuple[str, float, float]] = []
-    if position in rc.SCATTER_AXES and not pcts_wide.empty:
-        x_cat, y_cat = rc.SCATTER_AXES[position]
-        for pid in peers_frame.player_id:
-            pk = (int(pid), competition_id, season_id, position)
-            if pk not in pcts_wide.index:
-                continue
-            p = {k: float(v) for k, v in pcts_wide.loc[pk].items() if pd.notna(v)}
-            x = rc.category_score(p, position, x_cat)
-            y = rc.category_score(p, position, y_cat)
-            if x is None or y is None:
-                continue
-            name = peers_frame.loc[peers_frame.player_id == pid, "player_name"].iloc[0]
-            peers.append((str(name), x, y))
+    style = _style_row(engine, player_id, competition_id, season_id, position)
 
     # --- availability -----------------------------------------------------------------
     spells = store_injuries.load_for_player(engine, player_id)
@@ -335,7 +439,7 @@ def build(engine, player_id: int, competition_id: int, season_id: int) -> Report
         if len(squad_comps) == 1:
             benchmark_league = league_name(int(squad_comps[0]))
 
-    return ReportData(
+    report = ReportData(
         player_name=str(row["player_name"]),
         position=position,
         club=str(row["team_name"]) if pd.notna(row.get("team_name")) else None,
@@ -362,7 +466,7 @@ def build(engine, player_id: int, competition_id: int, season_id: int) -> Report
         rank=rank,
         peer_count=len(ranked),
         percentiles=percentiles,
-        category_scores=categories,
+        style=style,
         # The eight SkillCorner percentiles, from the same computation as everything
         # else on the page. Absent metrics stay absent: the radar breaks its line rather
         # than plotting the origin, which would read as "covered no distance".
@@ -370,7 +474,6 @@ def build(engine, player_id: int, competition_id: int, season_id: int) -> Report
             "distance_p90", "meters_per_minute", "hsr_distance_p90", "hsr_count_p90",
             "sprint_distance_p90", "sprint_count_p90", "psv99_kmh", "top5_psv99_kmh")
             if k in percentiles},
-        peers=peers,
         availability=availability,
         availability_status=availability_status,
         matches_missed=missed,
@@ -393,3 +496,6 @@ def build(engine, player_id: int, competition_id: int, season_id: int) -> Report
                          f"over {RANKABLE_MINUTES} minutes"),
         flags=flags,
     )
+    if data_only:
+        return as_data_only(report)
+    return with_authored(report, authored) if authored is not None else report

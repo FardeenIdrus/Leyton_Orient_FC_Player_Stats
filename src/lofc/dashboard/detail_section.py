@@ -22,6 +22,7 @@ import html
 import pandas as pd
 import streamlit as st
 
+from lofc.dashboard.formatting import dash_blanks
 from lofc.model import club_framework as cf
 
 from lofc.ingest.impect_detail import (AVAILABILITY, FAMILY_LABELS, MAP_FAMILIES, SCORES,
@@ -377,11 +378,15 @@ def render(row: pd.Series, neutral: pd.Series | None, league: str, key_prefix: s
         if not per_pos.empty:
             table = position_breakdown(per_pos)
             st.caption("All positions, weighted by minutes. By position:")
-            st.dataframe(table, hide_index=True, width="stretch",
+            # Minutes stay numeric (unbounded); the two IMPECT columns are bounded-ish
+            # rates shown as text so a missing one reads "—" rather than "None".
+            st.dataframe(dash_blanks(table, {"Offensive IMPECT": "{:.2f}",
+                                             "Defensive IMPECT": "{:.2f}"}),
+                         hide_index=True, width="stretch",
                          column_config={
                              "Minutes": st.column_config.NumberColumn(format="%d"),
-                             "Offensive IMPECT": st.column_config.NumberColumn(format="%.2f"),
-                             "Defensive IMPECT": st.column_config.NumberColumn(format="%.2f")})
+                             "Offensive IMPECT": st.column_config.TextColumn(),
+                             "Defensive IMPECT": st.column_config.TextColumn()})
 
     zones = _player_rows(row, "zone.")
     meta = _player_rows(row, "meta.")
@@ -417,9 +422,10 @@ def render(row: pd.Series, neutral: pd.Series | None, league: str, key_prefix: s
                      for k, (_, label) in AVAILABILITY.items()
                      if f"avail.receptions.{k}" in by_a.index],
                     columns=["Receptions", "Per 90", "Percentile"])
-                st.dataframe(table, hide_index=True, width="stretch",
+                st.dataframe(dash_blanks(table, {"Per 90": "{:.2f}"}),
+                             hide_index=True, width="stretch",
                              column_config={
-                                 "Per 90": st.column_config.NumberColumn(format="%.2f"),
+                                 "Per 90": st.column_config.TextColumn(),
                                  "Percentile": st.column_config.ProgressColumn(
                                      min_value=0, max_value=100, format="%d")})
 
@@ -428,12 +434,17 @@ def render(row: pd.Series, neutral: pd.Series | None, league: str, key_prefix: s
         table = physical_table(phys, neutral, pcts, scored or [])
         if not table.empty:
             rated, other = split_physical(table)
-            cfg = {**{c: st.column_config.NumberColumn(format="%.1f")
+            # Text so a missing value reads "—" (st.dataframe draws None for numbers); these
+            # are short card tables, so text ordering of the m/min columns is not a concern.
+            fmts = {**{c: "{:.1f}" for c in ("All phases", "In possession", "Out of possession")},
+                    "Band": "{:.2f}"}
+            rated, other = dash_blanks(rated, fmts), dash_blanks(other, fmts)
+            cfg = {**{c: st.column_config.TextColumn()
                       for c in ("All phases", "In possession", "Out of possession")},
                    "Percentile": st.column_config.ProgressColumn(
                        min_value=0, max_value=100, format="%d",
                        help="Against the same position in his league."),
-                   "Band": st.column_config.NumberColumn(format="%.2f", help="1-5.")}
+                   "Band": st.column_config.TextColumn(help="1-5.")}
             if not rated.empty:
                 st.markdown("##### Physical — in the rating")
                 st.dataframe(rated, hide_index=True, width="stretch", column_config=cfg,

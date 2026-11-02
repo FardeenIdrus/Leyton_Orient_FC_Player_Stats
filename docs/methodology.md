@@ -15,7 +15,7 @@ Machine learning is used in one place only, the market-value regression (§7).
 | Source | What it gives | Leagues | Seasons |
 |---|---|---|---|
 | **Impect** | Event data: the 32 Performance metrics, minutes, position, birth date, foot | Championship, League One, League Two, National League, Scottish Premiership, Scottish Championship, Premier League 2 | 2024/25, 2025/26, 2026/27 |
-| **SkillCorner** | Tracking data: the 8 Physical metrics (and more for display) | The same, **except the Scottish Championship** | 2025/26, 2026/27 |
+| **SkillCorner** | Tracking data: the 7 Physical metrics (and more for display) | The same, **except the Scottish Championship** | 2025/26, 2026/27 |
 | **Transfermarkt** (scraped) | Market value, contract end, loans, injuries, height | Values used for the four English leagues | Values for 2025/26 only |
 
 So a 2024/25 rating has no Physical part, and a Scottish Championship rating never has one.
@@ -101,17 +101,21 @@ entries end up on the same Impect measurement (for example "counterpressures" an
 
 Across all positions that is **32 distinct Impect metrics**.
 
-**Physical** uses the same **8 SkillCorner metrics** for every outfield position:
-distance, metres per minute, high-speed-running count, high-speed-running distance,
+**Physical** uses the same **7 SkillCorner metrics** for every outfield position:
+distance, high-speed-running count, high-speed-running distance,
 sprint count, sprint distance, **average match top speed** (`psv99_kmh`) and **top speed
 over his five fastest matches** (`top5_psv99_kmh`). Both speed measures are scored, each as
-one of the eight.
+one of the seven.
 
-So the rating draws on **40 metrics: 32 Impect + 8 SkillCorner**.
+Metres per minute is not scored: it is distance per 90 divided by 90 (correlation 0.999999 on
+live data), so scoring both would count one measurement twice (owner decision 2026-11-02).
+It stays on the platform as a display metric and a Players filter.
+
+So the rating draws on **39 metrics: 32 Impect + 7 SkillCorner**.
 
 The **"Top speed"** column on the Players page shows `top5_psv99_kmh`, the average of his
 five fastest matches, in km/h. That column is display only; it is the same value that is
-one of the eight Physical metrics, not an extra one.
+one of the seven Physical metrics, not an extra one.
 
 ### Step 2 — percentile to a 1–5 band
 
@@ -213,22 +217,21 @@ A selection of his 22 Performance metrics:
 Average of all 22 bands → **Performance 3.59**. Elite attacking output, pulled back by weak
 aerial duels, ball wins and ball retention.
 
-All eight Physical metrics:
+All seven Physical metrics:
 
 | Metric | Value | Percentile | Band |
 |---|---|---|---|
 | High-speed-running distance (per 90) | 711 m | 93.9 | 5.00 |
 | High-speed-running count (per 90) | 66.6 | 90.1 | 5.00 |
 | Distance (per 90) | 10,184 m | 86.3 | 4.82 |
-| Metres per minute | 113.2 | 86.3 | 4.82 |
 | Sprint count (per 90) | 14.0 | 85.4 | 4.77 |
 | Sprint distance (per 90) | 255 m | 80.7 | 4.53 |
 | Top speed, best 5 matches | 32.0 km/h | 81.1 | 4.56 |
 | Average match top speed | 29.5 km/h | 75.0 | 4.25 |
 
-Average → **Physical 4.72**.
+Average → **Physical 4.70**.
 
-> Composite = (3.59 × 0.3636 + 4.72 × 0.2727) ÷ (0.3636 + 0.2727) = **4.07**
+> Composite = (3.59 × 0.3636 + 4.70 × 0.2727) ÷ (0.3636 + 0.2727) = **4.07**
 
 He also has modelled money bands (Financial Fit 3.15, Resale Potential 3.62), so his
 `full_composite` is 3.94. No area is below 2.0, so no veto.

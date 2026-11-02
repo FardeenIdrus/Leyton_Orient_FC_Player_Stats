@@ -19,7 +19,7 @@ import streamlit as st
 
 from lofc.config import settings
 from lofc.dashboard import badges
-from lofc.dashboard.formatting import link_or_blank, numeric_or_dash
+from lofc.dashboard.formatting import dash_blanks, link_or_blank, numeric_or_dash
 from lofc.dashboard.loaders import (
     _competition_name_by_id, get_engine, load_assessment_status, load_current_form,
     load_injuries_for_players, load_scorecards)
@@ -266,6 +266,9 @@ def _watchlist(tab) -> None:
             "Transfermarkt": link_or_blank(
                 df["tm_player_id"], "https://www.transfermarkt.com/-/profil/spieler/{:.0f}"),
         })
+
+        # Any remaining missing text cell (Position, Status, Injury...) would draw "None".
+        frame = dash_blanks(frame)
 
         # The key version bumps on every dialog exit, which clears the selection so
         # the dialog does not reopen on the next rerun.

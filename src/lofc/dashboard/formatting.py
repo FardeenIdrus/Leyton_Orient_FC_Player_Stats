@@ -18,6 +18,7 @@ fabricated-looking value where the honest answer is "we don't know".
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 
@@ -47,3 +48,37 @@ def link_or_blank(values: pd.Series, url_fmt: str) -> pd.Series:
     that as a genuinely blank cell, unlike `None`/`pd.NA` (both render the literal text
     "None"; see this module's docstring)."""
     return values.map(lambda v: "" if pd.isna(v) else url_fmt.format(v)).astype("string")
+
+
+def _is_missing(value) -> bool:
+    """`pd.isna` for a scalar; False for a list/array (e.g. a ListColumn cell), where
+    `pd.isna` returns an array rather than a bool."""
+    result = pd.isna(value)
+    return bool(result) if isinstance(result, (bool, np.bool_)) else False
+
+
+def dash_blanks(frame: pd.DataFrame, formats: dict[str, str] | None = None) -> pd.DataFrame:
+    """A DISPLAY copy of `frame` in which no missing value can reach `st.dataframe`, which
+    draws every None/NaN/NaT as a grey "None" whatever the column config or a Styler says
+    (see this module's docstring). Text/object columns: missing -> "—". Columns named in
+    `formats` ({column: spec}) become text: a number takes a `str.format` spec ("{:.2f}"),
+    a date column a strftime spec ("%b %Y"); missing -> "—". Every other column (numbers
+    not listed, bools, list cells) is left untouched. The caller's frame is never changed,
+    and the row order/index is preserved so a row-click still indexes the original rows."""
+    out = frame.copy()
+    formats = formats or {}
+    for col in out.columns:
+        if col in formats:
+            spec = formats[col]
+            if pd.api.types.is_datetime64_any_dtype(out[col]) or "%" in spec:
+                # "%" = a strftime spec; covers datetime64 AND python date objects (.dt.date).
+                out[col] = out[col].map(lambda v, s=spec: "—" if _is_missing(v)
+                                        else pd.Timestamp(v).strftime(s))
+            else:
+                out[col] = out[col].map(lambda v: value_or_dash(v, spec))
+            out[col] = out[col].astype(object)
+        elif (pd.api.types.is_object_dtype(out[col])
+              or pd.api.types.is_string_dtype(out[col])
+              or isinstance(out[col].dtype, pd.CategoricalDtype)):
+            out[col] = out[col].astype(object).map(lambda v: "—" if _is_missing(v) else v)
+    return out

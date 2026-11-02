@@ -28,6 +28,7 @@ import pandas as pd
 import streamlit as st
 
 from lofc.dashboard import theme
+from lofc.dashboard.formatting import dash_blanks
 from lofc.config import settings
 from lofc.dashboard.loaders import competition_name_by_id, get_engine
 from lofc.dashboard.seasons import season_name_for
@@ -672,6 +673,16 @@ def _table(frame: pd.DataFrame, names: dict) -> pd.DataFrame:
     return out
 
 
+def report_display(table: pd.DataFrame) -> pd.DataFrame:
+    """`_table` as shown: a missing cell reads "—", not the grey "None" st.dataframe draws
+    (see formatting.py). Ratings "x.xx" and the ISO date sort the same as text as they do
+    as numbers. Row order unchanged, so a click still indexes the original `view`."""
+    out = table.copy()
+    out["Watched"] = pd.to_datetime(out["Watched"], errors="coerce")
+    return dash_blanks(out, {"Watched": "%Y-%m-%d", "Rating": "{:.2f}",
+                             "This season": "{:.2f}"})
+
+
 def _options(frame: pd.DataFrame, column: str) -> list[str]:
     if frame.empty or column not in frame.columns:
         return ["All"]
@@ -793,21 +804,19 @@ def _report_table(view: pd.DataFrame, names: dict, rating_label: str, live_label
         st.info("No reports match these filters.")
         return
 
-    table = _table(view, names).reset_index(drop=True)
+    table = report_display(_table(view, names).reset_index(drop=True))
     selection = st.dataframe(
         table, hide_index=True, width="stretch", height=680,
         on_select="rerun", selection_mode="single-row", key=key,
         column_config={
-            "Rating": st.column_config.NumberColumn(
-                f"Rating ({rating_label})", format="%.2f", width="small",
+            "Rating": st.column_config.TextColumn(
+                f"Rating ({rating_label})", width="small",
                 help="The platform's 1-5 composite from the last complete season. Blank "
                      "is not a poor rating — Model view says why there is none."),
-            "This season": st.column_config.NumberColumn(
-                f"Rating ({live_label})", format="%.2f", width="small",
+            "This season": st.column_config.TextColumn(
+                f"Rating ({live_label})", width="small",
                 help="This season's rating, where he has 450+ minutes and at least 10 "
                      "league-position peers do too. Updates every Monday."),
-            "Date": st.column_config.DateColumn("Fixture", format="DD MMM YY",
-                                                width="small"),
             "Player": st.column_config.TextColumn(
                 "Player", help="\u2020 = name read from the report text."),
             MODEL_VIEW: st.column_config.TextColumn(

@@ -60,45 +60,138 @@ def _key(name, birth_date) -> str | None:
     return f"{normalised}|{pd.Timestamp(birth_date).date()}"
 
 
+def _as_date(value):
+    """A real date, or None for missing / unparseable."""
+    if value is None:
+        return None
+    ts = pd.to_datetime(value, errors="coerce")
+    return None if pd.isna(ts) else ts.date()
+
+
+def _implausible(sheet_dob) -> bool:
+    """A footballer born before 1950 or younger than 14 is a typo, not a birth date."""
+    today = pd.Timestamp.today().year
+    return sheet_dob.year < 1950 or sheet_dob.year > today - 14
+
+
+def _compatible(ours_dob, sheet_dob) -> str | None:
+    """How the sheet's date can be reconciled with ours, or None when it contradicts it.
+
+    Only ever asked of a name that is UNIQUE among our players, so the date need not
+    identify anyone -- it only must not contradict. Typos seen on the live sheet: day and
+    month swapped, the year off by a little, and the date missing or nonsense.
+    """
+    if ours_dob is None or sheet_dob is None or _implausible(sheet_dob):
+        return "missing"
+    if ours_dob == sheet_dob:
+        return "exact"
+    if (ours_dob.year == sheet_dob.year and ours_dob.day == sheet_dob.month
+            and ours_dob.month == sheet_dob.day):
+        return "swapped"
+    if (ours_dob.day == sheet_dob.day and ours_dob.month == sheet_dob.month
+            and abs(ours_dob.year - sheet_dob.year) <= 2):
+        return "year"
+    return None
+
+
+# Cheapest-to-trust first: when several dropdown dates for a name are compatible, report the
+# most convincing reason.
+_RULE_ORDER = ["exact", "swapped", "year", "missing"]
+
+
 def resolve_links(reports: pd.DataFrame, lookup: pd.DataFrame,
                   ours: pd.DataFrame) -> pd.DataFrame:
     """`reports` plus a `player_id` column: our player, or NaN.
 
     Ambiguity is refused on BOTH sides. A key claimed by two of our players is dropped --
     if even the birth date cannot separate them, nothing here can, and guessing would
-    attach a rating, an injury history and an assessment to the wrong man. A key claimed
-    by two dropdown entries is dropped for the same reason.
+    attach a rating, an injury history and an assessment to the wrong man. A name listed
+    twice in the dropdown has every date tried; if they pin two of our players, none links.
+
+    `link_method` records how each link was made ("name+dob", "name+dob (tolerant: ...)",
+    "name only (report text)") so the tolerant ones can be reviewed.
 
     The row count never changes. A link is an enrichment, not a filter: losing a report
     would hide a scout's work, and duplicating one would double-count a verdict.
     """
     out = reports.copy()
     out["player_id"] = pd.Series([None] * len(out), index=out.index, dtype=object)
+    # How each link was made, so the tolerant ones can be reviewed. Not a stored column.
+    out["link_method"] = pd.Series([None] * len(out), index=out.index, dtype=object)
     if out.empty or lookup.empty or ours.empty:
         return out
 
+    ours_n = ours["player_name"].map(_norm)
     # Our side: name+DOB -> player_id, ambiguous keys dropped rather than picked.
     mine = ours.assign(_k=[_key(n, b) for n, b in
                            zip(ours["player_name"], ours["birth_date"])])
     mine = mine[mine["_k"].notna()].drop_duplicates("_k", keep=False)
     by_key = mine.set_index("_k")["player_id"]
 
-    # The form's side: scouted name -> that same key.
-    listed = lookup.assign(_k=[_key(n, b) for n, b in
-                               zip(lookup["player_name"], lookup["date_of_birth"])])
-    listed = listed[listed["_k"].notna()]
-    listed["_n"] = listed["player_name"].map(_norm)
-    listed = listed.drop_duplicates("_n", keep=False)
-    name_to_key = listed.set_index("_n")["_k"]
+    # The form's side: scouted name -> EVERY date listed for it. A name listed twice with two
+    # dates used to be dropped outright (`keep=False`), losing reports whose date was right.
+    # Now each date is tried; ambiguity is still refused (below) if they pin two players.
+    dobs_by_name: dict[str, list] = {}
+    for n, d in zip(lookup["player_name"], lookup["date_of_birth"]):
+        norm = _norm(n)
+        if norm:
+            dobs_by_name.setdefault(norm, []).append(_as_date(d))
+
+    # Our side by name, for the tolerant tier: only names held by exactly one player.
+    name_counts = ours_n.value_counts()
+    unique_ours = (ours.assign(_n=ours_n)[ours_n.map(name_counts) == 1]
+                   .query("_n != ''").set_index("_n"))
+
+    def strict(name):
+        ids = {by_key.get(_key(name, d)) for d in dobs_by_name.get(name, []) if d}
+        ids.discard(None)
+        ids = {i for i in ids if pd.notna(i)}
+        return ids.pop() if len(ids) == 1 else None
+
+    def tolerant(name):
+        if name not in unique_ours.index:
+            return None, None
+        dobs = dobs_by_name.get(name)
+        if not dobs:                      # name not in the dropdown at all
+            return None, None
+        row = unique_ours.loc[name]
+        mine_dob = _as_date(row["birth_date"])
+        rules = {_compatible(mine_dob, d) for d in dobs} - {None}
+        for rule in _RULE_ORDER:
+            if rule in rules:
+                return row["player_id"], rule
+        return None, None
 
     # `linkable` is False for the form's "A New Player" option, chosen on 19 reports
     # about 19 different people. Linking those would fuse nineteen strangers into one.
     linkable = (out["linkable"].fillna(True).astype(bool)
                 if "linkable" in out.columns else pd.Series(True, index=out.index))
-    keys = out.loc[linkable, "player_name"].map(_norm).map(name_to_key)
-    out.loc[linkable, "player_id"] = keys.map(by_key)
+    recovered = (out["name_from_report"].fillna(False).astype(bool)
+                 if "name_from_report" in out.columns
+                 else pd.Series(False, index=out.index))
+    names = out["player_name"].map(_norm)
 
-    # --- second tier: names recovered from the report text --------------------------------
+    # --- tier 1: strict name + exact date of birth ----------------------------------------
+    for idx in out.index[linkable]:
+        pid = strict(names[idx])
+        if pid is not None:
+            out.at[idx, "player_id"] = pid
+            out.at[idx, "link_method"] = "name+dob"
+
+    # --- tier 2: tolerant date, unique name -----------------------------------------------
+    #
+    # Measured live: 524 of 726 reports linked, ~75 more missed purely because the sheet's
+    # date is mistyped (Kian Leavy 2004-03-21 vs ours 2002-03-21). Safety moves from the
+    # date to the name: it must belong to exactly ONE of our players. Dropdown-named rows
+    # only -- a recovered name has its own rule below.
+    for idx in out.index[linkable & ~recovered & out["player_id"].isna()]:
+        pid, rule = tolerant(names[idx])
+        if pid is not None:
+            out.at[idx, "player_id"] = pid
+            out.at[idx, "link_method"] = (
+                "name+dob" if rule == "exact" else f"name+dob (tolerant: {rule})")
+
+    # --- tier 3: names recovered from the report text -------------------------------------
     #
     # The form's dropdown and OUR players table are DIFFERENT LISTS. A scout who could not
     # find a player in the dropdown may well have watched someone we hold full data on --
@@ -114,18 +207,30 @@ def resolve_links(reports: pd.DataFrame, lookup: pd.DataFrame,
     # This tier is reached ONLY by a recovered name. A dropdown-named player HAS a date of
     # birth available and must never be downgraded to name-only matching, which across the
     # platform leaves 13 names claimed by two people.
-    recovered = (out["name_from_report"].fillna(False).astype(bool)
-                 if "name_from_report" in out.columns
-                 else pd.Series(False, index=out.index))
     recovered = recovered & out["player_id"].isna()
     if recovered.any():
-        by_name = (ours.assign(_n=ours["player_name"].map(_norm))
+        by_name = (ours.assign(_n=ours_n)
                        .query("_n != ''")
                        .drop_duplicates("_n", keep=False)
                        .set_index("_n")["player_id"])
-        out.loc[recovered, "player_id"] = (
-            out.loc[recovered, "player_name"].map(_norm).map(by_name))
+        found = out.loc[recovered, "player_name"].map(_norm).map(by_name)
+        out.loc[recovered, "player_id"] = found
+        out.loc[found.index[found.notna()], "link_method"] = "name only (report text)"
     return out
+
+
+def _tolerant_review(linked, lookup, ours) -> pd.DataFrame:
+    """The tolerant links as name / our DOB / sheet DOB(s) / rule, for the owner to eyeball."""
+    t = linked[linked["link_method"].fillna("").str.contains("tolerant")]
+    dob = ours.drop_duplicates("player_id").set_index("player_id")["birth_date"]
+    sheet = (lookup.assign(_n=lookup["player_name"].map(_norm))
+                   .groupby("_n")["date_of_birth"]
+                   .agg(lambda v: ", ".join(str(x) for x in v)))
+    return pd.DataFrame({
+        "name": t["player_name"],
+        "our_dob": t["player_id"].map(dob),
+        "sheet_dob": t["player_name"].map(_norm).map(sheet),
+        "rule": t["link_method"]}).drop_duplicates()
 
 
 def relink(engine) -> int:
@@ -151,6 +256,7 @@ def relink(engine) -> int:
     ours = pd.read_sql("SELECT player_id, player_name, birth_date FROM players", engine)
 
     linked = resolve_links(reports, lookup, ours)
+    relink.review = _tolerant_review(linked, lookup, ours)
     table = ScoutReport.__table__
     written = 0
     with engine.begin() as conn:
@@ -177,6 +283,10 @@ def main() -> None:
     print(f"scout reports linked: {written} of {total} ({players} distinct players); "
           f"{total - written} unlinked")
     print(f"  of which matched on a name read from the report text: {via}")
+    review = getattr(relink, "review", None)
+    if review is not None and not review.empty:
+        print(f"  tolerant date links to review ({len(review)}):")
+        print(review.to_string(index=False))
 
 
 if __name__ == "__main__":

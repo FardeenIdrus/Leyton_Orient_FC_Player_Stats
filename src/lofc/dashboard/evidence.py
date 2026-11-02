@@ -26,6 +26,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from lofc.dashboard.formatting import dash_blanks
 from lofc.dashboard import theme
 from lofc.model.medical import (AVAILABILITY_SEASONS, AvailabilityEvidence,
                                 AvailabilityStatus, availability_with_evidence,
@@ -78,7 +79,11 @@ def _format_table(frame: pd.DataFrame) -> pd.DataFrame:
     display = frame.assign(Source=frame["source"].map(SOURCE_LABELS).fillna(frame["source"]))
     display = display[_TABLE_COLUMNS]
     display.columns = _TABLE_HEADERS
-    return display
+    # "Until" is blank while a spell is ongoing; st.dataframe would draw that as "None".
+    # ISO text sorts as dates do. Days out / Matches missed stay numeric.
+    for col in ("From", "Until"):
+        display[col] = pd.to_datetime(display[col], errors="coerce")
+    return dash_blanks(display, {"From": "%Y-%m-%d", "Until": "%Y-%m-%d"})
 
 
 def resolve_window(season_id: int, seasons: int = AVAILABILITY_SEASONS) -> tuple[str, ...] | None:

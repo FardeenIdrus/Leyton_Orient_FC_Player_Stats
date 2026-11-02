@@ -282,13 +282,13 @@ dimensions present and records the weight covered.
 | Dimension | Source | Metrics | Weight (outfield, normalised) |
 |---|---|---|---|
 | Performance | Impect | Per-position list (`PERFORMANCE_METRICS`), resolved through `CLUB_SUCCESSOR`; 32 distinct Impect metrics across all positions | 36.4% (GK 50%) |
-| Physical | SkillCorner | 8, same for every outfield position: distance, metres/minute, HSR count and distance, sprint count and distance, peak speed (p99 and top-5) | 27.3% (GK none) |
+| Physical | SkillCorner | 7, same for every outfield position: distance, HSR count and distance, sprint count and distance, peak speed (p99 and top-5) | 27.3% (GK none) |
 | Psychological | Scout assessment | Club criteria, 1–5 | 9.1% (GK 20%) |
 | Medical Risk | Scout assessment | Band entered by a person; injury availability shown as evidence | 13.6% (GK 15%) |
 | Financial Fit | Modelled | Fee, wage, contract | 9.1% (GK 10%) |
 | Resale Potential | Modelled | Age curve, market value | 4.5% (GK 5%) |
 
-So the objective ranking uses 40 metrics: 32 Impect + 8 SkillCorner. Within a dimension
+So the objective ranking uses 39 metrics: 32 Impect + 7 SkillCorner. Within a dimension
 metrics are equally weighted; each is a mid-rank percentile within league + season +
 position group over rankable players (inverted for lower-is-better metrics), mapped to a
 band by `3 + (percentile − 50) / 20`, clamped to 1–5. Full Back and Winger also have
