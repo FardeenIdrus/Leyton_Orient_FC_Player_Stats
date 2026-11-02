@@ -1,5 +1,5 @@
 """The club's per-position Psychological and Medical criteria, transcribed verbatim from
-`docs/LOFC - Position Archetype.docx`.
+`club_docs/LOFC - Position Archetype.docx` (not in git).
 
 This is the companion to `club_framework.py`: that module holds WHAT the club measures from
 data, this one holds what a human scores. Both are the club's own words, not our invention.

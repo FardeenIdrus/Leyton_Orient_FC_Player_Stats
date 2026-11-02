@@ -97,3 +97,7 @@ secrets/
 *.xlsx
 !Copy of 2026_27 Leyton Orient Scout Reporting*.xlsx
 02102026 Data.docx
+
+# Club working documents (Head of Recruitment's inputs, workbooks, player reports). Never
+# tracked: they are the club's, and some carry player data. Put them here, not in docs/.
+club_docs/
