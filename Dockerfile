@@ -13,16 +13,20 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Install dependencies first for better layer caching, then the package itself.
+# Dependencies BEFORE the source: this layer depends only on pyproject.toml, so a code-only
+# deploy reuses it instead of reinstalling every package (deploy 2.5 min -> seconds).
+# The editable install needs the package directory to exist; a stub stands in, and the real
+# src/ copied below replaces it (the install points at /app/src/lofc, not at the stub's files).
 COPY pyproject.toml README.md ./
-COPY src ./src
-RUN pip install --upgrade pip && pip install -e ".[dev]"
+RUN mkdir -p src/lofc && touch src/lofc/__init__.py \
+    && pip install --upgrade pip && pip install -e ".[dev]"
 
-# Remaining project files (alembic, tests, etc.).
-COPY . .
-
-# Run as a non-root user.
+# Run as a non-root user. /app is still tiny here, so this chown is instant; the project
+# files below arrive already owned by appuser instead of a recursive chown of everything.
 RUN useradd --create-home appuser && chown -R appuser:appuser /app
+
+# Source and remaining project files (alembic, tests, etc.).
+COPY --chown=appuser:appuser . .
 USER appuser
 
 CMD ["python", "-c", "from lofc.config import settings; print(settings)"]
