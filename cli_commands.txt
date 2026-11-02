@@ -455,3 +455,6 @@ docker compose exec -T app python -m lofc.store.integrity
 
 # Current club: where each player is NOW (Impect currentSquadId), shown as "Dundalk FC · now FC Portsmouth". Display only. Needs the player lists + club names landed by `python -m lofc.ingest.impect`
 docker compose exec -T app python -m lofc.model.current_club
+
+# Load the Transfermarkt loan file (reference/transfermarkt/loans.csv, written by the loan scrape) into player_loans -- the server side of the loan refresh; runs every weekly pipeline. --allow-shrink at season end, when most loans end
+docker compose exec -T app python -m lofc.store.loans

@@ -103,7 +103,7 @@ SKIP_TRANSFERMARKT_SCRAPE=true
 
 This omits `ingest.transfermarkt_efl` and `ingest.transfermarkt_loans`. **Without it the pipeline
 halts at that stage and scoring, scorecards and shortlists never run.** The loaders
-(`store.squads`, `store.injuries`) still run, so data pushed from a workstation is still ingested.
+(`store.squads`, `store.loans`, `store.injuries`) still run, so data pushed from a workstation is still ingested.
 
 **Refreshing registration data** (contracts, squads, loans, injuries) — on a workstation:
 
@@ -116,10 +116,10 @@ rsync -avz data/reference/transfermarkt/ root@SERVER:/opt/lofc/data/reference/tr
 
 then on the server, copy into the app volume and re-run the loaders (see below).
 
-> **Loans do not travel this way (found 2026-10-22).** `transfermarkt_loans` writes straight into
-> the workstation's database and creates no CSV, and there is no loans loader on the server — so
-> the rsync above carries contracts, squads and injuries but **not loans**. Fix pending:
-> `plan/TASKS.md` 2.3.
+Loans travel the same way since 2026-11-02: `transfermarkt_loans` also writes
+`reference/transfermarkt/loans.csv`, the rsync carries it, and `python -m lofc.store.loans` loads
+it (every weekly run does this too). A file far smaller than what is stored is refused and the
+stored loans kept; at the end of May, when most loans end, load with `--allow-shrink`.
 
 ### 2. `data/` lives in a Docker VOLUME, not on the host
 

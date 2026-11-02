@@ -202,7 +202,29 @@ def scrape_all(season: int | None = None) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=COLUMNS)
 
 
-def load(engine, frame: pd.DataFrame, season_id: int) -> int:
+def csv_path():
+    """The file the server loads (`lofc.store.loans`), next to the squads file, so the
+    documented `rsync data/reference/transfermarkt/` carries it."""
+    from pathlib import Path
+    return Path(settings.reference_data_dir) / "transfermarkt" / "loans.csv"
+
+
+def write_csv(frame: pd.DataFrame, season_id: int, when: datetime.datetime,
+              path=None) -> None:
+    """The scrape as a file, stamped with OUR season id and the scrape time. Atomic: an
+    interrupted run never leaves a half-file for the server to load."""
+    from pathlib import Path
+    path = Path(path) if path is not None else csv_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out = frame[COLUMNS].assign(season_id=int(season_id),
+                                scraped_at=when.replace(microsecond=0).isoformat())
+    tmp = path.with_suffix(".csv.tmp")
+    out.to_csv(tmp, index=False)
+    tmp.rename(path)
+
+
+def load(engine, frame: pd.DataFrame, season_id: int,
+         scraped_at: datetime.datetime | None = None) -> int:
     """Clear-then-insert one season, then link to our players via tm_player_id.
 
     Clear-then-insert because the page is a CURRENT snapshot: a loan that ended is gone
@@ -217,7 +239,8 @@ def load(engine, frame: pd.DataFrame, season_id: int) -> int:
     # (2026), the platform in its own (319). Without this the DELETE cleared 319 while the
     # INSERT wrote 2026, so the delete never matched and the insert collided with the
     # previous run on uq_player_loan -- the whole load rolled back and stale rows survived.
-    frame = frame.assign(season_id=season_id, scraped_at=datetime.datetime.now())
+    frame = frame[COLUMNS].assign(season_id=season_id,
+                                  scraped_at=scraped_at or datetime.datetime.now())
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM player_loans WHERE season_id = :s"), {"s": season_id})
         frame.to_sql("player_loans", conn, if_exists="append", index=False)
@@ -269,8 +292,14 @@ def main() -> None:
     args = parser.parse_args()
     season = args.season or current_tm_season()
     frame = scrape_all(season)
-    load(get_engine(), frame,
-         resolve_season_id(args.season_id, season, settings.live_season_id))
+    season_id = resolve_season_id(args.season_id, season, settings.live_season_id)
+    when = datetime.datetime.now()
+    # The file is what reaches the server (rsync, then `python -m lofc.store.loans`); the
+    # database load is this machine's own copy.
+    if not frame.empty:
+        write_csv(frame, season_id, when)
+        print(f"Wrote {len(frame)} loans to {csv_path()}")
+    load(get_engine(), frame, season_id, scraped_at=when)
 
 
 if __name__ == "__main__":

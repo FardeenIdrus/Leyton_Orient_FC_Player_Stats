@@ -126,6 +126,11 @@ def build_steps() -> list[tuple[str, list[str]]]:
     if comp_ids & EFL_LEAGUE_IDS:
         steps.append(("Squads: load the Transfermarkt squad snapshot into Postgres",
                       [sys.executable, "-m", "lofc.store.squads"]))
+        # Loans, the same way (TASKS 2.3): the Mac's loan scrape writes loans.csv, the file
+        # is pushed with the squads file, and this loads it. Without it a re-scrape reached
+        # only the Mac's database.
+        steps.append(("Loans: load the Transfermarkt loan snapshot into Postgres",
+                      [sys.executable, "-m", "lofc.store.loans"]))
 
     # 6. Model outputs — read the metric table per SCORING_SOURCE (neutral by default).
     steps += [
