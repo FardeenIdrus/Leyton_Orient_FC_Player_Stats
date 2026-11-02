@@ -467,8 +467,9 @@ def _metric_filter_panel(pool: pd.DataFrame, position: str, archetype: str,
         st.button("Reset metric filters", on_click=_reset, key=prefix + "reset")
     filtered, unknown = metric_filters.apply_metric_filters(pool, pcts, raw, pct_mins, raw_mins,
                                                          raw_maxs)
-    if unknown:
-        st.caption(f"{unknown} hidden: no data for an active metric filter.")
+    notice = hidden_notice(unknown)
+    if notice:
+        st.markdown(notice)
     return filtered
 
 
@@ -476,6 +477,14 @@ def _metric_filter_panel(pool: pd.DataFrame, position: str, archetype: str,
 # minimum standard (the league median); any dimension below 2.0 = veto; 4.0 = elite (70th
 # percentile). Pale fills so the number stays readable.
 _BAND_FILLS = [(2.0, "#F6D5D8"), (3.0, "#FBE7C6"), (4.0, "#E2F0E4"), (99.0, "#BFE0C5")]
+
+
+def hidden_notice(unknown: int) -> str | None:
+    """Players removed by a metric filter because they have no value for it. Bold and large
+    (owner, 2026-11-02): a top player vanishing for missing data must not be missed."""
+    if not unknown:
+        return None
+    return f"#### {unknown} hidden: no data for an active metric filter."
 
 
 def styled_ratings(table: pd.DataFrame, rating_cols: list[str]):

@@ -188,10 +188,11 @@ Docker: it drives headless Chromium through Playwright.
 
 **`dashboard/`** — the Streamlit app
 - `app.py` — entry point: login gate, sidebar, page registration and `st.navigation`.
-- `loaders.py` — every cached DB read (`st.cache_data`; 60 s TTL for anything carrying `assessed_composite`, 600 s otherwise).
+- `loaders.py` — every cached DB read. Pipeline data: 24 h TTL keyed on `data_version()` (Postgres write counters + table file ids + server start + date, re-read every 30 s), so a cache is never older than the database; a background warm-up refills it when the version changes. User-written data (`assessed_composite`, watchlist, scout sync): 60 s TTL.
 - `session.py`, `auth.py`, `cookie_auth.py`, `login_throttle.py` — login, roles/permissions, remembered-session cookie, password-spray throttle.
 - `theme.py`, `labels.py`, `charts.py`, `formatting.py`, `units.py`, `badges.py` — presentation building blocks.
-- `controls.py`, `sidebar_filters.py`, `metric_filters.py`, `search.py`, `seasons.py` — filters, global player search, season helpers.
+- `controls.py`, `sidebar_filters.py`, `metric_filters.py`, `search.py`, `search_target.py`, `seasons.py` — filters, global player search (and which row it opens), season helpers.
+- `compare_tables.py` — the Compare page's tables, radar metrics and packing-zone pitch.
 - `player_header.py`, `detail_section.py`, `evidence.py`, `assessment_detail.py`, `transparency.py` — player-card components.
 - `glossary_data.py`, `rating_reference.py` — glossary content and the "What goes into each rating" page.
 - `tabs/` — one module per page (below).
@@ -322,8 +323,8 @@ The dashboard reads Postgres only. It never runs a pipeline stage.
 - **Physical** — the club export tables; **Glossary** — `impect_definitions` plus
   `glossary_data`; **Watchlist** — `watchlist` joined to scores, injuries and contracts.
 
-Cached loaders expire on their TTL (60 s or 600 s); restart the dashboard container to see
-a pipeline rebuild immediately.
+Pipeline-data caches refresh by themselves within ~30 s of any database write (the
+`data_version()` token changes); user-written data within 60 s. No restart needed.
 
 ## Adding a league
 

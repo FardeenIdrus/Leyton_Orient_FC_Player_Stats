@@ -464,3 +464,9 @@ docker compose exec -T app python -m lofc.store.loans
 docker compose exec -T app python scripts/smoke_test.py
 docker compose exec -T app python scripts/smoke_test.py --quick
 # Server: docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python scripts/smoke_test.py
+# Smoke test NEW code against the LIVE data before deploying (read-only; nothing installed, the running site is untouched). Mac: pack the code, copy it into the server's app container, run it there:
+#   tar czf /tmp/newsrc.tgz src scripts/smoke_test.py && scp /tmp/newsrc.tgz root@lofc-recruitment.duckdns.org:/tmp/
+# Server:
+#   C="docker compose -f /opt/lofc/docker-compose.prod.yml"; $C exec -T app mkdir -p /tmp/newsrc; $C cp /tmp/newsrc.tgz app:/tmp/newsrc/newsrc.tgz
+#   $C exec -T app sh -c "cd /tmp/newsrc && rm -rf src scripts && tar xzf newsrc.tgz"
+#   $C exec -T -e PYTHONPATH=/tmp/newsrc/src app sh -c "cd /tmp/newsrc && python scripts/smoke_test.py"

@@ -75,7 +75,10 @@ docker compose exec -T db pg_restore -U lofc -d lofc --no-owner < /tmp/prod.dump
 - **`--force-recreate` does not rebuild.** It reuses the existing image; code or dependency
   changes need `deploy.sh`.
 - **`deploy.sh` does not re-score.** It ships code and runs migrations. A change to stored
-  scores needs the relevant pipeline step afterwards — only when data must be rebuilt.
+  scores needs the relevant pipeline step afterwards — only when data must be rebuilt. A change
+  to the rating formula (metrics or weights in `model/club_framework.py` /
+  `performance_weights.py`) needs `python -m lofc.model.scorecard_run` then
+  `python -m lofc.constrain.run`, AFTER `deploy.sh` has finished.
 - **After a manual `docker compose stop`, containers do NOT come back on reboot**
   (`restart: unless-stopped` honours the stop). Start them with `up -d`.
 - **`secrets/` never travels with a deploy** (gitignored). Copy the Google service-account key
@@ -154,6 +157,18 @@ ssh root@SERVER
 ```
 
 About 3 minutes, most of it the rebuild. The site stays up until the new containers swap in.
+Wait for "deployed at <commit>" before running anything else: a pipeline step started earlier
+runs the OLD code.
+
+Then check it, read-only (~1 min; `SMOKE: PASS` expected):
+
+```bash
+docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python scripts/smoke_test.py --quick
+```
+
+To test code on live data BEFORE deploying: copy `src` + `scripts/smoke_test.py` into
+`/tmp/newsrc` in the app container and run the smoke test there with
+`PYTHONPATH=/tmp/newsrc/src` (read-only; full command in `cli_commands.txt`).
 
 
 ### 4. The repository is PRIVATE — the server needs a deploy key

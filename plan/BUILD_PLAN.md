@@ -1366,6 +1366,24 @@ with "no sideways scrolling" in the same sentence — ask what he means. Not bui
 
 ---
 
+### 2026-11-02 — Compare rebuild, report authoring, search, speed, metres per minute (eb1d17c)
+
+Full detail per item in `plan/TASKS.md` (2.13, 2.15, 2.16, 2.19–2.21, 2.23, 2.24, 2.26, B7).
+- **Ratings:** Performance weighted per metric (club's High/Mid/Low); metres per minute dropped
+  (r 0.999999 with distance per 90, so running volume counted twice) — 39 metrics. Needs a rescore.
+- **Pages:** Compare rebuilt (players as columns, radar of High+Mid metrics, packing zones,
+  any position); Report gets author text, Psychological/Medical and a playing-style panel;
+  one search box that always opens the player; 23 physical filters; Squads name search and
+  Transfermarkt as-of dates; blank cells show "—".
+- **Speed:** version-keyed caches (24 h, refreshed on any database write) + background warm-up.
+- **Scout reports:** second matching tier for wrong dates of birth on the club sheet.
+- **Why the smoke test now scans tables:** converting blanks to "—" printed the literal
+  format "%b %Y" in Squads dates (python date objects took the number path). Every page passed
+  because nothing crashed. `scripts/smoke_test.py` now FAILS a page whose table shows a format
+  code, and Squads dates stay real dates so they sort by date.
+- **Lesson:** a unit test fed the wrong data shape (datetime64 where the page has date objects)
+  passed while the page was wrong. Test with the shape the page actually builds.
+
 ## Pending work register (nothing here is dropped)
 
 **Player report — BUILT 2026-08-28 (register item P7).** A one-page A4-landscape scouting
