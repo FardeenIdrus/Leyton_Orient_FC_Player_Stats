@@ -99,3 +99,30 @@ def test_slider_labels_use_the_glossary_names():
     for metric, (label, _) in PHYSICAL_LABELS.items():
         assert label.startswith(PHYSICAL[metric][0].rstrip(")")), (metric, label)
         assert "15–20" not in label
+
+
+def test_a_filter_on_a_metric_the_pool_already_carries_does_not_crash():
+    """Found live 2026-11-02 (in a presentation): the Players pool already holds raw
+    assists_p90 / xa_p90 / np_xg_p90 (for the goals-and-assists totals). Filtering on one of
+    them merged a second column of the same name, pandas renamed both, and the page died
+    with KeyError 'xa_p90'. The filter must use the PERCENTILE, not the raw column."""
+    import pandas as pd
+    from lofc.dashboard import metric_filters as mf
+    key = {"competition_id": 4, "season_id": 318, "position_group": "Winger"}
+    pool = pd.DataFrame([{**key, "player_id": i, "xa_p90": 0.30 - i * 0.1} for i in range(3)])
+    pcts = pd.DataFrame([{**key, "player_id": i, "xa_p90": [20.0, 60.0, 90.0][i]} for i in range(3)])
+    raw = pd.DataFrame([{"player_id": i, "competition_id": 4, "xa_p90": 0.3} for i in range(3)])
+    out, unknown = mf.apply_metric_filters(pool, pcts, raw, {"xa_p90": 50}, {})
+    assert out["player_id"].tolist() == [1, 2] and unknown == 0      # by percentile, not raw
+    assert list(out.columns) == list(pool.columns)                    # pool untouched
+
+
+def test_a_raw_filter_on_a_column_the_pool_already_carries_does_not_crash():
+    import pandas as pd
+    from lofc.dashboard import metric_filters as mf
+    key = {"competition_id": 4, "season_id": 318, "position_group": "Winger"}
+    pool = pd.DataFrame([{**key, "player_id": i, "distance_p90": 1.0} for i in range(3)])
+    raw = pd.DataFrame([{"player_id": i, "competition_id": 4,
+                         "distance_p90": [9000.0, 10000.0, 11000.0][i]} for i in range(3)])
+    out, _ = mf.apply_metric_filters(pool, pool.iloc[0:0], raw, {}, {"distance_p90": 9500.0})
+    assert out["player_id"].tolist() == [1, 2]

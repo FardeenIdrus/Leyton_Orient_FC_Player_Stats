@@ -75,18 +75,26 @@ def apply_metric_filters(pool: pd.DataFrame, pcts: pd.DataFrame, raw: pd.DataFra
     if not pct_active and not raw_mins:
         return pool, 0
 
+    # The filter values join under PRIVATE names. The pool already carries some metrics
+    # raw (assists_p90, xa_p90, np_xg_p90 for the totals); joining a second column of the
+    # same name made pandas rename both, and the page died with KeyError 'xa_p90' (found
+    # live, 2026-11-02). Private names also make sure a percentile filter reads the
+    # percentile, never the pool's raw value.
+    pct_cols = {m: f"__pct__{m}" for m in pct_active}
+    raw_cols = {m: f"__raw__{m}" for m in raw_mins}
     frame = pool
     if pct_active:
-        frame = frame.merge(pcts[PCT_KEY + list(pct_active)], on=PCT_KEY, how="left")
+        frame = frame.merge(pcts[PCT_KEY + list(pct_active)].rename(columns=pct_cols),
+                            on=PCT_KEY, how="left")
     if raw_mins:
-        frame = frame.merge(raw[RAW_KEY + list(raw_mins)].drop_duplicates(RAW_KEY),
-                            on=RAW_KEY, how="left")
-    needed = list(pct_active) + list(raw_mins)
+        frame = frame.merge(raw[RAW_KEY + list(raw_mins)].drop_duplicates(RAW_KEY)
+                            .rename(columns=raw_cols), on=RAW_KEY, how="left")
+    needed = list(pct_cols.values()) + list(raw_cols.values())
     missing = frame[needed].isna().any(axis=1)
     keep = ~missing
     for m, v in pct_active.items():
-        keep &= frame[m] >= v
+        keep &= frame[pct_cols[m]] >= v
     for m, v in raw_mins.items():
-        keep &= frame[m] >= v
+        keep &= frame[raw_cols[m]] >= v
     out = pool[keep.to_numpy()]
     return out, int(missing.sum())
