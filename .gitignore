@@ -95,7 +95,6 @@ secrets/
 # Generated deliverables — rebuilt from the database, never committed.
 *.pdf
 *.xlsx
-!Copy of 2026_27 Leyton Orient Scout Reporting*.xlsx
 02102026 Data.docx
 
 # Club working documents (Head of Recruitment's inputs, workbooks, player reports). Never
