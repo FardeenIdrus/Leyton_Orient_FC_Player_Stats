@@ -5,8 +5,10 @@ Pipeline per player (all within position group + league):
   1. every framework metric -> a direction-aware percentile (higher percentile = better;
      lower-is-better metrics are inverted first);
   2. percentile -> a 1-5 band (club-anchored: median->3, 70th->4);
-  3. equal-weight average of the bands in a dimension -> that dimension's 1-5 score
-     (metrics with no data drop out, so a missing metric never deflates the score);
+  3. average of the bands in a dimension -> that dimension's 1-5 score: Performance
+     weighted by the club's per-metric weights (`performance_weights`, 2026-11-02),
+     Physical equal-weighted (metrics with no data drop out and the remaining weights are
+     rescaled, so a missing metric never deflates the score);
   4. weighted average of the dimension scores -> a composite, renormalised over the
      dimensions actually present (so a player with no market value, hence no
      Financial/Resale, still gets a composite and stays in the ranking).
@@ -41,6 +43,7 @@ from __future__ import annotations
 import pandas as pd
 
 from lofc.model import club_framework as cf
+from lofc.model import performance_weights as pw
 
 KEY = ["player_id", "competition_id", "season_id", "position_group"]
 
@@ -90,14 +93,21 @@ def metric_percentiles(neutral: pd.DataFrame) -> pd.DataFrame:
     return out.set_index(KEY)
 
 
-def _dimension_band(row: pd.Series, metrics: list[str]) -> tuple[float | None, int, int]:
-    """Equal-weight average of the 1-5 bands over the present metrics in a dimension.
+def _dimension_band(row: pd.Series, metrics: list[str],
+                    weights: dict[str, float] | None = None) -> tuple[float | None, int, int]:
+    """Average of the 1-5 bands over the present metrics in a dimension -- weighted by the
+    club's per-metric weights where given (Performance, `performance_weights`), equal
+    otherwise (Physical). A missing metric drops out and the remaining weights are rescaled.
     Returns (band or None, n_present, n_total)."""
-    bands = [cf.band(row[m]) for m in metrics if m in row.index and pd.notna(row[m])]
+    present = [m for m in metrics if m in row.index and pd.notna(row[m])]
     n_total = len(metrics)
-    if not bands:
+    if not present:
         return None, 0, n_total
-    return round(sum(bands) / len(bands), 2), len(bands), n_total
+    w = {m: (weights.get(m, 0.0) if weights else 1.0) for m in present}
+    total = sum(w.values())
+    if total <= 0:
+        return None, 0, n_total
+    return round(sum(cf.band(row[m]) * w[m] for m in present) / total, 2), len(present), n_total
 
 
 def _resolved_performance(position: str, archetype: str = cf.DEFAULT_ARCHETYPE) -> list[str]:
@@ -149,7 +159,8 @@ def build_scorecards(neutral: pd.DataFrame,
         coverage: dict[str, tuple[int, int]] = {}
 
         archetype = archetype_by_position.get(position, cf.DEFAULT_ARCHETYPE)
-        perf_band, np_, nt_ = _dimension_band(row, _resolved_performance(position, archetype))
+        perf_band, np_, nt_ = _dimension_band(row, _resolved_performance(position, archetype),
+                                              pw.weights_for(position, archetype))
         if perf_band is not None:
             dim_bands[cf.PERFORMANCE] = perf_band
             coverage[cf.PERFORMANCE] = (np_, nt_)

@@ -130,10 +130,13 @@ percentile as elite**. The band is a straight line through those two points:
 
 ### Step 3 — average the bands in each area
 
-An area's score is the **plain average** of its metrics' bands. The club lists its metrics
-as a flat set of key indicators with no individual weights, so each counts equally. A
-metric with no value for this player drops out of the average rather than counting as
-zero. Dimension scores are rounded to two decimals.
+**Performance** is a **weighted average** of its metrics' bands (since 2026-11-02). The club
+tags each metric High, Mid or Low per position and per archetype (formula meeting, workbook
+"Weightings to be assigned 5"); one weight per tier, each table summing to exactly 1
+(`model/performance_weights.py`, which lists the five tables corrected to their tier ratios).
+**Physical** is still a plain average: the club has not weighted it yet. A metric with no
+value for this player drops out and the remaining weights are rescaled, rather than counting
+as zero; the player card shows it as "No value". Dimension scores are rounded to two decimals.
 
 ### Step 4 — combine the areas
 

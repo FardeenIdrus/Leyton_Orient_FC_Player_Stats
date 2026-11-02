@@ -44,19 +44,25 @@ def _definitions() -> dict[str, str]:
 
 
 def rating_ingredients(position: str, definitions: dict[str, str] | None = None) -> pd.DataFrame:
-    """One row per metric in the position's rating. Archetype columns (✓ = used) only for
-    positions that have archetypes; an archetype changes Performance only, so every physical
-    metric is used by every archetype."""
+    """One row per metric in the position's rating, with its weight. Archetype columns (that
+    archetype's weight; blank = left out) only for positions that have archetypes; an
+    archetype changes Performance only, so every physical metric is in every archetype."""
     defs = _definitions() if definitions is None else definitions
     rows = [{"key": m, "Metric": metric_label(m), "Counts towards": "Performance"}
             for m in _resolved_performance(position)]
     rows += [{"key": m, "Metric": PHYSICAL[m][0], "Counts towards": "Physical"}
              for m in cf.PHYSICAL_METRICS[position]]
     table = pd.DataFrame(rows, columns=["key", "Metric", "Counts towards"])
-    for arch in cf.archetypes_for(position)[1:]:
-        used = set(_resolved_performance(position, arch))
-        table[arch] = [TICK if (k in used or c == "Physical") else ""
-                       for k, c in zip(table["key"], table["Counts towards"])]
+    # Per-metric weights (formula meeting, 2026-11-02): Performance carries the club's
+    # weights, per archetype; Physical is equal-weighted. An archetype column shows that
+    # archetype's own weight, or nothing where it leaves the metric out.
+    from lofc.model import performance_weights as pw
+    for col, arch in [("Weight", cf.DEFAULT_ARCHETYPE)] + \
+            [(a, a) for a in cf.archetypes_for(position)[1:]]:
+        weights = pw.weights_for(position, arch) or {}
+        table[col] = ["Equal" if c == "Physical" else
+                      (f"{weights[k]:.2%}" if k in weights else "")
+                      for k, c in zip(table["key"], table["Counts towards"])]
     table["How it's measured"] = [defs.get(k, "") for k in table["key"]]   # provider wording
     return table
 

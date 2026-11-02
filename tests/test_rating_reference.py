@@ -22,19 +22,34 @@ def test_rows_are_exactly_what_the_scoring_uses(position):
     assert phys == cf.PHYSICAL_METRICS[position]
 
 
+@pytest.mark.parametrize("position", POSITIONS)
+def test_each_performance_metric_shows_its_weight(position):
+    """Per-metric weights (formula meeting, 2026-11-02). Physical is equal-weighted."""
+    from lofc.model import performance_weights as pw
+    table = rr.rating_ingredients(position).set_index("key")
+    weights = pw.weights_for(position, cf.DEFAULT_ARCHETYPE)
+    for key, row in table.iterrows():
+        expected = "Equal" if row["Counts towards"] == "Physical" else f"{weights[key]:.2%}"
+        assert row["Weight"] == expected, key
+
+
 @pytest.mark.parametrize("position", ["Full Back", "Winger"])
-def test_archetype_ticks_match_the_archetype_lists(position):
+def test_each_archetype_column_shows_its_own_weight_or_nothing(position):
+    """The archetype columns carried a tick; each archetype now has its own weights."""
+    from lofc.model import performance_weights as pw
     table = rr.rating_ingredients(position).set_index("key")
     for arch in cf.archetypes_for(position)[1:]:
-        used = set(_resolved_performance(position, arch))
+        weights = pw.weights_for(position, arch)
         for key, row in table.iterrows():
-            expected = key in used or row["Counts towards"] == "Physical"
-            assert (row[arch] == "✓") == expected, (arch, key)
+            if row["Counts towards"] == "Physical":
+                assert row[arch] == "Equal"
+            else:
+                assert row[arch] == (f"{weights[key]:.2%}" if key in weights else ""), (arch, key)
 
 
 def test_positions_without_archetypes_have_no_archetype_columns():
     assert list(rr.rating_ingredients("Centre Back").columns) == [
-        "key", "Metric", "Counts towards", "How it's measured"]
+        "key", "Metric", "Counts towards", "Weight", "How it's measured"]
 
 
 @pytest.mark.parametrize("position", POSITIONS)

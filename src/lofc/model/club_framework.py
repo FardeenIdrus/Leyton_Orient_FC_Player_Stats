@@ -15,8 +15,10 @@ FIVE DECISIONS resolved objectively from the club's own numbers (documented in t
 so the club did not have to be asked (the 5th is at DIMENSION_WEIGHTS below: the outfield
 weights sum to 110% in the doc, so we normalise each position to 1.0):
 
-  1. Per-metric weight WITHIN a dimension -> EQUAL. The club lists metrics as a flat set of
-     "key indicators" with no individual weights; equal weight adds no unstated preference.
+  1. Per-metric weight WITHIN a dimension -> EQUAL at first (the club listed a flat set of
+     "key indicators"). SUPERSEDED for Performance on 2026-11-02: the club set High / Mid /
+     Low weights per metric, position and archetype (`performance_weights.py`). Physical
+     stays equal-weighted until the club weights it.
 
   2. Percentile -> 1-5 band -> LINEAR, anchored on the club's own two thresholds
      (median = "Minimum Standard", 70th = "Elite"): band = 3 + (percentile - 50) / 20,

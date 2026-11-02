@@ -555,6 +555,11 @@ def _grand_table(row: pd.Series, position: str, archetype: str,
     records = []
     for m in perf:
         if pr is None or m not in pr.index or pd.isna(pr[m]):
+            # In the rating but no value for him: shown, not hidden (owner, 2026-11-02). It
+            # is out of his rating and the other weights are rescaled.
+            records.append({"Dimension": "Performance", "Metric": metric_label(m),
+                            "Source": _metric_source(m), "Season total": "—",
+                            "Per 90 / rate": "No value", "Percentile": None, "Band": None})
             continue
         pct = float(pr[m])
         val = mvr.get(m)

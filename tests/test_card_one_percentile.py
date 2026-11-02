@@ -54,3 +54,13 @@ def test_strengths_read_the_scorecard_percentiles():
     s = pd.Series({"ball_wins_p90": 80.0, "pressures_p90": 20.0, "pass_value_p90": 23.0})
     line = players._strengths_weaknesses(s, ["ball_wins_p90", "pressures_p90", "pass_value_p90"])
     assert "Ball wins (80)" in line and "Pressures (20)" in line
+
+
+def test_a_scored_metric_with_no_value_is_shown_not_hidden():
+    """Owner, 2026-11-02: a metric in the rating that the player has no value for is shown
+    as 'No value' rather than silently left off the card (it is out of his rating)."""
+    sc = _sc().assign(aerial_win_pct=float("nan"))
+    g = players._grand_table(_row(), "Centre Back", "All Metrics", sc, _values()).set_index("Metric")
+    assert g.loc["Aerial win %", "Per 90 / rate"] == "No value"
+    assert pd.isna(g.loc["Aerial win %", "Percentile"]) and pd.isna(g.loc["Aerial win %", "Band"])
+    assert g.loc["Ball wins", "Percentile"] == 80
