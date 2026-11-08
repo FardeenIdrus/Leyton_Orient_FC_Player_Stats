@@ -58,11 +58,15 @@ Caddy routes `orient-matchanalysis.duckdns.org` to it (see `Caddyfile`). Our `.e
 | `.env` | has `SKIP_TRANSFERMARKT_SCRAPE=true` | does not |
 
 The server's database drifts ahead of the workstation's. **Before any data work on the
-workstation, resync it from the server:**
+workstation, resync it from the server.** Run on the **Mac**, in the project folder (NOT on the
+server), with SERVER replaced by the droplet IP. Download ~190 MB; the Mac database becomes
+~3.5 GB (2026-11). Check the file size before dropping anything: a failed download is a 0-byte file.
 ```bash
 ssh root@SERVER "docker compose -f /opt/lofc/docker-compose.prod.yml exec -T db pg_dump -U lofc -Fc lofc" > /tmp/prod.dump
+ls -lh /tmp/prod.dump        # must be ~190 MB, not 0 -- stop here if it is not
 docker compose exec -T db psql -U lofc -d lofc -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 docker compose exec -T db pg_restore -U lofc -d lofc --no-owner < /tmp/prod.dump
+rm /tmp/prod.dump            # it holds user password hashes
 ```
 
 ### Lessons that cost real time
