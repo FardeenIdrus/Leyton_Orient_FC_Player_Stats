@@ -51,10 +51,30 @@ STORED_COLUMNS = list(COLUMNS.values()) + [
     "submitted_at", "updated_at", "linkable", "name_from_report",
 ]
 
-# A name is 2-4 capitalised words. Apostrophes and hyphens are part of real names
+# A name is 2-4 capitalised words, with lower-case particles (Frenkie de Jong) allowed between
+# them. Apostrophes and hyphens are part of real names
 # (Kah'vanni Amarni Lincoln, Oscar Lewie-Bech Jorgense, Corey Adjetey-Brew, all live rows).
-_NAME = re.compile(r"^([A-Z][\w\u00C0-\u024F\u2019'-]*"
-                   r"(?:\s+[A-Z][\w\u00C0-\u024F\u2019'-]*){1,3})$")
+_PARTICLES = ("van", "von", "de", "da", "dos", "das", "del", "della", "di", "du", "le", "la",
+              "el", "al", "bin", "ben", "der", "den", "ter")
+_WORD = r"[A-Z][\w\u00C0-\u024F\u2019'-]*"
+_NAME = re.compile(rf"^({_WORD}(?:\s+(?:(?:{'|'.join(_PARTICLES)})\s+)?{_WORD}){{1,3}})$")
+# A scout who types "Antonio Arena AS Roma" or "David Mantle RCB" has run the club or the
+# position into the name. Trailing tokens from the first club/position code, or any all-capitals
+# token, are cut -- but never below two words, and never the first two (so a real surname
+# in capitals right after the first name is untouched).
+_CODES = frozenset({"AS", "FC", "AFC", "SC", "CF", "CB", "RCB", "LCB", "RB", "LB", "RWB", "LWB",
+                    "CM", "CDM", "CAM", "DM", "AM", "LW", "RW", "LM", "RM", "ST", "SS", "GK"})
+
+
+def _strip_trailing_codes(name: str) -> str:
+    words = name.split()
+    for i in range(2, len(words)):
+        w = words[i]
+        if w in _CODES or (len(w) >= 2 and w.isupper()):
+            return " ".join(words[:i])
+    return name
+
+
 # Where the name stops and the report starts. A shirt number may precede the name
 # ("52. Reggie Rose - ..."); a bracketed one may follow it ("Kerriou (#25) played as").
 _LEADING_NUMBER = re.compile(r"^\s*\d{1,3}\s*[.)]\s*")
@@ -145,7 +165,7 @@ def _name_from_line(line: str, club=None) -> str | None:
     match = _NAME.match(candidate)
     if not match:
         return None
-    name = match.group(1)
+    name = _strip_trailing_codes(match.group(1))
     # A report often opens by setting the scene ("...Man City have a lot of rotations").
     # If a scout opens with the CLUB instead of the player, the club must not become the
     # player's name.

@@ -16,14 +16,15 @@ from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
+from sqlalchemy import bindparam, text as sa_text
 
 from lofc.config import settings
 from lofc.dashboard import badges
 from lofc.dashboard.formatting import dash_blanks, link_or_blank, numeric_or_dash
 from lofc.dashboard.loaders import (
-    _competition_name_by_id, get_engine, load_assessment_status, load_current_form,
+    _competition_name_by_id, _versioned, get_engine, load_assessment_status, load_current_form,
     load_injuries_for_players, load_scorecards)
-from lofc.dashboard.seasons import season_name_for
+from lofc.dashboard.seasons import calendar_months_left, season_name_for
 from lofc.dashboard.session import CarriedPlayer, go_to_assess
 from lofc.dashboard.tabs.players import _current_form_summary
 from lofc.model import assessment_status
@@ -44,8 +45,55 @@ _AGGREGATE_TO_RAW_STATUS = {
 _INJURY_PREFIX = "🔴"   # currently-out marker; the word "out" always carries it too
 
 
+def with_latest_market_value(df: pd.DataFrame, valuations: pd.DataFrame) -> pd.DataFrame:
+    """Fill a missing `market_value_eur` from the player's most recent valuation in any season.
+
+    The store joins valuations on the exact (player, competition, season), but watchlist rows
+    are keyed to the live season (2026/27) while valuations stop at 2025/26 -- so every row
+    came back blank (verified live: 0 of 18 exact matches, 7 of 18 players have one). A
+    player with no valuation anywhere stays blank; nothing is invented.
+    """
+    out = df.copy()
+    if valuations.empty:
+        return out
+    latest = (valuations.dropna(subset=["market_value_eur"])
+              .sort_values("season_id").groupby("player_id")["market_value_eur"].last())
+    fallback = out["player_id"].map(latest)
+    out["market_value_eur"] = out["market_value_eur"].where(
+        out["market_value_eur"].notna(), fallback)
+    return out
+
+
+def market_value_text(df: pd.DataFrame, show_money: bool, loader=None) -> pd.Series | None:
+    """The 'Market value' column text, or None when the sidebar switch 'Show affordability
+    (modelled)' is off. Off means no column AND no valuation query -- the same rule as the
+    Players table and player card (market value is a modelled-money figure)."""
+    if not show_money:
+        return None
+    loader = loader or load_valuations_for_players
+    ids = tuple(sorted(df["player_id"].astype(int).unique().tolist()))
+    filled = with_latest_market_value(df, loader(ids))
+    return numeric_or_dash(filled["market_value_eur"] / 1e6, "€{:.1f}m")
+
+
+def months_left_column(contract_until: pd.Series, today=None) -> pd.Series:
+    """Calendar months to expiry per row (same rule as Squads); NaN where unknown."""
+    return contract_until.map(lambda d: calendar_months_left(d, today)).astype("float64")
+
+
 def _badge_text(aggregate_status: str) -> str:
     return badges.for_status(_AGGREGATE_TO_RAW_STATUS[aggregate_status]).text
+
+
+@_versioned()
+def load_valuations_for_players(player_ids: tuple) -> pd.DataFrame:
+    """Every valuation row for these players (all seasons), for the latest-known fallback."""
+    if not player_ids:
+        return pd.DataFrame(columns=["player_id", "season_id", "market_value_eur"])
+    return pd.read_sql(
+        sa_text("SELECT player_id, season_id, market_value_eur FROM valuations "
+                "WHERE player_id IN :ids").bindparams(bindparam("ids", expanding=True)),
+        get_engine(), params={"ids": list(player_ids)})
 
 
 def _current_form_text(live_rows: pd.DataFrame, player_id: int) -> str:
@@ -152,7 +200,7 @@ def _watchlist_entry_dialog(pid: int, cid: int, sid: int, player_name: str,
             position_group=position_group, minutes=None))
 
 
-def _watchlist(tab) -> None:
+def _watchlist(tab, show_money: bool = False) -> None:
     """The tracking list: every watched player; click a row to read/edit its note.
 
     Reads its own fresh query (never the filtered pool, never cached): watched
@@ -189,8 +237,7 @@ def _watchlist(tab) -> None:
         # with `reset_index(drop=True)`, and a Series left outside that no longer lines up by
         # position -- only a column travels correctly with its row through the filter.
         df["contract_until_dt"] = pd.to_datetime(df["contract_until"], errors="coerce")
-        df["months_left"] = (
-            (df["contract_until_dt"] - pd.Timestamp.now().normalize()).dt.days / 30.44).round(0)
+        df["months_left"] = months_left_column(df["contract_until_dt"])
 
         # Injury record, bulk-loaded for exactly the players on this list (never the whole
         # 3,766-row table) -- recent absence is material to a recruiter revisiting a target.
@@ -256,7 +303,6 @@ def _watchlist(tab) -> None:
             "Physical": df["physical_band"],
             form_header: df["current_form"],
             "Injury": df["injury_status"],
-            "Market value": numeric_or_dash(df["market_value_eur"] / 1e6, "€{:.1f}m"),
             "Contract": df["contract_until_dt"].dt.strftime("%m/%Y").fillna("—"),
             "Months left": numeric_or_dash(df["months_left"], "{:.0f}"),
             "Status": df["status"],
@@ -266,6 +312,10 @@ def _watchlist(tab) -> None:
             "Transfermarkt": link_or_blank(
                 df["tm_player_id"], "https://www.transfermarkt.com/-/profil/spieler/{:.0f}"),
         })
+
+        market_value = market_value_text(df, show_money)
+        if market_value is not None:
+            frame.insert(frame.columns.get_loc("Contract"), "Market value", market_value)
 
         # Any remaining missing text cell (Position, Status, Injury...) would draw "None".
         frame = dash_blanks(frame)
@@ -297,9 +347,10 @@ def _watchlist(tab) -> None:
                                    "spells on record' means none is on file — not a fitness "
                                    "guarantee, since coverage is incomplete outside the EFL."),
                 "Market value": st.column_config.TextColumn(
-                    "Market value", help="Transfermarkt. '—' = no known valuation."),
+                    "Market value", help="Transfermarkt, latest known valuation. '—' = no "
+                                        "valuation on record."),
                 "Months left": st.column_config.TextColumn(
-                    "Months left", help="Months from today until the contract expires. Under "
+                    "Months left", help="Calendar months from today until the contract expires. Under "
                                         "6 = he can sign a pre-contract elsewhere. '—' = no "
                                         "known contract date."),
                 "Assessed": st.column_config.TextColumn(

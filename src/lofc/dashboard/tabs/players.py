@@ -18,10 +18,12 @@ from lofc.constrain.filters import RANK_COLUMN
 from lofc.dashboard import (assessment_detail, badges, detail_section, evidence, metric_filters,
                             player_header)
 from lofc.dashboard.charts import PLOTLY_CONFIG, bar_chart, radar_chart
+from lofc.dashboard import compare_tables as ct
 from lofc.dashboard.formatting import dash_blanks, numeric_or_dash
 from lofc.dashboard.units import season_total
 from lofc.dashboard.labels import LABELS, _metric_source, metric_label
 from lofc.dashboard.loaders import (
+    round_half_up,
     get_engine, headline, league_names, load_assessment_status, load_current_clubs,
     load_current_form,
     competition_name_by_id, load_loan_for_player, load_other_league_seasons,
@@ -107,14 +109,63 @@ def attach_season_scores(rows: pd.DataFrame, scores: pd.DataFrame) -> pd.DataFra
     """
     out = rows.copy()
     keys = ["player_id", "competition_id", "season_id"]
+    bands = {"Score": "objective_composite", "Performance": "performance_band",
+             "Physical": "physical_band"}
     if out.empty:
-        out["Score"] = pd.Series(dtype="float64")
+        for col in bands:
+            out[col] = pd.Series(dtype="float64")
         return out
-    lookup = (scores[keys + ["objective_composite"]]
-              .drop_duplicates(keys).set_index(keys)["objective_composite"])
-    idx = pd.MultiIndex.from_frame(out[keys])
-    out["Score"] = lookup.reindex(idx).to_numpy()
+    # All Metrics only: `player_scorecards` holds one row per player-season-league PER
+    # archetype (Wingers and Full Backs have three), and de-duplicating without this kept
+    # whichever came first -- Markanday 2025/26 read 3.43 (Direct & 1v1), not 3.41.
+    if "archetype" in scores.columns:
+        scores = scores[scores["archetype"] == cf.DEFAULT_ARCHETYPE]
+    for col, src in bands.items():
+        if src not in scores.columns:
+            out[col] = float("nan")
+            continue
+        lookup = scores[keys + [src]].drop_duplicates(keys).set_index(keys)[src]
+        out[col] = lookup.reindex(pd.MultiIndex.from_frame(out[keys])).to_numpy()
     return out
+
+
+def season_rating_columns(rows: pd.DataFrame, no_physical_seasons=()) -> pd.DataFrame:
+    """Overall / Performance / Physical for the season table. Overall is Performance +
+    Physical, so in a season where NO player has a physical band (2024/25: no SkillCorner
+    data) it is a Performance-only rating and must not sit in the Overall column beside the
+    full ones. Season-level, from the data (`seasons_without_physical`): a player without
+    tracking in a season that has it still shows his Overall, as the Players table does."""
+    out = rows.copy()
+    out["Overall"] = out["Score"].where(~out["season_id"].isin(list(no_physical_seasons)))
+    return out
+
+
+def card_no_physical_seasons(rows: pd.DataFrame, scorecards: pd.DataFrame) -> list:
+    """Season ids among `rows` in which no player at all has a physical band."""
+    if scorecards is None or scorecards.empty:
+        return []
+    if "archetype" in scorecards.columns:
+        scorecards = scorecards[scorecards["archetype"] == cf.DEFAULT_ARCHETYPE]
+    return [s for s in ct.seasons_without_physical(scorecards)
+            if s in set(rows["season_id"].astype(int))]
+
+
+def season_total_count(raw, per90, minutes, prefer_derived: bool) -> int:
+    """A season goals / assists total: the per-90 rate x minutes / 90 (half-up), or the raw
+    total. `prefer_derived` picks which wins when both exist; the other is the fallback."""
+    derived = round_half_up(float(per90) * minutes / 90) if pd.notna(per90) and minutes else None
+    raw_total = int(raw) if pd.notna(raw) else None
+    first, second = (derived, raw_total) if prefer_derived else (raw_total, derived)
+    if first is not None:
+        return first
+    return second if second is not None else 0
+
+
+def whole_minutes(value) -> int:
+    """Minutes as a whole number, rounding half up -- the one rule for every card figure.
+    Python's round() is half-to-even and int() truncates; the header and tiles disagreed
+    (3,067 vs 3,066 for 3,066.7)."""
+    return round_half_up(value)
 
 
 def _trajectory(player_id: int, role: str, key_prefix: str) -> None:
@@ -126,13 +177,18 @@ def _trajectory(player_id: int, role: str, key_prefix: str) -> None:
     # Each season's own composite, joined on player+league+season (see attach_season_scores).
     # The table showed output but not the rating -- the one number the rest of the platform
     # ranks on -- so comparing two seasons meant changing the sidebar season and reopening.
-    rows = attach_season_scores(rows, _stored_scorecards())
+    cards = _stored_scorecards()
+    rows = attach_season_scores(rows, cards)
+    no_physical = card_no_physical_seasons(rows, cards)
+    rows = season_rating_columns(rows, no_physical)
     view = pd.DataFrame({
         "Season": rows["season_name"].str.replace("/20", "/", regex=False),
         "League": rows["competition_name"],
         "Club": rows["team_name"],
-        "Minutes": rows["minutes"].round(0).astype(int),
-        "Score": rows["Score"].round(2),
+        "Minutes": rows["minutes"].map(whole_minutes),
+        "Overall": rows["Overall"].round(2),
+        "Performance": rows["Performance"].round(2),
+        "Physical": rows["Physical"].round(2),
     })
     if role == "goalkeeper":
         view["Save %"] = (rows["save_pct"] * 100).round(0)  # stored 0-1
@@ -147,15 +203,21 @@ def _trajectory(player_id: int, role: str, key_prefix: str) -> None:
         view["npxG/90"] = rows["np_xg_p90"].round(2)
         view["xA/90"] = rows["xa_p90"].round(2)
     st.markdown("**Season by season**")
-    # Score as "x.xx" text so an unscored season reads "—" (a number column draws "None");
+    # Ratings as "x.xx" text so an unscored season reads "—" (a number column draws "None");
     # the per-90 / % columns stay numeric (text would mis-sort them).
-    view = dash_blanks(view, {"Score": "{:.2f}"})
+    view = dash_blanks(view, {c: "{:.2f}" for c in ("Overall", "Performance", "Physical")})
     st.dataframe(view, hide_index=True, width="stretch", key=f"{key_prefix}_trajectory",
-                 column_config={"Score": st.column_config.TextColumn(
-                     "Score",
-                     help="The club composite that season, in that league. Blank = not scored "
-                          "(under 450 minutes). Each is a rank against THAT league's peers, so "
-                          "two seasons in different leagues are not like-for-like.")})
+                 column_config={
+                     "Overall": st.column_config.TextColumn(
+                         "Overall", help="The club composite that season, in that league: "
+                                         "Performance + Physical. Each is a rank against THAT "
+                                         "league's peers, so two leagues are not like-for-like."),
+                     "Performance": st.column_config.TextColumn(
+                         "Performance", help="Performance band that season (event data)."),
+                     "Physical": st.column_config.TextColumn(
+                         "Physical", help="Physical band that season (SkillCorner).")})
+    # One note, shared with Compare; the seasons are found from the data, not hard-coded.
+    st.caption(ct.comparison_note([season_name_for(int(s_)) for s_ in no_physical]))
 
 
 
@@ -264,13 +326,35 @@ def _current_form_summary(rows: pd.DataFrame, player_id: int) -> dict[str, int] 
         # Sum each row's own total (rate x that row's minutes / 90), not the rate averaged
         # across rows -- correct even for the rare mid-season mover with two competition rows.
         per_row = mine[per90_col].fillna(0) * mine["minutes"].fillna(0) / 90
-        return round(float(per_row.sum()))
+        return round_half_up(per_row.sum())
 
     return {
-        "minutes": int(round(minutes)),
+        "minutes": whole_minutes(minutes),
         "goals": _total("goals_p90"),
         "assists": _total("assists_p90"),
     }
+
+
+GK_TILE_NOTE = ("Save % / Saves: no longer published — see **Scorecard metrics** below for the "
+                "live shot-stopping figures.")
+DEF_TILE_NOTE = ("Tackles / Interceptions: no longer published — see **Scorecard metrics** below "
+                 "for the live defensive-action figures.")
+
+
+def empty_tile_note(role: str) -> str | None:
+    """The caption for a role whose output tiles are all retired; None for other roles."""
+    return {"goalkeeper": GK_TILE_NOTE, "defender": DEF_TILE_NOTE}.get(role)
+
+
+METRIC_GLOSSARY_NOTE = "What each metric means is on the **Glossary** tab (searchable)."
+SCOUTS_HELP = ("High priority = all scouts said Sign. "
+               "Scouts split = they disagreed. Blank = no reports.")
+
+
+def current_form_empty_caption(season_name: str) -> str:
+    """No-row caption, naming the same live season as the heading above it."""
+    return (f"No {season_name} appearances recorded — he has not featured yet, or his "
+            "league has not started. Not scored: this is plain facts, not a rating.")
 
 
 def _current_form(player_id: int, has_rating: bool = False) -> None:
@@ -286,8 +370,7 @@ def _current_form(player_id: int, has_rating: bool = False) -> None:
     summary = _current_form_summary(load_current_form(), player_id)
     st.markdown(f"**Current form — {season_name_for(live)}**")
     if summary is None:
-        st.caption("No 2026/27 appearances recorded — he has not featured yet, or his "
-                   "league has not started. Not scored: this is plain facts, not a rating.")
+        st.caption(current_form_empty_caption(season_name_for(live)))
         return
     c1, c2, c3 = st.columns(3)
     c1.metric("Minutes", f"{summary['minutes']:,}", border=True)
@@ -762,8 +845,7 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
         if plan.get("gk_saves_p90"):
             o2.metric("Saves", total("gk_saves_p90"), border=True)
         if not any(plan.values()):
-            o1.caption("Save % / Saves: retired StatsBomb stats, no longer populated — see "
-                       "**Scorecard metrics** below for the live Impect shot-stopping figures.")
+            o1.caption(empty_tile_note(role))
     elif role == "defender":
         # tackles_p90/interceptions_p90: same retired-column situation as above, NULL for
         # every defender now.
@@ -773,20 +855,17 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
         if plan.get("interceptions_p90"):
             o2.metric("Interceptions", total("interceptions_p90"), border=True)
         if not any(plan.values()):
-            o1.caption("Tackles / Interceptions: retired StatsBomb stats, no longer populated "
-                       "— see **Scorecard metrics** below for the live Impect defensive-action "
-                       "figures.")
+            o1.caption(empty_tile_note(role))
     else:
         # EFL rows carry raw season totals; scouting rows (all leagues) don't, so fall back
         # to the per-90-derived total, which the combined table supplies for every league.
-        def _season_total(raw_col: str, per90_col: str) -> int:
-            if pd.notna(row.get(raw_col)):
-                return int(row[raw_col])
-            v = mv.get(per90_col)
-            return round(float(v) * minutes / 90) if pd.notna(v) and minutes else 0
+        # Assists prefer the Impect-derived figure (what Season by season shows); the raw total
+        # is the retired provider's and disagreed (4 vs 7 for the same season).
+        def _season_total(raw_col: str, per90_col: str, prefer_derived: bool = False) -> int:
+            return season_total_count(row.get(raw_col), mv.get(per90_col), minutes, prefer_derived)
         o1.metric("Goals", f"{_season_total('goals', 'goals_p90'):,}", border=True)
-        o2.metric("Assists", f"{_season_total('assists', 'assists_p90'):,}", border=True)
-    o3.metric("Minutes", f"{int(row['minutes']):,}" if pd.notna(row.get("minutes")) else "—", border=True)
+        o2.metric("Assists", f"{_season_total('assists', 'assists_p90', True):,}", border=True)
+    o3.metric("Minutes", f"{whole_minutes(row['minutes']):,}" if pd.notna(row.get("minutes")) else "—", border=True)
 
     npxg, xa = row.get("np_xg_p90"), row.get("xa_p90")
     if role in ("midfielder", "attacker") and pd.notna(npxg) and pd.notna(xa):
@@ -939,8 +1018,7 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
                         min_value=0, max_value=100, format="%d"),
                 },
             )
-            st.caption("What each metric means — and, for a substitute, the StatsBomb stat it stands "
-                       "in for — is on the **Glossary** tab (searchable).")
+            st.caption(METRIC_GLOSSARY_NOTE)
             # Every metric the platform holds for this player, as a file. Asked for
             # directly by recruiters: the table existed but there was no way to take it
             # into a meeting, and re-keying 90 numbers is where errors come from.
@@ -1336,8 +1414,7 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
                 "Assessed", help="Whether a scout has assessed this player. Does NOT affect "
                                  "the ranking - scout input never moves the composite."),
             "Scouts": st.column_config.TextColumn(
-                "Scouts", help="High priority = all scouts said Sign. "
-                               "Split = they disagreed. Blank = no reports."),
+                "Scouts", help=SCOUTS_HELP),
         }
         # No per-row styling here (no zebra stripe, no affordability tint): a pandas Styler
         # emits an inline CSS string PER CELL, and `st.dataframe` renders to a canvas-based

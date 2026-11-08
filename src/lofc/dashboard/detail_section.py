@@ -24,6 +24,7 @@ import streamlit as st
 
 from lofc.dashboard.formatting import dash_blanks
 from lofc.model import club_framework as cf
+from lofc.report.render import ordinal as _ordinal_suffix
 
 from lofc.ingest.impect_detail import (AVAILABILITY, FAMILY_LABELS, MAP_FAMILIES, SCORES,
                                        ZONE_LABELS, ZONES)
@@ -356,6 +357,12 @@ def _player_rows(row: pd.Series, prefix: str) -> pd.DataFrame:
     return mine
 
 
+def ordinal(n) -> str:
+    """63 -> "63rd" (1st, 2nd, 3rd, 11th-13th, 21st ...). The tile used to append "th" always."""
+    n = int(round(float(n)))
+    return f"{n}{_ordinal_suffix(n)}"
+
+
 # --- render -----------------------------------------------------------------------------
 
 def render(row: pd.Series, neutral: pd.Series | None, league: str, key_prefix: str,
@@ -372,7 +379,7 @@ def render(row: pd.Series, neutral: pd.Series | None, league: str, key_prefix: s
             if name in by.index:
                 pct = by.at[name, "pct"]
                 col.metric(SCORES[key][1], f"{by.at[name, 'value_p90']:.2f}", border=True,
-                           delta=None if pd.isna(pct) else f"{pct:.0f}th percentile",
+                           delta=None if pd.isna(pct) else f"{ordinal(pct)} percentile",
                            delta_color="off")
         per_pos = _player_rows(row, "score_pos.")
         if not per_pos.empty:

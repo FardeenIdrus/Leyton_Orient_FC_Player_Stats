@@ -1366,6 +1366,23 @@ with "no sideways scrolling" in the same sentence — ask what he means. Not bui
 
 ---
 
+### 2026-11-08 — Live-bug round 2.28–2.31 (built locally, not yet deployed)
+
+Full detail per item in `plan/TASKS.md` (1.6, 2.28–2.31).
+- **Season comparisons:** a change shows only between seasons with the same parts (2024/25 has
+  no physical data, so its Overall/Physical comparisons read "—"); one note per page. Blanking
+  is per season, not per player (reviewer caught a per-row version that blanked wrongly).
+- **Card:** Season by season = All Metrics rating only; its minutes/goals/assists from Impect
+  (same as the tiles); .5 rounds up on every minutes figure; "63rd", not "63th"; no StatsBomb.
+- **Other pages:** Watchlist value only with the affordability switch on; Months left in
+  calendar months everywhere; Squads/Physical/Glossary wording from the data; scout names lose
+  trailing club/position codes.
+- **How it was done:** three builders on separate files → independent reviewer → read-only
+  final check against live data (SMOKE PASS, 52 checks). 2,134 tests.
+- **Lesson:** a mockup detail (a 2026/27 row) was copied into the final check's checklist and
+  then raised as a "gap". Check a suggestion against what the page already shows before
+  recommending it.
+
 ### 2026-11-02 — Compare rebuild, report authoring, search, speed, metres per minute (eb1d17c)
 
 Full detail per item in `plan/TASKS.md` (2.13, 2.15, 2.16, 2.19–2.21, 2.23, 2.24, 2.26, B7).

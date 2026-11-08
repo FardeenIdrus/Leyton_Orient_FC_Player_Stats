@@ -248,6 +248,54 @@ def rating_trend_text(points: list, current_league) -> str:
     return " → ".join(parts) if parts else DASH
 
 
+def _short_season(season_id: int) -> str:
+    """317 -> "24/25"."""
+    from lofc.dashboard.seasons import season_name_for
+    name = season_name_for(int(season_id))
+    return f"{name[2:4]}/{name[5:]}" if len(name) == 7 else name
+
+
+def rating_trend_rows(by_season: dict, season_ids: list, no_physical_seasons=(),
+                      current_league=None) -> dict:
+    """Three short rows -- Overall / Performance / Physical trend -- one value per season,
+    oldest first, "—" where a season has none: "24/25 — · 25/26 3.41 · 26/27 —".
+
+    `by_season` maps season_id -> (overall, performance, physical[, league]). Overall is
+    Performance + Physical, so in a season where NOBODY has a physical band
+    (`no_physical_seasons`, from `seasons_without_physical`) Overall would be a
+    Performance-only number beside full ones and reads "—". That is season-level on purpose:
+    a player without tracking in a season that has it still shows his Overall, as the
+    Players table does. A league is appended, abbreviated, where it differs from
+    `current_league` ("24/25 3.20 (L2)"), as the old single-line trend did."""
+    def one(i, season_id):
+        label = _short_season(season_id)
+        got = by_season.get(season_id)
+        if got is None or _missing(got[i]) or (i == 0 and season_id in set(no_physical_seasons)):
+            return f"{label} {DASH}"
+        league = got[3] if len(got) > 3 else None
+        tag = f" ({_abbr(league)})" if league and league != current_league and _abbr(league) else ""
+        return f"{label} {float(got[i]):.2f}{tag}"
+    return {label: " · ".join(one(i, sid) for sid in season_ids)
+            for i, label in enumerate(("Overall trend", "Performance trend", "Physical trend"))}
+
+
+def seasons_without_physical(history: pd.DataFrame) -> list:
+    """Season ids that hold ratings but no physical band at all, from the loaded history."""
+    if history is None or history.empty or "physical_band" not in history.columns:
+        return []
+    per = history.groupby("season_id").agg(rated=("objective_composite", "count"),
+                                           phys=("physical_band", "count"))
+    return sorted(int(s) for s in per[(per.rated > 0) & (per.phys == 0)].index)
+
+
+def comparison_note(season_names: list) -> str:
+    """The one note per page for a "—" change."""
+    base = f"{DASH} = no comparison possible."
+    if not season_names:
+        return base
+    return f"{base} {' and '.join(season_names)} {'has' if len(season_names) == 1 else 'have'} no physical data."
+
+
 def style_text(row) -> str:
     """The Players page's pills as compact text: "Wide · 1v1 (leans)"."""
     if row is None:
@@ -272,7 +320,8 @@ def load_rating_history(season_id: int) -> pd.DataFrame:
     """Overall ('All Metrics') for the two seasons before `season_id`: one row per player and
     season, the league with the most minutes."""
     df = pd.read_sql(
-        "SELECT s.player_id, s.season_id, s.competition_id, s.objective_composite, n.minutes "
+        "SELECT s.player_id, s.season_id, s.competition_id, s.objective_composite, "
+        "s.performance_band, s.physical_band, n.minutes "
         "FROM player_scorecards s JOIN player_metrics_neutral n ON n.player_id = s.player_id "
         " AND n.competition_id = s.competition_id AND n.season_id = s.season_id "
         "WHERE s.season_id BETWEEN %(lo)s AND %(hi)s AND s.archetype = 'All Metrics'",

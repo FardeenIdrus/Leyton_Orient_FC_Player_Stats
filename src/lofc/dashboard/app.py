@@ -411,7 +411,7 @@ def main() -> None:
                  search_index)
 
     def _watchlist_page():
-        _watchlist(st.container())
+        _watchlist(st.container(), show_money)
 
     def _assess_page():
         _season_banner()

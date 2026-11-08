@@ -40,6 +40,20 @@ _TABLE_VER_KEY = "users_table_ver"
 _DIALOG_HANDLED_KEY = "users_dialog_handled"
 
 
+_FLASH_KEY = "users_flash"
+
+
+def queue_flash(state, message: str) -> None:
+    """Keep a success message across the rerun. `st.rerun()` aborts the current run, so a
+    `st.success` written just before it is never drawn; the next run shows this instead."""
+    state[_FLASH_KEY] = message
+
+
+def pop_flash(state) -> str | None:
+    """The queued message, once: it is removed as it is read."""
+    return state.pop(_FLASH_KEY, None)
+
+
 def _bump_and_rerun() -> None:
     """Bump the table's key before rerunning, the same way `watchlist._close` does -- so the
     dataframe's selection is cleared and the dialog does not immediately reopen on the next
@@ -88,8 +102,8 @@ def _create_account_form(engine) -> None:
         except ValueError as exc:
             st.error(str(exc))
             return
-        st.success(f"Created {role} account '{username.strip()}'. They must change their "
-                   "password at first sign-in.")
+        queue_flash(st.session_state, f"Created {role} account '{username.strip()}'. "
+                    "They must change their password at first sign-in.")
         st.rerun()
 
 
@@ -120,7 +134,7 @@ def _account_dialog(engine, actor: CurrentUser, row: store_users.UserRow) -> Non
                 st.error("Password rejected: " + "; ".join(problems))
             else:
                 store_users.reset_password(engine, row.id, new_password)
-                st.success("Password reset. They must change it at their next sign-in.")
+                queue_flash(st.session_state, "Password reset. They must change it at their next sign-in.")
                 _bump_and_rerun()
 
     st.divider()
@@ -131,7 +145,7 @@ def _account_dialog(engine, actor: CurrentUser, row: store_users.UserRow) -> Non
                    "case of a mistyped password five times.")
         if st.button("Clear lockout", key=f"clear_lock_{row.id}"):
             store_users.clear_lockout(engine, row.id)
-            st.success("Lockout cleared.")
+            queue_flash(st.session_state, "Lockout cleared.")
             _bump_and_rerun()
     else:
         st.write("Not locked.")
@@ -147,14 +161,14 @@ def _account_dialog(engine, actor: CurrentUser, row: store_users.UserRow) -> Non
                        "to them — nothing is deleted.")
         if st.button("Deactivate account", key=f"deactivate_{row.id}", disabled=bool(reason)):
             store_users.set_active(engine, row.id, False)
-            st.success(f"{row.username} deactivated.")
+            queue_flash(st.session_state, f"{row.username} deactivated.")
             _bump_and_rerun()
     else:
         st.info("This account is deactivated and cannot sign in. Every past assessment "
                 "stays attributed to them.")
         if st.button("Reactivate account", key=f"reactivate_{row.id}", type="primary"):
             store_users.set_active(engine, row.id, True)
-            st.success(f"{row.username} reactivated.")
+            queue_flash(st.session_state, f"{row.username} reactivated.")
             _bump_and_rerun()
 
     st.divider()
@@ -164,6 +178,9 @@ def _account_dialog(engine, actor: CurrentUser, row: store_users.UserRow) -> Non
 
 def render(engine, actor: CurrentUser) -> None:
     st.subheader("Users")
+    msg = pop_flash(st.session_state)
+    if msg:
+        st.success(msg)
     if not can(actor.role, "manage_users"):
         # Belt and braces: `app.py` never registers this page for a non-admin, so this
         # branch should be unreachable in normal use -- but the page must never trust its

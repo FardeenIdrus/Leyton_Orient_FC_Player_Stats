@@ -2,7 +2,7 @@
 
 > **The one place to look for "what's next".** Updated after every task.
 > Detail lives elsewhere (linked); this file only says WHAT, IN WHAT ORDER, and WHAT IT WAITS ON.
-> Last updated: **2026-11-02**.
+> Last updated: **2026-11-08**.
 
 **How to read it.** Section 1 is built and waiting to ship. Section 2 is the work queue, in
 priority order (value to the platform first). Section 3 is blocked on someone else. Section 4
@@ -20,19 +20,21 @@ is recurring. Section 5 is the backlog. Section 6 is recently done.
 | 1.4 | **✅ LIVE (checked on the server 2026-11-02). Scout reports: explicit "Data vs scout" column + filter.** Replaces "Model view" ("Model agrees", "Model is lukewarm"). Labels: Data agrees / Data disagrees — rated 3.5+ or under 3.0; Average rating — 3.0 to 3.5; each with its season. New filter; tab "Data disagrees (N)" | 103 rated reports: 0 label mismatches against verdict, rating and season; each filter returns only its group; groups sum to all 681; tab = filter (31); 1,584 tests | **Owner reviewing locally**, then deploy |
 | 1.5 | **✅ LIVE (checked on the server 2026-11-02). Ireland physical data + card "no physical" line** (2026-10-26). SkillCorner editions 1081 (2025 → 318) and 1416 (2026 → 319) mapped to Irish Premier Division (10189). Card: blank physical section → "Physical — *no physical data for this league*" or "*… for this player*" (none for goalkeepers) | 1,788 tests; Irish ratings will move: physical now counts 43% | Deploy, then a full pipeline run (data must be rebuilt) |
 | 1.3 | **✅ LIVE (checked on the server 2026-11-02). Documentation consolidated** — one file per purpose (see BUILD_PLAN "Documentation map") | 0 dangling references; rewritten docs checked against code + live data; 1,565 tests pass | Commit only (docs) |
+| 1.6 | **Live-bug round 2026-11-08 (tasks 2.28–2.31): BUILT locally, NOT deployed.** Builders → reviewer → final check (read-only against live data: SMOKE PASS, 52 checks, every fix confirmed). 2,134 tests pass | See 2.28–2.31 | Commit, deploy, ONE forced scout sync (names re-read), smoke test. No rescore: display-only |
 
-**Mac** (owner runs, after reviewing 1.4 locally):
+**To ship 1.6 — Mac:**
 ```bash
-git add -A src tests plan docs DEPLOY.md README.md .gitignore
-git commit -m "scout reports: Data vs scout labels + filter, names from lines 2-3; squads registered positions (P18); docs consolidated"
+git add src tests plan
+git commit -m "Live fixes: season comparisons like for like, card figures and wording, watchlist value behind the switch, months left, scout names"
 git push
 ```
 **Server:**
 ```bash
 /opt/lofc/scripts/deploy.sh
 docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python -m lofc.store.scout_reports --force
+docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python scripts/smoke_test.py --quick
 ```
-(The forced sync is needed once: stored reports only re-read their names when the sheet changes.)
+(Forced sync once: stored scout reports only re-read their names when the sheet changes.)
 
 ---
 
@@ -67,6 +69,11 @@ docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python -m lofc.s
 | 2.24 | **Speed — ✅ LIVE 2026-11-02 (eb1d17c; live smoke PASS).** Measured: DB fast; ~17 s of Python on every cold cache, and caches expired every 5–10 min. Now: pipeline-data caches last 24 h keyed on a data-version token (Postgres write counters + table file ids + server start + date, checked every 30 s) so data is never older than the database; user-written data keeps 60 s; one-season reads; background warm-up when the version changes. 1,928 tests | Users waited 10+ s per action | Deploy, then measure on the server | Step B (vectorise build_candidates, precompute style labels) if still slow |
 | 2.26 | **Blank cells show "—" not "None" — ✅ LIVE 2026-11-02 (eb1d17c; live smoke PASS).** All tables (Players ratings, Squads, Scout reports, card, watchlist, injuries). Squads dates stay real dates so they sort by date (their blanks still read "None", as do Minutes / Months left). Smoke test now fails if a table shows a format code ("%b %Y"). Squads also: Transfermarkt as-of dates + Player search. 2,075 tests | Tables read cleanly | Deploy | — |
 | 2.25 | **Players under 450 minutes searchable** (owner approved 2026-11-02): card shows header, raw stats, physical, injuries, scout reports; caption "Not rated: under 450 minutes (N played)"; no rating/percentiles/style | Recruiters can look up anyone | Build (search index from all season players) | — |
+| 2.27 | **UI redesign** (owner 2026-11-06; Director of Football and Head of Recruitment want a cleaner, more professional platform). Brief + mockups are local only in `club_docs/` (confidential reference, never committed). Scope: existing features only. **v1 rejected** (stripped content). **v2 built 2026-11-06:** full player card (every live section, Dilan Markanday) + Players (all filters, metric filters, money columns), real data, `club_docs/design/mockup_v2.html`; page inventory `club_docs/design/inventory.md`. **v2 approved by owner 2026-11-06** with: Band column kept; Radar/Bars switch removed (radar only); Leyton Orient median line added to the Performance radar (verified: same season, same position, rated Orient players, median percentile); availability coverage caption reworded (apply when built). **v3 built 2026-11-06:** + Compare (Markanday v Lisbie v Edwards: summary, radars with Orient line, tables, 3 packing pitches) and Report (form + live one-page preview) — `club_docs/design/mockup_v3.html`. **v4 2026-11-06:** season comparison rule (owner: option 1 — change only between seasons with the same parts; 24/25 Overall/Physical "—" with one note per page; trend as Overall/Performance/Physical rows), radar labels no longer overlap, report reorganised (clickable photo box 130×160, never stored; Technical and Physical side by side; style full width; Orient-median key reworded) — `club_docs/design/mockup_v4.html`. **v5 2026-11-06:** all 15 views (+ Squads, Scout reports, Watchlist, Assess, Sign-off, Physical, rating reference, playing styles, Glossary, Users), real data — `club_docs/design/mockup_v5.html` | Staff confidence; professional look | **Owner reviewed v5 2026-11-06 (approved, "yes" to the 3 questions).** NEXT after 1.6 ships: pilot Players + player card in Streamlit to match v5; then the other pages in batches | Mockups: `club_docs/design/mockup_v5.html` (local only). Inventory of every page element: `club_docs/design/inventory.md`. Season by season in the redesign: no 2026/27 row (owner 2026-11-08) |
+| 2.28 | **✅ BUILT locally 2026-11-08 (not deployed; ships with 1.6).** (a) StatsBomb removed from the card captions (goalkeeper / defender / glossary notes reworded); (b) Metres per minute: owner kept as display only, no change; (c) Squads "On loan only" with an empty loan list: guarded (columns always present) | Rule breach; possible crash | Deploy (1.6) | `tabs/players.py` empty_tile_note; `tabs/squads.py` ensure_display_columns |
+| 2.29 | **✅ BUILT locally 2026-11-08 (ships with 1.6).** (a) Season by season uses the All Metrics rating only; (b) "63rd percentile" (proper ordinals); (c) Season by season minutes / goals / assists now from Impect, same source as the tiles (owner chose Impect 2026-11-08); (d) every card minutes figure rounds .5 UP — header, tiles, table (owner 2026-11-08). Owner decided NO 2026/27 row in Season by season: the rating tiles already show the season being viewed (reconsider only in the redesign) | Wrong number shown to staff | Deploy (1.6) | `tabs/players.py` attach_season_scores; `detail_section.py` ordinal; `loaders.py` load_trajectory, round_half_up; `player_header.py` Minutes |
+| 2.30 | **✅ BUILT locally 2026-11-08 (ships with 1.6).** Owner's rule: a change is shown only between seasons with the same parts, else "—"; one note per page "— = no comparison possible. 2024/25 has no physical data." Blanking is per SEASON (only seasons with no physical data anywhere), not per player. Applied to Compare (change vs last season, rating trend with league tags e.g. "(L2)") and the card's Season by season (Overall / Performance / Physical columns) | Misleading change shown to staff | Deploy (1.6) | `compare_tables.py` rating_trend_rows, comparison_note, seasons_without_physical; `tabs/compare.py` compare_row |
+| 2.31 | **✅ BUILT locally 2026-11-08 (ships with 1.6).** (a) Watchlist Market value = latest known valuation, and the column shows ONLY when the affordability switch is on (owner: money stays hidden when off); (b) Months left = calendar months everywhere (shared helper); (c) Squads wording: "7 leagues with Transfermarkt squad data", plain no-record / no-rating messages; (d) Physical page: "League One 2025/26 (club export)", "Rank of N" from the data, Fit-score and "never scores" sentences removed (full rebuild still 2.1e); (e) Glossary metric count computed (39 today); (f) scout names: trailing club / position codes stripped ("Antonio Arena AS Roma" → "Antonio Arena"), particles (van, de…) kept. Also: Users success messages now survive the reload; Assess shows existing assessments as a table | Wrong or stale information | Deploy (1.6) + forced scout sync | `tabs/watchlist.py`, `seasons.py` calendar_months_left, `tabs/squads.py`, `tabs/physical.py`, `tabs/glossary.py`, `ingest/scout_reports.py` _strip_trailing_codes, `tabs/users.py`, `tabs/assess.py` |
 
 **Audit leads (2.5) — found 2026-10-22 while rewriting the docs; each to be verified before fixing:**
 
@@ -156,6 +163,7 @@ docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python -m lofc.s
 
 | Date | What |
 |---|---|
+| 2026-11-08 | Live-bug round 2.28–2.31 built and checked (see 1.6). Owner decisions: Impect for Season-by-season goals/minutes; .5 rounds up on every card minutes figure; no 2026/27 row in Season by season |
 | 2026-11-02 | Removed by the owner: 2.1c pipeline diagram, 2.7 per-match tracking, 2.8 Head of Recruitment's remaining asks, 2.11 league weighting, 3.1–3.3 (colleague's limits, club domain, Impect email) |
 | 2026-10-26 | **18 new Impect competitions live** (25 leagues); league registry; per-league failure isolation + `pipeline_runs`; API retries; integrity check; DB maintenance; scout_sync retention; page footer removed |
 | 2026-10-22 | Built (section 1): scout names on lines 2–3; Squads registered positions (P18); documentation consolidated (19 → 9 files). Local DB resynced from the server |

@@ -13,6 +13,23 @@ from lofc.dashboard.labels import SC_METRIC_LABELS
 from lofc.dashboard.loaders import load_sc_players, load_sc_teams
 
 
+def short_season(label: str) -> str:
+    """'2025/2026' (the export's own label) as '2025/26', like every other page."""
+    start, _, end = str(label).partition("/")
+    return f"{start}/{end[-2:]}" if end else str(label)
+
+
+def intro_text(season: str) -> str:
+    # This page always reads the one-off club export, so the intro says so.
+    return (f"**Physical output from SkillCorner tracking data, League One "
+            f"{short_season(season)} (club export).** "
+            "Off-ball running and intensity, which on-ball event data cannot see.")
+
+
+def rank_column(n_clubs: int) -> str:
+    return f"Rank of {n_clubs}"
+
+
 def _physical(tab) -> None:
     with tab:
         teams = load_sc_teams()
@@ -23,12 +40,10 @@ def _physical(tab) -> None:
             return
 
         season = teams["season_label"].iloc[0]
-        st.markdown(f"**Physical output from SkillCorner tracking data, League One {season}.** "
-                    "Off-ball running and intensity, which on-ball event data cannot see.")
+        st.markdown(intro_text(season))
         st.caption("Scope, stated plainly: player-level tracking covers the Leyton Orient squad only; "
                    "other clubs appear as team totals. So this page measures our own physical identity and "
-                   "where the team sits in the league. It never scores recruitment targets, because no "
-                   "tracking data exists for them.")
+                   "where the team sits in the league.")
 
         st.markdown("##### Where Leyton Orient sit in the league")
         label_by_col = {v: k for k, v in SC_METRIC_LABELS.items()}
@@ -53,12 +68,10 @@ def _physical(tab) -> None:
             summary_rows.append({"Metric": label,
                                  "Leyton Orient": round(float(teams.loc[lofc_mask, col].iloc[0]), 1),
                                  "League median": round(float(teams[col].median()), 1),
-                                 "Rank of 24": rank})
+                                 rank_column(len(teams)): rank})
         st.dataframe(pd.DataFrame(summary_rows), hide_index=True, width="stretch")
         st.caption("This describes how the team currently plays, not how it should: a draft physical identity "
-                   "for the Director of Football to confirm or override. Once confirmed, it informs which "
-                   "on-ball traits (e.g. pressing volume) the Fit score weights for every candidate — the "
-                   "traits themselves come from event data that exists for all players.")
+                   "for the Director of Football to confirm or override.")
 
         if not players.empty:
             st.markdown("##### Player level: the Leyton Orient squad")

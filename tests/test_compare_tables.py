@@ -222,8 +222,8 @@ def test_extras_cells_are_escaped_in_the_summary_table():
 
 def test_summary_rows_order():
     from lofc.dashboard.tabs.compare import comparison_html
-    keys = ["Overall", "Performance", "Physical", "Rating trend", "Playing style",
-            "Scout verdicts"]
+    keys = ["Overall", "Performance", "Physical", "Overall trend", "Performance trend",
+            "Physical trend", "Playing style", "Scout verdicts"]
     html = comparison_html([{"Player": "A", **{k: "1" for k in keys}},
                             {"Player": "B", **{k: "2" for k in keys}}])
     pos = [html.index(f">{k}<") for k in keys]

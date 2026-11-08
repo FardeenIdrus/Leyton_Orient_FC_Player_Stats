@@ -161,7 +161,7 @@ def style_entries(defs: dict) -> list[dict]:
 
 
 def rating_metrics() -> set[str]:
-    """The 39 metrics that build the rating: every position's Performance metrics (as the
+    """The metrics that build the rating: every position's Performance metrics (as the
     scoring resolves them) plus the Physical ones. Straight from the scoring code."""
     from lofc.model import club_framework as cf
     from lofc.model.scorecard import _resolved_performance

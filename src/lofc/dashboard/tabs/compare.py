@@ -21,6 +21,7 @@ from lofc.dashboard.loaders import (
     load_scorecard_percentiles, load_style_labels)
 from lofc.dashboard.search import search_options
 from lofc.dashboard.search_target import resolve_search_target
+from lofc.dashboard.seasons import season_name_for
 from lofc.dashboard.tabs.players import _sc_pct_series
 from lofc.dashboard.theme import NONE_OPTION, RED
 from lofc.model import club_framework as cf
@@ -162,7 +163,7 @@ def change_style(cell) -> str:
 # "3.41 (League Two) → 3.68 (+0.27)" -> prev, previous league, now, change. The text format is
 # owned by `season_change`/`compare_row` above, so this is the one place that reads it back.
 _CHANGE_RE = re.compile(r"^(?:(?P<prev>\S+?)(?: \((?P<lg>.+?)\))? → )?(?P<now>\S+?)"
-                        r"(?: \((?P<delta>[+-]?\d+\.\d+)\))?$")
+                        r"(?: \((?P<delta>[+-]?\d+\.\d+|—)\))?$")
 
 _CSS = f"""
 <style>
@@ -193,13 +194,15 @@ def _value_cell(text: str) -> str:
         return f'<td><span class="v">{html.escape(text)}</span></td>'
     now, prev, lg, delta = m["now"], m["prev"], m["lg"], m["delta"]
     sub = ""
-    if prev is not None:
+    if delta == "—":            # not comparable (different rating parts): say so, no number
+        sub = "—"
+    elif prev is not None:
         was = html.escape(prev + (f" ({lg})" if lg else ""))
         if delta is None:
             sub = f"was {was}"
         else:
             sub = (f"no change vs {was}" if delta == "0.00" else f"{html.escape(delta)} vs {was}")
-    style = f' style="{change_style(text)}"' if sub else ""
+    style = f' style="{NEUTRAL_STYLE if sub == "—" else change_style(text)}"' if sub else ""
     return (f'<td><span class="v">{html.escape(now)}</span>'
             + (f'<span class="ch"{style}>{sub}</span>' if sub else "") + "</td>")
 
@@ -207,7 +210,8 @@ def _value_cell(text: str) -> str:
 # Summary rows that are plain text (not "value + change vs last season"), in display order:
 # status above the ratings, history / style / scouts below them.
 _TEXT_ROWS_TOP = ()   # Club now / Contract to / Loan removed (owner, 2026-11-02)
-_TEXT_ROWS_BOTTOM = ("Rating trend", "Playing style", "Scout verdicts")
+_TEXT_ROWS_BOTTOM = ("Overall trend", "Performance trend", "Physical trend",
+                     "Playing style", "Scout verdicts")
 
 
 def _text_cell(text: str, warn: bool = False) -> str:
@@ -278,7 +282,15 @@ def compare_row(r: pd.Series, prev: pd.DataFrame | None, show_money: bool = Fals
             prev_row = hit.iloc[0]
     league_now = r.get("league")
 
-    def cell(prev_col, now_col, league_note=False):
+    # Overall = Performance + Physical. A change is only meaningful between seasons that both
+    # have a physical band (2024/25 has none, so its rating is Performance only); otherwise
+    # the change reads "—". Performance is comparable whenever both seasons have one.
+    same_parts = pd.notna(prev_row.get("prev_physical")) and pd.notna(r.get("physical_band"))
+
+    def cell(prev_col, now_col, league_note=False, needs_same_parts=False):
+        if needs_same_parts and not prev_row.empty and not same_parts:
+            now = r.get(now_col)
+            return f"{value_or_dash(now, '{:.2f}')} (—)" if pd.notna(now) else "—"
         text = season_change(prev_row.get(prev_col), r.get(now_col))
         prev_league = prev_row.get("prev_league")
         # Only name the league when it differs: a move up or down a division changes what the
@@ -292,9 +304,9 @@ def compare_row(r: pd.Series, prev: pd.DataFrame | None, show_money: bool = Fals
            "League": value_or_dash(r.get("league"), "{}"),
            "Age": value_or_dash(r.get("age"), "{:.1f}"),
            "Minutes": value_or_dash(r.get("minutes"), "{:,.0f}"),
-           "Overall": cell("prev_composite", "objective_composite", True),
+           "Overall": cell("prev_composite", "objective_composite", True, True),
            "Performance": cell("prev_performance", "performance_band"),
-           "Physical": cell("prev_physical", "physical_band")}
+           "Physical": cell("prev_physical", "physical_band", needs_same_parts=True)}
     if show_money:
         market_eur = r.get("market_value_eur")
         row["Market (€m)"] = value_or_dash(
@@ -315,10 +327,13 @@ def summary_extras(r: pd.Series, ctx: dict) -> dict:
     `ctx` holds the already-loaded (cached) frames, keyed by player id; every value is text and
     a missing source reads "—"."""
     pid, cid, sid = int(r["player_id"]), int(r["competition_id"]), int(r["season_id"])
-    hist = ctx.get("history", {}).get(pid, [])
-    points = [*hist, (sid, r.get("objective_composite"), r.get("league"))]
+    hist = ctx.get("history", {}).get(pid, {})
+    by_season = {**hist, sid: (r.get("objective_composite"), r.get("performance_band"),
+                               r.get("physical_band"), r.get("league"))}
     out = {
-        "Rating trend": ct.rating_trend_text(points, r.get("league")),
+        **ct.rating_trend_rows(by_season, [sid - 2, sid - 1, sid],
+                               no_physical_seasons=ctx.get("no_physical", ()),
+                               current_league=r.get("league")),
         "Playing style": ct.style_text(ctx.get("styles", {}).get((pid, cid))),
         "Scout verdicts": ct.scout_text(ctx.get("scouts", {}).get(pid)),
     }
@@ -330,7 +345,8 @@ def _extras_context(pids: tuple[int, ...], season_id: int) -> dict:
     styles = _safe(lambda: load_style_labels(season_id), pd.DataFrame())
     hist = _safe(lambda: ct.load_rating_history(season_id), pd.DataFrame())
     scouts = _safe(lambda: ct.load_scout_verdicts(pids), pd.DataFrame())
-    ctx: dict = {"styles": {}, "history": {}, "scouts": {}}
+    ctx: dict = {"styles": {}, "history": {}, "scouts": {},
+                 "no_physical": ct.seasons_without_physical(hist) if not hist.empty else []}
     if not styles.empty and "player_id" in styles.columns:
         st_rows = styles[styles["player_id"].isin(pids)]
         ctx["styles"] = {(int(x["player_id"]), int(x["competition_id"])): x
@@ -338,9 +354,11 @@ def _extras_context(pids: tuple[int, ...], season_id: int) -> dict:
     if not hist.empty:
         names = competition_name_by_id()
         for pid, grp in hist[hist["player_id"].isin(pids)].groupby("player_id"):
-            ctx["history"][int(pid)] = [
-                (int(x.season_id), x.objective_composite, names.get(int(x.competition_id)))
-                for x in grp.sort_values("season_id").itertuples()]
+            # One entry per season; the grouped rows are already the league with most minutes.
+            ctx["history"][int(pid)] = {
+                int(x.season_id): (x.objective_composite, x.performance_band, x.physical_band,
+                                   names.get(int(x.competition_id)))
+                for x in grp.sort_values("season_id").itertuples()}
     if not scouts.empty:
         for pid, grp in scouts.groupby("player_id"):
             ctx["scouts"][int(pid)] = list(grp["verdict"])
@@ -412,6 +430,8 @@ def _compare(tab, pool: pd.DataFrame, position: str, archetype: str,
 
         st.markdown(comparison_html(rows), unsafe_allow_html=True)
         st.caption("Big number: this season. Small: change from last season (green up, red down).")
+        seasons_no_phys = [season_name_for(s_) for s_ in ctx["no_physical"]]
+        st.caption(ct.comparison_note(seasons_no_phys))
 
         lens = archetype != cf.DEFAULT_ARCHETYPE
         different_leagues = len({int(r["competition_id"]) for r in recs}) > 1

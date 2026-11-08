@@ -24,7 +24,7 @@ import datetime
 import pandas as pd
 import streamlit as st
 
-from lofc.dashboard import evidence, transparency
+from lofc.dashboard import assessment_detail, evidence, transparency
 from lofc.dashboard.auth import can
 from lofc.dashboard.session import CarriedPlayer, CurrentUser, get_assess_target
 from lofc.model import assessment_rules as rules
@@ -40,6 +40,17 @@ _BAND_HELP = " · ".join(f"{n} {label}" for n, label in rules.BAND_LABELS.items(
 _PSYCHOLOGICAL = "Psychological"
 _MEDICAL = "Medical"
 _DIMENSIONS = (_PSYCHOLOGICAL, _MEDICAL)
+
+
+def existing_assessments_table(frame: pd.DataFrame) -> pd.DataFrame:
+    """The player card's assessments table plus a Dimension column, all dimensions in one
+    list (same helper and status wording as the card)."""
+    table = assessment_detail.entries_table(frame)
+    if not frame.empty:
+        table.insert(2, "Dimension", frame["dimension"].tolist())
+    else:
+        table.insert(2, "Dimension", [])
+    return table
 
 
 def _dimension_key(player_id: int) -> str:
@@ -243,6 +254,14 @@ def render(engine, user: CurrentUser, player_id: int, player_name: str,
         return
 
     transparency.render_panel()
+
+    existing = store_assess.load_for_player(engine, player_id, competition_id, season_id)
+    st.markdown("##### Existing assessments")
+    if existing.empty:
+        st.caption("No assessments yet.")
+    else:
+        st.dataframe(existing_assessments_table(existing), hide_index=True, width="stretch",
+                     key=f"assess_existing_{player_id}_{competition_id}_{season_id}")
 
     # Keyed per player so switching to a different player always re-opens on Psychological,
     # rather than carrying over whichever dimension was last open for someone else. Applying

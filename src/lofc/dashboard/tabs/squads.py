@@ -28,7 +28,7 @@ import streamlit as st
 from lofc.dashboard.formatting import dash_blanks
 from lofc.dashboard.loaders import competition_name_by_id, get_engine
 from lofc.dashboard.search import fold
-from lofc.dashboard.seasons import contract_data_date, loan_data_date
+from lofc.dashboard.seasons import calendar_months_left, contract_data_date, loan_data_date
 from lofc.dashboard.session import go_to_player
 from lofc.dashboard.sidebar_filters import SidebarFilters, apply_sidebar_filters
 from lofc.model.scorecard import peer_pool_sizes, pool_is_thin
@@ -345,11 +345,7 @@ def registered_squad_frame(season_id: int, rating_season_id: int) -> pd.DataFram
 
 def months_left(when, today: datetime.date | None = None) -> float | None:
     """Whole months from today to a contract expiry. Negative means already expired."""
-    if when is None or pd.isna(when):
-        return None
-    today = today or datetime.date.today()
-    end = pd.Timestamp(when).date()
-    return (end.year - today.year) * 12 + (end.month - today.month)
+    return calendar_months_left(when, today)
 
 
 # Position falls back to last season where a player has not featured, marked in the column so
@@ -652,6 +648,46 @@ DISPLAY_COLUMNS = ["Club", "Player", "Position", "Age", "Minutes", "This season"
                    "On loan from", "Loan ends", "Foot", "Nationality"]
 
 
+# Transfermarkt squads cover 7 leagues; the platform RATES 25. Wording that said "our seven
+# leagues" read as the rated set, which it is not.
+TM_LEAGUES = "the 7 leagues with Transfermarkt squad data"
+MINUTES_HELP = f"This season, in {TM_LEAGUES}."
+FOOTER_CAPTION = ("Blank means unknown, not zero. Loans are read per club, so a player "
+                  f"loaned out beyond {TM_LEAGUES} will not appear.")
+
+
+def no_record_message(player: str, club: str) -> str:
+    return (f"**{player}** is in {club}'s squad, but the platform holds no performance "
+            f"record for him — he has not played in one of {TM_LEAGUES}. His contract and "
+            "loan details above are everything we have. There is no profile to open.")
+
+
+def no_rating_message(player: str) -> str:
+    return (f"**{player}** has no rating in any season yet — he has not played 450 minutes "
+            f"in one of {TM_LEAGUES}. His squad, contract and loan details above are "
+            "everything we hold.")
+
+
+def ensure_display_columns(view: pd.DataFrame) -> pd.DataFrame:
+    """Add any missing display column as empty. `prepare` returns an empty frame untouched,
+    so "On loan only" with no loans on file had no 'On loan from' column and raised KeyError
+    instead of showing the normal empty table."""
+    missing = [c for c in DISPLAY_COLUMNS if c not in view.columns]
+    if not missing:
+        return view
+    return view.assign(**{c: pd.Series(dtype="object", index=view.index) for c in missing})
+
+
+def summary_counts(view: pd.DataFrame) -> dict[str, int]:
+    """The four tiles above the table. An empty view gives zeros."""
+    return {
+        "players": int(len(view)),
+        "on_loan": int(view["On loan from"].notna().sum()),
+        "contract_known": int(view["Contract to"].notna().sum()),
+        "expiring": int((view["Months left"].notna() & (view["Months left"] < 12)).sum()),
+    }
+
+
 # How each numeric column is rounded for EXPORT. The on-screen table is formatted by
 # column_config, but `to_csv` writes the raw float -- so the file the Head of Recruitment
 # opens showed "105.097500" minutes and "26.778919" years while the screen showed 105 and
@@ -807,12 +843,13 @@ def render(season_id: int, rating_season_id: int, season_label: str,
         # usually an extension nobody has published -- not a closed one.
         view = view[view["Months left"].notna() & (view["Months left"] < 12)]
 
+    view = ensure_display_columns(view)
+    counts = summary_counts(view)
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Players", f"{len(view):,}")
-    m2.metric("On loan", f"{int(view['On loan from'].notna().sum()):,}")
-    m3.metric("Contract known", f"{int(view['Contract to'].notna().sum()):,}")
-    expiring = int((view["Months left"].notna() & (view["Months left"] < 12)).sum())
-    m4.metric("Expiring < 12 months", f"{expiring:,}")
+    m1.metric("Players", f"{counts['players']:,}")
+    m2.metric("On loan", f"{counts['on_loan']:,}")
+    m3.metric("Contract known", f"{counts['contract_known']:,}")
+    m4.metric("Expiring < 12 months", f"{counts['expiring']:,}")
 
     table = squad_display(view[DISPLAY_COLUMNS].reset_index(drop=True))
     selection = st.dataframe(
@@ -832,7 +869,7 @@ def render(season_id: int, rating_season_id: int, season_label: str,
                                  "where he has not featured yet."),
             "Minutes": st.column_config.NumberColumn(
                 "Minutes", format="%d", width="small",
-                help="This season, in our seven leagues only."),
+                help=MINUTES_HELP),
             "Last season": st.column_config.TextColumn(
                 f"{rating_label} rating", width="small",
                 help="The club composite from the last complete season."),
@@ -860,20 +897,13 @@ def render(season_id: int, rating_season_id: int, season_label: str,
         # He is in the squad list because Transfermarkt registered him; we cannot open a
         # profile we do not have, so say which and why rather than navigate or crash.
         if pd.isna(picked.get("player_id")):
-            st.info(
-                f"**{picked['Player']}** is in {picked['Club']}'s squad, but the platform "
-                "holds no performance record for him — he has not played in one of our "
-                "seven leagues. His contract and loan details above are everything we "
-                "have. There is no profile to open.")
+            st.info(no_record_message(picked["Player"], picked["Club"]))
         else:
             # Pick a league-season he actually HAS a rating in, rather than pairing this
             # season's league with last season's id -- see best_profile_target.
             target = best_profile_target(player_rated_rows(int(picked["player_id"])))
             if target is None:
-                st.info(
-                    f"**{picked['Player']}** has no rating in any season yet — he has not "
-                    "played 450 minutes in one of our seven leagues. His squad, contract and "
-                    "loan details above are everything we hold.")
+                st.info(no_rating_message(picked["Player"]))
             else:
                 go_to_player(int(picked["player_id"]), target[0], target[1])
 
@@ -884,5 +914,4 @@ def render(season_id: int, rating_season_id: int, season_label: str,
         mime="text/csv", width="stretch",
         help="Exactly the rows and columns shown above, after the filters.")
 
-    st.caption("Blank means unknown, not zero. Loans are read per club, so a player "
-               "loaned out beyond our seven leagues will not appear.")
+    st.caption(FOOTER_CAPTION)

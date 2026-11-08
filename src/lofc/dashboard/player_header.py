@@ -29,6 +29,7 @@ import html
 import pandas as pd
 import streamlit as st
 
+from lofc.dashboard.loaders import round_half_up
 from lofc.dashboard.theme import RED
 
 INK = "#14161A"
@@ -229,7 +230,7 @@ def build(row: pd.Series, shares: pd.DataFrame | None = None,
         # printed "Contract to" twice on every card. Nationality takes the freed cell --
         # it reached ~100% coverage in the 2026-09-07 backfill and had nowhere to show.
         _cell("Nationality", text("nationality")),
-        _cell("Minutes", text("minutes", lambda v: f"{float(v):,.0f}")),
+        _cell("Minutes", text("minutes", lambda v: f"{round_half_up(v):,}")),
     ]
     name = html.escape(str(row.get("player_name", "")))
     club = html.escape(club_text(row.get("team_name", "") or "", row.get("current_club")))

@@ -616,11 +616,40 @@ def load_trajectory() -> pd.DataFrame:
     seasons exist purely to show direction (improving or declining). A mid-season
     mover has one row per league, deliberately: rates are league-relative.
     """
-    return pd.read_sql(
-        "SELECT player_id, competition_id, season_id, season_name, competition_name, team_name, "
-        "minutes, goals, assists, np_xg_p90, xa_p90, "
-        "save_pct, gk_saves_p90, tackles_p90, interceptions_p90, pass_completion_pct "
-        "FROM player_season_metrics ORDER BY season_id DESC", get_engine())
+    # Minutes, goals and assists come from the Impect-spined combined table (the card's tiles
+    # and header read it), falling back to the older table only where it has no row.
+    # Assists were 4 here against 7 in the season tile: the older table's raw total is the
+    # retired provider's; assists_p90 is Impect's, and Impect is the platform's definition.
+    # Measured live: raw goals differ in 2% of rows, assists in 31%, minutes (>1) in 60%.
+    raw = pd.read_sql(
+        "SELECT m.player_id, m.competition_id, m.season_id, m.season_name, m.competition_name, "
+        "m.team_name, m.minutes, m.goals, m.assists, m.np_xg_p90, m.xa_p90, "
+        "m.save_pct, m.gk_saves_p90, m.tackles_p90, m.interceptions_p90, m.pass_completion_pct, "
+        "n.minutes AS n_minutes, n.goals_p90 AS n_goals_p90, n.assists_p90 AS n_assists_p90 "
+        "FROM player_season_metrics m LEFT JOIN player_metrics_neutral n "
+        " ON n.player_id = m.player_id AND n.competition_id = m.competition_id "
+        " AND n.season_id = m.season_id ORDER BY m.season_id DESC", get_engine())
+    return trajectory_from_rows(raw)
+
+
+def round_half_up(value) -> int:
+    """Whole number, .5 rounds UP -- the one rule for every minutes / goals / assists figure
+    on the card (Python round() and SQL ROUND on a double are half-to-even)."""
+    return int(float(value) + 0.5)
+
+
+def trajectory_from_rows(raw: pd.DataFrame) -> pd.DataFrame:
+    """Prefer the combined table's minutes and its per-90 derived goals / assists totals;
+    rows with no combined-table figures keep the older table's. Rounding is half-up, in
+    Python, so it matches the card's tiles."""
+    out = raw.copy()
+    minutes = out["n_minutes"].astype(float)
+    for col, rate in (("goals", "n_goals_p90"), ("assists", "n_assists_p90")):
+        derived = (out[rate].astype(float) * minutes / 90).map(
+            lambda v: round_half_up(v) if pd.notna(v) else float("nan"))
+        out[col] = derived.where(derived.notna(), out[col])
+    out["minutes"] = minutes.where(minutes.notna(), out["minutes"])
+    return out.drop(columns=["n_minutes", "n_goals_p90", "n_assists_p90"])
 
 
 

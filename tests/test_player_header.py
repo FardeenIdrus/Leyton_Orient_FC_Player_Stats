@@ -197,3 +197,11 @@ def test_a_card_renders_with_every_bio_field_missing():
     out = ph.build(_row(contract_until=None, foot=None, height_cm=None,
                         nationality=None, age=None, minutes=None))
     assert "not recorded" in out
+
+
+@pytest.mark.parametrize("raw, shown", [(3066.7, "3,067"), (2.5, "3"), (3066.5, "3,067"),
+                                        (1250.4, "1,250")])
+def test_header_minutes_round_half_up_like_the_rest_of_the_card(raw, shown):
+    # f"{v:,.0f}" rounds .5 to even (2.5 -> "2"); every other card figure rounds half up.
+    out = _markup(ph.build(_row(minutes=raw)))
+    assert f">{shown}<" in out

@@ -812,7 +812,7 @@ def _report_table(view: pd.DataFrame, names: dict, rating_label: str, live_label
             "Rating": st.column_config.TextColumn(
                 f"Rating ({rating_label})", width="small",
                 help="The platform's 1-5 composite from the last complete season. Blank "
-                     "is not a poor rating — Model view says why there is none."),
+                     "is not a poor rating — Data vs scout says why there is none."),
             "This season": st.column_config.TextColumn(
                 f"Rating ({live_label})", width="small",
                 help="This season's rating, where he has 450+ minutes and at least 10 "

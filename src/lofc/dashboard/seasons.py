@@ -233,3 +233,16 @@ def loan_data_date() -> str | None:
         return pd.to_datetime(value).strftime("%d %b %Y") if value is not None else None
     except Exception:
         return None
+
+
+def calendar_months_left(when, today: datetime.date | None = None) -> int | None:
+    """Whole calendar months from today to a contract expiry; negative = already expired.
+
+    The one rule for Squads and Watchlist: days / 30.44 gave Nils Ramming (31 May 2027) 7 on
+    one page and 6 on the other. None when the date is unknown -- never 0.
+    """
+    if when is None or pd.isna(when):
+        return None
+    today = today or datetime.date.today()
+    end = pd.Timestamp(when).date()
+    return (end.year - today.year) * 12 + (end.month - today.month)
