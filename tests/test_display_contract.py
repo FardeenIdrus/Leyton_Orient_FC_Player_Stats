@@ -30,12 +30,12 @@ def test_the_bio_loader_selects_every_field_the_player_card_renders():
     forever, however complete the column is in the database."""
     import inspect
     from lofc.dashboard import loaders
-    source = inspect.getsource(loaders.load_candidates)
-    # the bio SELECT inside load_candidates
+    # the bio SELECT lives in the cached all-seasons build that load_candidates slices
+    source = inspect.getsource(loaders._candidates_all_seasons)
     for column in ("birth_date", "foot", "contract_until", "height_cm", "nationality"):
         assert column in source, (
             f"players.{column} is rendered by the player card but is not selected in "
-            f"load_candidates' bio query — it will always read as 'not recorded'")
+            f"the candidates bio query — it will always read as 'not recorded'")
 
 
 def test_the_card_renders_every_declared_field_when_present():

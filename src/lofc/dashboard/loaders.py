@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import io
 import logging
 import threading
 import time
@@ -44,6 +45,37 @@ def get_engine():
     # that reached the browser. admin.py's CLI engine already sets this for the same reason;
     # the dashboard's engine did not.
     return create_engine(settings.database_url, hide_parameters=True)
+
+
+def _read_sql_copy(sql: str) -> pd.DataFrame:
+    """`pd.read_sql` for a LONG, narrow result, via Postgres COPY -> CSV.
+
+    Measured (2026-11-08, 390k-row style-signal read): read_sql 4.1 s, of which the database
+    is 0.3 s -- the rest is SQLAlchemy/pandas turning rows into Python objects. COPY + read_csv
+    returns the identical frame in 0.9 s. Text columns come back as pandas' string dtype, as
+    read_sql returns them. `sql` must be a literal (no bind parameters), so build it from
+    ints only. Falls back to read_sql on any failure, so the result is never different."""
+    try:
+        raw = get_engine().raw_connection()
+        try:
+            buf = io.StringIO()
+            raw.cursor().copy_expert(
+                f"COPY ({sql}) TO STDOUT WITH (FORMAT csv, HEADER true)", buf)
+        finally:
+            raw.close()
+        buf.seek(0)
+        # Only an empty field is NULL (COPY's csv default); text such as "NA" or "None"
+        # stays text, as read_sql would return it.
+        frame = pd.read_csv(buf, keep_default_na=False, na_values=[""])
+        if frame.empty:                                     # let read_sql define empty dtypes
+            return pd.read_sql(sql, get_engine())
+        # read_csv reads text as object; read_sql under this pandas gives the string dtype.
+        for col in frame.columns[frame.dtypes == object]:
+            frame[col] = frame[col].astype("str")
+        return frame
+    except Exception:                                       # noqa: BLE001
+        logging.getLogger(__name__).warning("COPY read failed; using read_sql", exc_info=True)
+        return pd.read_sql(sql, get_engine())
 
 
 # --- cache policy: data-version keyed long caches ---------------------------------------
@@ -158,17 +190,28 @@ _warm_lock = threading.Lock()
 _last_warmed_version: str | None = None
 
 
+def _warm_order(seasons: list[int]) -> list[int]:
+    """Seasons in warm-up order: the default and live seasons first (what a user opens
+    first), then every other season, newest first."""
+    first = [s for s in dict.fromkeys(
+        [default_season_id(seasons, settings.live_season_id), settings.live_season_id])
+        if s in seasons]
+    return first + [s for s in seasons if s not in first]
+
+
 def _warm_caches() -> None:
-    """Fill the heavy Players-path caches for the default and live seasons, so the first user
-    after a restart or a pipeline run does not pay the ~17 s cold cost. Never raises."""
+    """Fill the heavy Players-path caches for EVERY season, one at a time (default and live
+    first), so no visit after a restart or a pipeline run pays the cold cost. Measured
+    2026-11-08: the first visit to an older season cost up to 29 s, because only the default
+    and live seasons were warmed. Never raises; a failure in one loader skips only that one."""
     try:
         seasons = available_seasons()
-        wanted = {default_season_id(seasons, settings.live_season_id), settings.live_season_id}
-        for sid in sorted(s for s in wanted if s in seasons):
+        for sid in _warm_order(seasons):
             # 1.0 = the wage multiplier app.py uses with the affordability layer off (default)
             for fn, args in ((load_candidates, (1.0, sid)), (load_percentiles, (sid,)),
                              (load_metric_values, (sid,)), (load_scorecard_percentiles, (sid,)),
-                             (load_style_labels, (sid,)), (load_scorecards, (sid,))):
+                             (load_style_labels, (sid,)), (load_scorecards, (sid,)),
+                             (load_previous_ratings, (sid,)), (headline, (sid,))):
                 try:
                     fn(*args)
                 except Exception:                           # noqa: BLE001
@@ -240,6 +283,20 @@ def player_names() -> dict[int, str]:
 
 @_versioned()
 def load_candidates(wage_ceiling_multiplier: float, season_id: int | None = None) -> pd.DataFrame:
+    # build_candidates reads every season of ~10 tables (the 510k-row percentiles table
+    # alone is 5 s) and tiers/ages every season, whatever season is asked for -- so the old
+    # per-season call paid ~8-25 s for EACH season. Build the all-season frame once (cached
+    # on the data version) and slice it: the same rows the old code produced, since it also
+    # built every season and filtered last.
+    # The players bio query lives in _candidates_all_seasons (checked by test_display_contract).
+    out = _candidates_all_seasons(wage_ceiling_multiplier)
+    if season_id is not None:                       # rank within one season only
+        out = out[out["season_id"] == season_id].reset_index(drop=True)
+    return out
+
+
+@_versioned()
+def _candidates_all_seasons(wage_ceiling_multiplier: float) -> pd.DataFrame:
     engine = get_engine()
     # all_leagues: keep EVERY scored player (EFL + Scottish/PL2). Non-EFL players carry
     # NaN market value/wage, so they can't pass the affordability gates, but they are
@@ -280,8 +337,6 @@ def load_candidates(wage_ceiling_multiplier: float, season_id: int | None = None
     # float64 column, so "missing" is always NaN, never a stray object.
     fallback_age = pd.to_numeric(out["age"], errors="coerce")
     out["age"] = dob_age.where(dob_age.notna(), fallback_age)
-    if season_id is not None:                       # rank within one season only
-        out = out[out["season_id"] == season_id].reset_index(drop=True)
     return out
 
 
@@ -428,9 +483,9 @@ def load_percentiles(season_id: int | None = None) -> pd.DataFrame:
     # for the trajectory chart.
     where = (f"season_id = {int(season_id)}" if season_id is not None
              else "season_id = (SELECT MAX(season_id) FROM player_percentiles)")
-    return pd.read_sql(
+    return _read_sql_copy(
         f"SELECT player_id, competition_id, metric, percentile FROM player_percentiles "
-        f"WHERE {where}", get_engine())
+        f"WHERE {where}")
 
 
 # Metrics the club framework treats as goalkeeper-only: the stored metric a GK club-metric
@@ -912,8 +967,8 @@ def load_style_inputs(season_id: int) -> pd.DataFrame:
         "  ON s.player_id = n.player_id AND s.competition_id = n.competition_id "
         " AND s.season_id = n.season_id AND s.archetype = 'All Metrics' "
         "WHERE n.season_id = %(s)s", engine, params={"s": int(season_id)})
-    sig = pd.read_sql("SELECT player_id, competition_id, signal, value FROM player_style_signals "
-                      "WHERE season_id = %(s)s", engine, params={"s": int(season_id)})
+    sig = _read_sql_copy("SELECT player_id, competition_id, signal, value "
+                         f"FROM player_style_signals WHERE season_id = {int(season_id)}")
     if sig.empty:
         return base
     wide = sig.pivot_table(index=["player_id", "competition_id"], columns="signal",

@@ -36,7 +36,11 @@ WRAPPER_SRC = '''
 import os
 import streamlit as st
 
-_orig = st.navigation
+# Keep the REAL st.navigation once per process: this wrapper re-runs on every AppTest run,
+# and re-reading st.navigation here would wrap the previous run's patch -- after a few
+# thousand runs (ui_check --full) that chain hits Python's recursion limit.
+_orig = getattr(st, "_lofc_real_navigation", None) or st.navigation
+st._lofc_real_navigation = _orig
 _LIST_FILE = os.environ.get("SMOKE_PAGE_LIST", "")
 
 
@@ -53,6 +57,10 @@ def _nav(sections, *a, **k):
     page = next((p for p in pages if p.title == target), pages[0])
 
     class _R:
+        # The stand-in carries the real page's title and url_path, like st.navigation's page.
+        title = page.title
+        url_path = page.url_path
+
         def run(self):
             page._page()
     return _R()
