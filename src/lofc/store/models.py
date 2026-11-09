@@ -770,6 +770,25 @@ for _spec in _METRIC_REGISTRY:
 del _spec
 
 
+class SkillCornerMatchCount(Base):
+    """How many matches SkillCorner tracked for a player in a league season (`count_match` in
+    the platform's season files), written by `model.build_neutral` beside the physical metrics
+    it matches. DISPLAY ONLY: kept out of `player_metrics_neutral`, whose every non-key column
+    is ranked as a metric (`scorecard.metric_percentiles`)."""
+
+    __tablename__ = "skillcorner_match_counts"
+    __table_args__ = (
+        UniqueConstraint("player_id", "competition_id", "season_id",
+                         name="uq_sc_matches_player_comp_season"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    competition_id: Mapped[int] = mapped_column(Integer)
+    season_id: Mapped[int] = mapped_column(Integer)
+    matches: Mapped[int] = mapped_column(Integer)
+
+
 class TransfermarktSquad(Base):
     """The REGISTERED squad at every club we cover, as scraped from Transfermarkt.
 

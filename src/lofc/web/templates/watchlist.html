@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Watchlist{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_url('css/players.css') }}">
+<link rel="stylesheet" href="{{ static_url('css/watchlist.css') }}">
+<section class="view on" id="v-watchlist" data-page="watchlist">
+  <div class="section-label">{{ page.group }}</div>
+  <h1>Watchlist</h1>
+  <div class="meta">Click a row to edit the note or status.</div>
+  <div id="wl-empty" class="info" hidden></div>
+
+  <div id="wl-main" hidden>
+    <div class="filters" id="wl-filters">
+      <div class="fl">
+        <div class="f wl-status"><label id="wl-status-label">Assessment status <span class="hlp" id="wl-status-help">?</span></label>
+          <div class="wl-checks" id="wl-status" role="group" aria-labelledby="wl-status-label"></div></div>
+        <div class="f"><label>&nbsp;</label><label class="switch" id="sw-money"><input type="checkbox" id="f-money" name="money"><i></i>Market value</label></div>
+      </div>
+      <p class="note wl-cap">Status “Scout sent” is your note; Assessed records that a scout did the assessment.</p>
+    </div>
+
+    <div id="wl-none" class="info" hidden></div>
+    <div class="tiles wl-tiles" id="wl-tiles"></div>
+
+    <div class="card" id="wl-card">
+      <div class="wl-head"><div class="note" id="wl-count"></div>
+        <a class="btn small" id="wl-dl" download>⬇ Download watchlist (CSV)</a></div>
+      <div class="tw" id="wl-tw" data-scroll-x><table><thead id="wl-thead"></thead><tbody id="wl-body"></tbody></table></div>
+      <p class="note wl-foot">Blank Composite: not scored in that league and season.</p>
+    </div>
+
+    <div class="card wl-edit" id="wl-edit" hidden>
+      <div class="wl-edit-head"><h2 id="e-title"></h2><span class="note" id="e-sub"></span></div>
+      <div class="wl-edit-grid">
+        <div class="f"><label for="e-note">Scout note</label>
+          <textarea class="ctl" id="e-note" rows="6" placeholder="What to verify, who watched him, verdicts..."></textarea></div>
+        <div class="f wl-edit-side"><label for="e-status">Status</label><select class="ctl" id="e-status"></select>
+          <a class="btn" id="e-assess">Assess this player</a></div>
+      </div>
+      <div class="wl-edit-actions">
+        <button class="btn primary" id="e-save" type="button">Save</button>
+        <button class="btn" id="e-remove" type="button">Remove from watchlist</button>
+        <button class="btn" id="e-close" type="button">Close</button>
+        <span class="note" id="e-msg" role="status"></span>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ static_url('js/watchlist.js') }}"></script>{% endblock %}

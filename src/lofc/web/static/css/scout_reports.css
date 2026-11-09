@@ -1,0 +1,39 @@
+/* Scout reports page only: what app.css + players.css do not cover. */
+#v-scout-reports .sr-sync{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:4px 0 6px}
+#v-scout-reports .sr-sync .sr-warn{margin:0;padding:6px 12px}
+#v-scout-reports .tabs{margin:10px 0 0}
+#v-scout-reports .filters{margin:12px 0 12px}
+#v-scout-reports .fl{gap:10px 12px}
+#v-scout-reports .f.grow{flex:1 1 240px;min-width:220px}
+#v-scout-reports .f-league{flex:0 0 220px;min-width:180px}
+#v-scout-reports .f-age{flex:0 0 96px;min-width:96px}
+#v-scout-reports .f-age input{width:96px}
+#v-scout-reports .f-foot{flex:0 0 110px;min-width:110px}
+#v-scout-reports .sr-row2{margin-top:10px}
+#v-scout-reports .sr-row2 .f{flex:1 1 110px;min-width:110px}
+#v-scout-reports .sr-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#sr-tw{max-height:min(680px,calc(100vh - 300px));min-height:240px;margin-top:8px}
+#v-scout-reports table{border-collapse:separate;border-spacing:0}
+#v-scout-reports th{z-index:2;padding:8px 7px}
+#v-scout-reports th button{font:inherit;font-weight:600;font-size:12.5px;color:var(--muted);background:none;border:0;padding:0;cursor:pointer;white-space:nowrap}
+#v-scout-reports th button:hover,#v-scout-reports th.sorted button{color:var(--ink)}
+#v-scout-reports td{white-space:nowrap;padding:8px 7px;font-size:14px}
+#v-scout-reports td.cut{max-width:170px;overflow:hidden;text-overflow:ellipsis}
+#v-scout-reports td.pcell{max-width:200px}
+#v-scout-reports td.dvs{white-space:normal;min-width:170px;max-width:240px;font-size:13px}
+#v-scout-reports .plink{text-decoration:none}
+#v-scout-reports .plink:hover .pname{text-decoration:underline}
+#v-scout-reports tbody tr.click:hover{background:#FAFAFB}
+/* the open report */
+.sr-report{border-left:4px solid var(--mid);margin-top:14px}
+.sr-rhead{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.sr-rname{font-size:20px;font-weight:700}
+.sr-rclub{font-size:15px}
+.sr-rmeta{margin:4px 0 10px}
+.sr-rmeta .pill{text-transform:uppercase}
+.sr-facts{grid-template-columns:repeat(4,auto);margin-top:0}
+.sr-facts b{font-size:14.5px}
+.sr-body{margin-top:12px;white-space:pre-wrap;font-size:15px;line-height:1.6;max-width:80ch}
+.sr-body.sr-empty{color:var(--muted);font-style:italic}
+.sr-below{margin-top:12px}
+@media (max-width:1400px){.sr-facts{grid-template-columns:repeat(2,auto)}}

@@ -1,0 +1,69 @@
+/* Club vs League One */
+.cv-how{background:var(--card);border-radius:12px;padding:12px 18px;margin:14px 0 18px;border-top:0}
+.cv-how ol{margin:10px 0 2px;padding-left:22px;line-height:1.6}
+.cv-how li{margin:2px 0}
+h2 .hlp-i{font-size:12px;cursor:help;vertical-align:2px}
+#cv-top6-t td.n,#cv-big-t td.n{white-space:nowrap}
+#cv-top6-t tr.me td,#cv-big-t tr.me td{background:#FFF6F7}
+.cv-rk{font-weight:700}.cv-rk.good{color:var(--hi)}.cv-rk.bad{color:var(--lo)}
+#cv-gap-t td{vertical-align:top}
+#cv-gap-t tr.pos{cursor:pointer}
+#cv-gap-t tr.pos:hover td{background:#FAFAFB}
+#cv-gap-t tr.pos.on td{background:#FFF6F7}
+#cv-gap-t tr.pos.on td:first-child{box-shadow:inset 3px 0 0 var(--red)}
+.cv-pos{font-weight:700;font-size:15px}
+.cv-who{font-weight:600}
+.cv-tag{display:inline-block;font-size:11.5px;font-weight:600;color:var(--muted);border:1px solid #CDD1D7;border-radius:4px;padding:0 5px;margin-left:5px;vertical-align:1px}
+.cv-tag.away{color:#8A6410;border-color:#E9C46A}
+.cv-also{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.5}
+.cv-bar-note{font-size:12px;color:#8A6410;margin-top:4px}
+.cv-named{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.5}
+.cv-gapv{font-weight:700;font-size:16px;white-space:nowrap}
+.cv-gapv.neg{color:var(--lo)}.cv-gapv.pos{color:var(--hi)}
+.cv-gapbar{height:6px;border-radius:3px;background:var(--track);margin-top:6px;width:90px;position:relative}
+.cv-gapbar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--lo)}
+.cv-why{font-size:13px;line-height:1.5}
+.cv-why div{white-space:nowrap}
+.cv-filters{margin:8px 0 6px}
+.cv-filters .f{min-width:170px}
+#cv-tabs span select{font:inherit;font-size:14px;border:0;background:transparent;color:inherit;cursor:pointer}
+#cv-rec-t tr.click{cursor:pointer}
+.cv-star{font:inherit;font-size:16px;background:none;border:1px solid var(--line);border-radius:7px;width:32px;height:30px;cursor:pointer;color:var(--muted)}
+.cv-star.on{color:#C98A00;border-color:#E9C46A}
+.cv-str{display:inline-block;font-size:11.5px;font-weight:600;color:var(--hi);border:1px solid #A9D3B9;border-radius:10px;padding:1px 7px;margin:1px 3px 1px 0;white-space:nowrap}
+#v-club-vs-league td,#v-club-vs-league th{overflow-wrap:normal;word-break:normal}
+#v-club-vs-league td.n{white-space:nowrap}
+.cv-pos{white-space:nowrap}
+.cv-barc{min-width:230px}
+.cv-named{margin-top:6px}
+.cv-named div{white-space:nowrap}
+.cv-named b{display:inline-block;min-width:34px;color:var(--ink);font-weight:600}
+.cv-named span{color:var(--muted)}
+#cv-tabs span:last-child select{padding:0 2px}
+#cv-gap-t th:nth-child(5),#cv-gap-t td:nth-child(5){white-space:nowrap}
+@media (max-width:1380px){.cv-why div{white-space:normal}.cv-barc{min-width:200px}#cv-gap-t td,#cv-gap-t th{padding:8px 6px}}
+/* recommendations (owner's layout, recs_mockup) */
+.cv-rec-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.cv-rec-head .cv-filters{margin:0}
+.cv-rec-head .f{min-width:150px}
+.cv-rec-head .f-contract{min-width:230px}
+.cv-level{display:flex;gap:28px;margin:16px 0 14px;padding:12px 16px;background:var(--soft);border-radius:10px;font-size:13.5px;color:var(--muted)}
+.cv-level div{display:flex;flex-direction:column}
+.cv-level b{font-size:22px;color:var(--ink);line-height:1.2}
+.cv-level .ours b{color:var(--orient)}
+.cv-level b.neg{color:var(--lo)}.cv-level b.pos{color:var(--hi)}
+.cv-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:10px;align-items:flex-end}
+.cv-tab{font:inherit;font-size:14px;background:none;border:0;padding:9px 14px;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.cv-tab span{margin-left:7px;font-size:12px;background:var(--soft);border-radius:10px;padding:1px 7px;color:var(--muted)}
+.cv-tab.on{color:var(--ink);font-weight:600;border-bottom-color:var(--red)}
+.cv-tab.on span{background:var(--ink);color:#fff}
+.cv-more{margin-left:auto;padding-bottom:4px}
+.cv-more select{font:inherit;font-size:14px;border:0;background:transparent;color:var(--ink);cursor:pointer}
+.cv-more.on select{font-weight:600}
+.cv-count{font-size:13px;color:var(--muted);margin:6px 0 8px}
+.cv-also div{white-space:nowrap}
+.cv-also b{font-weight:600;color:var(--ink)}
+#cv-big-t tr.sec td{background:transparent;color:var(--muted);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;padding:12px 10px 4px}
+.cv-rec-head .f-strong{min-width:0}
+#cv-strong{white-space:nowrap;font-size:14px}
+.cv-t6{display:inline-block;font-size:11px;font-weight:700;color:#fff;background:var(--hi);border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:1px;cursor:help}

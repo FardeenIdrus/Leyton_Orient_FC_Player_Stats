@@ -28,6 +28,7 @@ from lofc.config import settings
 from lofc.constrain.filters import build_candidates
 from lofc.dashboard.labels import LABELS
 from lofc.dashboard.seasons import SEASON_REF_DATE, age_reference_date, default_season_id
+from lofc.core.infobar import headline_counts
 from lofc.model import assessment_status
 from lofc.model import club_framework as cf
 from lofc.model import metric_registry as reg
@@ -113,6 +114,12 @@ _CORE_TABLES = (
     "skillcorner_player_season",
 )
 _SCORECARD_TABLES = _CORE_TABLES + ("player_scorecards",)
+# Extra tables only the web front end's caches are keyed on (`web_data_version`): its caches
+# have no time limit, so everything they read must be tracked. Querying their counters here
+# does not change the tokens above (`_hash_stats` keeps only the tables asked for).
+_WEB_TABLES = _SCORECARD_TABLES + ("player_detail_metrics", "scout_reports",
+                                   "scout_assessments", "transfermarkt_squads",
+                                   "skillcorner_match_counts")
 
 
 def _hash_stats(stats: pd.DataFrame, postmaster_start: str, tables) -> str:
@@ -133,7 +140,7 @@ def _table_stats() -> tuple[pd.DataFrame, str]:
     """(write counters per tracked table, postmaster start time): one tiny query, at most
     every 30 s per process. Postgres bumps n_tup_ins/upd/del on every write to a table."""
     engine = get_engine()
-    names = ", ".join(f"'{t}'" for t in _SCORECARD_TABLES)
+    names = ", ".join(f"'{t}'" for t in _WEB_TABLES)
     stats = pd.read_sql(
         "SELECT s.relname, (s.n_tup_ins + s.n_tup_upd + s.n_tup_del) AS writes, "
         "c.relfilenode FROM pg_stat_user_tables s JOIN pg_class c ON c.oid = s.relid "
@@ -151,6 +158,20 @@ def _compute_data_version(with_scorecards: bool = False) -> str:
     except Exception:                                       # noqa: BLE001
         # Degrade to a short-TTL-like behaviour, never to stale-forever: the token changes
         # every 10 minutes.
+        logging.getLogger(__name__).warning("data_version query failed; using time window",
+                                            exc_info=True)
+        return f"fallback-{int(time.time() // 600)}"
+
+
+def web_data_version() -> str:
+    """`data_version(with_scorecards=True)` plus the detail metrics, scout reports and scout
+    assessments: the key of the web front end's in-process caches, which never expire on a
+    timer (a 60 s TTL meant the first click after a quiet minute paid a 1-2 s rebuild).
+    Changes within ~30 s of any write to those tables (`_table_stats`)."""
+    try:
+        stats, start = _table_stats()
+        return _hash_stats(stats, start, _WEB_TABLES) + time.strftime("-%Y%m%d", time.gmtime())
+    except Exception:                                       # noqa: BLE001
         logging.getLogger(__name__).warning("data_version query failed; using time window",
                                             exc_info=True)
         return f"fallback-{int(time.time() // 600)}"
@@ -558,6 +579,12 @@ def load_assessment_status(season_id: int | None = None) -> pd.DataFrame:
     working, and a scout who saves an assessment and does not see the badge update for ten
     minutes will reasonably conclude the save failed.
     """
+    return assessment_status_frame(season_id)
+
+
+def assessment_status_frame(season_id: int | None = None) -> pd.DataFrame:
+    """`load_assessment_status` without its cache (the web front end keys its own copy on
+    `web_data_version`)."""
     frame = store_assess.load_all(get_engine())
     if season_id is not None and not frame.empty:
         frame = frame[frame["season_id"] == season_id]
@@ -650,17 +677,7 @@ def headline(season_id: int | None = None) -> tuple[int, int, int]:
     Both player counts are returned because they differ by everyone under the minutes floor
     (4,376 vs 3,229 on 2025/26), and the Players table lists only the rated ones. Showing the
     wider count alone led a reader to divide a table count by it."""
-    engine = get_engine()
-    where = f"WHERE season_id = {int(season_id)}" if season_id is not None else ""
-    players = pd.read_sql(
-        f"SELECT COUNT(DISTINCT player_id) AS c FROM player_metrics_neutral {where}", engine)["c"][0]
-    rated_where = (f"{where} AND" if where else "WHERE") + (
-        " archetype = 'All Metrics' AND objective_composite IS NOT NULL")
-    rated = pd.read_sql(
-        f"SELECT COUNT(DISTINCT player_id) AS c FROM player_scorecards {rated_where}", engine)["c"][0]
-    leagues = pd.read_sql(
-        f"SELECT COUNT(DISTINCT competition_id) AS c FROM player_metrics_neutral {where}", engine)["c"][0]
-    return int(players), int(rated), int(leagues)
+    return headline_counts(get_engine(), season_id)
 
 
 @_versioned()

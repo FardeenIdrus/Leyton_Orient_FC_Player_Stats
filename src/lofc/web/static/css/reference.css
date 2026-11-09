@@ -1,0 +1,43 @@
+/* Reference pages: What goes into each rating, How playing styles work, Glossary */
+.rf-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px}
+.rf-seg{margin:14px 0 14px;flex-wrap:wrap}
+.rf-seg button{font:inherit;font-size:14px;padding:7px 14px;border:0;background:#fff;color:var(--ink);cursor:pointer}
+.rf-seg button.on{background:var(--ink);color:#fff}
+.rf-card{margin-bottom:18px}
+.rf-line{font-size:15px;font-weight:600;margin-bottom:10px}
+.rf-line span{font-weight:400;color:var(--muted)}
+.rf-h2{font-size:17px;margin:22px 0 10px}
+.rf-table td,.rf-table th{overflow-wrap:normal;word-break:normal;vertical-align:top}
+.rf-table th{white-space:normal}
+.rf-table td.m{font-weight:600;white-space:nowrap}
+.rf-table td.w{white-space:nowrap;text-align:right}
+.rf-table th.w{text-align:right}
+.rf-table td.how{min-width:260px;color:#333A43;line-height:1.45}
+.rf-table tr.sec td{background:transparent;color:var(--muted);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;padding:14px 10px 5px}
+.rf-table tbody tr.sec:first-child td{padding-top:4px}
+.rf-table .sub{font-weight:400;color:var(--muted);font-size:13px}
+/* playing styles */
+.ps-steps,.ps-labels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:14px 0 6px}
+.ps-step{background:var(--card);border-radius:12px;padding:16px 18px;line-height:1.5}
+.ps-step b.n{display:block;color:var(--red);font-size:13px;margin-bottom:6px;letter-spacing:.02em}
+.ps-label{background:var(--card);border-radius:12px;padding:16px 18px;line-height:1.5;color:#4A4A4A}
+.ps-label .t{display:block;font-size:16px;font-weight:700;color:var(--ink);margin:8px 0 4px}
+.ps-pill{display:inline-block;border-radius:999px;padding:3px 13px;font-size:13px;font-weight:600}
+.ps-pill.s{background:var(--ink);color:#fff;border:1px solid var(--ink)}
+.ps-pill.l{background:#fff;color:#4A4A4A;border:1px dashed #8A8A8A}
+.ps-pill.n{color:var(--muted);padding-left:0}
+@media (max-width:1100px){.ps-steps,.ps-labels{grid-template-columns:minmax(0,1fr)}}
+/* glossary */
+.gl-bar{margin:14px 0 8px}
+.gl-search{max-width:520px;width:100%;font-size:15px;padding:10px 12px}
+.gl-row{padding:12px 2px;border-bottom:1px solid var(--line)}
+.gl-row:last-child{border-bottom:0}
+.gl-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:3px}
+.gl-name{font-weight:600;font-size:15.5px}
+.gl-tag{font-size:11.5px;font-weight:700;color:var(--hi);border:1px solid #A9D3B9;border-radius:10px;padding:1px 8px}
+.gl-src{font-size:12.5px;color:var(--muted)}
+.gl-text{font-size:14.5px;color:#333A43;line-height:1.55;max-width:920px}
+#gl-tabs{margin-top:6px}
+#gl-tabs span{display:inline-flex;gap:6px}
+#gl-tabs span i{font-style:normal;color:var(--muted);font-weight:400}
+.rf-table td.g{white-space:nowrap;color:var(--muted)}

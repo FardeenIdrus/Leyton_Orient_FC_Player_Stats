@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Home{% endblock %}
+{% block content %}
+<section class="view on home" id="v-home" data-page="home">
+  <div class="hero">
+    <img class="hero-logo" src="{{ static_url('img/logo.png') }}" alt="Leyton Orient FC crest" width="112" height="112">
+    <div class="hero-txt">
+      <div class="hero-kicker">Leyton Orient FC · Est. 1881</div>
+      <h1>Recruitment</h1>
+      <div class="hero-sub">Welcome back, {{ user.full_name }}.</div>
+    </div>
+  </div>
+  <div class="tiles-home">
+    {% for p in links %}
+    <a class="hl" href="{{ p.path }}"><span class="hl-g">{{ p.group }}</span><b>{{ p.title }}</b><span class="hl-d">{{ p.line }}</span><span class="hl-go" aria-hidden="true">→</span></a>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

@@ -26,9 +26,16 @@ from lofc.dashboard.tabs.players import _sc_pct_series
 from lofc.dashboard.theme import NONE_OPTION, RED
 from lofc.model import club_framework as cf
 
-# slot name -> session_state key of its selectbox
-_SLOT_KEYS = {"Player A": "cmp_a", "Player B": "cmp_b", "Player C": "cmp_c"}
-
+# The page's logic lives in lofc.core.compare (one implementation for Streamlit and the web);
+# this module draws it. Names are re-exported so callers and tests keep working.
+from lofc.core.compare import (  # noqa: E402,F401
+    CHANGE_RE as _CHANGE_RE, DOWN_STYLE, NEUTRAL_STYLE, PHYS_RADAR_LABEL as _PHYS_RADAR_LABEL,
+    SLOT_KEYS as _SLOT_KEYS, TEXT_ROWS_BOTTOM as _TEXT_ROWS_BOTTOM,
+    TEXT_ROWS_TOP as _TEXT_ROWS_TOP, TONE_STYLE, UP_STYLE, change_parts, change_style,
+    compare_row, compare_view, default_candidates, fill_default_slots, mv_series as _mv_series,
+    no_physical_caption, physical_radar_inputs, safe as _safe, same_position, sanitize_slots,
+    season_change, summary_attributes, summary_extras)
+from lofc.core import compare as _core  # noqa: E402
 
 _KEYS = ["player_id", "competition_id", "season_id"]
 
@@ -63,30 +70,6 @@ def apply_compare_pick(state, search_index: pd.DataFrame, by_label: dict[str, in
                 state.pop(key, None)
 
 
-def default_candidates(pool: pd.DataFrame, search_index: pd.DataFrame, position: str) -> list[str]:
-    """Search labels to default A/B from: the pool in its (rating) order, then the rest of the
-    position, so two defaults exist even when the sidebar filters leave fewer than two."""
-    by_key = {(int(r.player_id), int(r.competition_id), int(r.season_id)): r.label
-              for r in search_index.itertuples()}
-    out = [by_key[k] for k in zip(pool["player_id"].astype(int), pool["competition_id"].astype(int),
-                                  pool["season_id"].astype(int)) if k in by_key]
-    rest = search_index.loc[search_index["position_group"] == position, "label"]
-    return list(dict.fromkeys(out + rest.tolist()))
-
-
-def fill_default_slots(state, labels: list[str]) -> None:
-    """Give A and B a default when unset, never the same player as each other or as C
-    (verifier, 2026-11-02: picking the player at index 1 into A left B defaulting to index 1)."""
-    def taken(*keys):
-        return {state.get(k) for k in keys if state.get(k) not in (None, NONE_OPTION)}
-    if "cmp_a" not in state:
-        skip = taken("cmp_b", "cmp_c")
-        state["cmp_a"] = next((x for x in labels if x not in skip), labels[0])
-    if "cmp_b" not in state:
-        skip = taken("cmp_a", "cmp_c")
-        state["cmp_b"] = next((x for x in labels if x not in skip), labels[0])
-
-
 def row_for_label(label: str, search_index: pd.DataFrame, by_label: dict[str, int],
                   pool: pd.DataFrame) -> pd.Series | None:
     """The player's row for a slot label: from the filtered pool when he is in it, otherwise
@@ -94,76 +77,9 @@ def row_for_label(label: str, search_index: pd.DataFrame, by_label: dict[str, in
     filters still shows. None when he cannot be found."""
     t = search_index.iloc[by_label[label]]
     key = tuple(int(t[k]) for k in _KEYS)
-    hit = pool[(pool["player_id"] == key[0]) & (pool["competition_id"] == key[1])
-               & (pool["season_id"] == key[2])]
-    if not hit.empty:
-        return hit.iloc[0]
-    # Default wage multiplier: money columns are only shown when the sidebar money layer is on,
-    # and the row is used for display, never for ranking.
-    row, _ = resolve_search_target(load_candidates(1.0, key[2]), load_scorecards(key[2]), key)
+    row, _reason = _core.pick_row(key, pool, lambda s: load_candidates(1.0, s), load_scorecards)
     return row
 
-
-def sanitize_slots(state, labels: list[str]) -> None:
-    """Drop slot values that are not of the sidebar's position (`labels` = that position's
-    search labels), e.g. after the sidebar position changed, so they fall back to their default."""
-    for key in _SLOT_KEYS.values():
-        if key in state and state[key] not in labels and state[key] != NONE_OPTION:
-            if key == "cmp_c":
-                state[key] = NONE_OPTION
-            else:
-                state.pop(key)
-
-
-def same_position(frame: pd.DataFrame) -> bool:
-    """True when every row is one position -- comparisons are strictly like-for-like."""
-    return frame["position_group"].nunique(dropna=False) <= 1
-
-
-# Colours for the season-change cells (readable on both light and dark themes).
-UP_STYLE = "color: #1a9850; font-weight: 600"
-DOWN_STYLE = "color: #d73027; font-weight: 600"
-NEUTRAL_STYLE = "color: #888888"
-
-# Physical axes of the radar: the rating's physical metrics, minus "Average match top speed"
-# (psv99_kmh), which the Head of Recruitment does not want shown; top5 is labelled "Top speed".
-_PHYS_RADAR_LABEL = {
-    "distance_p90": "Distance", "meters_per_minute": "Metres per minute",
-    "hsr_count_p90": "High-speed runs", "hsr_distance_p90": "High-speed distance",
-    "sprint_count_p90": "Sprints", "sprint_distance_p90": "Sprint distance",
-    "top5_psv99_kmh": "Top speed",
-}
-
-
-def season_change(prev, now, fmt: str = "{:.2f}") -> str:
-    """"3.41 → 3.68 (+0.27)". The change is taken from the displayed (rounded) numbers so the
-    three figures always add up on screen. No previous season: this season's value alone."""
-    now_txt = value_or_dash(now, fmt)
-    if pd.isna(prev):
-        return now_txt
-    prev_txt = value_or_dash(prev, fmt)
-    if pd.isna(now):
-        return f"{prev_txt} → —"
-    delta = float(fmt.format(now)) - float(fmt.format(prev))
-    delta_txt = "0.00" if abs(delta) < 0.005 else f"{delta:+.2f}"
-    return f"{prev_txt} → {now_txt} ({delta_txt})"
-
-
-def change_style(cell) -> str:
-    """CSS for a season-change cell: green if it rose, red if it fell, grey otherwise (equal,
-    no previous season, blank). Reads the sign the text itself carries."""
-    text = str(cell)
-    if text.endswith("(0.00)") or not text.endswith(")"):
-        return NEUTRAL_STYLE
-    if "(+" in text:
-        return UP_STYLE
-    return DOWN_STYLE if "(-" in text else NEUTRAL_STYLE
-
-
-# "3.41 (League Two) → 3.68 (+0.27)" -> prev, previous league, now, change. The text format is
-# owned by `season_change`/`compare_row` above, so this is the one place that reads it back.
-_CHANGE_RE = re.compile(r"^(?:(?P<prev>\S+?)(?: \((?P<lg>.+?)\))? → )?(?P<now>\S+?)"
-                        r"(?: \((?P<delta>[+-]?\d+\.\d+|—)\))?$")
 
 _CSS = f"""
 <style>
@@ -188,30 +104,11 @@ _CSS = f"""
 
 def _value_cell(text: str) -> str:
     """One body cell: this season's value large, the change from last season small beneath it
-    (green up, red down, grey otherwise -- `change_style` reads the sign)."""
-    m = _CHANGE_RE.match(text)
-    if not m:
-        return f'<td><span class="v">{html.escape(text)}</span></td>'
-    now, prev, lg, delta = m["now"], m["prev"], m["lg"], m["delta"]
-    sub = ""
-    if delta == "—":            # not comparable (different rating parts): say so, no number
-        sub = "—"
-    elif prev is not None:
-        was = html.escape(prev + (f" ({lg})" if lg else ""))
-        if delta is None:
-            sub = f"was {was}"
-        else:
-            sub = (f"no change vs {was}" if delta == "0.00" else f"{html.escape(delta)} vs {was}")
-    style = f' style="{NEUTRAL_STYLE if sub == "—" else change_style(text)}"' if sub else ""
-    return (f'<td><span class="v">{html.escape(now)}</span>'
-            + (f'<span class="ch"{style}>{sub}</span>' if sub else "") + "</td>")
-
-
-# Summary rows that are plain text (not "value + change vs last season"), in display order:
-# status above the ratings, history / style / scouts below them.
-_TEXT_ROWS_TOP = ()   # Club now / Contract to / Loan removed (owner, 2026-11-02)
-_TEXT_ROWS_BOTTOM = ("Overall trend", "Performance trend", "Physical trend",
-                     "Playing style", "Scout verdicts")
+    (green up, red down, grey otherwise -- `core.compare.change_parts` reads the text)."""
+    p = change_parts(text)
+    sub = (f'<span class="ch" style="{TONE_STYLE[p["tone"]]}">{html.escape(p["sub"])}</span>'
+           if p["sub"] else "")
+    return f'<td><span class="v">{html.escape(p["now"])}</span>{sub}</td>'
 
 
 def _text_cell(text: str, warn: bool = False) -> str:
@@ -226,9 +123,7 @@ def comparison_html(rows: list[dict]) -> str:
         f'<th><span class="nm">{html.escape(str(r["Player"]))}</span>'
         f'<span class="sm">{html.escape(" · ".join(x for x in (str(r.get("Club") or ""), str(r.get("League") or "")) if x))}'
         "</span></th>" for r in rows)
-    attrs = [k for k in ("Age", "Minutes", *_TEXT_ROWS_TOP, "Overall", "Performance", "Physical",
-                         "Market (€m)", *_TEXT_ROWS_BOTTOM)
-             if any(k in r for r in rows)]
+    attrs = summary_attributes(rows)
     text_rows = _TEXT_ROWS_TOP + _TEXT_ROWS_BOTTOM
 
     def cell(k, r):
@@ -243,135 +138,10 @@ def comparison_html(rows: list[dict]) -> str:
             f"<tbody>{body}</tbody></table>")
 
 
-def physical_radar_inputs(pcts_by_label: dict, position: str):
-    """(axes, traces, missing) for the physical radar.
-
-    `pcts_by_label` maps a player name to his scorecard-percentile Series (or None). Axes are the
-    rating's physical metrics (club_framework.PHYSICAL_METRICS) minus psv99_kmh, as display
-    labels, present for EVERY player who has data. A player with fewer than three physical
-    percentiles (SkillCorner does not cover everyone) is returned in `missing`, not plotted."""
-    metrics = [m for m in cf.PHYSICAL_METRICS.get(position, []) if m in _PHYS_RADAR_LABEL]
-    if not metrics:
-        return [], [], []
-    have, missing = {}, []
-    for name, s in pcts_by_label.items():
-        vals = {m: s[m] for m in metrics if s is not None and m in s.index and pd.notna(s[m])}
-        if len(vals) >= 3:
-            have[name] = vals
-        else:
-            missing.append(name)
-    shared = [m for m in metrics if all(m in v for v in have.values())] if have else []
-    if len(shared) < 3:
-        return [], [], missing + ([] if not have else list(have))
-    axes = [_PHYS_RADAR_LABEL[m] for m in shared]
-    return axes, [(n, [float(v[m]) for m in shared]) for n, v in have.items()], missing
-
-
-def no_physical_caption(names: list[str]) -> str:
-    return "No physical data: " + ", ".join(names)
-
-
-def compare_row(r: pd.Series, prev: pd.DataFrame | None, show_money: bool = False) -> dict:
-    """One row of the head-to-head table. A bare st.dataframe prints the literal "None" for a
-    missing cell, so every value is pre-formatted text with an em-dash fallback. Overall,
-    Performance and Physical read "last season → this season (change)"."""
-    prev_row = pd.Series(dtype=object)
-    if prev is not None and not prev.empty:
-        hit = prev[prev["player_id"] == int(r["player_id"])]
-        if not hit.empty:
-            prev_row = hit.iloc[0]
-    league_now = r.get("league")
-
-    # Overall = Performance + Physical. A change is only meaningful between seasons that both
-    # have a physical band (2024/25 has none, so its rating is Performance only); otherwise
-    # the change reads "—". Performance is comparable whenever both seasons have one.
-    same_parts = pd.notna(prev_row.get("prev_physical")) and pd.notna(r.get("physical_band"))
-
-    def cell(prev_col, now_col, league_note=False, needs_same_parts=False):
-        if needs_same_parts and not prev_row.empty and not same_parts:
-            now = r.get(now_col)
-            return f"{value_or_dash(now, '{:.2f}')} (—)" if pd.notna(now) else "—"
-        text = season_change(prev_row.get(prev_col), r.get(now_col))
-        prev_league = prev_row.get("prev_league")
-        # Only name the league when it differs: a move up or down a division changes what the
-        # number means, so the reader needs to see it.
-        if league_note and " → " in text and pd.notna(prev_league) and prev_league != league_now:
-            head, tail = text.split(" → ", 1)
-            text = f"{head} ({prev_league}) → {tail}"
-        return text
-
-    row = {"Player": r["player_name"], "Club": r["team_name"],
-           "League": value_or_dash(r.get("league"), "{}"),
-           "Age": value_or_dash(r.get("age"), "{:.1f}"),
-           "Minutes": value_or_dash(r.get("minutes"), "{:,.0f}"),
-           "Overall": cell("prev_composite", "objective_composite", True, True),
-           "Performance": cell("prev_performance", "performance_band"),
-           "Physical": cell("prev_physical", "physical_band", needs_same_parts=True)}
-    if show_money:
-        market_eur = r.get("market_value_eur")
-        row["Market (€m)"] = value_or_dash(
-            market_eur / 1e6 if pd.notna(market_eur) else market_eur, "{:.1f}")
-    return row
-
-
-def _safe(fn, default):
-    """A display extra must never take the page down: any failure reads as "no data"."""
-    try:
-        return fn()
-    except Exception:                                     # noqa: BLE001
-        return default
-
-
-def summary_extras(r: pd.Series, ctx: dict) -> dict:
-    """The status / history / style / scout rows of one player's summary column.
-    `ctx` holds the already-loaded (cached) frames, keyed by player id; every value is text and
-    a missing source reads "—"."""
-    pid, cid, sid = int(r["player_id"]), int(r["competition_id"]), int(r["season_id"])
-    hist = ctx.get("history", {}).get(pid, {})
-    by_season = {**hist, sid: (r.get("objective_composite"), r.get("performance_band"),
-                               r.get("physical_band"), r.get("league"))}
-    out = {
-        **ct.rating_trend_rows(by_season, [sid - 2, sid - 1, sid],
-                               no_physical_seasons=ctx.get("no_physical", ()),
-                               current_league=r.get("league")),
-        "Playing style": ct.style_text(ctx.get("styles", {}).get((pid, cid))),
-        "Scout verdicts": ct.scout_text(ctx.get("scouts", {}).get(pid)),
-    }
-    return out
-
-
 def _extras_context(pids: tuple[int, ...], season_id: int) -> dict:
     """Load (all cached) what the extra summary rows read, narrowed to the compared players."""
-    styles = _safe(lambda: load_style_labels(season_id), pd.DataFrame())
-    hist = _safe(lambda: ct.load_rating_history(season_id), pd.DataFrame())
-    scouts = _safe(lambda: ct.load_scout_verdicts(pids), pd.DataFrame())
-    ctx: dict = {"styles": {}, "history": {}, "scouts": {},
-                 "no_physical": ct.seasons_without_physical(hist) if not hist.empty else []}
-    if not styles.empty and "player_id" in styles.columns:
-        st_rows = styles[styles["player_id"].isin(pids)]
-        ctx["styles"] = {(int(x["player_id"]), int(x["competition_id"])): x
-                         for _, x in st_rows.iterrows()}
-    if not hist.empty:
-        names = competition_name_by_id()
-        for pid, grp in hist[hist["player_id"].isin(pids)].groupby("player_id"):
-            # One entry per season; the grouped rows are already the league with most minutes.
-            ctx["history"][int(pid)] = {
-                int(x.season_id): (x.objective_composite, x.performance_band, x.physical_band,
-                                   names.get(int(x.competition_id)))
-                for x in grp.sort_values("season_id").itertuples()}
-    if not scouts.empty:
-        for pid, grp in scouts.groupby("player_id"):
-            ctx["scouts"][int(pid)] = list(grp["verdict"])
-    return ctx
-
-
-def _mv_series(metric_values: pd.DataFrame | None, r: pd.Series) -> pd.Series | None:
-    """The player's per-90 / physical values in his league (None when not held)."""
-    if metric_values is None or metric_values.empty:
-        return None
-    mv = metric_values[(metric_values["player_id"] == int(r["player_id"]))
-                       & (metric_values["competition_id"] == int(r["competition_id"]))]
-    return mv.iloc[0] if not mv.empty else None
+    return _core.extras_context(pids, season_id, load_style_labels, ct.load_rating_history,
+                                ct.load_scout_verdicts, competition_name_by_id)
 
 
 def _compare(tab, pool: pd.DataFrame, position: str, archetype: str,
@@ -380,7 +150,7 @@ def _compare(tab, pool: pd.DataFrame, position: str, archetype: str,
              search_index: pd.DataFrame | None = None) -> None:
     with tab:
         if search_index is None or search_index.empty:
-            st.warning("No players for this season.")
+            st.warning(_core.NO_PLAYERS)
             return
 
         # Every slot lists every player of the season (all positions, accent-folded labels, as
@@ -388,7 +158,7 @@ def _compare(tab, pool: pd.DataFrame, position: str, archetype: str,
         all_labels, by_label = search_options(search_index)
         same_pos = search_index.loc[search_index["position_group"] == position, "label"].tolist()
         if len(same_pos) < 2:
-            st.warning("Need at least two players in this position.")
+            st.warning(_core.NEED_TWO)
             return
         sanitize_slots(st.session_state, same_pos)
         fill_default_slots(st.session_state, default_candidates(pool, search_index, position))
@@ -404,90 +174,68 @@ def _compare(tab, pool: pd.DataFrame, position: str, archetype: str,
         chosen = [p for p in [a, b, (c if c != NONE_OPTION else None)] if p]
         chosen = list(dict.fromkeys(chosen))  # de-duplicate, keep order
         if len(chosen) < 2:
-            st.info("Pick two different players to compare.")
+            st.info(_core.PICK_TWO)
             return
 
         recs = [row_for_label(lbl, search_index, by_label, pool) for lbl in chosen]
         if any(r is None for r in recs):
-            st.info("One of these players has no data for this season.")
+            st.info(_core.NO_DATA)
             return
         if len({r["position_group"] for r in recs}) > 1:
-            st.error("Compare like with like: these players are not all in one position.")
+            st.error(_core.NOT_LIKE)
             return
 
-        # Percentiles come from the scorecard (position + league + season), the same source the
-        # player profile and the composite use, so Compare agrees with the rest of the platform.
-        sc_pcts = load_scorecard_percentiles(season_id)
-        prev = load_previous_ratings(season_id)
-        # Column heads: the name, plus the club only when two players share a name.
-        raw = [r["player_name"] for r in recs]
-        names = [f'{n} ({r["team_name"]})' if raw.count(n) > 1 else n for n, r in zip(raw, recs)]
-        pcts = {n: _sc_pct_series(sc_pcts, int(r["player_id"]), int(r["competition_id"]),
-                                  int(r["season_id"])) for n, r in zip(names, recs)}
-        values = {n: _mv_series(metric_values, r) for n, r in zip(names, recs)}
         ctx = _extras_context(tuple(int(r["player_id"]) for r in recs), season_id)
-        rows = [{**compare_row(r, prev, show_money), **summary_extras(r, ctx)} for r in recs]
+        v = compare_view(recs, position, archetype, show_money, metric_values,
+                         load_scorecard_percentiles(season_id), load_previous_ratings(season_id),
+                         ctx)
+        names = v["names"]
 
-        st.markdown(comparison_html(rows), unsafe_allow_html=True)
-        st.caption("Big number: this season. Small: change from last season (green up, red down).")
-        seasons_no_phys = [season_name_for(s_) for s_ in ctx["no_physical"]]
-        st.caption(ct.comparison_note(seasons_no_phys))
-
-        lens = archetype != cf.DEFAULT_ARCHETYPE
-        different_leagues = len({int(r["competition_id"]) for r in recs}) > 1
-        has_physical = bool(cf.PHYSICAL_METRICS.get(position))
+        st.markdown(comparison_html(v["rows"]), unsafe_allow_html=True)
+        st.caption(_core.SUMMARY_CAPTION)
+        st.caption(v["note"])
 
         # --- radars side by side (they stack on a narrow screen) -----------------------------
         left, right = st.columns(2)
         with left:
-            st.markdown("##### Performance" + (f" · {archetype}" if lens else ""))
-            axes, traces, no_data = ct.radar_inputs(pcts, ct.radar_metrics(position, archetype))
-            if traces:
-                st.plotly_chart(radar_chart(traces, axes), width="stretch", config=PLOTLY_CONFIG)
-            if no_data:
-                st.caption("No percentiles for " + ", ".join(no_data) + ".")
-            if different_leagues:
-                st.caption("Different leagues: percentiles are within each player's own league.")
+            st.markdown("##### " + v["perf_heading"])
+            rad = v["radar"]
+            if rad["traces"]:
+                st.plotly_chart(radar_chart(rad["traces"], rad["axes"]), width="stretch",
+                                config=PLOTLY_CONFIG)
+            if rad["no_data"]:
+                st.caption("No percentiles for " + ", ".join(rad["no_data"]) + ".")
+            if v["different_leagues"]:
+                st.caption(_core.LEAGUES_NOTE)
         with right:
-            if has_physical:
+            if v["has_physical"]:
                 st.markdown("##### Physical")
-                phys_axes, phys_traces, no_phys = physical_radar_inputs(pcts, position)
-                if phys_traces:
-                    st.plotly_chart(radar_chart(phys_traces, phys_axes), width="stretch",
-                                    config=PLOTLY_CONFIG)
-                if no_phys:
-                    st.caption(no_physical_caption(no_phys))
+                ph = v["phys_radar"]
+                if ph["traces"]:
+                    st.plotly_chart(radar_chart(ph["traces"], [_PHYS_RADAR_LABEL[m] for m in ph["axes"]]),
+                                    width="stretch", config=PLOTLY_CONFIG)
+                if ph["no_data"]:
+                    st.caption(no_physical_caption(ph["no_data"]))
 
         # --- Packing zones: one pitch per player, side by side ---------------------------------
         _zones_section(recs, names)
 
         # --- Performance table: the rating's metrics (tier shown), the rest in an expander ----
         st.markdown("##### Performance")
-        rated = ct.rating_metrics(position, archetype)
-        tiers = dict(rated)
-        st.markdown(ct.table_html(names, ct.build_rows(
-            [m for m, _ in rated], tiers, names, values, pcts)), unsafe_allow_html=True)
-        value_cols = metric_values.columns if metric_values is not None else []
-        other = ct.other_performance_metrics(
-            position, archetype, [m for m in sc_pcts.columns if m in value_cols])
-        other_rows = ct.build_rows(other, {}, names, values, pcts, drop_empty=True)
-        if other_rows:
+        st.markdown(ct.table_html(names, v["perf_rows"]), unsafe_allow_html=True)
+        if v["other_rows"]:
             with st.expander("Other metrics"):
-                st.markdown(ct.table_html(names, other_rows), unsafe_allow_html=True)
+                st.markdown(ct.table_html(names, v["other_rows"]), unsafe_allow_html=True)
 
         # --- Physical table (SkillCorner; goalkeepers have none) --------------------------------
         # Nothing at all when no compared player has physical data: the radar's caption
         # already names them (one message, not two).
-        phys_rows = (ct.build_rows(ct.physical_rating_metrics(position), {}, names, values,
-                                   pcts, drop_empty=True) if has_physical else [])
-        if phys_rows:
+        if v["phys_rows"]:
             st.markdown("##### Physical")
-            st.markdown(ct.table_html(names, phys_rows), unsafe_allow_html=True)
-            more = ct.build_rows(ct.other_physical_metrics(position), {}, names, values, pcts,
-                                 drop_empty=True)
-            if more:
+            st.markdown(ct.table_html(names, v["phys_rows"]), unsafe_allow_html=True)
+            if v["phys_more"]:
                 with st.expander("Other metrics"):
-                    st.markdown(ct.table_html(names, more), unsafe_allow_html=True)
+                    st.markdown(ct.table_html(names, v["phys_more"]), unsafe_allow_html=True)
 
 
 def _zones_section(recs: list, names: list[str]) -> None:

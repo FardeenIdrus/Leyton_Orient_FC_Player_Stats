@@ -92,16 +92,20 @@ def test_both_squad_queries_produce_the_same_rating_columns(column):
 # the ranked list -- the surface that IS the ranking -- must state it too.
 
 def test_the_pool_carries_a_peer_count_before_any_page_renders_it():
-    """`with_peer_counts` must run in main(), against the season's FULL scorecard set."""
+    """The pool is built by `core.players_pool.build_pool` (main() calls it); that function must
+    attach `peer_count` from the season's FULL scorecard set and withhold thin pools."""
     import inspect
+    from lofc.core import players_pool
     from lofc.dashboard import app
-    source = inspect.getsource(app.main)
+    assert "build_pool(" in inspect.getsource(app.main), "main() no longer builds the pool via build_pool"
+    source = inspect.getsource(players_pool.build_pool)
     assert "with_peer_counts" in source, (
         "the Players pool never gets a peer_count column, so the gate cannot run and the "
         "Peers column would render empty")
     assert "peer_pool_sizes(ranking)" in source, (
         "peer pools must be counted from `ranking` (every scored player that season), not "
         "from the filtered pool — a sidebar filter must not shrink a player's peer group")
+    assert "MIN_PEERS_FOR_RANKING" in source, "thin pools are no longer withheld from the ranked list"
 
 
 def test_the_player_card_renders_the_peer_count_it_gates_on():

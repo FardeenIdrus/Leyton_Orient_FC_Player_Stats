@@ -402,3 +402,53 @@ and superseded by the rule-based playing styles in §6b. It never fed the rating
 - **Event data is on-ball.** Off-ball work is seen only through the SkillCorner Physical
   metrics.
 - **Modelled wages are a prior.** Real asking wages come from agents.
+
+## Club vs League One (new web site, owner 2026-11-09)
+
+The page answers one question: **where do we fall short of a top-6 League One side this season,
+and who could close the gap?** Every number on it is a stored rating, minutes figure or
+percentile; the page only picks, weights by minutes and compares. Code: `src/lofc/core/club_vs_league.py`.
+
+**The rules, in plain English**
+
+1. **This season only.** A player counts if he has an Overall rating this season: 450+ minutes
+   and a peer pool big enough to rate (small pools are never rated).
+2. **Top 6.** The six League One clubs whose players have the highest average Overall rating
+   this season, weighted by minutes (each player's rating × his minutes, summed, ÷ the club's
+   minutes).
+3. **Our level.** Our best player at the position rated this season in League One. Players rated
+   only last season, or only in another league (on loan), are listed with a tag ("25/26", or the
+   league's name) but never set our level.
+4. **Positions.** Goalkeeper, Centre Back, Full Back, Midfield (Defensive, Central and Attacking
+   Mid together), Winger, Centre Forward. A rating is always the player's own, from his own
+   position pool; a midfielder's sub-position is shown as a tag.
+5. **Top-6 bar.** For each of the six clubs, its best rated player at the position; the bar is
+   the median of those players, and each one is named. If fewer than 4 of the 6 clubs have a
+   rated player there yet (early season), last season's top 6 is used for that position, with
+   last season's data, and the page says so.
+6. **Gap.** The bar minus our level, biggest first. "Where it comes from" compares our player's
+   percentiles with the median of the named players' and shows the three biggest shortfalls.
+7. **Players who could close the gap.** This season's rated players at the position (not ours)
+   with an Overall above our level — **one list per league, top 15**, because a rating compares a
+   player only with his own league. A tag marks the 70th percentile or better on one of the
+   three shortfall metrics; "Top-6 level" marks an Overall at or above the bar. Filters: age,
+   contract, and "Strong on 2+ of our weaknesses". No market value, fee or wage is shown.
+8. **Big picture.** Our rank among League One clubs, this season and last, on the minutes-
+   weighted club averages of Overall, Performance, Physical, the seven physical metrics and ten
+   performance measures from players' season figures.
+
+**Worked example (real data, 9 Nov 2026, season 2026/27): Centre Back**
+
+* Top 6 this season (average Overall, weighted by minutes): Stockport County 3.52, Milton Keynes
+  Dons 3.45, Leicester City 3.35, Wigan Athletic 3.20, Bradford City 3.18, Peterborough United
+  3.16. We are 23rd of 24.
+* Each club's best rated centre back: Kyron Gordon 4.29 (Stockport), Jack Sanders 3.74 (MK Dons),
+  Caleb Okoli 3.68 (Leicester), Jon Mellish 3.75 (Wigan), George Pratt 3.82 (Bradford), Thomas
+  O'Connor 3.46 (Peterborough). All six clubs have one, so this season's bar is used.
+* Bar = the median of 3.46, 3.68, 3.74, 3.75, 3.82, 4.29 = (3.74 + 3.75) ÷ 2 = **3.75** (the page works from the unrounded ratings).
+* Our level = our best centre back rated this season in League One: Joseph Olowu **2.85**.
+* Gap = 3.75 − 2.85 = **0.90**, shown on the page as −0.90.
+* Where it comes from: Distance — Olowu 5th percentile, the six named centre backs' median 90th.
+
+Wingers that day used last season's bar: only 3 of this season's top-6 clubs had a rated winger
+yet, so the bar came from 2025/26's top 6 (5 of them had one).

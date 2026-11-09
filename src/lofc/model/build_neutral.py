@@ -257,6 +257,33 @@ def build_detail_for_impect_league(engine, target) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=DETAIL_COLUMNS)
 
 
+MATCH_COUNT_COLUMNS = ["player_id", "competition_id", "season_id", "matches"]
+
+
+def match_counts(matched: pd.DataFrame | None, competition_id: int, season_id: int) -> pd.DataFrame:
+    """Matches SkillCorner tracked per player (`count_match`), from the rows `load_skillcorner`
+    matched to our players. Display only (skillcorner_match_counts)."""
+    if matched is None or "count_match" not in matched.columns:
+        return pd.DataFrame(columns=MATCH_COUNT_COLUMNS)
+    m = matched[["player_id", "count_match"]].dropna()
+    out = pd.DataFrame({"player_id": m["player_id"].astype("int64").values,
+                        "competition_id": int(competition_id), "season_id": int(season_id),
+                        "matches": m["count_match"].round().astype("int64").values})
+    return out.drop_duplicates("player_id").reset_index(drop=True)[MATCH_COUNT_COLUMNS]
+
+
+def write_match_counts(engine, frame: pd.DataFrame, competition_id: int, season_id: int) -> int:
+    """Clear-then-insert one league season into skillcorner_match_counts."""
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM skillcorner_match_counts WHERE "
+                          "competition_id = :c AND season_id = :s"),
+                     {"c": competition_id, "s": season_id})
+        if len(frame):
+            frame.to_sql("skillcorner_match_counts", conn, if_exists="append", index=False)
+    return len(frame)
+
+
 def write_detail_for(engine, frame: pd.DataFrame, competition_id: int, season_id: int) -> int:
     """Clear-then-insert one league season into player_detail_metrics."""
     from sqlalchemy import text
@@ -290,9 +317,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", action="store_true",
                         help="load the combined table into player_metrics_neutral")
+    parser.add_argument("--match-counts", action="store_true",
+                        help="only (re)write skillcorner_match_counts from the landed "
+                             "SkillCorner files; no other table is touched, no API call")
     args = parser.parse_args()
 
     engine = get_engine()
+    if args.match_counts:
+        total = 0
+        for t in settings.skillcorner_targets:
+            if not skillcorner_api.physical_path(t.edition_id).exists():
+                print(f"  [{t.competition_id}/{t.season_id}] no landed file: skipped")
+                continue
+            counts = match_counts(load_skillcorner(engine, t.competition_id, t.season_id),
+                                  t.competition_id, t.season_id)
+            n = write_match_counts(engine, counts, t.competition_id, t.season_id)
+            total += n
+            print(f"  [{t.competition_id}/{t.season_id}] tracked-match counts: {n}")
+        print(f"skillcorner_match_counts: wrote {total} rows.")
+        return
     mode = "load into player_metrics_neutral" if args.write else "read-only report"
     print(f"Combined neutral-layer build ({mode})")
     print("=" * 78)
@@ -329,6 +372,9 @@ def main() -> None:
         if args.write:
             totals["rows"] += write_for(engine, table, competition_id, season_id)
             line.append("written")
+            counts = match_counts(load_skillcorner(engine, competition_id, season_id),
+                                  competition_id, season_id)
+            line.append(f"tracked-match counts {write_match_counts(engine, counts, competition_id, season_id)}")
             if spine_source == "impect":
                 detail = build_detail_for_impect_league(engine, target)
                 line.append(f"detail {write_detail_for(engine, detail, competition_id, season_id):,}")

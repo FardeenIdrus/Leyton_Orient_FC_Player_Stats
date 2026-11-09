@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Club vs League One{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_url('css/club_vs_league.css') }}">
+<section class="view on" id="v-club-vs-league" data-page="club-vs-league">
+  <div class="section-label">{{ page.group }}</div>
+  <h1>Club vs League One</h1>
+  <div class="meta">Where we fall short of a top-6 League One side this season, and who could close the gap.</div>
+
+  <details class="cv-how" id="cv-how"><summary>How this is worked out</summary>
+    <ol>
+      <li>Everything uses this season's stored ratings: 450+ minutes, and never from a peer pool too small to rate.</li>
+      <li><b>Top 6</b>: {{ terms["Top 6"] }}</li>
+      <li><b>Our level</b>: {{ terms["Our level"] }} Last season's ratings and loans elsewhere are shown, tagged, but never set it.</li>
+      <li><b>Top-6 bar</b>: {{ terms["Top-6 bar"] }} If fewer than 4 of the 6 clubs have one yet, last season's top 6 is used, and labelled.</li>
+      <li><b>Gap</b>: {{ terms["Gap"] }} "Where it comes from" compares our player's percentiles with the named players'.</li>
+      <li>Players who could close the gap are listed per league, top 15, because ratings compare players within their own league. <b>Top-6 level</b>: {{ terms["Top-6 level"] }}</li>
+    </ol>
+  </details>
+
+  <div id="cv-msg" role="status"></div>
+  <div id="cv-skel" class="skeleton-page" aria-hidden="true"><div class="row tr2"><div class="skel" style="height:300px"></div><div class="skel" style="height:300px"></div></div><div class="skel" style="height:420px"></div></div>
+
+  <div id="cv-body" hidden>
+    <div class="row tr2">
+      <div class="card" id="cv-top6"><h2>Top 6 this season <span class="hlp-i" tabindex="0" data-tip="Top 6: {{ terms['Top 6'] }}">ⓘ</span></h2>
+        <div class="sub" id="cv-top6-sub"></div><div class="tw"><table id="cv-top6-t"></table></div></div>
+      <div class="card" id="cv-big"><h2>Big picture <span class="hlp-i" tabindex="0" data-tip="Our rank among League One clubs on the minutes-weighted average of our players' ratings and per-90 physical figures.">ⓘ</span></h2>
+        <div class="sub">Our rank among League One clubs · built from players' season figures</div><div class="tw"><table id="cv-big-t"></table></div></div>
+    </div>
+
+    <div class="card" id="cv-gap"><h2>Gap map <span class="hlp-i" tabindex="0" data-tip="Our level: {{ terms['Our level'] }}&#10;Top-6 bar: {{ terms['Top-6 bar'] }}&#10;Gap: {{ terms['Gap'] }}">ⓘ</span></h2>
+      <div class="sub">Biggest gap first · click a position for the players above our level</div>
+      <div class="tw"><table id="cv-gap-t"></table></div>
+    </div>
+
+    <div class="card" id="cv-rec">
+      <div class="cv-rec-head">
+        <div><h2>Players who could close the gap <span class="hlp-i" tabindex="0" data-tip="Players rated this season at this position with an Overall above our best, top 15 per league: ratings compare players within their own league.">ⓘ</span></h2>
+          <div class="sub" id="cv-rec-sub"></div></div>
+        <div class="fl cv-filters">
+          <div class="f"><label for="cv-group">Position</label><select class="ctl" id="cv-group"></select></div>
+          <div class="f f-age"><label for="cv-age">Age</label><select class="ctl" id="cv-age"></select></div>
+          <div class="f f-contract"><label for="cv-contract">Contract</label><select class="ctl" id="cv-contract"></select></div>
+          <div class="f f-strong"><label>&nbsp;</label><label class="switch" id="cv-strong" role="switch" aria-checked="false" tabindex="0" data-tip="Only players at the 70th percentile or better on at least 2 of this position's 3 biggest shortfalls."><i></i>Strong on 2+ of our weaknesses</label></div>
+        </div>
+      </div>
+      <div class="cv-level" id="cv-level"></div>
+      <div class="cv-tabs" id="cv-tabs" role="tablist" aria-label="League"></div>
+      <div class="cv-count" id="cv-count"></div>
+      <div class="tw"><table id="cv-rec-t"></table></div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ static_url('js/club_vs_league.js') }}"></script>{% endblock %}

@@ -12,7 +12,7 @@ from your laptop** for a demo (Option B).
 |---|---|
 | URL | https://lofc-recruitment.duckdns.org (a `leytonorient.com` name is pending with club IT) |
 | Host | DigitalOcean droplet `lofc-platform`, London, Ubuntu 24.04, **2 vCPU / 3.8 GB RAM / 77 GB disk**, IP 165.22.122.157 |
-| Code | `/opt/lofc`, branch `main`, `docker-compose.prod.yml` (db, app, dashboard, caddy) |
+| Code | `/opt/lofc`, branch `main`, `docker-compose.prod.yml` (db, app, dashboard, web-blue / web-green, caddy) |
 | Network | DigitalOcean Cloud Firewall `lofc-platform-fw`: inbound TCP 22/80/443 only. Postgres is not exposed |
 | Docker logs | Capped in `/etc/docker/daemon.json` (json-file, 10 MB × 3 per container) |
 | OS upgrade | Ubuntu offers 26.04 — **not planned**; do not run `do-release-upgrade` without a snapshot and a plan |
@@ -48,6 +48,32 @@ docker compose -f /opt/lofc/docker-compose.prod.yml exec -T db \
 `lofc_default` network with the alias `match-analysis` on port 5050 and publishes no ports; our
 Caddy routes `orient-matchanalysis.duckdns.org` to it (see `Caddyfile`). Our `.env` is
 `chmod 600` so it is not readable without Docker access.
+
+### The new web front end (from the 2.36 deploy; owner decisions 2026-11-09)
+
+| | |
+|---|---|
+| Main domain (`DASHBOARD_DOMAIN`) | The new web front end (FastAPI, `lofc.web.app`), served by **one** of two identical containers, `web-blue` / `web-green` |
+| Fallback domain (`OLD_DASHBOARD_DOMAIN`, a DuckDNS name, in `.env`) | The old Streamlit dashboard, kept for about two weeks after the switch; then remove that Caddy block and the variable |
+| Which container serves | `caddy/web_upstream.caddy` (not committed), e.g. `reverse_proxy web-green:8600`; written by `scripts/web_switch.sh`, applied with a graceful `caddy reload` |
+| Health | `GET /healthz` → `{"status": "ok", "warm": true/false}` (liveness, always 200); `GET /readyz` → 200 once every start-up warm-up is done, 503 before |
+| Process | `uvicorn … --workers 1 --proxy-headers`, no reloader; page caches live in the process |
+| Memory (measured 2026-11-09, production mode, after the full warm-up) | ~1.34 GB steady, 1.41 GB peak per web container; limit `mem_limit: 3g`, `cpus: 2.0`. During a deploy two run side by side for a few minutes (~2.8 GB) — needs the 8 GB server |
+| Warm-up | ~80 s on a Mac; the switch waits up to 20 min (`LOFC_WEB_READY_TRIES` × `LOFC_WEB_READY_INTERVAL`) |
+| Data changes | Any write the pages read (a scout-sheet sync that changes rows, the Monday pipeline, the daily rollover) re-runs every page's warm-up in the background (`core/webcache.rewarm_on_change`), ~3 min of one CPU |
+
+**How a deploy switches it** (`scripts/deploy.sh` → `scripts/web_switch.sh`): build all images →
+restart db, app, dashboard, Caddy → migrations → start the idle colour from the new image → wait
+for its `/readyz` → point Caddy at it → stop the old colour. If the new one never gets warm or the
+reload fails, nothing switches and the old one keeps serving (the deploy exits 1). On the very
+first deploy the upstream file names the Streamlit dashboard, so the main domain keeps serving
+Streamlit until `web-blue` is warm.
+
+**Roll back to the Streamlit dashboard on the main domain** (seconds, no rebuild):
+```bash
+cd /opt/lofc && echo "reverse_proxy dashboard:8501" > caddy/web_upstream.caddy
+docker compose -f docker-compose.prod.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+```
 
 ### Two machines, two jobs
 
@@ -160,7 +186,9 @@ ssh root@SERVER
 /opt/lofc/scripts/deploy.sh      # pull, rebuild, migrate, report status
 ```
 
-About 3 minutes, most of it the rebuild. The site stays up until the new containers swap in.
+About 3 minutes for the rebuild, then the web switch waits for the new web container's
+warm-up (a few minutes): the old web container keeps serving until then, so users never meet a
+cold site.
 Wait for "deployed at <commit>" before running anything else: a pipeline step started earlier
 runs the OLD code.
 

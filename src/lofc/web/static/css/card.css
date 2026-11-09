@@ -1,0 +1,138 @@
+/* Player card: only what app.css (mockup v5) does not already have. */
+.card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px;flex-wrap:wrap}
+.back{font-size:14px;color:var(--muted);text-decoration:none}.back:hover{color:var(--ink);text-decoration:underline}
+.switch:focus-visible{outline:2px solid var(--orient);outline-offset:3px;border-radius:6px}
+.rank-as{font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+.rank-as select{font:inherit;font-size:14px;color:var(--ink)}
+.phead h1{font-size:34px}
+.reg b.absent{font-weight:400;font-style:italic;color:var(--muted)}
+.mbp .note b{color:var(--ink)}
+.tiles.two{grid-template-columns:1fr 1fr}
+.tile .v{line-height:1.2}
+.foot{margin-top:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.foot.end{justify-content:flex-end}
+.sw{flex-direction:column;gap:6px;margin-top:14px;font-size:15px}
+.warn ul{margin:6px 0 0;padding-left:20px}
+.money-cap{margin-top:8px}
+.style-row b:first-child{font-weight:600}
+.style-row .pb{min-width:0}
+.tw table{min-width:0}
+td.l,th.l{text-align:left}
+.pz-ctl{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}
+.pz-ctl label{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+.pz-ctl select{font:inherit;font-size:14px;color:var(--ink)}
+.seg-wrap{display:flex;flex-direction:column;gap:4px}
+.seg button{font:inherit;font-size:13.5px;padding:6px 12px;border:0;background:#fff;color:var(--ink);cursor:pointer}
+.seg button.on{background:var(--ink);color:#fff}
+.zone{cursor:default}
+.zone span:last-child{font-size:12px}
+.pitch .zone{min-height:0}
+.report summary{font-weight:500}
+.report .txt{white-space:pre-wrap;font-size:14px;margin:8px 0 0}
+.badge-row{margin:6px 0}
+.dim h4{margin:14px 0 4px;font-size:14.5px}
+.flagline{font-size:13px;color:var(--muted);margin:4px 0}
+.notes-d{margin-top:8px}
+.rkey span{display:flex;align-items:center}
+.inwin{border-left:3px solid var(--red);padding-left:8px;margin-bottom:8px}
+.spell-h{font-weight:600;font-size:14px;margin:12px 0 6px}
+/* Against our <position>s */
+.sf-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap}
+.verdict{display:flex;gap:28px;flex-wrap:wrap;margin:16px 0 14px;padding:14px 18px;background:var(--soft);border-radius:10px}
+.verdict .k{font-size:13px;color:var(--muted)}.verdict .v{font-size:28px;font-weight:700;line-height:1.2}
+.verdict .s{font-size:13px;color:var(--muted)}
+tr.target td{background:#FFF4F5;font-weight:600}tr.target td:first-child{box-shadow:inset 3px 0 0 var(--red)}
+.tag{display:inline-block;font-size:11.5px;font-weight:700;color:#fff;background:var(--red);border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:1px}
+.lg{display:inline-block;font-size:11.5px;font-weight:700;color:var(--muted);border:1px solid #CDD1D7;border-radius:4px;padding:0 5px;margin-left:6px}
+.adds{padding:0}.adds ul{padding:0;margin:6px 0 14px}.adds li{margin:5px 0;font-size:14.5px;list-style:none}
+.adds .up{color:var(--hi);font-weight:700}.adds .dn{color:var(--lo);font-weight:700}
+td.best{background:#E6F2EB}
+.sq-cols{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:18px;margin-top:18px;align-items:start}
+@media (max-width:1100px){.sq-cols{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:1280px){.phead h1{font-size:30px}}
+.pills-row{margin-bottom:8px}
+.style-row{grid-template-columns:minmax(110px,0.9fr) minmax(0,1.6fr) 34px 64px;padding:7px 0}
+.pb .t u{position:absolute;top:-3px;height:14px;background:var(--ink);text-decoration:none}
+.pb .t u.m50{left:50%;width:1px;opacity:.45}
+.pb .t u.m70{left:70%;width:2px}
+/* app.css lets any card break words anywhere; in tables that shredded metric names. */
+.card td,.card th{overflow-wrap:normal;word-break:normal}
+.tw td:first-child{min-width:110px}
+#sbs td,#sbs th{padding:8px 7px}
+#inj td,#sbs td{white-space:nowrap}
+.card .pb{min-width:80px}
+/* keep the wide tables inside their card at 1440 without a sideways scroll */
+#at td,#at th{padding:8px 5px}
+#at .pb{min-width:64px;gap:6px}
+#sbs td,#sbs th{padding:8px 4px;font-size:14px}
+#sbs .chip{min-width:42px;padding:3px 5px}
+/* ---- 2.36 U3 rating scores: large numbers, compact box ---- */
+.scores{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:12px;margin-top:4px}
+.score{background:var(--soft);border-radius:12px;padding:14px 16px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.score .k{font-size:13px;font-weight:600;color:var(--muted);letter-spacing:.01em}
+.score .v .chip{font-size:30px;line-height:1.1;padding:7px 14px;min-width:0;border-radius:9px;font-weight:700}
+.score.main{background:#fff;box-shadow:inset 0 0 0 1.5px var(--line)}
+.score.main .v .chip{font-size:38px;padding:8px 16px}
+.score .x{font-size:13px;color:var(--muted);line-height:1.35}
+#c-rating .sw{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+#c-rating .tiles.money{margin-top:14px}
+@media (max-width:1280px){.score .v .chip{font-size:26px}.score.main .v .chip{font-size:32px}}
+/* ---- U5 packing zones: taller pitch ---- */
+#c-zones .pitch{grid-template-rows:repeat(5,minmax(92px,1fr)) 34px;gap:5px}
+#c-zones .zone{font-size:12.5px;gap:2px}
+#c-zones .zone b{font-size:21px}
+.zone[data-tip]{cursor:help}
+.zone[data-tip]:hover{box-shadow:inset 0 0 0 2px #15171C}
+/* ---- U13/U14/U15 rated tables: weight groups, roomier number columns, vs ours ---- */
+table.rated td,table.rated th{padding:8px 8px}
+table.rated th{white-space:normal;vertical-align:bottom;line-height:1.25}
+table.rated td:first-child{white-space:normal;min-width:120px;line-height:1.3}
+table.rated .src{font-size:12px;color:var(--muted)}
+table.rated th.col-per-90-rate,table.rated th.col-all-phases{min-width:64px}
+table.rated th.col-percentile{min-width:110px}
+table.rated .pb{min-width:96px;gap:8px}
+table.rated th.col-band{min-width:62px}
+table.rated th.col-vs-ours{min-width:58px;white-space:nowrap;cursor:help;text-decoration:underline dotted;text-underline-offset:3px}
+table.rated tr.sec.wt td{background:transparent;color:var(--muted);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;padding:14px 8px 5px;border-bottom:1px solid var(--line)}
+table.rated tbody tr.sec.wt:first-child td{padding-top:6px}
+.vs{font-weight:700;font-size:14px;color:var(--muted)}
+.vs.up{color:var(--hi)}.vs.dn{color:var(--lo)}
+/* squad section: radar + better/worse lists, 50/50 */
+.sq-cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center}
+#c-rating #cf-h{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+#c-rating #cf .tile .v{font-size:20px}
+#sbs th{white-space:normal;vertical-align:bottom;line-height:1.25}
+/* every table fits its half at 1280: number columns tight, headers wrap, metric names wrap */
+table.rated td,table.rated th{padding:8px 6px}
+table.rated td:first-child{min-width:96px}
+table.rated .chip{min-width:0;padding:3px 7px;font-size:13.5px}
+#ph table.rated .pb,#po .pb{min-width:56px;gap:6px}
+#ph table.rated th.col-percentile{min-width:74px}
+#ph th,#po th{white-space:normal;vertical-align:bottom;line-height:1.25}
+#ph td,#po td{padding:8px 5px}
+#po td:first-child{min-width:96px}
+@media (max-width:1380px){
+  table.rated td,table.rated th,#po td,#po th{padding:7px 4px;font-size:13.5px}
+  table.rated .pb{min-width:64px;gap:5px}
+  table.rated th.col-percentile{min-width:84px}
+  #ph table.rated .pb,#po .pb{min-width:44px}
+  #ph table.rated th.col-percentile{min-width:62px}
+  table.rated th.col-per-90-rate,table.rated th.col-all-phases{min-width:0}
+  table.rated th.col-band{min-width:0}
+  table.rated th.col-vs-ours{min-width:0}
+}
+@media (max-width:1380px){
+  #ph td,#ph th{padding:7px 3px}
+  #ph table.rated td:first-child{min-width:84px}
+  #ph table.rated .pb{min-width:34px;gap:4px}
+  #ph table.rated th.col-percentile{min-width:50px}
+  #ph .chip{padding:3px 5px}
+}
+@media (max-width:1380px){#ph table.rated td:first-child{min-width:78px}#ph th.col-percentile{min-width:44px}}
+#ph td,#ph th{padding:8px 4px}
+#ph table.rated .pb{min-width:48px}
+#ph table.rated th.col-percentile{min-width:64px}
+@media (max-width:1380px){#ph td,#ph th{padding:7px 3px}#ph table.rated .pb{min-width:30px}#ph table.rated th.col-percentile{min-width:40px}#ph .chip{padding:3px 4px;font-size:13px}}
+/* at 1280 the physical table's percentile shows as its number only (the bar returns at 1440+) */
+@media (max-width:1380px){#ph table.rated .pb .t{display:none}#ph table.rated .pb{min-width:0}#ph table.rated th.col-percentile{min-width:0}}
+@media (max-width:1380px){#ph th,#po th{font-size:11.5px}}

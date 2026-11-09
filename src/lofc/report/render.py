@@ -90,24 +90,57 @@ def _environment() -> Environment:
                       autoescape=select_autoescape(["html", "j2"]),
                       trim_blocks=True, lstrip_blocks=True)
     env.filters["ordinal"] = ordinal
+    env.filters["half_up"] = lambda v: f"{half_up(v):,}"
     return env
 
 
-def to_html(d: ReportData) -> str:
-    """One player's report as a complete HTML document."""
+def half_up(value) -> int:
+    """Whole number, .5 rounds UP: the one rule for minutes / goals / assists (owner decision
+    D2, 2026-11-09). Python's format() and round() go half to even."""
+    return int(float(value) + 0.5)
+
+
+def bar_inputs(d: ReportData) -> list[dict]:
+    """The percentile bars, one per metric of the position's "All Metrics" list: label,
+    the value as DRAWN (`shown`: flipped where a high percentile is bad, so a long bar always
+    means good at the thing named; None = not measured), and the Leyton Orient median tick
+    on the same scale (None when the club has no players in the position). The document's
+    SVG and the web page both draw these."""
     metrics = (_resolved_performance(d.position, "All Metrics")
                if d.position in cf.PERFORMANCE_METRICS else [])
     from lofc.dashboard.labels import LABELS
-    labels = [LABELS.get(m, m.replace("_p90", "").replace("_", " ").capitalize())
-              for m in metrics]
-    values = [d.percentiles.get(m) for m in metrics]
+    out = []
+    for m in metrics:
+        label = LABELS.get(m, m.replace("_p90", "").replace("_", " ").capitalize())
+        inverted = m in _LOWER_IS_BETTER
+        value = d.percentiles.get(m)
+        # The club's own squad median for this position, drawn as a tick on each bar. Only
+        # when the club actually HAS players in the position -- otherwise there is no
+        # benchmark to draw and a missing tick is the honest rendering.
+        mark = d.benchmark.get(m) if d.benchmark_n else None
+        if inverted:
+            value = None if value is None else 100.0 - float(value)
+            mark = None if mark is None else 100.0 - float(mark)
+        out.append({"metric": m, "label": f"{label} (fewer is better)" if inverted else label,
+                    "raw_label": label, "inverted": inverted,
+                    "shown": None if value is None else float(value),
+                    "orient": None if mark is None else float(mark)})
+    return out
+
+
+def to_html(d: ReportData, not_rated: str | None = None) -> str:
+    """One player's report as a complete HTML document.
+
+    `not_rated` (the web page's thin-pool note, e.g. "Not rated: only 8 comparable players
+    (needs 10)") withholds the composite, the rank and the Performance / Physical bands and
+    prints the note instead. Streamlit never passes it, so its document is unchanged."""
+    rows = bar_inputs(d)
+    labels = [r["raw_label"] for r in rows]
+    values = [d.percentiles.get(r["metric"]) for r in rows]
     # Indexes of metrics where a high raw percentile is bad, so the bar is drawn on the
     # flipped value: a long green bar must always mean the player is good at the thing named.
-    inverted = {i for i, m in enumerate(metrics) if m in _LOWER_IS_BETTER}
-    # The club's own squad median for this position, drawn as a tick on each bar. Only
-    # when the club actually HAS players in the position -- otherwise there is no
-    # benchmark to draw and a missing tick is the honest rendering.
-    bench = ([d.benchmark.get(m) for m in metrics] if d.benchmark_n else None)
+    inverted = {i for i, r in enumerate(rows) if r["inverted"]}
+    bench = ([d.benchmark.get(r["metric"]) for r in rows] if d.benchmark_n else None)
     bars = svg.percentile_bars(labels, values, width=520, inverted=inverted,
                                benchmark=bench,
                                # 250, measured across all eight positions against the most
@@ -156,7 +189,7 @@ def to_html(d: ReportData) -> str:
     css = (_TEMPLATES / "report.css").read_text()
     body = _environment().get_template("report.html.j2").render(
         d=d, bars=bars, style=style_view(d), radar=radar, band_key=band_key,
-        whence=whence,
+        whence=whence, not_rated=not_rated,
         assist_definition=ASSIST_DEFINITION)
 
     # The name is escaped explicitly here: this f-string is OUTSIDE Jinja, so the
@@ -180,5 +213,5 @@ def goals_by_position(shares) -> list[str]:
     scoring = [(group, goals) for group, _m, _s, goals, _a in shares if goals]
     if len(scoring) < 2 and not (len(scoring) == 1 and shares and shares[0][3] in (0, None)):
         return []
-    return [f"{goals:.0f} {'goal' if goals == 1 else 'goals'} as {group.lower()}"
-            for group, goals in scoring]
+    return [f"{n} {'goal' if n == 1 else 'goals'} as {group.lower()}"
+            for group, n in ((g, half_up(goals)) for g, goals in scoring)]

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Physical{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_url('css/physical.css') }}">
+<section class="view on" id="v-physical" data-page="physical">
+  <div class="section-label">{{ page.group }}</div>
+  <h1>Physical</h1>
+  <div class="meta">SkillCorner tracking data · per 90 minutes played</div>
+
+  <div class="filters" id="filters">
+    <div class="fl">
+      <div class="f f-season"><label for="f-season">Season</label><select class="ctl" id="f-season" name="season"></select></div>
+      <div class="f f-league" id="w-league"><label for="f-league">League</label><select class="ctl" id="f-league" name="league"></select></div>
+      <div class="f f-position" id="w-position"><label for="f-position">Position</label><select class="ctl" id="f-position" name="position"></select></div>
+      <div class="f f-age" id="w-age"><label for="f-age">Age</label><select class="ctl" id="f-age" name="age"></select></div>
+    </div>
+  </div>
+
+  <div id="ph-empty" class="info" hidden></div>
+
+  <div id="ph-main" hidden>
+    <div class="ph-grid">
+      <div class="card" id="ph-leaders">
+        <div class="ph-head">
+          <div class="ph-title"><h2>Physical leaders</h2><div class="sub" id="ld-sub"></div></div>
+          <div class="f f-metric"><label for="f-metric">Metric</label><select class="ctl" id="f-metric" name="metric"></select></div>
+        </div>
+        <p class="ph-def" id="ld-def"></p>
+        <div class="tiles ph-tiles" id="ld-tiles"></div>
+        <div class="warn" id="ld-thin" hidden></div>
+        <div class="tw" id="ld-tw"><table><thead id="ld-head"></thead><tbody id="ld-body"></tbody></table></div>
+        <div class="ph-foot"><button type="button" class="btn small" id="ld-more" aria-label="Show all players">Show all</button></div>
+      </div>
+
+      <div class="card" id="ph-scatter">
+        <div class="ph-head">
+          <div class="ph-title"><h2>Two metrics</h2><div class="sub" id="sc-sub"></div></div>
+        </div>
+        <div class="fl ph-axes">
+          <div class="f"><label for="f-x">Across</label><select class="ctl" id="f-x" name="x"></select></div>
+          <div class="f"><label for="f-y">Up</label><select class="ctl" id="f-y" name="y"></select></div>
+          <div class="f f-find"><label for="f-find">Find a player</label><input class="ctl" id="f-find" type="search" autocomplete="off" placeholder="Name…"></div>
+        </div>
+        <div class="ph-key"><span><i class="ph-dot orient"></i>Leyton Orient</span><span><i class="ph-dot"></i>Others</span><span><i class="ph-med"></i>Median</span><span class="note">Click a dot to open the player</span></div>
+        <div id="sc-plot" class="ph-plot"></div>
+      </div>
+    </div>
+
+    <div class="card" id="ph-squad">
+      <div class="ph-head"><div class="ph-title"><h2 id="sq-title">Leyton Orient squad</h2><div class="sub" id="sq-sub"></div></div></div>
+      <div class="tw" id="sq-tw"><table><thead id="sq-head"></thead><tbody id="sq-body"></tbody></table></div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ static_url('js/physical.js') }}"></script>{% endblock %}

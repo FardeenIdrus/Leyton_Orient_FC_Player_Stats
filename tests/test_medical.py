@@ -46,6 +46,12 @@ def test_window_labels_covers_the_season_and_the_one_before():
     assert window_labels(319) == ("25/26", "26/27")
 
 
+def test_window_labels_for_2024_25_reaches_back_to_23_24():
+    # A 2024/25 report used to fail: its window needs 316 (23/24), which was unmapped,
+    # although Transfermarkt injuries are stored for 23/24.
+    assert window_labels(317) == ("23/24", "24/25")
+
+
 def test_window_labels_raises_for_an_unmapped_season_id():
     # 320 (2027/28) has not been added to _SEASON_LABELS yet -- silently dropping it
     # would zero out the injury count and read the player as 100% available.
@@ -54,10 +60,10 @@ def test_window_labels_raises_for_an_unmapped_season_id():
 
 
 def test_window_labels_raises_for_a_fully_unmapped_season_id():
-    # 316 predates the mapping entirely, so the window would otherwise be empty --
+    # 315 predates the mapping entirely, so the window would otherwise be empty --
     # the most dangerous case, since an empty window silently matches no injuries.
     with pytest.raises(ValueError):
-        window_labels(316)
+        window_labels(315)
 
 
 def test_games_missed_only_counts_the_window():

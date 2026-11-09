@@ -1,0 +1,58 @@
+/* Compare page only: what app.css (mockup v5) and players.css (shared controls) do not cover. */
+#v-compare .filters{margin:12px 0 14px}
+#v-compare .fl{gap:12px 14px}
+#v-compare .f-season{flex:0 0 104px;min-width:104px}
+#v-compare .f-position{flex:0 0 150px;min-width:150px}
+#v-compare .f-leagues{flex:0 0 160px;min-width:160px}
+#v-compare .f-rank{flex:0 0 190px;min-width:150px}
+#v-compare .f-wide,#v-compare .f-range{min-width:230px}
+#v-compare .slots{margin-top:12px}
+#v-compare .slot{flex:1 1 260px;min-width:0}
+#v-compare .slot label{display:flex;align-items:center;gap:6px}
+#v-compare .results{max-height:380px}
+#v-compare .results .rc{float:right;font-weight:600;color:var(--muted);margin-left:10px}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;flex:none;vertical-align:0}
+.dot.d0{background:#15171C}.dot.d1{background:#D9822B}.dot.d2{background:#2A9D8F}
+#v-compare .row.two{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr)}
+#v-compare .row.one{grid-template-columns:minmax(0,1fr)!important}
+#c-sum{margin-bottom:18px}
+/* head-to-head: players are columns */
+#cmp-sum{table-layout:fixed}
+#cmp-sum th.k{width:150px;font-size:13.5px;color:var(--muted);font-weight:600;white-space:normal;position:static}
+#cmp-sum thead th{position:static;vertical-align:bottom;white-space:normal;border-bottom:2px solid var(--red);padding:10px}
+#cmp-sum .nm{display:flex;align-items:center;font-size:18px;font-weight:700;color:var(--ink);text-decoration:none;line-height:1.2}
+#cmp-sum .nm:hover{text-decoration:underline}
+#cmp-sum .sm{display:block;font-size:13px;color:var(--muted);font-weight:400;margin-top:3px}
+#cmp-sum .nr{display:block;font-size:13px;color:#8E0B20;font-weight:600;margin-top:4px}
+#cmp-sum td{vertical-align:middle;padding:10px}
+#cmp-sum .big{font-size:18px;font-weight:600}
+#cmp-sum .chip{font-size:18px;padding:4px 10px;min-width:64px}
+#cmp-sum .ch{display:block;font-size:13px;font-weight:600;margin-top:4px}
+#cmp-sum .ch.up{color:var(--hi)}#cmp-sum .ch.down{color:var(--lo)}#cmp-sum .ch.neutral{color:var(--muted)}
+#cmp-sum td.trend{font-size:14px}
+#cmp-sum td.trend .tr{display:inline-block;margin-right:10px;white-space:nowrap}
+/* metric tables */
+#v-compare .tier{font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+#v-compare td.ml{min-width:140px}
+#v-compare .cmp-pair td,#v-compare .cmp-pair th{padding:7px 6px}
+#v-compare .cmp-pair th{white-space:normal}
+#v-compare .cmp-pair td b{font-weight:600}
+#v-compare .cmp-pair td{white-space:nowrap}
+#v-compare .cmp-pair td.ml{white-space:normal}
+#v-compare .pc{font-size:12.5px;font-weight:600}
+#v-compare td.best{background:#E6F2EB}#v-compare td.worst{background:#FBEAE9}
+#v-compare details .tw{margin-top:8px}
+.card td,.card th{overflow-wrap:normal;word-break:normal}
+/* packing zones */
+.pz-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.pz-m{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+.pz-m select{font:inherit;font-size:14px;color:var(--ink);min-width:240px}
+.pz-grid{display:grid;gap:16px;margin-top:8px}
+.pz-name{font-weight:600;margin-bottom:6px;display:flex;align-items:center}
+#v-compare .pitch{grid-template-rows:repeat(5,80px) 28px}
+#v-compare .zone{font-size:11.5px;cursor:default}
+#v-compare .zone b{font-size:17px}
+@media (max-width:1100px){#v-compare .row.two{grid-template-columns:minmax(0,1fr)}}
+#v-compare tr.sec.wt td{background:transparent;color:var(--muted);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;padding:14px 6px 5px}
+#v-compare tbody tr.sec.wt:first-child td{padding-top:6px}
+@media (max-width:1380px){#v-compare .cmp-pair td,#v-compare .cmp-pair th{padding:7px 4px;font-size:13.5px}#v-compare td.ml{min-width:110px}}

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Report{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_url('css/report.css') }}">
+<section class="view on" id="v-report" data-page="report" data-default-season="{{ default_season }}">
+  <div class="section-label">{{ page.group }}</div>
+  <h1>Player report</h1>
+
+  <div class="filters">
+    <div class="fl">
+      <div class="f f-season"><label for="rp-season">Season</label>
+        <select id="rp-season" class="ctl">{% for s in seasons %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select></div>
+      <div class="f grow"><label for="rp-search">Find a player</label>
+        <div class="searchbox">
+          <input id="rp-search" class="ctl" type="search" autocomplete="off" placeholder="Any player, any position, any league…">
+          <button class="btn small" id="rp-clear" type="button" aria-label="Clear search" disabled>✕ Clear</button>
+          <div class="results" id="rp-results" hidden></div>
+        </div></div>
+    </div>
+  </div>
+
+  <div id="rp-status" class="rp-status" role="status"></div>
+
+  <div id="rp-body" hidden>
+    <div class="rp-head">
+      <div class="rp-id">
+        <div class="section-label" id="h-sub"></div>
+        <div class="rp-name" id="h-name"></div>
+        <div class="meta" id="h-club"></div>
+        <div class="reg" id="h-bio"></div>
+        <div class="note rp-line" id="h-split"></div>
+        <div class="note rp-line" id="h-style" hidden></div>
+        <div class="note rp-line" id="h-cmp"></div>
+      </div>
+      <div class="rp-actions">
+        <div class="rp-stamp"><span class="pill" id="h-stamp"></span><span class="note" id="h-asof"></span></div>
+        <button class="btn" id="rp-write" type="button" aria-expanded="false" aria-controls="rp-form">✎ Write your report</button>
+        <button class="btn primary" id="rp-dl" type="button">⬇ Download report</button>
+        <a class="btn" id="rp-dl-data" download>⬇ Download data-only report</a>
+      </div>
+    </div>
+
+    <div class="card rp-form" id="rp-form" hidden>
+      <div class="rp-form-head"><h2>Write your report</h2>
+        <span class="note">All optional. Psychological and Medical are your view only; they never change any rating.</span></div>
+      <div class="rp-form-grid">
+        <div id="f-text"></div>
+        <div><h3>Psychological</h3><div id="f-psych"></div><div class="rp-band" id="f-psych-band"></div></div>
+        <div><h3>Medical</h3><div id="f-med"></div></div>
+      </div>
+    </div>
+
+    <div class="row rp-top">
+      <div class="card" id="c-verdict"><h2>Composite</h2><div class="sub" id="v-rank"></div>
+        <div id="v-body"></div></div>
+      <div class="card" id="c-summary"><h2>Summary</h2><div id="n-body"></div></div>
+    </div>
+
+    <div class="card" id="c-tech">
+      <div class="rp-card-head"><div><h2>Technical</h2><div class="sub" id="t-sub"></div></div>
+        <div class="rp-key" id="t-key"></div></div>
+      <div class="tiles rp-counts" id="t-counts"></div>
+      <div class="note rp-line" id="t-whence"></div>
+      <div class="rp-bars" id="t-bars"></div>
+    </div>
+
+    <div class="row rp-bottom" id="r-bottom">
+      <div class="card" id="c-style"><h2>Playing style</h2><div class="sub" id="s-sub"></div><div id="s-body"></div></div>
+      <div class="card" id="c-phys"><h2>Physical</h2><div class="sub" id="p-sub"></div>
+        <div class="rp-phys"><div id="p-radar"></div>
+          <div class="rp-avail" id="p-avail"></div></div></div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ static_url('js/report.js') }}"></script>{% endblock %}

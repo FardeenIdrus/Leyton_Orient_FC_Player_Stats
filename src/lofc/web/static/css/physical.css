@@ -1,0 +1,93 @@
+/* Physical page only: what app.css does not cover. */
+#v-physical .filters{margin:14px 0 14px}
+#v-physical .f-season,#v-physical .f-position{flex:0 0 170px;min-width:170px}
+#v-physical .f-league{flex:0 0 210px;min-width:190px}
+#v-physical select.ctl{font:inherit;font-size:14px;color:var(--ink)}
+.ph-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:18px;margin-bottom:18px;align-items:start}
+.ph-head{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;flex-wrap:wrap}
+.ph-title{min-width:0}
+.ph-title h2{font-size:18px}
+#v-physical .card .sub{margin-bottom:0;font-size:13.5px}
+#v-physical .f-metric{flex:0 1 300px;min-width:220px}
+.ph-def{font-size:13.5px;color:var(--muted);margin:10px 0 12px}
+.ph-tiles{margin-bottom:12px}
+.ph-tiles .tile .k{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ph-tiles .tile .v{font-size:28px;font-weight:700;margin-top:4px}
+.ph-tiles .tile.orient{background:#EEF4FB}
+#ld-tw{max-height:640px}
+#v-physical td{padding:7px 9px}
+#v-physical th{padding:8px 9px}
+#v-physical td.ph-val{font-weight:600;font-size:15.5px}
+#v-physical .ph-pcol{width:150px}
+#v-physical .plink{text-decoration:none}
+#v-physical .plink:hover .pname{text-decoration:underline}
+#v-physical td.pcell{min-width:150px}
+#v-physical td.pcell .note{margin-top:2px}
+.ph-foot{display:flex;justify-content:flex-end;margin-top:10px}
+/* scatter */
+.ph-axes{margin:12px 0 6px}
+.ph-axes .f{flex:1 1 200px;min-width:180px}
+.ph-plot svg{display:block;max-width:640px;margin:0 auto}
+.ph-plot .ax{font-size:11.5px;fill:var(--muted)}
+.ph-plot .axl{font-size:12.5px;fill:var(--ink);font-weight:600}
+.ph-plot .pt{fill:var(--mid);fill-opacity:.75;stroke:#fff;stroke-width:1}
+.ph-plot .pt.orient{fill:var(--orient);fill-opacity:1;stroke-width:1.5}
+.ph-plot a:hover .pt{fill:var(--ink);fill-opacity:1}
+.ph-plot .ptl{font-size:11.5px;font-weight:600;fill:var(--orient);paint-order:stroke;stroke:#fff;stroke-width:3px}
+.ph-dot{display:inline-block;width:11px;height:11px;border-radius:50%;background:var(--mid);margin-right:6px;vertical-align:-1px}
+.ph-dot.orient{background:var(--orient)}
+/* squad */
+#sq-tw{margin-top:12px}
+#ph-squad th{white-space:normal;vertical-align:bottom;line-height:1.25}
+#ph-squad th button{font:inherit;font-weight:600;font-size:12.5px;color:var(--muted);background:none;border:0;padding:0;cursor:pointer;text-align:inherit}
+#ph-squad th.n button{text-align:right}
+#ph-squad th button:hover,#ph-squad th.sorted button{color:var(--ink)}
+#ph-squad th.n{max-width:118px}
+td.ph-cell{white-space:nowrap}
+.ph-v{font-weight:600;font-size:15px}
+.ph-pp{display:inline-block;min-width:30px;text-align:center;margin-left:8px;padding:1px 6px;border-radius:5px;font-size:12.5px;font-weight:600}
+@media (max-width:1380px){.ph-grid{grid-template-columns:minmax(0,1fr)}}
+/* numbers and header words never break mid-way (.card sets overflow-wrap:anywhere) */
+#v-physical table{overflow-wrap:normal}
+#v-physical td.n,#v-physical td.c,#ph-leaders th{white-space:nowrap}
+#ph-squad th{word-break:normal}
+/* 2.36 U12: the two boxes share their edges (one 50/50 grid, equal height); the scatter
+   stays in view beside the long leaders list */
+.ph-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:stretch}
+#ph-scatter .ph-plot svg{max-width:100%}
+@media (max-width:1380px){.ph-grid{grid-template-columns:minmax(0,1fr)}}
+#v-physical .ph-pcol{width:104px}
+#v-physical td.pcell{min-width:120px}
+#ld-tw td,#ld-tw th{padding:7px 7px}
+#ld-tw th{white-space:normal;vertical-align:bottom;line-height:1.25}
+/* 2.36: the two-metric chart fills its box (drawn at the box's size), medians, names, key */
+#ph-scatter{display:flex;flex-direction:column}
+#ph-scatter .ph-plot{position:relative;flex:1 1 auto;min-height:420px;top:auto}
+#ph-scatter .ph-plot svg{position:absolute;inset:0;max-width:none;margin:0}
+#ph-scatter .ph-plot>.note{position:static}
+.ph-axes .f-find{flex:1 1 180px}
+.ph-key{display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted);margin:2px 0 8px}
+.ph-key .note{margin-left:auto}
+.ph-med{display:inline-block;width:18px;border-top:2px dashed #8D939C;margin-right:6px;vertical-align:3px}
+.ph-plot .med{stroke:#8D939C;stroke-width:1.2;stroke-dasharray:5 4}
+.ph-plot .medt{font-size:11px;fill:var(--muted)}
+.ph-plot .pt{cursor:pointer}
+.ph-plot .pt.dim{fill-opacity:.25}
+.ph-plot .pt.found{fill:var(--red);fill-opacity:1;stroke:#fff;stroke-width:2}
+.ph-plot .ptl.top{fill:var(--ink)}
+.ph-plot .ptl.found{fill:var(--red);font-size:12.5px}
+.ph-rk{font-size:11.5px;color:var(--muted);margin-top:2px;white-space:nowrap}
+@media (max-width:1380px){#ph-scatter .ph-plot{min-height:480px}}
+
+/* leaders: the Physical rating column fits beside the metric and its percentile */
+#v-physical .ph-pcol{width:84px}
+#ld-tw .pb{min-width:56px;gap:6px}
+#v-physical #ld-tw td.pcell{min-width:104px}
+#ld-tw td,#ld-tw th{padding:7px 5px}
+@media (max-width:1380px){#ph-squad td,#ph-squad th{padding:7px 4px}#ph-squad th.n{max-width:96px}.ph-pp{margin-left:4px;min-width:26px;padding:1px 4px}#ph-squad td.pcell{min-width:110px}}
+/* the Tracked matches column (2.36) */
+#ld-tw th{white-space:normal}
+#v-physical .ph-pcol{width:76px}
+#v-physical #ld-tw td.pcell{min-width:96px}
+#ld-tw .pb{min-width:50px}
+#ld-tw td,#ld-tw th{padding:7px 4px}

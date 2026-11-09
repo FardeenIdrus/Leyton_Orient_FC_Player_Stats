@@ -178,7 +178,7 @@ def test_join_keys_are_deduped_so_a_player_is_listed_once_per_club():
     claimed by two of our players; either fans the join out and lists a squad member
     twice."""
     import pandas as pd
-    from lofc.dashboard.tabs.squads import registered_squad_frame
+    from lofc.core.squads import registered_squad_frame   # moved from tabs/squads (2.36)
     import inspect
     src = inspect.getsource(registered_squad_frame)
     assert "DISTINCT ON (player_id)" in src, "appearance join is not deduped"
@@ -203,7 +203,7 @@ def test_the_link_runs_before_the_bio_merge():
     name-linked player with an id but no nationality, age or height — Oliver Dovin had all
     three in the database and none on screen."""
     import inspect
-    from lofc.dashboard.tabs.squads import registered_squad_frame
+    from lofc.core.squads import registered_squad_frame   # moved from tabs/squads (2.36)
     src = inspect.getsource(registered_squad_frame)
     assert src.index("LINK FIRST") < src.index('bio = pd.read_sql'), (
         "bio is merged before the name+DOB link resolves player_id")

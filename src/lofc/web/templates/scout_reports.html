@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Scout reports{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_url('css/players.css') }}">
+<link rel="stylesheet" href="{{ static_url('css/scout_reports.css') }}">
+<section class="view on" id="v-scout-reports" data-page="scout-reports">
+  <div class="section-label">{{ page.group }}</div>
+  <h1>Scout reports</h1>
+  <div class="sr-sync">
+    <span id="sr-sync" class="meta" role="status"></span>
+    <button class="btn small" id="sr-refresh" type="button" title="Read the scouting sheet now">Refresh</button>
+    <span id="sr-sync-msg" class="note" role="status"></span>
+  </div>
+  <div id="sr-empty" class="info" hidden></div>
+
+  <div id="sr-main" hidden>
+    <div class="tabs" id="sr-tabs" role="tablist"></div>
+
+    <div class="filters" id="sr-filters">
+      <div class="fl">
+        <div class="f grow"><label for="f-q">Search for a player</label>
+          <input class="ctl" id="f-q" name="q" type="search" autocomplete="off" placeholder="Start typing a name…"></div>
+        <div class="f f-league"><label for="f-league">League</label><select class="ctl" id="f-league" name="league"></select></div>
+        <div class="f f-age"><label for="f-max_age">Max age</label>
+          <input class="ctl num" id="f-max_age" name="max_age" type="number" min="16" max="40" step="1" value="40"></div>
+        <div class="f f-foot"><label for="f-foot">Foot</label><select class="ctl" id="f-foot" name="foot"></select></div>
+      </div>
+      <div class="fl sr-row2">
+        {% for key, label in [("scout", "Scout"), ("verdict", "Verdict"), ("grade", "Grade"), ("position", "Position"), ("club", "Club"), ("seen", "Seen"), ("data", "Our data"), ("dvs", "Data vs scout")] %}
+        <div class="f"><label for="f-{{ key }}">{{ label }}</label><select class="ctl" id="f-{{ key }}" name="{{ key }}" data-label="{{ label }}"></select></div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="card" id="sr-card">
+      <div class="sr-head"><div class="note" id="sr-cap"></div></div>
+      <div class="tw" id="sr-tw" data-scroll-x><table><thead id="sr-thead"></thead><tbody id="sr-body"></tbody></table></div>
+      <div id="sr-none" class="info" hidden>No reports match these filters.</div>
+    </div>
+    <div id="sr-detail"></div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ static_url('js/scout_reports.js') }}"></script>{% endblock %}

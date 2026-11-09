@@ -49,9 +49,12 @@ def test_scout_reports_no_longer_says_model_view():
     # The help text is an inline literal inside the Streamlit render function, so it cannot
     # be called without a running page; the source check is the only feasible form. It also
     # pins the replacement wording so the pointer cannot simply be deleted.
-    src = inspect.getsource(scout_reports)
+    # The text now lives in lofc.core.scout_reports_page.column_help (the page calls it).
+    from lofc.core import scout_reports_page
+    src = inspect.getsource(scout_reports) + inspect.getsource(scout_reports_page)
     assert "Model view" not in src
-    assert "Data vs scout says why there is none" in src
+    assert "Data vs scout says why there is none" in scout_reports_page.column_help(
+        "2025/26", "2026/27")["Rating"]
 
 
 # --- Users flash messages ----------------------------------------------------------------

@@ -15,42 +15,22 @@ reach scout_assessments or any rating.
 
 from __future__ import annotations
 
-import re
-
 import streamlit as st
 
+from lofc.core import report_page as rp
 from lofc.dashboard.search import filter_labels, search_options
 from lofc.dashboard.session import CurrentUser
 from lofc.model import club_criteria as cc
-from lofc.report.data import as_data_only, authored_from_inputs, build, with_authored
-from lofc.report.render import to_html
+from lofc.report.data import authored_from_inputs, build
 
-
-def _safe_filename(name: str, season_label: str) -> str:
-    """A filename that survives being emailed: no spaces, no punctuation, no accents lost."""
-    stem = re.sub(r"[^A-Za-z0-9]+", "_", f"{name}_{season_label}").strip("_")
-    return f"{stem}_report.html"
-
-
-_SCREEN_CHOICES = {"Meets": "meets", "Does not meet": "does_not_meet"}
+# Lifted to lofc.core.report_page (TASKS 2.36) so the web Report page shares them.
+_safe_filename = rp.safe_filename
+_SCREEN_CHOICES = rp.SCREEN_CHOICES
 
 
 def _preselected(search_index, by_label):
-    """The label for ?player_id=&competition_id=[&season_id=] in the URL, or None. Lets a
-    link (e.g. a "Write report" button on the player card) open this page on that player.
-    The index is already scoped to the selected season, so a season_id that disagrees with it
-    matches nothing rather than showing another season's player."""
-    qp = st.query_params
-    try:
-        pid, comp = int(qp.get("player_id")), int(qp.get("competition_id"))
-        season = int(qp["season_id"]) if "season_id" in qp else None
-    except (TypeError, ValueError):
-        return None
-    hit = search_index[(search_index["player_id"] == pid)
-                       & (search_index["competition_id"] == comp)]
-    if season is not None:
-        hit = hit[hit["season_id"] == season]
-    return hit.iloc[0]["label"] if not hit.empty and hit.iloc[0]["label"] in by_label else None
+    """See `report_page.preselected_label` (reads ?player_id=&competition_id=[&season_id=])."""
+    return rp.preselected_label(search_index, by_label, st.query_params)
 
 
 @st.cache_data(ttl=60, show_spinner="Building report…")
@@ -78,8 +58,7 @@ def _form(data, user, key: str):
         for n, text in enumerate(cc.PSYCHOLOGICAL_CRITERIA.get(data.position, [])):
             scores[text] = st.selectbox(text, [None, 1, 2, 3, 4, 5], key=f"{key}_ps{n}",
                                         format_func=lambda v: "—" if v is None else str(v))
-        scored = [v for v in scores.values() if v is not None]
-        st.caption(f"Band: {sum(scored) / len(scored):.2f}" if scored else "Band: —")
+        st.caption(rp.psych_band_caption(scores))
     with right:
         st.markdown("**Medical**")
         screening: dict[str, str] = {}
@@ -151,9 +130,7 @@ def render(engine, user: CurrentUser, search_index, season_id: int) -> None:
     authored = _form(base, user, key=f"rep_{pid}_{comp}_{season_id}")
     # Variants are derived from the one base report (no further database read). All-blank
     # inputs leave the report exactly as today.
-    data = with_authored(base, authored) if authored else base
-    html = to_html(data)
-    data_only_html = to_html(as_data_only(base))
+    data, html, data_only_html = rp.variants(base, authored)
 
     name = _safe_filename(data.player_name, data.season_label)
     st.markdown(f"**{data.player_name}** — {data.stamp}")
@@ -164,7 +141,7 @@ def render(engine, user: CurrentUser, search_index, season_id: int) -> None:
     with c2:
         st.download_button("⬇ Download data-only report",
                            data=data_only_html.encode("utf-8"),
-                           file_name=name.replace("_report", "_data_only_report"),
+                           file_name=rp.data_only_filename(name),
                            mime="text/html", use_container_width=True)
 
     # Rendered at the page's own scale so what is on screen is what prints.

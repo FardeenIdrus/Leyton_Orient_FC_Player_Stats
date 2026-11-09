@@ -38,17 +38,16 @@ import streamlit as st
 
 from lofc.config import settings
 from lofc.model import styles as styles_mod
-from lofc.constrain.filters import apply_gates
 from lofc.dashboard.auth import can
 from lofc.dashboard.controls import synced_budget, synced_min_minutes, synced_wage_budget
 from lofc.dashboard.loaders import (
-    available_seasons, get_engine, start_warmup_if_needed, league_names, load_candidates, load_metric_values,
-    load_percentiles, load_scorecards, load_scorecards_archetype, load_wage_framework,
-    load_current_clubs, load_loan_status, load_style_labels, max_minutes, player_context_lookup, player_names,
+    available_seasons, get_engine, start_warmup_if_needed, league_names, load_metric_values,
+    load_percentiles, load_wage_framework,
+    max_minutes, player_context_lookup, player_names,
     position_and_league_for)
 from lofc.dashboard.seasons import (
-    CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, LOAN_ANY, LOAN_FILTERS, contract_mask,
-    default_season_id, last_complete_season_id, loan_data_date, loan_mask,
+    CONTRACT_HORIZONS, DEFAULT_CONTRACT_HORIZON, LOAN_ANY, LOAN_FILTERS,
+    default_season_id, last_complete_season_id, loan_data_date,
     ranking_notice, season_name_for)
 from lofc.dashboard.session import (
     force_reload_after_logout, peek_carry, register_pages, require_login, restore_from_cookie,
@@ -62,13 +61,12 @@ from lofc.dashboard.tabs.report import render as _report_render
 from lofc.dashboard.tabs.player_types import _player_types
 from lofc.dashboard.tabs.players import _kpi_strip, _players
 from lofc.dashboard.tabs.signoff import render as _signoff
-from lofc.dashboard.search import build_search_index
+from lofc.core.players_pool import POSITION_ORDER, PoolFilters, build_pool
 from lofc.dashboard.sidebar_filters import SidebarFilters
 
 # Methodology is hidden for now (owner, 2026-10-09: too much text, users found it noisy).
 # The page code is kept; set True to restore it.
 SHOW_METHODOLOGY = False
-from lofc.model.scorecard import MIN_PEERS_FOR_RANKING, peer_pool_sizes, with_peer_counts
 from lofc.dashboard.tabs.users import render as _users_render
 from lofc.dashboard.tabs.watchlist import _watchlist
 from lofc.dashboard.theme import LOGO, header, style
@@ -83,8 +81,7 @@ def role_metrics_for(position: str) -> list[str]:
     ms = list(ROLE_METRICS[POSITION_ROLE[position]])
     return _successor_metrics(ms) if settings.impect_only else ms
 
-POSITION_ORDER = ["Goalkeeper", "Centre Back", "Full Back", "Defensive Mid",
-                  "Central Mid", "Winger", "Attacking Mid", "Centre Forward"]
+# POSITION_ORDER now lives in lofc.core.players_pool (imported above): one list for both front ends.
 
 def main() -> None:
     st.set_page_config(page_title="LOFC Recruitment Intelligence",
@@ -270,96 +267,20 @@ def main() -> None:
         leagues=(() if set(chosen_leagues) >= set(league_options) else tuple(chosen_leagues)),
         contract_horizon=contract_horizon, loan=loan_choice, foot=foot_choice)
 
-    candidates = load_candidates(wage_multiplier, season_id)
-    # The global player search's universe: every position, every league, for this season --
-    # built BEFORE any sidebar filter (age/league/contract/foot/position) narrows `candidates`
-    # below, so the search a recruiter types into never depends on what the sidebar currently
-    # shows. Reuses this same query rather than issuing a second one.
-    search_index = build_search_index(candidates)
+    # The pool (filters -> candidates -> gates -> scorecards -> loans -> peers -> styles -> thin
+    # pools withheld -> sorted) is built by lofc.core.players_pool, the same function the web
+    # front end calls, so both show the identical list. Steps and their reasons are documented
+    # there.
+    built = build_pool(PoolFilters(
+        season_id=season_id, position=position, archetype=archetype, min_minutes=min_minutes,
+        max_age=max_age, leagues=tuple(chosen_leagues), contract_horizon=contract_horizon,
+        loan=loan_choice, foot=foot_choice, style=style_choice, strong_only=strong_only,
+        budget_eur=budget_eur, wage_multiplier=wage_multiplier))
+    pool, withheld, ranking = built.pool, built.withheld, built.ranking
+    candidates, contract_unknown, search_index = (built.candidates, built.contract_unknown,
+                                                  built.search_index)
     percentiles = load_percentiles(season_id)
     metric_values = load_metric_values(season_id)
-
-    # An unknown age is kept, not silently dropped; the cap only excludes known-older players.
-    age_ok = (candidates["age"] <= max_age) | candidates["age"].isna()
-    candidates = candidates[age_ok]
-    if chosen_leagues:
-        candidates = candidates[candidates["league"].isin(chosen_leagues)]
-    # Contract-expiry horizon. A player with NO known contract date cannot be judged, so he is
-    # excluded — but we count him rather than dropping him silently: contract data is largely
-    # EFL-only, so switching this on would otherwise look like "no Scottish/PL2 player is
-    # expiring" when the truth is "we don't know". The count is surfaced on the Players tab.
-    contract_unknown = 0
-    mask = contract_mask(candidates["contract_until"], contract_horizon)
-    if mask is not None:
-        in_position = candidates["position_group"] == position
-        contract_unknown = int((candidates["contract_until"].isna() & in_position).sum())
-        candidates = candidates[mask]
-    if foot_choice != "Any":
-        candidates = candidates[candidates["foot"].isin([foot_choice.lower(), "both"])]
-    pool = apply_gates(candidates[(candidates["position_group"] == position) &
-                                  (candidates["minutes"] >= min_minutes)], budget_eur)
-    # Phase 2: the club's objective composite (Performance + Physical, real data) is the
-    # primary ranking — the invented Style-fit is retired. Merge the live scorecard in.
-    keys3 = ["player_id", "competition_id", "season_id"]
-    # All six dimension bands travel with the pool, not just Performance/Physical: the
-    # `veto` flag can trip on any of the six (scorecard.py's dim_bands), and the profile's
-    # advisory needs the actual band values to name which dimension and by how much — see
-    # tabs/players.py's flags block. Without Financial/Resale/Psychological/Medical here,
-    # the advisory could say a player is flagged but never say why for anyone tripped on a
-    # dimension not already on screen.
-    sc_cols = keys3 + ["objective_composite", "full_composite", "objective_weight_covered",
-                       "performance_band", "physical_band", "financial_band", "resale_band",
-                       "psychological_band", "medical_band", "veto", "below_min_composite"]
-    # When an archetype lens is selected, rank by that archetype's composite but keep the
-    # all-round composite visible alongside (the guardrail). "All Metrics" -> they are equal.
-    all_round = load_scorecards(season_id)[keys3 + ["objective_composite"]].rename(
-        columns={"objective_composite": "allround_composite"})
-    ranking = (load_scorecards(season_id) if archetype == cf.DEFAULT_ARCHETYPE
-               else load_scorecards_archetype(position, archetype, season_id))
-    pool = pool.merge(ranking[sc_cols], on=keys3, how="left").merge(all_round, on=keys3, how="left")
-    # Signable = affordable (fee + wage). The old on-profile/Style-fit gate is dropped: the
-    # platform ranks everyone on the club composite and never excludes on a quality threshold.
-    # Loan status joined on player_id only -- a loan is a fact about the player TODAY, not
-    # about the season being ranked, so it deliberately does not key on season.
-    _loans = load_loan_status()
-    pool = pool.merge(_loans, on="player_id", how="left")
-    pool["on_loan"] = pool["on_loan"].fillna(False)
-    _loan_filter = loan_mask(pool["on_loan"], pool["loan_ends"], loan_choice)
-    if _loan_filter is not None:
-        pool = pool[_loan_filter]
-    pool["qualifies"] = pool["affordable_fee"] & pool["affordable_wage"]
-    # How many players share each row's peer pool -- counted from the season's FULL scorecard
-    # set (`ranking`), never from `pool`, because a peer group is a property of the data and
-    # must not shrink when the sidebar narrows to one league or raises the minutes floor.
-    # The count is shown on every row (tabs/players.py's "Peers" column): a 4.44 out of 105
-    # and a 4.90 out of 1 are different claims and must not look identical.
-    pool_sizes = peer_pool_sizes(ranking)
-    pool = with_peer_counts(pool, pool_sizes)
-    # A composite is a rank within its pool, so below the floor it is not a weak ranking --
-    # it is not a ranking at all. A player alone in his pool takes the 100th percentile on
-    # every metric by construction and scores 4.90, above anything earned across a full
-    # season. He is withheld from the ranked list rather than placed in it: there is no
-    # honest position for him inside a list whose order is itself a quality claim. Squads &
-    # loans carries him with current-season facts and no score, which is the page built for
-    # that question. NaN (no scorecard) counts as thin -- `pool_is_thin` treats it that way.
-    # Style labels joined LEFT, so a player without one is never dropped from the list.
-    _style = load_style_labels(season_id)
-    if not _style.empty:
-        _style_cols = keys3 + ["style_label", "tier", "strong_styles", "leans_styles"] + \
-            [c for c in _style.columns if c.startswith("fit.")]
-        pool = pool.merge(_style[_style_cols], on=keys3, how="left")
-        if style_choice != "All styles":
-            pool = pool[[styles_mod.has_style(r, style_choice, strong_only)
-                         for r in pool.to_dict("records")]]
-    # Where he is now (Impect), for "Dundalk FC · now FC Portsmouth". LEFT join, display only.
-    _current = load_current_clubs()
-    if not _current.empty:
-        pool = pool.merge(_current, on="player_id", how="left")
-    thin = pool["peer_count"].isna() | (pool["peer_count"] < MIN_PEERS_FOR_RANKING)
-    # Who was withheld (name, club, league), for the one-line notice.
-    withheld = pool.loc[thin, ["player_name", "team_name", "league"]].copy()
-    pool = pool[~thin]
-    pool = pool.sort_values("objective_composite", ascending=False, na_position="last").reset_index(drop=True)
     metrics = role_metrics_for(position)
 
     # A season that has player data but no scorecards yet (e.g. the current season, freshly

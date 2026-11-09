@@ -12,8 +12,9 @@ def _blocks():
     return text
 
 
-def test_our_site_is_unchanged():
-    assert "{$DASHBOARD_DOMAIN} {\n\treverse_proxy dashboard:8501\n}" in _blocks()
+def test_our_site_follows_the_active_web_container():
+    # owner 2026-11-09: the main domain serves the new web front end (test_prod_deploy.py)
+    assert "{$DASHBOARD_DOMAIN} {\n\timport /etc/caddy/site/web_upstream.caddy\n}" in _blocks()
 
 
 def test_colleague_site_routes_to_his_alias_and_port():

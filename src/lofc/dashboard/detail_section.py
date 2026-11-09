@@ -327,6 +327,11 @@ def physical_gap(league_has_physical: bool, position: str) -> str | None:
 
 @st.cache_data(ttl=600)
 def _league_has_physical(competition_id: int, season_id: int) -> bool:
+    return league_has_physical_uncached(competition_id, season_id)
+
+
+def league_has_physical_uncached(competition_id: int, season_id: int) -> bool:
+    """`_league_has_physical` without its cache (the web keeps its own, per data version)."""
     from lofc.dashboard.loaders import get_engine
     return bool(pd.read_sql(
         "SELECT EXISTS (SELECT 1 FROM player_metrics_neutral WHERE competition_id = %(c)s "

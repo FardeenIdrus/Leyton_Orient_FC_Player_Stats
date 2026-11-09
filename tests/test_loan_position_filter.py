@@ -144,8 +144,11 @@ def test_the_loan_branch_of_render_goes_through_loan_view():
     """
     import inspect
 
+    from lofc.core import squads as core
     from lofc.dashboard.tabs import squads
-    source = inspect.getsource(squads.render)
+    # the loans branch moved into core.squads.build_view (2.36), which render calls
+    assert "build_view(" in inspect.getsource(squads.render)
+    source = inspect.getsource(core.build_view)
     assert "loan_view(" in source, (
         "render() builds the 'On loan only' view without loan_view(), so the Position "
         "filter is discarded again")

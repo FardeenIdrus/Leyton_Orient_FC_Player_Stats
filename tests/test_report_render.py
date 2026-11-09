@@ -407,3 +407,53 @@ def test_report_no_longer_imports_report_categories():
     import inspect
     assert "report_categories" not in inspect.getsource(render)
     assert "report_categories" not in inspect.getsource(data)
+
+
+# --- TASKS 2.36 ------------------------------------------------------------------------
+def test_minutes_goals_assists_and_chances_round_half_up():
+    """Owner decision D2 (2026-11-09): every minutes / goals figure rounds half-up. Python's
+    format rounds half to even, so 1,026.5 minutes read 1,026 and 2.5 goals read 2."""
+    out = render.to_html(_fixture(minutes=1026.5, goals=2.5, assists=0.5,
+                                  chances_created=4.5))
+    assert "1,027" in out and "1,026<" not in out
+    counts = out[out.index('class="counts"'):out.index("</dl>", out.index('class="counts"'))]
+    assert "<dd>3</dd>" in counts and "<dd>1</dd>" in counts and "<dd>5</dd>" in counts
+
+
+def test_goals_by_position_round_half_up():
+    shares = [("Winger", 900.0, 0.6, 2.5, 0.0), ("Centre Forward", 600.0, 0.4, 0.5, 0.0)]
+    assert render.goals_by_position(shares) == ["3 goals as winger", "1 goal as centre forward"]
+
+
+def test_not_rated_hides_composite_rank_and_data_bands():
+    """A thin peer pool (< MIN_PEERS_FOR_RANKING) is never shown as a rating (owner D1): no
+    composite, no rank, no Performance / Physical band, and a note saying why. Scout bands
+    stay: they are not computed from the pool."""
+    d = _fixture(composite=4.49, rank=1, peer_count=8,
+                 dimension_bands={"Performance": 4.1, "Physical": 3.6,
+                                  "Psychological": 3.0, "Medical": None},
+                 flags=["Composite 1.90 is below the club's 3.00 minimum standard",
+                        "Physical 1.50 is below the club minimum of 2.00"])
+    out = render.to_html(d, not_rated="Not rated: only 8 comparable players (needs 10)")
+    assert "4.49" not in out and "4.10" not in out and "3.60" not in out
+    assert "1st of 8" not in out
+    assert "Not rated: only 8 comparable players (needs 10)" in out
+    assert "3.00" in out                                  # Psychological kept
+    assert "below the club" not in out
+
+
+def test_without_not_rated_the_document_is_unchanged():
+    assert render.to_html(_fixture()) == render.to_html(_fixture(), not_rated=None)
+
+
+def test_bar_inputs_are_the_drawn_bars():
+    """The web page draws the same bars as the document: same metrics, labels, flipped
+    turnovers and Orient ticks."""
+    d = _fixture(position="Central Mid", percentiles={"turnovers_p90": 30.0},
+                 benchmark={"turnovers_p90": 60.0}, benchmark_n=3)
+    rows = render.bar_inputs(d)
+    t = next(r for r in rows if r["metric"] == "turnovers_p90")
+    assert t["inverted"] and t["shown"] == 70.0 and t["orient"] == 40.0
+    assert t["label"].endswith("(fewer is better)")
+    missing = [r for r in rows if r["metric"] != "turnovers_p90"]
+    assert missing and all(r["shown"] is None for r in missing)

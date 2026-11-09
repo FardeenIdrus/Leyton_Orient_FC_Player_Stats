@@ -29,6 +29,7 @@ import html
 import pandas as pd
 import streamlit as st
 
+from lofc.core import card as card_core   # the card's facts, shared with the web front end
 from lofc.dashboard.loaders import round_half_up
 from lofc.dashboard.theme import RED
 
@@ -124,26 +125,22 @@ def minutes_bar(shares: pd.DataFrame, assigned: str) -> str:
     other is an ink grey. Returns "" when there is nothing to say -- a player who filled
     one position all season has no split worth drawing, and an empty bar would imply one.
     """
-    if shares is None or len(shares) < 2:
+    split = card_core.minutes_split(shares, assigned)
+    if split is None:
         return ""
 
     segs, legend = [], []
-    other = iter(_OTHER_TONES)
-    for r in shares.itertuples():
-        is_assigned = r.position_group == assigned
-        colour = RED if is_assigned else next(other, _OTHER_TONES[-1])
-        pct = float(r.share) * 100.0
-        segs.append(f'<div class="lofc-ph-seg" style="width:{pct:.2f}%;background:{colour}" '
-                    f'title="{html.escape(r.position_group)} {pct:.0f}%"></div>')
-        name = html.escape(r.position_group)
-        legend.append(f"<b>{name}</b> {pct:.0f}%" if is_assigned else f"{name} {pct:.0f}%")
+    for seg in split["segments"]:
+        pct = seg["share_pct"]
+        segs.append(f'<div class="lofc-ph-seg" style="width:{pct:.2f}%;background:{seg["colour"]}" '
+                    f'title="{html.escape(seg["position"])} {pct:.0f}%"></div>')
+        name = html.escape(seg["position"])
+        legend.append(f"<b>{name}</b> {pct:.0f}%" if seg["assigned"] else f"{name} {pct:.0f}%")
 
-    goals = [(r.position_group, float(r.goals)) for r in shares.itertuples()
-             if pd.notna(r.goals) and float(r.goals) >= 0.5]
     goals_line = ""
-    if len(goals) > 1 or (goals and shares.iloc[0]["position_group"] != goals[0][0]):
-        parts = " · ".join(f"{g:.0f} as {html.escape(p.lower())}" for p, g in goals)
-        goals_line = f'<div class="lofc-ph-goals">Goals: {parts}</div>'
+    if split["goals_line"]:
+        # "Goals: 4 as centre forward" -- the position names are provider text: escape them
+        goals_line = f'<div class="lofc-ph-goals">{html.escape(split["goals_line"])}</div>'
 
     return (f'<div class="lofc-ph-mins">'
             f'<span class="lofc-ph-k2">Minutes by position</span>'
@@ -153,85 +150,34 @@ def minutes_bar(shares: pd.DataFrame, assigned: str) -> str:
 
 
 def _months_to(when) -> int | None:
-    """Whole months from today to `when`, or None. Negative means already expired.
+    """Whole months from today to `when` (see `core.card.months_to`)."""
+    return card_core.months_to(when)
 
-    pd.isna FIRST and unconditionally. `pd.NaT` passes `isinstance(x, datetime.datetime)`
-    -- it subclasses datetime -- so guarding on the type before the null check let NaT
-    through, returned nan, and the caller then raised "NaTType does not support strftime",
-    breaking the whole player card for anyone with no contract date.
-    """
-    if when is None:
-        return None
-    try:
-        if pd.isna(when):
-            return None
-    except (TypeError, ValueError):
-        return None
-    end = pd.Timestamp(when).date()
-    today = datetime.date.today()
-    return (end.year - today.year) * 12 + (end.month - today.month)
+
+def _chip_html(chip: dict, cls: str) -> str:
+    inner = "".join(f"<b>{html.escape(t)}</b>" if bold else html.escape(t) for t, bold in chip["parts"])
+    return f'<span class="lofc-ph-chip{cls}">{inner}</span>'
 
 
 def status_strip(row: pd.Series, loan: pd.Series | None = None) -> str:
     """Contract runway and loan status, as chips.
 
     These decide whether a player is GETTABLE, which is a different question from how good
-    he is, so they are stated plainly rather than left in a bio table. The runway is given
-    in months as well as a date: "Jun 2027" does not read as urgent to someone scanning a
-    list, "9 months left" does. Under 12 months is marked, because that is the window in
-    which a player can be approached.
+    he is, so they are stated plainly rather than left in a bio table. The wording and the
+    under-12-months rule are `core.card.contract_chip` / `loan_chip`, shared with the web card.
     """
-    chips = []
-    contract = row.get("contract_until")
-    months = _months_to(contract)
-    if months is None:
-        chips.append('<span class="lofc-ph-chip">Contract <b>not recorded</b></span>')
-    else:
-        when = pd.Timestamp(contract).strftime("%b %Y")
-        if months < 0:
-            chips.append(f'<span class="lofc-ph-chip expiring">Contract <b>expired</b> '
-                         f'({html.escape(when)})</span>')
-        else:
-            years, rem = divmod(months, 12)
-            length = (f"{years}y {rem}m" if years and rem else
-                      f"{years}y" if years else f"{rem}m")
-            cls = " expiring" if months < 12 else ""
-            chips.append(f'<span class="lofc-ph-chip{cls}">Contract to '
-                         f'<b>{html.escape(when)}</b> · {length} left</span>')
-
-    if loan is not None and len(loan):
-        parent = loan.get("parent_club")
-        ends = loan.get("loan_ends")
-        bits = "On loan"
-        if parent and pd.notna(parent):
-            bits += f" from <b>{html.escape(str(parent))}</b>"
-        if ends is not None and pd.notna(ends):
-            bits += f" · until {html.escape(pd.Timestamp(ends).strftime('%b %Y'))}"
-        chips.append(f'<span class="lofc-ph-chip loan">{bits}</span>')
-
+    contract = card_core.contract_chip(row.get("contract_until"))
+    chips = [_chip_html(contract, " expiring" if contract["expiring"] else "")]
+    loan_chip = card_core.loan_chip(loan)
+    if loan_chip is not None:
+        chips.append(_chip_html(loan_chip, " loan"))
     return f'<div class="lofc-ph-status">{"".join(chips)}</div>'
 
 
 def build(row: pd.Series, shares: pd.DataFrame | None = None,
           loan: pd.Series | None = None) -> str:
     """The whole header as one HTML string."""
-    def text(key, fmt=None):
-        v = row.get(key)
-        if v is None or (not isinstance(v, str) and pd.isna(v)):
-            return None
-        return fmt(v) if fmt else str(v)
-
-    cells = [
-        _cell("Age", text("age", lambda v: f"{float(v):.1f}")),
-        _cell("Foot", text("foot", lambda v: str(v).capitalize())),
-        _cell("Height", text("height_cm", lambda v: f"{int(v)} cm")),
-        # Contract deliberately NOT here: it is the chip below, which carries the same
-        # date PLUS the time remaining and the urgency colour. Showing it in both places
-        # printed "Contract to" twice on every card. Nationality takes the freed cell --
-        # it reached ~100% coverage in the 2026-09-07 backfill and had nowhere to show.
-        _cell("Nationality", text("nationality")),
-        _cell("Minutes", text("minutes", lambda v: f"{round_half_up(v):,}")),
-    ]
+    cells = [_cell(label, value) for label, value in card_core.register_cells(row)]
     name = html.escape(str(row.get("player_name", "")))
     club = html.escape(club_text(row.get("team_name", "") or "", row.get("current_club")))
     position = html.escape(str(row.get("position_group", "") or ""))

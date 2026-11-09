@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>{% block title %}{{ page.title }}{% endblock %} · LOFC Recruitment</title>
+<style>html{background:#F1F2F4}body{margin:0;background:#F1F2F4}</style>
+<link rel="icon" type="image/png" href="{{ static_url('img/logo.png') }}">
+<link rel="stylesheet" href="{{ static_url('css/app.css') }}">
+<link rel="modulepreload" href="{{ static_url('js/common.js') }}">
+</head>
+<body>
+<div class="app">
+<nav>
+  <a class="brand" href="/" aria-label="Home"><img class="logo" src="{{ static_url('img/logo.png') }}" alt="" width="40" height="40"><div><b>Recruitment</b><span>Leyton Orient FC</span></div></a>
+  <div class="navgroups">
+  {% for group, items in nav %}
+  <div class="ngroup"><div class="group">{{ group }}</div>
+  {% for p in items %}<a href="{{ p.path }}"{% if p.key == active %} class="on" aria-current="page"{% endif %}>{{ p.title }}</a>{% endfor %}
+  </div>
+  {% endfor %}
+  </div>
+  <div class="user"><b>{{ user.full_name }}</b>{{ role_label }}<a href="/login" id="signout">Sign out</a></div>
+</nav>
+<main>
+  <div class="infobar" id="infobar"><span>{% for item in info_items %}{% if not loop.first %} · {% endif %}{{ item|safe }}{% endfor %}</span></div>
+  <div class="page">
+  {% block content %}{% endblock %}
+  </div>
+</main>
+</div>
+<script type="module" src="{{ static_url('js/shell.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

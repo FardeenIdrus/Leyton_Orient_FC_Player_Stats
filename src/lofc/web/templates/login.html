@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Sign in · LOFC Recruitment</title>
+<style>html,body{background:#14161B}</style>
+<link rel="icon" type="image/png" href="{{ static_url('img/logo.png') }}">
+<link rel="stylesheet" href="{{ static_url('css/app.css') }}">
+</head>
+<body class="auth">
+<main class="auth-wrap">
+  <div class="auth-side" aria-hidden="true">
+    <img src="{{ static_url('img/logo.png') }}" alt="" width="148" height="148">
+    <div class="auth-club">Leyton Orient FC</div>
+    <div class="auth-tag">Recruitment</div>
+  </div>
+  <div class="auth-card">
+    <img class="auth-logo-sm" src="{{ static_url('img/logo.png') }}" alt="Leyton Orient FC" width="56" height="56">
+    <h1>Sign in</h1>
+    <p class="auth-lead">Leyton Orient recruitment platform</p>
+    {% if error %}<div class="notice" role="alert">{{ error }}</div>{% endif %}
+    <form method="post" action="/login" autocomplete="on">
+      <div class="f"><label for="username">Username</label><input class="ctl" id="username" name="username" autocomplete="username" required autofocus></div>
+      <div class="f"><label for="password">Password</label><input class="ctl" id="password" name="password" type="password" autocomplete="current-password" required></div>
+      <button class="btn primary auth-go" type="submit">Sign in</button>
+    </form>
+    <p class="note auth-foot">Forgotten password? Ask an administrator to reset it.</p>
+  </div>
+</main>
+</body>
+</html>

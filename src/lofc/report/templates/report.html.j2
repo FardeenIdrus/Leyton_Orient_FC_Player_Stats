@@ -96,12 +96,15 @@
 
     <div class="verdict">
       <h2>Club composite</h2>
-      {% if d.composite is not none %}
+      {% if not_rated %}
+      <div class="figure">&mdash;</div>
+      <div class="of">{{ not_rated }}</div>
+      {% elif d.composite is not none %}
       <div class="figure">{{ "%.2f"|format(d.composite) }}</div>
       {% else %}
       <div class="figure">&mdash;</div>
       {% endif %}
-      {% if d.rank %}
+      {% if d.rank and not not_rated %}
       <div class="of">{{ d.rank }}{{ d.rank|ordinal }} of {{ d.peer_count }}
         {{ d.league }} {{ d.position }}s</div>
       {% endif %}
@@ -109,8 +112,10 @@
       <dl class="bands">
         {% for name, band in d.dimension_bands.items() %}
         {% set theirs = d.authored and name in ("Psychological", "Medical") %}
+        {% set withheld = not_rated and name in ("Performance", "Physical") %}
         <div><dt>{{ name }}</dt>
-          {% if band is not none %}<dd>{{ "%.2f"|format(band) }}</dd>
+          {% if withheld %}<dd class="absent">&mdash;</dd>
+          {% elif band is not none %}<dd>{{ "%.2f"|format(band) }}</dd>
           {% elif theirs %}<dd class="absent">&mdash;</dd>
           {% else %}<dd class="absent">not assessed</dd>{% endif %}</div>
         {% endfor %}
@@ -128,7 +133,7 @@
          its budget, which printed the report as two pages. The reassurance that a flag
          never excludes a player is stated once, in the footer. #}
       <div class="flags">
-        {% for flag in d.flags %}<div class="flag">⚠ {{ flag }}</div>{% endfor %}
+        {% for flag in d.flags if not (not_rated and flag.startswith(("Composite ", "Performance ", "Physical "))) %}<div class="flag">⚠ {{ flag }}</div>{% endfor %}
       </div>
       {% endif %}
     </div>
@@ -144,11 +149,11 @@
         {% endif %}
       </div>
       <dl class="counts">
-        <div><dt>Minutes</dt><dd>{{ "{:,.0f}".format(d.minutes) if d.minutes else "—" }}</dd></div>
-        <div><dt>Goals</dt><dd>{{ "%.0f"|format(d.goals) if d.goals is not none else "—" }}</dd></div>
-        <div><dt>Assists</dt><dd>{{ "%.0f"|format(d.assists) if d.assists is not none else "—" }}</dd></div>
+        <div><dt>Minutes</dt><dd>{{ d.minutes|half_up if d.minutes else "—" }}</dd></div>
+        <div><dt>Goals</dt><dd>{{ d.goals|half_up if d.goals is not none else "—" }}</dd></div>
+        <div><dt>Assists</dt><dd>{{ d.assists|half_up if d.assists is not none else "—" }}</dd></div>
         <div><dt>Chances created</dt>
-          <dd>{{ "%.0f"|format(d.chances_created) if d.chances_created is not none else "—" }}</dd></div>
+          <dd>{{ d.chances_created|half_up if d.chances_created is not none else "—" }}</dd></div>
       </dl>
       {# WHERE the output came from. Nothing is removed from his profile -- these are
          the same goals, attributed to the position he was playing at the time. It matters

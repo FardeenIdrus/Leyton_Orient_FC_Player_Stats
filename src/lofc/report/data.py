@@ -191,11 +191,11 @@ class ReportData:
     style: dict = field(default_factory=dict)
 
 
-def _style_row(engine, player_id: int, competition_id: int, season_id: int,
-               position: str) -> dict:
-    """His playing-style row, built exactly as the dashboard's load_style_labels does
-    (loaders.py) but without Streamlit, which this module must not import. Percentiles
-    are over the whole season's pool, so the full frame is needed, not just his row."""
+def _style_labels(engine, season_id: int) -> pd.DataFrame:
+    """Every player's playing-style row for the season, built exactly as the dashboard's
+    load_style_labels does (loaders.py) but without Streamlit, which this module must not
+    import. Percentiles are over the whole season's pool, so the full frame is needed.
+    Empty when the season has no style signals."""
     from lofc.model import styles
     base = pd.read_sql(
         text("SELECT n.player_id, n.competition_id, n.season_id, n.position_group, "
@@ -206,17 +206,50 @@ def _style_row(engine, player_id: int, competition_id: int, season_id: int,
                            "player_style_signals WHERE season_id = :s"),
                       engine, params={"s": int(season_id)})
     if base.empty or sig.empty:
-        return {}
+        return pd.DataFrame()
     wide = sig.pivot_table(index=["player_id", "competition_id"], columns="signal",
                            values="value").reset_index()
     frame = base.merge(wide, on=["player_id", "competition_id"], how="left")
     if not set(styles.SIGNALS) & set(frame.columns):
+        return pd.DataFrame()
+    return styles.assign_styles(styles.signal_percentiles(frame))
+
+
+def _style_row(labels: pd.DataFrame, player_id: int, competition_id: int,
+               position: str) -> dict:
+    """His row of `_style_labels`, or {}."""
+    if labels is None or labels.empty:
         return {}
-    labels = styles.assign_styles(styles.signal_percentiles(frame))
     mine = labels[(labels.player_id == player_id)
                   & (labels.competition_id == competition_id)
                   & (labels.position_group == position)]
     return mine.iloc[0].to_dict() if not mine.empty else {}
+
+
+@dataclass(frozen=True)
+class SeasonInputs:
+    """The season-wide frames one report reads: every player-season's neutral row, the
+    percentiles computed from them (`metric_percentiles`, the composite's own function) and
+    the style labels. The same for every player in the season, so the web front end builds
+    them once and passes them to `build` (TASKS 2.36); Streamlit's plain `build` call builds
+    them itself. Callers must not mutate them."""
+
+    season_id: int
+    neutral: pd.DataFrame
+    percentiles: pd.DataFrame
+    style_labels: pd.DataFrame
+
+
+def season_inputs(engine, season_id: int) -> SeasonInputs:
+    neutral = pd.read_sql(select(_N).where(_N.c.season_id == season_id), engine)
+    return SeasonInputs(season_id=int(season_id), neutral=neutral,
+                        percentiles=metric_percentiles(neutral),
+                        style_labels=_style_labels(engine, season_id))
+
+
+def resolved_bands(engine) -> pd.DataFrame:
+    """Every player-season's resolved Psychological / Medical bands (Decision 17)."""
+    return scout_scores.resolve_bands(store_assess.load_all(engine))
 
 
 def _age(birth_date, season_id: int) -> float | None:
@@ -294,7 +327,9 @@ def with_authored(base: ReportData, authored: Authored) -> ReportData:
 
 
 def build(engine, player_id: int, competition_id: int, season_id: int, *,
-          authored: Authored | None = None, data_only: bool = False) -> ReportData:
+          authored: Authored | None = None, data_only: bool = False,
+          season: SeasonInputs | None = None,
+          resolved: pd.DataFrame | None = None) -> ReportData:
     """Everything one player's report needs.
 
     `authored` swaps in a user's own narrative and Psychological / Medical figures for the
@@ -302,11 +337,17 @@ def build(engine, player_id: int, competition_id: int, season_id: int, *,
     Medical value, stamp "Data only"). With neither, the report is built from the scout
     assessments as before.
 
+    `season` (`season_inputs`) and `resolved` (`resolved_bands`) may be passed in when the
+    caller already holds them; read here otherwise. Either way the report is the same.
+
     Raises ValueError naming the player when the player-season does not exist: an empty
     report is worse than an error, because it reads as a player about whom nothing is known.
     """
-    neutral = pd.read_sql(
-        select(_N).where(_N.c.season_id == season_id), engine)
+    if season is None:
+        season = season_inputs(engine, season_id)
+    elif season.season_id != int(season_id):
+        raise ValueError(f"season inputs are for season {season.season_id}, not {season_id}")
+    neutral = season.neutral
     mine = neutral[(neutral.player_id == player_id)
                    & (neutral.competition_id == competition_id)]
     if mine.empty:
@@ -319,7 +360,7 @@ def build(engine, player_id: int, competition_id: int, season_id: int, *,
     bio_row = bio.iloc[0] if not bio.empty else None
 
     # --- percentiles, from the same function the composite uses ---------------------
-    pcts_wide = metric_percentiles(neutral)
+    pcts_wide = season.percentiles
     key = (player_id, competition_id, season_id, position)
     percentiles: dict[str, float] = {}
     if key in pcts_wide.index:
@@ -335,7 +376,8 @@ def build(engine, player_id: int, competition_id: int, season_id: int, *,
 
     # --- assessments: a band only where somebody decided ------------------------------
     assessments = store_assess.load_for_player(engine, player_id, competition_id, season_id)
-    resolved = scout_scores.resolve_bands(store_assess.load_all(engine))
+    if resolved is None:
+        resolved = resolved_bands(engine)
     mine_resolved = resolved[(resolved.player_id == player_id)
                              & (resolved.competition_id == competition_id)
                              & (resolved.season_id == season_id)] if not resolved.empty \
@@ -375,7 +417,7 @@ def build(engine, player_id: int, competition_id: int, season_id: int, *,
     ranked = ranked.dropna(subset=["objective_composite"])
     rank, _peers = rank_in_pool(ranked, player_id, competition_id, season_id, position)
 
-    style = _style_row(engine, player_id, competition_id, season_id, position)
+    style = _style_row(season.style_labels, player_id, competition_id, position)
 
     # --- availability -----------------------------------------------------------------
     spells = store_injuries.load_for_player(engine, player_id)

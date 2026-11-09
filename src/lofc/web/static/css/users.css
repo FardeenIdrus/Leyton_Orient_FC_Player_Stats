@@ -1,0 +1,29 @@
+/* Users page */
+.us-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:14px}
+.us-create{margin-bottom:18px}
+.us-create h2{margin-bottom:12px}
+.us-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px 16px}
+.us-actions{display:flex;gap:10px;margin-top:12px}
+.us-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;align-items:start}
+.us-layout.open{grid-template-columns:minmax(0,1.6fr) minmax(320px,1fr)}
+.us-list tbody tr{cursor:pointer}
+.us-list tbody tr:hover{background:#FAFAFB}
+.us-list tbody tr.on td{background:#FFF6F7}
+.us-list td.dim{color:var(--muted)}
+.us-panel{position:sticky;top:64px}
+.us-panel h2{font-size:18px}
+.us-panel .sec{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}
+.us-panel h3{margin:0 0 6px}
+.us-panel .f{margin-top:8px}
+.us-panel .btn{margin-top:10px}
+.us-panel .x{float:right;margin-top:-4px}
+.tag-off{color:var(--lo);font-weight:600}
+.tag-lock{color:#8A6410;font-weight:600}
+@media (max-width:1100px){.us-layout.open{grid-template-columns:minmax(0,1fr)}.us-panel{position:static}}
+.us-list td,.us-list th{overflow-wrap:normal;word-break:normal;white-space:nowrap}
+.us-list td:nth-child(2){white-space:normal}
+.us-layout.open{grid-template-columns:minmax(0,1fr) 340px}
+/* the account panel is a drawer over the page: the list keeps its full width */
+.us-layout.open{grid-template-columns:minmax(0,1fr)}
+.us-panel{position:fixed;top:0;right:0;bottom:0;width:min(400px,92vw);overflow:auto;z-index:20;border-radius:0;box-shadow:-12px 0 32px rgba(21,23,28,.14);padding:24px}
+@media (max-width:1100px){.us-panel{position:fixed}}

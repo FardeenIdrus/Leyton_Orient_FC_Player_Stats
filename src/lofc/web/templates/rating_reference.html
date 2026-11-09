@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}What goes into each rating{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_url('css/reference.css') }}">
+<section class="view on" id="v-rating-reference" data-page="rating-reference">
+  <div class="section-label">{{ page.group }}</div>
+  <div class="rf-head">
+    <h1>What goes into each rating</h1>
+    <a class="btn" id="rr-xlsx" href="/api/rating-reference.xlsx" download data-tip="One tab per position, with an empty Comments column for review.">⬇ Download as Excel</a>
+  </div>
+  <div class="seg rf-seg" id="rr-pos" role="group" aria-label="Position"></div>
+  <div class="card rf-card">
+    <div class="rf-line" id="rr-line">&nbsp;</div>
+    <div class="tw"><table class="rf-table" id="rr-table"><tbody><tr><td class="note">Loading…</td></tr></tbody></table></div>
+    <p class="note" id="rr-note" hidden></p>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ static_url('js/rating_reference.js') }}"></script>{% endblock %}

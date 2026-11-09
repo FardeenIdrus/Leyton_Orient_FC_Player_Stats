@@ -3,7 +3,8 @@
 #   docker compose -f docker-compose.prod.yml up -d --build
 #   docker compose -f docker-compose.prod.yml exec app python -m lofc.pipeline
 #
-# Only the dashboard is public, via Caddy (automatic HTTPS). Access control is the
+# Only the web front end (DASHBOARD_DOMAIN) and, as a fallback, the old Streamlit dashboard
+# (OLD_DASHBOARD_DOMAIN) are public, via Caddy (automatic HTTPS). Access control is the
 # platform's OWN login (real accounts, scrypt-hashed passwords, lockout, 12-hour
 # sessions) -- there is no separate Caddy basic-auth layer; see DEPLOY.md, "Why no
 # Caddy basic-auth". The database, the app container and the admin tools are NOT
@@ -65,6 +66,41 @@ services:
     restart: unless-stopped
     # No host port: Caddy reaches it over the internal network and serves it publicly.
 
+  # The new web front end (docs/frontend.md), served on DASHBOARD_DOMAIN. Two identical
+  # containers, blue and green: a deploy starts the idle one from the new image and Caddy
+  # switches to it only once its warm-up is done (scripts/web_switch.sh), so no user ever meets
+  # a cold site; the old one is then stopped. One worker on purpose: the page caches live in the
+  # process (~1.4 GB warm, measured 2026-11-09) and a second worker would double that and the
+  # warm-up. No reloader. No host port: Caddy reaches it over the internal network.
+  web-blue: &web
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    volumes:
+      - appdata:/app/data:ro       # landed provider files (glossary definitions, physical)
+      - ./secrets:/app/secrets:ro  # the Scout reports "Refresh" reads the club's sheet (read-only key)
+    command: ["uvicorn", "lofc.web.app:app", "--host", "0.0.0.0", "--port", "8600",
+              "--workers", "1", "--proxy-headers", "--forwarded-allow-ips", "*",
+              "--timeout-graceful-shutdown", "20"]
+    mem_limit: 3g
+    cpus: "2.0"
+    healthcheck:
+      # /readyz: 200 once every start-up warm-up is done (503 before).
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8600/readyz', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15m
+    restart: unless-stopped
+
+  web-green:
+    <<: *web
+
   caddy:
     image: caddy:2.8-alpine
     depends_on:
@@ -74,8 +110,14 @@ services:
       - "443:443"
     environment:
       DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN:?set DASHBOARD_DOMAIN in .env}
+      # The old Streamlit dashboard stays reachable here as a fallback for about two weeks after
+      # the switch to the new front end (owner, 2026-11-09). A DuckDNS name for this server.
+      OLD_DASHBOARD_DOMAIN: ${OLD_DASHBOARD_DOMAIN:?set OLD_DASHBOARD_DOMAIN in .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # caddy/web_upstream.caddy names the web container that serves DASHBOARD_DOMAIN; written by
+      # scripts/web_switch.sh (not committed). A directory mount, so an edit is seen on reload.
+      - ./caddy:/etc/caddy/site:ro
       - caddy_data:/data
       - caddy_config:/config
     restart: unless-stopped

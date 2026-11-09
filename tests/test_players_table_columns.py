@@ -90,3 +90,10 @@ def test_player_types_page_is_not_offered():
     from lofc.dashboard import app
     source = inspect.getsource(app.main)
     assert 'st.Page(_player_types_page' not in source
+
+
+def test_mins_column_rounds_half_up():
+    # owner 2026-11-09: half-up everywhere (the table used pandas round(0), half to even)
+    src = inspect.getsource(players)
+    assert 'view["Mins"] = view["minutes"].round(0)' not in src
+    assert 'view["Mins"] = view["minutes"].map(lambda v: whole_minutes(v) if pd.notna(v) else v)' in src

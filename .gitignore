@@ -100,3 +100,6 @@ secrets/
 # Club working documents (Head of Recruitment's inputs, workbooks, player reports). Never
 # tracked: they are the club's, and some carry player data. Put them here, not in docs/.
 club_docs/
+
+# Written by scripts/web_switch.sh on the server: which web container Caddy serves.
+caddy/web_upstream.caddy

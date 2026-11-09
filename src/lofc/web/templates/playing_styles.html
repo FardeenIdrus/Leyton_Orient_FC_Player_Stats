@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}How playing styles work{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_url('css/reference.css') }}">
+<section class="view on" id="v-playing-styles" data-page="playing-styles">
+  <div class="section-label">{{ page.group }}</div>
+  <h1>How playing styles work</h1>
+  <div class="meta">A style describes <b>how a player plays</b>. Styles never change a player's rating.</div>
+  <div class="ps-steps" id="ps-steps"></div>
+  <h2 class="rf-h2">What the labels mean</h2>
+  <div class="ps-labels" id="ps-labels"></div>
+  <p class="note">A player can be Strong in more than one style. Wingers get two labels: <b>where</b> they play and <b>what</b> they do.</p>
+  <div class="seg rf-seg" id="ps-group" role="group" aria-label="Position"></div>
+  <div class="card rf-card" id="ps-example-card" hidden>
+    <h2 id="ps-ex-h"></h2>
+    <div class="tw"><table class="rf-table" id="ps-ex"></table></div>
+    <p class="note" id="ps-ex-note"></p>
+  </div>
+  <div class="card rf-card">
+    <h2>Styles and their signals</h2>
+    <div class="tw"><table class="rf-table" id="ps-table"><tbody><tr><td class="note">Loading…</td></tr></tbody></table></div>
+    <p class="note">⚑ = measures success, not only what he attempts. Team style affects receptions: a winger in a direct side receives more balls in behind. Defensive and central midfielders are compared together for style.</p>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ static_url('js/playing_styles.js') }}"></script>{% endblock %}

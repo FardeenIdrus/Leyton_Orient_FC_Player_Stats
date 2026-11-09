@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Players{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_url('css/players.css') }}">
+<section class="view on" id="v-players" data-page="players">
+  <div class="section-label">Players</div>
+  <h1 id="pl-title">Players</h1>
+  <div class="meta" id="pl-meta">&nbsp;</div>
+  <div id="pl-notice"></div>
+
+  <div class="filters" id="filters">
+    <div class="fl" id="fl-main">
+      <div class="f grow">
+        <label for="f-search">Find a player — every position and league</label>
+        <div class="searchbox">
+          <input class="ctl" id="f-search" type="search" placeholder="Search a player…" aria-label="Search a player" autocomplete="off">
+          <button type="button" class="btn small" id="search-clear" disabled>✕ Clear</button>
+          <div class="results" id="search-results" hidden></div>
+        </div>
+      </div>
+      <div class="f f-season"><label for="f-season">Season</label><select class="ctl" id="f-season" name="season"></select></div>
+      <div class="f f-position"><label for="f-position">Position</label><select class="ctl" id="f-position" name="position"></select></div>
+      <div class="f f-leagues"><label id="lbl-leagues">Leagues</label>
+        <div class="popwrap">
+          <button type="button" class="ctl pop-btn" id="leagues-btn" aria-label="Leagues" aria-haspopup="true" aria-expanded="false">All leagues</button>
+          <div class="pop" id="leagues-pop" hidden>
+            <div class="pop-actions"><button type="button" class="btn small" id="leagues-all">All leagues</button><button type="button" class="btn small" id="leagues-none">Untick all</button></div>
+            <div class="pop-list" id="leagues-list"></div>
+          </div>
+        </div>
+      </div>
+      <div class="f f-rank" id="rank-wrap" hidden><label for="f-rank">Rank as</label><select class="ctl" id="f-rank" name="rank_as"></select></div>
+      <button type="button" class="btn" id="more-btn" aria-expanded="false">More filters ▾</button>
+      <button type="button" class="btn" id="mf-btn" aria-expanded="false">Metric filters ▾</button>
+    </div>
+
+    <div class="more" id="more">
+      <div class="fl">
+        <div class="f f-range"><label for="f-minutes">Minimum minutes</label>
+          <div class="pair"><input type="range" id="f-minutes" name="min_minutes_slider" aria-label="Minimum minutes"><input class="ctl num" type="number" id="f-minutes-num" name="min_minutes" aria-label="…or type the minutes"></div>
+          <div class="ends"><span>450</span><span id="minutes-max"></span></div></div>
+        <div class="f f-range"><label for="f-age">Maximum age</label>
+          <div class="pair"><input type="range" id="f-age" name="max_age" aria-label="Maximum age"><output id="age-out" class="val"></output></div>
+          <div class="ends"><span>18</span><span>40 (no cap)</span></div></div>
+        <div class="f"><label for="f-foot">Preferred foot</label><select class="ctl" id="f-foot" name="foot"></select></div>
+        <div class="f f-wide"><label for="f-contract">Contract expiry</label><select class="ctl" id="f-contract" name="contract"></select></div>
+        <div class="f"><label for="f-loan">Loan status</label><select class="ctl" id="f-loan" name="loan"></select></div>
+        <div class="f" id="style-wrap"><label for="f-style">Playing style</label><select class="ctl" id="f-style" name="style"></select></div>
+        <div class="f" id="strong-wrap"><label>&nbsp;</label><label class="switch" id="sw-strong"><input type="checkbox" id="f-strong" name="strong_only"><i></i>Strong only</label></div>
+      </div>
+      <div class="fl" style="margin-top:16px">
+        <div class="f"><label>&nbsp;</label><label class="switch" id="sw-money"><input type="checkbox" id="f-money" name="money"><i></i>Show affordability (modelled)</label></div>
+        <div class="f f-range money" hidden><label for="f-budget">Transfer budget (€m)</label>
+          <div class="pair"><input type="range" id="f-budget" name="budget_slider" aria-label="Transfer budget (€m)"><input class="ctl num" type="number" id="f-budget-num" name="budget" aria-label="…or type it (€m)"></div>
+          <div class="ends"><span>0</span><span>150</span></div></div>
+        <div class="f f-range money" hidden><label for="f-wagex">Wage budget (× club ceiling)</label>
+          <div class="pair"><input type="range" id="f-wagex" name="wage_x" aria-label="Wage budget (× club ceiling)"><output id="wagex-out" class="val"></output></div>
+          <div class="ends"><span>0.5</span><span>25</span></div></div>
+        <div class="f money" hidden><label for="f-wage">…or type a max weekly wage (£)</label><input class="ctl num wide" type="number" id="f-wage" name="wage" aria-label="…or type a max weekly wage (£)"></div>
+      </div>
+      <div class="note money" hidden id="money-cap" style="margin-top:8px"></div>
+    </div>
+
+    <div class="more" id="mf">
+      <div id="mf-phys">
+        <h3 style="margin-top:0">Physical · raw values</h3>
+        <div class="tabs" id="ph-tabs"></div>
+        <div class="sliders" id="ph-sliders"></div>
+      </div>
+      <h3 style="margin-top:22px">Performance · minimum percentile in league and position</h3>
+      <div class="sliders four" id="pf-sliders"></div>
+      <div style="margin-top:14px"><button type="button" class="btn small" id="mf-reset">Reset metric filters</button></div>
+    </div>
+  </div>
+
+  <div class="chips" id="active"></div>
+
+  <div class="card" id="ranking">
+    <div class="rank-head">
+      <div><h2>Ranking</h2><div class="note" id="count-cap">&nbsp;</div></div>
+      <div class="rank-tools">
+        <label class="switch" id="sw-assessed" title=""><input type="checkbox" id="f-assessed" name="assessed"><i></i>Rank on scout-verified rating</label>
+        <label class="switch" id="sw-signed" hidden><input type="checkbox" id="f-signed" name="signed_only"><i></i>Signed-off assessments only</label>
+        <label class="switch money" id="sw-signable" hidden><input type="checkbox" id="f-signable" name="signable"><i></i>Only signable players</label>
+        <a class="btn small" id="csv" href="/api/players.csv" download>⬇ Download this list (CSV)</a>
+      </div>
+    </div>
+    <div class="note" id="cap-lines"></div>
+    <div id="pl-hidden"></div>
+    <div class="tw" id="tw"><table><thead id="pl-head"></thead><tbody id="pl-body"></tbody></table></div>
+    <details id="about"><summary>About this list</summary><div id="about-body"></div></details>
+  </div>
+
+  <div class="card" id="not-ranked" style="margin-top:18px">
+    <h2>Not ranked</h2><div class="sub" id="nr-sub"></div><div id="nr-body"></div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ static_url('js/players.js') }}"></script>{% endblock %}

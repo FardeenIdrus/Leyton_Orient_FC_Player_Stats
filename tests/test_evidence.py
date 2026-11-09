@@ -109,9 +109,13 @@ def test_resolve_window_returns_the_window_for_a_mapped_season():
 
 
 def test_resolve_window_returns_none_rather_than_raising_for_an_unmapped_season():
-    """CRITICAL 1: `available_seasons()` can offer 317 (2024/25) before `_SEASON_LABELS` has
-    the season one step further back (316) that a two-season window needs -- `window_labels`
-    then raises. The player profile and the Assess page both call through here, so this must
-    come back as a plain None the caller can degrade on, not propagate the exception and take
-    the whole page down."""
-    assert evidence.resolve_window(317) is None
+    """CRITICAL 1: a season can be offered before `_SEASON_LABELS` has the season one step
+    further back that a two-season window needs -- `window_labels` then raises. (317 was that
+    case until 316 was mapped; 316 itself still needs the unmapped 315.) The player profile and
+    the Assess page both call through here, so this must come back as a plain None the caller
+    can degrade on, not propagate the exception and take the whole page down."""
+    assert evidence.resolve_window(316) is None
+
+
+def test_resolve_window_for_2024_25_now_reaches_back_to_23_24():
+    assert evidence.resolve_window(317) == ("23/24", "24/25")

@@ -84,6 +84,28 @@ services:
     command: ["streamlit", "run", "src/lofc/dashboard/app.py",
               "--server.port=8501", "--server.address=0.0.0.0"]
 
+  # New web front end (docs/frontend.md) at http://localhost:8600 -- local development only.
+  # The image does not contain FastAPI yet (pyproject.toml lists it for the next rebuild), so
+  # it is installed into the container's user site at start. Code reloads on save.
+  web:
+    # Reuses the image `app` already built (no second multi-minute build); `docker compose
+    # build app` refreshes it.
+    image: ${COMPOSE_PROJECT_NAME:-leyton_orient_fc_player_stats}-app
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://lofc:lofc@db:5432/lofc}
+    volumes:
+      - ./src:/app/src
+      - ./data:/app/data:ro
+    ports:
+      - "8600:8600"
+    cpus: 1.5
+    command: ["sh", "-c", "pip install --user -q 'fastapi==0.162.2' && uvicorn lofc.web.app:app --host 0.0.0.0 --port 8600 --reload --reload-dir /app/src"]
+
   # Business-intelligence / self-serve reporting layer at http://localhost:3000.
   # Demonstrates the wider-BI growth path (commercial, academy, board) over the same
   # database. Free and open-source; first run needs a one-time setup in the browser.

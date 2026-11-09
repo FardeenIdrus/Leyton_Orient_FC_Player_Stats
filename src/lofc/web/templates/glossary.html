@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Glossary{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_url('css/reference.css') }}">
+<section class="view on" id="v-glossary" data-page="glossary">
+  <div class="section-label">{{ page.group }}</div>
+  <h1>Glossary</h1>
+  <div class="meta" id="gl-intro">&nbsp;</div>
+  <div class="gl-bar">
+    <input class="ctl gl-search" id="gl-q" type="search" placeholder="e.g. ball wins, sprint, in-behind" aria-label="Search the glossary" autocomplete="off">
+  </div>
+  <div class="tabs" id="gl-tabs" role="tablist" aria-label="Groups"></div>
+  <div class="card rf-card"><div id="gl-list"><p class="note">Loading…</p></div></div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ static_url('js/glossary.js') }}"></script>{% endblock %}

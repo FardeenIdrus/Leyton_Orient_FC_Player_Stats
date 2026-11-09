@@ -29,8 +29,8 @@ NOT_PUBLISHED = "Not published by {provider} in the data or documentation we hol
 PHYSICAL: dict[str, tuple[str, str]] = {
     # Verified 2026-10-16 against per-match data: season psv99 = mean of every match's PSV-99;
     # psv99_top5 = mean of his 5 fastest matches. "Top speed" is the latter (Head of Recruitment).
-    "top5_psv99_kmh": ("Top speed", "Average of his 5 fastest matches' top speeds (SkillCorner PSV-99 Top 5). A match's top speed is the 99th percentile of his movement above 15 km/h. km/h."),
-    "psv99_kmh": ("Average match top speed", "Average of his top speed across all his matches (SkillCorner PSV-99). km/h."),
+    "top5_psv99_kmh": ("Top speed", "Average of his 5 fastest matches' top speeds (SkillCorner PSV-99 Top 5). A match's top speed is the 99th percentile of his movement above 15 km/h."),
+    "psv99_kmh": ("Average match top speed", "Average of his top speed across all his matches (SkillCorner PSV-99), in km/h."),
     "distance_p90": ("Distance", "Total distance covered, per 90 minutes."),
     "meters_per_minute": ("Metres per minute", "Distance covered per minute on the pitch. Equals distance per 90 ÷ 90."),
     "running_distance_p90": ("Running distance", "Distance at running speed, below 20 km/h, per 90. SkillCorner does not publish the lower bound."),

@@ -114,15 +114,52 @@ _PAGE_CSS = """<style>
 </style>"""
 
 
+# The three steps, with **bold** marked (the web page renders the same text).
+STEPS = [("1 · Signals", "Mostly what he **attempts** and **where** he plays, e.g. his "
+          "share of receptions out wide. ⚑ marks the ones that measure success."),
+         ("2 · Compared with peers", "Each signal becomes a percentile (0–100) against the "
+          "**same position, league and season**, 450+ minutes."),
+         ("3 · Fit", "A style's **fit** is the average of its signals' percentiles. His "
+          "label comes from his best fit.")]
+
+
+def _bold(text: str) -> str:
+    import re
+    return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+
+
 def _steps_html() -> str:
-    steps = [("1 · Signals", "Mostly what he <b>attempts</b> and <b>where</b> he plays, e.g. his "
-              "share of receptions out wide. ⚑ marks the ones that measure success."),
-             ("2 · Compared with peers", "Each signal becomes a percentile (0–100) against the "
-              "<b>same position, league and season</b>, 450+ minutes."),
-             ("3 · Fit", "A style's <b>fit</b> is the average of its signals' percentiles. His "
-              "label comes from his best fit.")]
     return '<div class="sr-steps">' + "".join(
-        f'<div class="sr-step"><b class="n">{t}</b>{body}</div>' for t, body in steps) + "</div>"
+        f'<div class="sr-step"><b class="n">{t}</b>{_bold(body)}</div>' for t, body in STEPS) + "</div>"
+
+
+def worked_example(frame: pd.DataFrame, group: str) -> dict | None:
+    """The worked example for one style group, from the style inputs of a season (League One):
+    the example style, its signals, and up to two real players (best Strong, mid-band Leans)
+    with each signal's percentile and the fit -- formatted as the page shows them. None when
+    League One has no data for it."""
+    style = example_style(group)
+    sigs = {s: v for g in st.STYLES[group].values() for s, v in g.items()}[style]
+    pool = frame[frame["competition_id"] == EXAMPLE_LEAGUE]
+    if pool.empty or not set(sigs) <= set(pool.columns):
+        return None
+    pcts = st.signal_percentiles(pool)
+    labels = st.assign_styles(pcts).merge(
+        pool[["player_id", "competition_id", "player_name", "team_name"]],
+        on=["player_id", "competition_id"])
+    labels = labels[labels["position_group"].map(st.style_group) == group]
+    ex = example_players(labels, style)
+    if ex.empty:
+        return None
+    p = pcts.set_index(["player_id", "competition_id"])
+    rows = []
+    for _, r in ex.iterrows():
+        pr = p.loc[(r["player_id"], r["competition_id"])]
+        rows.append({"name": str(r["player_name"]), "team": str(r["team_name"]),
+                     "pcts": [f"{pr[s]:.0f}" for s in sigs],
+                     "fit": f"{r[f'fit.{style}']:.0f}", "tier": str(r["tier"])})
+    return {"style": style, "signal_keys": list(sigs),
+            "signals": [st.SIGNAL_LABELS[s] for s in sigs], "rows": rows}
 
 
 def _labels_html() -> str:
@@ -135,17 +172,16 @@ def _labels_html() -> str:
         f'<span class="t">{_e(t)}</span>{_e(body)}</div>' for c, p, t, body in cards) + "</div>"
 
 
-def _example_html(ex: pd.DataFrame, style: str, sigs: list[str], pcts: pd.DataFrame) -> str:
-    head = "".join(f"<th>{_e(st.SIGNAL_LABELS[s])}</th>" for s in sigs)
+def _example_html(ex: dict) -> str:
+    head = "".join(f"<th>{_e(lab)}</th>" for lab in ex["signals"])
     body = []
-    for _, r in ex.iterrows():
-        p = pcts.loc[(r["player_id"], r["competition_id"])]
-        cells = "".join(f"<td>{p[s]:.0f}th percentile</td>" for s in sigs)
+    for r in ex["rows"]:
+        cells = "".join(f"<td>{p}th percentile</td>" for p in r["pcts"])
         pill = ('<span class="sr-pill s">' if r["tier"] == "Strong" else '<span class="sr-pill l">') \
-            + _e(style) + "</span>" + ("" if r["tier"] == "Strong" else " leans")
-        body.append(f'<tr><td class="metric">{_e(r["player_name"])}<br><span style="font-weight:400;'
-                    f'color:#6B6B6B;font-size:.8rem">{_e(r["team_name"])}</span></td>{cells}'
-                    f'<td class="metric">{r[f"fit.{style}"]:.0f}</td><td>{pill}</td></tr>')
+            + _e(ex["style"]) + "</span>" + ("" if r["tier"] == "Strong" else " leans")
+        body.append(f'<tr><td class="metric">{_e(r["name"])}<br><span style="font-weight:400;'
+                    f'color:#6B6B6B;font-size:.8rem">{_e(r["team"])}</span></td>{cells}'
+                    f'<td class="metric">{r["fit"]}</td><td>{pill}</td></tr>')
     return (_CSS + f'<table class="lofc-ref"><tr><th>Player</th>{head}<th>Fit</th><th>Label</th></tr>'
             + "".join(body) + "</table>")
 
@@ -179,26 +215,13 @@ def render(season_id: int, season_label: str) -> None:
         return
 
     # Worked example: a two-signal style, League One, the season passed in.
-    first_style = example_style(group)
-    first_sigs = {s: v for g in st.STYLES[group].values() for s, v in g.items()}[first_style]
-    frame = load_style_inputs(season_id)
-    pool = frame[frame["competition_id"] == EXAMPLE_LEAGUE]
-    if not pool.empty and set(first_sigs) <= set(pool.columns):
-        pcts = st.signal_percentiles(pool)
-        labels = st.assign_styles(pcts).merge(
-            pool[["player_id", "competition_id", "player_name", "team_name"]],
-            on=["player_id", "competition_id"])
-        labels = labels[labels["position_group"].map(st.style_group) == group]
-        ex = example_players(labels, first_style)
-        if not ex.empty:
-            st_.markdown(f'##### Example: "{first_style}", League One, {season_label}')
-            st_.markdown(_example_html(ex, first_style, first_sigs,
-                                       pcts.set_index(["player_id", "competition_id"])),
-                         unsafe_allow_html=True)
-            fits = " · ".join(f"{r['player_name']}: fit {r[f'fit.{first_style}']:.0f} → {r['tier']}"
-                              for _, r in ex.iterrows())
-            st_.markdown(f'<div class="sr-note">Fit = the average of the percentiles. {_e(fits)}.</div>',
-                         unsafe_allow_html=True)
+    ex = worked_example(load_style_inputs(season_id), group)
+    if ex is not None:
+        st_.markdown(f'##### Example: "{ex["style"]}", League One, {season_label}')
+        st_.markdown(_example_html(ex), unsafe_allow_html=True)
+        fits = " · ".join(f"{r['name']}: fit {r['fit']} → {r['tier']}" for r in ex["rows"])
+        st_.markdown(f'<div class="sr-note">Fit = the average of the percentiles. {_e(fits)}.</div>',
+                     unsafe_allow_html=True)
 
     st_.markdown("##### Styles and their signals")
     st_.markdown(_table_html(style_table(group)), unsafe_allow_html=True)

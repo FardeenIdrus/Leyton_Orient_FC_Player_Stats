@@ -6,7 +6,16 @@
 # before the platform had accounts of its own; keeping it once real per-user login exists
 # would just be a second, club-wide password everyone has to be told, on top of their own
 # account -- friction with no security upside. See DEPLOY.md, "Why no Caddy basic-auth".
+# The new web front end (owner, 2026-11-09). Which web container serves it -- web-blue or
+# web-green -- is named in caddy/web_upstream.caddy, written by scripts/web_switch.sh on each
+# deploy and applied with a graceful `caddy reload` (no dropped requests). Until the first web
+# container is warm that file points at the Streamlit dashboard.
 {$DASHBOARD_DOMAIN} {
+	import /etc/caddy/site/web_upstream.caddy
+}
+
+# The old Streamlit dashboard, kept as a fallback for about two weeks after the switch.
+{$OLD_DASHBOARD_DOMAIN} {
 	reverse_proxy dashboard:8501
 }
 

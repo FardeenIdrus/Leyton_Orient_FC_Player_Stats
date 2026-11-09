@@ -9,12 +9,16 @@ ranking."""
 from __future__ import annotations
 
 
+import html
+
 import pandas as pd
 import streamlit as st
 
 from lofc.aggregate.player_season import RANKABLE_MINUTES
 from lofc.config import settings
+from lofc.core import card as card_core   # decisions shared with the web card
 from lofc.constrain.filters import RANK_COLUMN
+from lofc.core.infobar import infobar_count_items  # shared with the web front end
 from lofc.dashboard import (assessment_detail, badges, detail_section, evidence, metric_filters,
                             player_header)
 from lofc.dashboard.charts import PLOTLY_CONFIG, bar_chart, radar_chart
@@ -82,10 +86,7 @@ def _veto_reasons(row: pd.Series, include_modelled: bool = True) -> list[str]:
     25/26: 965 players carry the flag and 390 of them (40%) trip ONLY on those two, so
     with modelling off two in five advisories pointed at a number the reader had
     deliberately hidden."""
-    return [f"{label} {value:.2f} is below the club minimum of {cf.VETO_BAND:.2f}"
-            for label, col in _VETO_DIMENSIONS
-            if include_modelled or label not in _MODELLED_DIMENSIONS
-            for value in [row.get(col)] if pd.notna(value) and value < cf.VETO_BAND]
+    return card_core.veto_reasons(row, include_modelled)
 
 
 def attach_season_scores(rows: pd.DataFrame, scores: pd.DataFrame) -> pd.DataFrame:
@@ -388,15 +389,11 @@ def _strengths_weaknesses(pcts: pd.Series | None, metrics: list[str]) -> str:
     """A one-line read of a player: top-3 and bottom-3 percentiles among the metrics that
     build his rating. `pcts` is his scorecard-percentile row -- the same numbers as the
     Scorecard table, so the card never shows two percentiles for one metric."""
-    if pcts is None:
+    got = card_core.strengths_watchouts(pcts, metrics, lambda m: LABELS.get(m, m))
+    if got is None:
         return ""
-    pairs = [(m, float(pcts[m])) for m in metrics if m in pcts.index and pd.notna(pcts[m])]
-    if len(pairs) < 2:
-        return ""
-    high = sorted(pairs, key=lambda x: x[1], reverse=True)[:3]
-    low = sorted(pairs, key=lambda x: x[1])[:3]
-    fmt = lambda items: " · ".join(f"{LABELS.get(m, m)} ({v:.0f})" for m, v in items)
-    return f":green[**Strengths**] {fmt(high)}  \n:red[**Watch-outs**] {fmt(low)}"
+    fmt = lambda items: " · ".join(f"{i['metric']} ({i['pct']})" for i in items)
+    return f":green[**Strengths**] {fmt(got['strengths'])}  \n:red[**Watch-outs**] {fmt(got['watch_outs'])}"
 
 
 def _metrics_held_by_anyone(metric_values: pd.DataFrame, metric_names) -> set[str]:
@@ -655,15 +652,6 @@ def column_widths(view: pd.DataFrame, columns: list[str]) -> dict[str, int | str
     return out
 
 
-def infobar_count_items(players: int, rated: int) -> list[str]:
-    """The info bar's two player counts: everyone with data, and the rated subset the table
-    lists. Both are shown so neither is read as the denominator of the other."""
-    return [
-        f"<b>{players:,}</b> players",
-        f"<b>{rated:,}</b> rated ({RANKABLE_MINUTES}+ mins)",
-    ]
-
-
 def _kpi_strip(pool: pd.DataFrame, season_label_text: str | None = None,
                season_id: int | None = None, show_money: bool = False) -> None:
     """A quiet, single-line orientation strip: which dataset am I looking at. Shown above
@@ -779,10 +767,9 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
     # The label names ONE position. For roughly one player in ten it covers under half his
     # season, and every percentile below is against that group's peers -- said plainly
     # rather than left for the reader to infer from the bar.
-    if len(shares) > 1 and shares.iloc[0]["share"] < 0.5:
-        st.info(f"Scored as **{shares.iloc[0]['position_group']}** — his largest position, "
-                f"but only {shares.iloc[0]['share'] * 100:.0f}% of his minutes. Every "
-                f"percentile below compares him with players in that position.")
+    scored_as = card_core.scored_as_notice(shares)
+    if scored_as:
+        st.info(scored_as)
 
     # --- the same player, elsewhere this season -------------------------------------
     # A loanee gets a row and a score in each league he appeared in, because a percentile
@@ -790,14 +777,8 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
     # it is a level-step signal -- 3.96 against U21 peers and 2.63 in senior League Two is
     # exactly what a loan is meant to answer.
     others = load_other_league_seasons(pid, cid, sid)
-    for o in others.itertuples():
-        league = competition_name_by_id().get(int(o.competition_id),
-                                              f"competition {o.competition_id}")
-        comp = (f" — rated **{o.objective_composite:.2f}** there"
-                if pd.notna(o.objective_composite) else "")
-        st.caption(f"Also played {o.minutes:,.0f} min for {o.team_name} in "
-                   f"**{league}** this season{comp}. Same player, scored separately "
-                   f"because percentiles are league-relative.")
+    for note in card_core.other_league_notes(others, competition_name_by_id().get):
+        st.caption(note)
 
     # Watch toggle. Key carries the render site AND the row identity, so the two
     # render sites never collide and a click can't land on a different player
@@ -824,53 +805,21 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
     mv = mv.iloc[0] if not mv.empty else pd.Series(dtype=float)
     minutes = float(row["minutes"]) if pd.notna(row.get("minutes")) else 0.0
 
-    def total(per90_col: str) -> str:
-        value = mv.get(per90_col)
-        return f"{round(float(value) * minutes / 90):,}" if pd.notna(value) and minutes else "—"
-
     # Names its season, matching the "Current form - <season>" heading below it. Without it
     # two identical sets of Goals/Assists/Minutes tiles sat adjacent, only one of them labelled.
     st.markdown(season_output_heading(int(row["season_id"])))
-    o1, o2, o3 = st.columns(3)
-    if role == "goalkeeper":
-        # save_pct/gk_saves_p90 are retired StatsBomb columns, NULL for every goalkeeper in
-        # every league now Impect is the spine (see labels.py LABELS) -- an unconditional
-        # tile here would read "Save % —" / "Saves —" on every single profile forever, which
-        # is exactly the empty-card bug this checks for. `_output_tile_plan` self-heals if
-        # the data ever returns.
-        plan = _output_tile_plan(role, metric_values)
-        if plan.get("save_pct"):
-            save_pct = mv.get("save_pct")  # stored 0-1
-            o1.metric("Save %", f"{float(save_pct) * 100:.0f}%" if pd.notna(save_pct) else "—", border=True)
-        if plan.get("gk_saves_p90"):
-            o2.metric("Saves", total("gk_saves_p90"), border=True)
-        if not any(plan.values()):
-            o1.caption(empty_tile_note(role))
-    elif role == "defender":
-        # tackles_p90/interceptions_p90: same retired-column situation as above, NULL for
-        # every defender now.
-        plan = _output_tile_plan(role, metric_values)
-        if plan.get("tackles_p90"):
-            o1.metric("Tackles", total("tackles_p90"), border=True)
-        if plan.get("interceptions_p90"):
-            o2.metric("Interceptions", total("interceptions_p90"), border=True)
-        if not any(plan.values()):
-            o1.caption(empty_tile_note(role))
-    else:
-        # EFL rows carry raw season totals; scouting rows (all leagues) don't, so fall back
-        # to the per-90-derived total, which the combined table supplies for every league.
-        # Assists prefer the Impect-derived figure (what Season by season shows); the raw total
-        # is the retired provider's and disagreed (4 vs 7 for the same season).
-        def _season_total(raw_col: str, per90_col: str, prefer_derived: bool = False) -> int:
-            return season_total_count(row.get(raw_col), mv.get(per90_col), minutes, prefer_derived)
-        o1.metric("Goals", f"{_season_total('goals', 'goals_p90'):,}", border=True)
-        o2.metric("Assists", f"{_season_total('assists', 'assists_p90', True):,}", border=True)
-    o3.metric("Minutes", f"{whole_minutes(row['minutes']):,}" if pd.notna(row.get("minutes")) else "—", border=True)
+    out_cols = st.columns(3)
+    # Which tiles a role gets (and the note when all are retired) is `core.card.season_output_tiles`,
+    # the same decision the web card shows.
+    output = card_core.season_output_tiles(role, row, mv, metric_values)
+    for tile in output["tiles"]:
+        out_cols[tile["slot"]].metric(tile["label"], tile["value"], border=True)
+    if output["note"]:
+        out_cols[0].caption(output["note"])
 
-    npxg, xa = row.get("np_xg_p90"), row.get("xa_p90")
-    if role in ("midfielder", "attacker") and pd.notna(npxg) and pd.notna(xa):
-        st.caption(f"Underlying rates: {npxg:.2f} non-pen xG per 90 · {xa:.2f} xA per 90 — these (not raw "
-                   "goals/assists) drive the scores, because they're steadier season to season.")
+    rates = card_core.underlying_rates_caption(role, row)
+    if rates:
+        st.caption(rates)
 
     _trajectory(int(row["player_id"]), role, key_prefix)
     # Whether he is SCORED in the live season decides what the caption may claim. Looked up
@@ -878,10 +827,7 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
     # which may not be the live one.
     _live = settings.live_season_id
     _live_cards = _stored_scorecards(_live) if _live is not None else None
-    _has_live_rating = bool(
-        _live_cards is not None and not _live_cards.empty
-        and ((_live_cards["player_id"] == int(row["player_id"]))
-             & (_live_cards["objective_composite"].notna())).any())
+    _has_live_rating = card_core.has_rating_in_season(_live_cards, int(row["player_id"]))
     _current_form(int(row["player_id"]), _has_live_rating)
 
     # Dimension score tiles (1-5). Money tiles only when the affordability layer is on.
@@ -912,8 +858,7 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
         _cards, int(row["player_id"]),
         int(row["competition_id"]), int(row["season_id"]), row["position_group"])
     cols[0].metric(comp_label, fmt(composite), border=True,
-                   delta=(f"{rank}{ordinal(rank)} of {peers} in this league"
-                          if rank is not None else None),
+                   delta=card_core.rank_text(rank, peers),
                    delta_color="off",
                    help="The club's objective composite (1-5): Performance + Physical, from "
                         "real data. The figure beneath it is his standing among players in "
@@ -923,43 +868,21 @@ def _render_profile_body(row: pd.Series, percentiles: pd.DataFrame, metrics: lis
                    help="The club-framework Performance dimension (1-5).")
     cols[2].metric("Physical", fmt(physical), border=True,
                    help="The club-framework Physical dimension (1-5), where tracking data exists.")
+    money = card_core.money_block(row, show_money)
     if has_value:
-        cols[3].metric("Market value", f"€{row['market_value_eur'] / 1e6:.1f}m", border=True)
-        cols[4].metric("Fair value",
-                       f"€{row['fair_value_eur'] / 1e6:.1f}m" if pd.notna(row.get("fair_value_eur")) else "n/a",
-                       border=True)
-        if pd.notna(row.get("estimated_weekly_wage_gbp")) and pd.notna(row.get("wage_ceiling_gbp")):
-            st.caption(f"Modelled weekly wage £{int(row['estimated_weekly_wage_gbp']):,} vs the wage cap "
-                       f"£{int(row['wage_ceiling_gbp']):,} for this player — modelled estimate, not an actual salary.")
-        if int(row["competition_id"]) == 65 and pd.notna(row.get("fair_value_eur")):
-            st.caption("⚠️ Fair-value note: Transfermarkt prices very few National League players, so "
-                       "fair values in this league carry extra uncertainty — trust the direction, not the figure.")
-    elif show_money:
-        st.caption("No market-value or wage data for this league (Scottish / PL2 aren't priced) — this "
-                   "is a quality view.")
+        cols[3].metric(money["tiles"][0]["label"], money["tiles"][0]["value"], border=True)
+        cols[4].metric(money["tiles"][1]["label"], money["tiles"][1]["value"], border=True)
+    if money:
+        for caption in money["captions"]:
+            st.caption(caption)
     # Advisory flags (never exclusions) — an amber callout, so it reads as guidance, not a block.
     # Named per dimension (e.g. "Resale Potential 1.58 is below the club minimum of 2.00"),
     # not just "a dimension" — half of all flagged players trip on Financial or Resale, which
     # aren't otherwise on screen unless money display is switched on, so a generic message
     # was unexplainable from what the user could see.
-    flags = []
-    if row.get("veto"):
-        reasons = _veto_reasons(row, include_modelled=bool(show_money))
-        # With affordability modelling off, a flag that trips ONLY on Financial or Resale
-        # now yields no reasons. Say nothing rather than fall through to the generic
-        # "detail unavailable" line: the player is not below any standard the reader can
-        # see, and an unexplainable warning is worse than no warning.
-        if reasons:
-            flags.extend(reasons)
-        elif show_money:
-            flags.append("below the club minimum (band &lt; 2.0) on a dimension — "
-                         "detail unavailable on this view")
-    if row.get("below_min_composite"):
-        flags.append(f"Composite {composite:.2f} is below the club's {cf.MIN_COMPOSITE:.2f} "
-                     "minimum standard" if pd.notna(composite)
-                     else f"composite below the club's {cf.MIN_COMPOSITE:.2f} minimum standard")
+    flags = card_core.advisory_flags(row, show_money)
     if flags:
-        items = "".join(f"<li style='margin:2px 0;'>{f}</li>" for f in flags)
+        items = "".join(f"<li style='margin:2px 0;'>{html.escape(f)}</li>" for f in flags)
         st.markdown(
             "<div style='background:#FFF6E5;border:1px solid #F1C40F;border-left:5px solid #F1C40F;"
             "border-radius:8px;padding:9px 13px;margin:.35rem 0 .5rem;color:#7A5B00;font-size:.9rem;'>"
@@ -1312,7 +1235,8 @@ def _players(tab, pool: pd.DataFrame, position: str, percentiles: pd.DataFrame, 
         # word "Rank" beside a score claimed it answered a different one. The player's true
         # standing ("8th of 13 in this league") is on his profile.
         view.insert(0, "#", range(1, len(view) + 1))
-        view["Mins"] = view["minutes"].round(0)
+        # half-up, as everywhere (owner 2026-11-09); blanks stay blank
+        view["Mins"] = view["minutes"].map(lambda v: whole_minutes(v) if pd.notna(v) else v)
         # Top speed = average of his 5 fastest matches (SkillCorner PSV-99 Top 5), raw km/h --
         # the Head of Recruitment's definition; not psv99, which averages ALL his matches.
         _speed = metric_values[["player_id", "competition_id", "top5_psv99_kmh"]].drop_duplicates(
@@ -1538,28 +1462,18 @@ def _scout_reports_section(engine, row) -> None:
     st.markdown(verdict_chips_html(reports["verdict"]), unsafe_allow_html=True)
 
     for _, report in reports.iterrows():
-        date = pd.to_datetime(report["fixture_date"], errors="coerce")
-        fixture = (f"{report['home_team']} v {report['away_team']}"
-                   if pd.notna(report["home_team"]) else "")
-        played = (", ".join(report["positions_played"])
-                  if isinstance(report["positions_played"], list) else "")
-        header = " · ".join(b for b in [
-            f"**{report['scout']}**",
-            date.strftime("%d %b %Y") if pd.notna(date) else None,
-            report["observation"],
-            f"Grade {report['grade']}" if pd.notna(report["grade"]) else None,
-            report["verdict"]] if b)
+        card = card_core.report_card(report)
+        header = " · ".join(f"**{t}**" if bold else t for t, bold in card["title"])
         with st.expander(header, expanded=len(reports) == 1):
-            if fixture or played:
-                st.caption(" · ".join(b for b in [fixture,
-                                                  f"played {played}" if played else None] if b))
-            if pd.notna(report["squad_role"]):
-                st.caption(f"Squad role: {report['squad_role']}")
+            if card["match"]:
+                st.caption(card["match"])
+            if card["squad_role"]:
+                st.caption(f"Squad role: {card['squad_role']}")
             # The scout's own words, as TEXT. Rendering 437 free-text reports through
             # markdown would let a stray asterisk or bracket rewrite the layout, and
             # carries the injection risk the 2026-08-25 XSS sweep closed elsewhere.
-            if pd.notna(report["comments"]):
-                st.text(str(report["comments"]))
+            if card["comments"]:
+                st.text(card["comments"])
 
 
 def _dimension_status(frame: pd.DataFrame, dimension: str) -> str | None:
@@ -1599,12 +1513,9 @@ def _scout_section(engine, row) -> None:
     if not frame.empty:
         statuses = {d: _dimension_status(frame, d)
                     for d in (scout_scores.PSYCHOLOGICAL, scout_scores.MEDICAL)}
-        outstanding = scout_scores.missing_dimensions(statuses)
-        if outstanding and len(outstanding) < 2:
-            st.warning(
-                f"**{outstanding[0]} is still outstanding**, so this player has no "
-                f"scout-verified rating yet. Both dimensions are needed before scout "
-                f"input scores \u2014 one alone is not a partial assessment.")
+        warning = card_core.outstanding_warning(scout_scores.missing_dimensions(statuses))
+        if warning:
+            st.warning(warning)
     if frame.empty:
         badges.render(badges.for_status(None))
         st.caption("No psychological or medical assessment has been recorded for this "
@@ -1621,21 +1532,9 @@ def _scout_section(engine, row) -> None:
             scoring = [e for e in entries if e.status in ("submitted", "signed_off")]
             if status == scout_scores.CONFLICT:
                 badges.render(badges.for_status(scout_scores.CONFLICT))
-                st.caption(f"{len(scoring)} assessments disagree. Nobody has signed one off, "
-                           "so none of them scores this dimension. Resolve it from the "
-                           "sign-off queue.")
-            elif len(entries) > 1:
-                # Which one scores depends on `status` (Decision 17): a signed-off row always
-                # wins regardless of how many others exist; short of that, exactly one
-                # `submitted` row scores. Naming the true winner here, rather than always
-                # saying "the signed-off one", matters once a rejection can leave a single
-                # ordinary `submitted` row sitting beside others that no longer score.
-                winner_desc = ("the signed-off one scores" if status == "signed_off"
-                              else "the submitted one scores" if status == "submitted"
-                              else "none of them currently scores")
-                st.caption(f"{len(entries)} assessment{'s' if len(entries) != 1 else ''} "
-                           f"exist for this dimension. {winner_desc[0].upper()}"
-                           f"{winner_desc[1:]}; the others stay on the record, attributed.")
+            caption = card_core.dimension_caption(status, len(entries), len(scoring))
+            if caption:
+                st.caption(caption)
             st.dataframe(assessment_detail.entries_table(dim_rows), hide_index=True,
                         width="stretch", key=f"assess_table_{row['player_id']}_"
                         f"{row['competition_id']}_{row['season_id']}_{dimension}")

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_url('css/users.css') }}">
+<section class="view on" id="v-users" data-page="users">
+  <div class="section-label">{{ page.group }}</div>
+  <div class="us-head">
+    <div><h1>Users</h1><div class="meta">Click a row to manage an account. Accounts are never deleted.</div></div>
+    <button type="button" class="btn primary" id="us-new" aria-expanded="false" aria-controls="us-create">＋ Create account</button>
+  </div>
+  <div id="us-msg" role="status"></div>
+
+  <form class="card us-create" id="us-create" hidden autocomplete="off">
+    <h2>Create account</h2>
+    <div class="us-grid">
+      <div class="f"><label for="c-username">Username</label><input class="ctl" id="c-username" required></div>
+      <div class="f"><label for="c-name">Full name</label><input class="ctl" id="c-name" required></div>
+      <div class="f"><label for="c-role">Role</label><select class="ctl" id="c-role"></select></div>
+      <div class="f"><label for="c-pw">Temporary password</label><input class="ctl" id="c-pw" type="password" autocomplete="new-password" required></div>
+      <div class="f"><label for="c-pw2">Confirm temporary password</label><input class="ctl" id="c-pw2" type="password" autocomplete="new-password" required></div>
+    </div>
+    <p class="note">They change it at their first sign-in. It is never shown again.</p>
+    <div class="us-actions"><button class="btn primary" type="submit">Create account</button><button class="btn" type="button" id="c-cancel">Cancel</button></div>
+  </form>
+
+  <div class="us-layout">
+    <div class="card us-list"><div class="tw"><table><thead><tr><th>Username</th><th>Full name</th><th>Role</th><th>Status</th><th>Lockout</th><th>Created</th></tr></thead><tbody id="us-body"><tr><td colspan="6" class="note">Loading…</td></tr></tbody></table></div></div>
+    <aside class="card us-panel" id="us-panel" hidden aria-live="polite"></aside>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ static_url('js/users.js') }}"></script>{% endblock %}

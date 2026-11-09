@@ -39,3 +39,9 @@ def test_value_metrics_keep_two_decimals(metric):
 
 def test_no_minutes_no_total():
     assert season_total("ball_wins_p90", 22.9, 0) == "—"
+
+
+def test_season_total_counts_round_half_up():
+    # owner 2026-11-09: half-up everywhere; 0.25 per 90 over 900 minutes = 2.5 -> "3"
+    assert season_total("ball_wins_p90", 0.25, 900) == "3"
+    assert season_total("ball_wins_p90", 0.45, 900) == "5"

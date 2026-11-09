@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Player{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_url('css/card.css') }}">
+<section class="view on" id="v-card" data-page="card"
+         data-player="{{ ids.player }}" data-competition="{{ ids.competition }}" data-season="{{ ids.season }}">
+  <div class="card-top">
+    <a href="/players" id="back" class="back">← Back to players</a>
+    <span class="switch" id="money-sw" role="switch" aria-checked="false" aria-label="Show affordability (modelled)" tabindex="0"><i></i>Show affordability (modelled)</span>
+  </div>
+  <div id="card-status" class="note" role="status"></div>
+  <div id="card-skel" class="skeleton-page" aria-hidden="true">
+    <div class="skel" style="height:200px;margin-bottom:18px"></div>
+    <div class="row tr2"><div class="skel" style="height:260px"></div><div class="skel" style="height:260px"></div></div>
+    <div class="row tr2"><div class="skel" style="height:420px"></div><div class="skel" style="height:420px"></div></div>
+  </div>
+  <div id="card-body" hidden>
+    <div class="phead">
+      <div>
+        <div class="section-label" id="h-pos"></div>
+        <h1 id="h-name"></h1>
+        <div class="meta" id="h-club"></div>
+        <div class="reg" id="h-reg"></div>
+        <div class="status" id="h-status"></div>
+        <div class="mbp" id="h-mbp"></div>
+        <div id="h-notes"></div>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="h-watch" type="button">☆ Add to watchlist</button>
+        <a class="btn" id="h-assess" href="/assess">Assess this player</a>
+        <a class="btn" id="h-tm" target="_blank" rel="noopener noreferrer" hidden>View on Transfermarkt ↗</a>
+        <label class="rank-as" id="h-rank-wrap" hidden>Rank as <select id="h-rank" class="ctl"></select></label>
+      </div>
+    </div>
+
+    <div class="row tr2">
+      <div class="card" id="c-rating">
+        <h2 id="r-h"></h2><div class="sub" id="r-sub"></div>
+        <div id="r-notrated"></div>
+        <div class="scores" id="r-tiles"></div>
+        <div class="tiles money" id="r-money" hidden style="margin-top:12px"></div>
+        <div class="note money" id="r-moneycap" hidden></div>
+        <div class="warn" id="r-adv" hidden></div>
+        <div class="sw" id="r-sw"></div>
+        <h3 id="cf-h"></h3><div class="sub" id="cf-sub"></div>
+        <div class="tiles" id="cf"></div>
+        <p class="note" id="cf-note"></p>
+      </div>
+      <div class="card" id="c-output"><h2 id="so-h"></h2><div class="sub" id="so-sub"></div><div class="tiles" id="so"></div><p class="note" id="so-cap"></p>
+        <h3>Impect scores</h3><div class="tiles two" id="im"></div><div id="im-pos"></div></div>
+    </div>
+
+    <div class="row">
+      <div class="card" id="c-sbs">
+        <h2>Season by season</h2><div class="sub" id="sbs-sub"></div>
+        <div class="tw" id="sbs"></div>
+      </div>
+    </div>
+
+    <div class="row tr2">
+      <div class="card" id="c-style"><h2>Playing style</h2><div class="sub" id="sf-sub"></div><div id="sf-pills"></div><div id="sf"></div></div>
+      <div class="card" id="c-scout"><h2 id="sr-h"></h2><div id="sr-v"></div><div id="sr"></div>
+        <h3 style="margin-top:20px">Scout assessment</h3><div id="sa"></div></div>
+    </div>
+
+    <div class="row tr2">
+      <div class="card" id="c-perf"><h2>Performance · in the rating</h2><div class="sub" id="pr-sub"></div>
+        <div class="tw" id="pr"></div>
+        <div class="foot"><span class="note" id="pr-note"></span><span class="foot-btns"><a class="btn small" id="pr-csv" download hidden>⬇ Download scorecard metrics (CSV)</a> <a class="btn small" id="at-csv" download hidden>⬇ Download full metrics (CSV)</a></span></div>
+        <details id="at-d"><summary>All tracked metrics</summary>
+          <div class="tw" style="max-height:420px;margin-top:8px" id="at"></div>
+</details>
+      </div>
+      <div class="card rcard" id="c-pp"><h2>Performance profile</h2><div class="sub" id="pp-sub"></div><div class="rbody" id="pp"></div></div>
+    </div>
+
+    <div class="row tr2">
+      <div class="card" id="c-zones"><h2>Packing zones</h2><div class="sub" id="pz-sub"></div>
+        <div class="pz-ctl" id="pz-ctl" hidden>
+          <label>Metric <select id="pz-m" class="ctl"><option value="total_touches">Total Touches</option></select></label>
+          <div class="seg-wrap"><span class="note">Values</span><div class="seg" id="pz-mode" role="group" aria-label="Values"></div></div>
+        </div>
+        <div class="pitch" id="pz"></div>
+        <div class="legend" id="pz-legend"></div>
+      </div>
+      <div class="card" id="c-rec"><h2>Receptions</h2><div class="sub" id="rc-sub"></div><div id="rc"></div></div>
+    </div>
+
+    <div class="row tr2">
+      <div class="card" id="c-phys"><h2>Physical · in the rating</h2><div class="sub" id="ph-sub"></div>
+        <div id="ph-empty"></div>
+        <div class="tw" id="ph"></div>
+        <details id="po-d"><summary>Other physical metrics</summary><div class="tw" style="margin-top:8px" id="po"></div></details>
+        <p class="note" id="ph-cap"></p></div>
+      <div class="card rcard" id="c-prad"><h2>Physical profile</h2><div class="sub" id="rad-sub"></div><div class="rbody" id="prad"></div></div>
+    </div>
+
+    <div class="row">
+      <div class="card" id="c-avail"><h2>Availability and injury record</h2><div id="av-warn"></div><div class="tiles" id="av"></div>
+        <p class="note" id="av-cap"></p><p class="note" id="av-cov"></p>
+        <h3>Injury spells</h3><div id="inj"></div></div>
+    </div>
+
+    <div class="card" id="c-squad"></div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ static_url('js/card.js') }}"></script>{% endblock %}

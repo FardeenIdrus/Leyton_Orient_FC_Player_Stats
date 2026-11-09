@@ -1,0 +1,33 @@
+/* Squads & loans page only: what app.css and players.css (shared controls) do not cover. */
+#v-squads .filters{margin:12px 0 8px}
+#v-squads .fl{gap:12px 14px}
+#v-squads .f-player{flex:1 1 180px;min-width:180px;max-width:300px}
+#v-squads .f-league{flex:0 0 170px;min-width:170px}
+#v-squads .f-club{flex:0 1 200px;min-width:150px}
+#v-squads .f-position{flex:0 0 150px;min-width:150px}
+#v-squads .f-show{min-width:0}
+#v-squads .f-leagues{flex:0 0 170px;min-width:170px}
+#v-squads .f-wide{min-width:230px}
+#v-squads .f-loan{min-width:190px}
+#v-squads .f-range{min-width:220px}
+#v-squads .seg{flex-wrap:wrap}
+#v-squads .seg button{font:inherit;font-size:13.5px;padding:7px 12px;border:0;background:#fff;color:var(--ink);cursor:pointer;white-space:nowrap}
+#v-squads .seg button+button{border-left:1px solid #CDD1D7}
+#v-squads .seg button.on{background:var(--ink);color:#fff}
+#v-squads .seg button:focus-visible{outline:2px solid var(--orient);outline-offset:-2px}
+#sq-asof{margin:0 0 10px}
+#v-squads .tiles{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:14px}
+.sq-head{display:flex;justify-content:space-between;align-items:center;gap:16px}
+#sq-click{flex:1;min-width:0}
+#sq-click .info{margin:0}
+#tw{max-height:calc(100vh - 330px);min-height:360px;margin-top:10px}
+#v-squads table{border-collapse:separate;border-spacing:0}
+#v-squads th{z-index:2;padding:8px 7px}
+#v-squads th button{font:inherit;font-weight:600;font-size:12.5px;color:var(--muted);background:none;border:0;padding:0;cursor:pointer;white-space:nowrap}
+#v-squads th button:hover,#v-squads th.sorted button{color:var(--ink)}
+#v-squads td{white-space:nowrap;padding:7px 7px;font-size:14px}
+#v-squads td .chip{min-width:52px}
+#v-squads .cut{max-width:170px;overflow:hidden;text-overflow:ellipsis}
+#v-squads tbody tr{cursor:pointer}
+#sq-foot{margin:10px 0 0}
+@media (max-width:1100px){#v-squads .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}

@@ -1,0 +1,107 @@
+/* Players page only: what app.css (mockup v5 tokens) does not cover. */
+#v-players .filters{margin:12px 0 8px}
+#v-players .fl{gap:12px 14px}
+#v-players .f.grow{flex:1 1 200px;min-width:200px}
+#v-players .f-season{flex:0 0 104px;min-width:104px}
+#v-players .f-position{flex:0 0 140px;min-width:140px}
+#v-players .f-leagues{flex:0 0 150px;min-width:150px}
+#v-players .f-rank{flex:0 0 140px;min-width:140px}
+#v-players .f-wide{min-width:230px}
+#v-players .f-range{min-width:230px}
+select.ctl{display:block;width:100%;padding:7px 8px;font:inherit;font-size:14px;color:var(--ink);background:#fff}
+input.ctl.num{width:96px;padding:6px 8px}
+input.ctl.num.wide{width:130px}
+.ctl:disabled{opacity:.5}
+.searchbox{position:relative;display:flex;gap:8px;align-items:center}
+.searchbox input.ctl{flex:1;min-width:0}
+.results{position:absolute;z-index:20;left:0;right:0;top:calc(100% + 4px);background:#fff;border:1px solid #CDD1D7;border-radius:8px;box-shadow:0 8px 24px rgba(20,22,27,.14);max-height:340px;overflow:auto}
+.results button{display:block;width:100%;text-align:left;font:inherit;font-size:14px;padding:8px 12px;border:0;border-bottom:1px solid var(--line);background:#fff;cursor:pointer;color:var(--ink)}
+.results button:hover,.results button:focus-visible{background:var(--soft)}
+.results .none{padding:10px 12px;color:var(--muted);font-size:14px}
+.popwrap{position:relative}
+.pop-btn{width:100%;cursor:pointer;text-align:left;font:inherit;font-size:14px;color:var(--ink);overflow:hidden;text-overflow:ellipsis}
+.pop-btn::after{content:"▾";color:var(--muted);margin-left:auto}
+.pop{position:absolute;z-index:20;top:calc(100% + 4px);left:0;width:300px;background:#fff;border:1px solid #CDD1D7;border-radius:8px;box-shadow:0 8px 24px rgba(20,22,27,.14);padding:10px}
+.pop-list{max-height:300px;overflow:auto;margin-top:8px;display:flex;flex-direction:column;gap:2px}
+.pop-list label{display:flex;gap:8px;align-items:center;font-size:14px;padding:4px 2px;cursor:pointer}
+.pair{display:flex;align-items:center;gap:10px}
+.pair input[type=range]{flex:1;min-width:90px}
+input[type=range]{accent-color:var(--ink);width:100%}
+.val{font-weight:600;font-size:14px;min-width:34px;text-align:right}
+.f-range .ends,.range .ends{display:flex;justify-content:space-between;color:var(--muted);font-size:12px}
+.switch{position:relative}
+.switch input{position:absolute;inset:0;width:100%;height:100%;opacity:0;margin:0;cursor:pointer}
+.switch:has(input:checked) i{background:var(--ink)}
+.switch:has(input:checked) i::after{left:16px}
+.switch:has(input:focus-visible) i{outline:2px solid var(--orient);outline-offset:2px}
+.sliders .range label{font-size:13px}
+.tabs button{font:inherit;font-size:14px;padding:7px 12px;border:0;background:none;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent}
+.tabs button.on{color:var(--ink);border-color:var(--red);font-weight:600}
+.fchip{display:inline-flex;align-items:center;gap:6px}
+.fchip button{font:inherit;border:0;background:none;cursor:pointer;color:var(--muted);padding:0 2px;font-size:15px;line-height:1}
+.fchip button:hover{color:var(--red)}
+.rank-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.rank-tools{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+#cap-lines .note,#cap-lines div{margin:2px 0}
+#pl-hidden .notice{margin:8px 0}
+#tw{max-height:calc(100vh - 250px);min-height:320px;margin-top:10px}
+#v-players table{border-collapse:separate;border-spacing:0}
+#v-players th{z-index:2}
+#v-players th button{font:inherit;font-weight:600;font-size:12.5px;color:var(--muted);background:none;border:0;padding:0;cursor:pointer;white-space:nowrap}
+#v-players th button:hover{color:var(--ink)}
+#v-players th.sorted button{color:var(--ink)}
+#v-players td{white-space:nowrap;padding:8px 7px}
+#v-players th{padding:8px 7px}
+#v-players td.sty{white-space:normal;min-width:120px}
+#v-players .cut{max-width:150px;overflow:hidden;text-overflow:ellipsis}
+#v-players .pname.cut{max-width:170px}
+#v-players td.rating,#v-players th.rating{text-align:center}
+#v-players tbody tr{cursor:pointer}
+#v-players tbody tr:hover{background:#FAFAFB}
+.hlp{color:var(--muted);font-size:11px;margin-left:3px;cursor:help}
+#about-body p{margin:6px 0}
+#nr-body .tw{max-height:220px;margin-top:6px}
+#pl-notice .info,#pl-notice .warn{margin:10px 0 0}
+.pop-actions{display:flex;gap:8px}
+/* 2.36: the ranking fits its card at 1280-1920 without a sideways scroll -- long names wrap
+   instead of being cut, the scout pills stack */
+#v-players .cut{max-width:132px;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.3}
+#v-players .pname.cut{max-width:150px}
+#v-players td{padding:8px 6px}
+#v-players td .pill{white-space:nowrap}
+#v-players #tw td:last-child{white-space:normal}
+@media (max-width:1380px){#v-players .cut{max-width:112px}#v-players .pname.cut{max-width:128px}#v-players td,#v-players th{padding:7px 4px}}
+#v-players #tw td,#v-players #tw th{overflow-wrap:normal;word-break:normal}
+#v-players td.sty{min-width:0;max-width:170px}
+#v-players .cut{max-width:150px}
+#v-players .pname.cut{max-width:160px}
+@media (max-width:1380px){#v-players .cut{max-width:124px}#v-players .pname.cut{max-width:132px}#v-players td.sty{max-width:150px}}
+@media (max-width:1380px){#v-players .cut{max-width:114px}#v-players .pname.cut{max-width:124px}#v-players td.sty{max-width:136px}}
+#v-players #tw .cut{overflow-wrap:break-word}
+@media (max-width:1380px){#v-players td.sty{max-width:124px}#v-players #tw td:last-child{max-width:120px}#v-players td,#v-players th{padding:7px 3px}}
+@media (max-width:1380px){#v-players #tw td:last-child{max-width:112px}#v-players #tw td:last-child .pill{white-space:normal;text-align:center}}
+/* long headers ("Composite (Direct & 1v1 Specialist)") wrap instead of widening the table */
+#v-players #tw th{white-space:normal;vertical-align:bottom;line-height:1.25}
+#v-players #tw th button{white-space:normal;text-align:inherit;max-width:120px}
+#v-players #tw td:last-child{max-width:116px}
+#v-players #tw td:last-child .pill{white-space:normal;text-align:center}
+/* room for the headings' ⓘ markers (2.36) */
+#v-players .cut{max-width:138px}
+#v-players .pname.cut{max-width:148px}
+#v-players td.sty{max-width:156px}
+@media (max-width:1380px){#v-players .cut{max-width:106px}#v-players .pname.cut{max-width:116px}#v-players td.sty{max-width:118px}#v-players #tw td:last-child{max-width:104px}}
+@media (max-width:1380px){#v-players .cut{max-width:98px}#v-players .pname.cut{max-width:110px}#v-players #tw td:last-child{max-width:110px}#v-players #tw td:last-child .pill{padding:2px 6px}}
+#v-players #tw th button{max-width:100px}
+#v-players .cut{max-width:130px}
+#v-players .pname.cut{max-width:142px}
+@media (max-width:1380px){#v-players .cut{max-width:98px}#v-players .pname.cut{max-width:110px}}
+#v-players .cut{max-width:122px}
+#v-players .pname.cut{max-width:136px}
+#v-players td.sty{max-width:146px}
+@media (max-width:1380px){#v-players .cut{max-width:98px}#v-players .pname.cut{max-width:110px}#v-players td.sty{max-width:118px}}
+#v-players #tw th button{max-width:86px}
+#v-players #tw th{padding-left:5px;padding-right:5px}
+@media (max-width:1500px){#v-players #tw th,#v-players #tw th button{font-size:11.5px}#v-players #tw td:first-child{padding-left:2px;padding-right:2px}}
+@media (max-width:1380px){#v-players #tw td:last-child{max-width:92px}#v-players td.sty{max-width:108px}}
+@media (max-width:1380px){#v-players #tw td:last-child{max-width:104px}#v-players td.sty{max-width:100px}#v-players .cut{max-width:94px}}
+@media (min-width:1501px){#v-players #tw th button{max-width:116px}}

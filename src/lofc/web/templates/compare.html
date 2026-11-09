@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Compare{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_url('css/players.css') }}">
+<link rel="stylesheet" href="{{ static_url('css/compare.css') }}">
+<section class="view on" id="v-compare" data-page="compare">
+  <div class="section-label">Compare</div>
+  <h1 id="cmp-title">Compare</h1>
+  <div class="meta" id="cmp-meta">Up to three players of one position</div>
+  <div id="cmp-notice"></div>
+
+  <div class="filters" id="filters">
+    <div class="fl">
+      <div class="f f-season"><label for="f-season">Season</label><select class="ctl" id="f-season" name="season"></select></div>
+      <div class="f f-position"><label for="f-position">Position</label><select class="ctl" id="f-position" name="position"></select></div>
+      <div class="f f-leagues"><label id="lbl-leagues">Leagues</label>
+        <div class="popwrap">
+          <button type="button" class="ctl pop-btn" id="leagues-btn" aria-label="Leagues" aria-haspopup="true" aria-expanded="false">All leagues</button>
+          <div class="pop" id="leagues-pop" hidden>
+            <div class="pop-actions"><button type="button" class="btn small" id="leagues-all">All leagues</button><button type="button" class="btn small" id="leagues-none">Untick all</button></div>
+            <div class="pop-list" id="leagues-list"></div>
+          </div>
+        </div>
+      </div>
+      <div class="f f-rank" id="rank-wrap" hidden><label for="f-rank">Rank as</label><select class="ctl" id="f-rank" name="rank_as"></select></div>
+      <div class="f"><label>&nbsp;</label><label class="switch" id="sw-money"><input type="checkbox" id="f-money" name="money"><i></i>Market value</label></div>
+      <div class="f"><label>&nbsp;</label><button type="button" class="btn" id="more-btn" aria-expanded="false">More filters ▾</button></div>
+    </div>
+
+    <div class="more" id="more">
+      <div class="fl">
+        <div class="f f-range"><label for="f-minutes">Minimum minutes</label>
+          <div class="pair"><input type="range" id="f-minutes" name="min_minutes_slider" aria-label="Minimum minutes"><input class="ctl num" type="number" id="f-minutes-num" name="min_minutes" aria-label="…or type the minutes"></div>
+          <div class="ends"><span>450</span><span id="minutes-max"></span></div></div>
+        <div class="f f-range"><label for="f-age">Maximum age</label>
+          <div class="pair"><input type="range" id="f-age" name="max_age" aria-label="Maximum age"><output id="age-out" class="val"></output></div>
+          <div class="ends"><span>18</span><span>40 (no cap)</span></div></div>
+        <div class="f"><label for="f-foot">Preferred foot</label><select class="ctl" id="f-foot" name="foot"></select></div>
+        <div class="f f-wide"><label for="f-contract">Contract expiry</label><select class="ctl" id="f-contract" name="contract"></select></div>
+        <div class="f"><label for="f-loan">Loan status</label><select class="ctl" id="f-loan" name="loan"></select></div>
+        <div class="f" id="style-wrap"><label for="f-style">Playing style</label><select class="ctl" id="f-style" name="style"></select></div>
+        <div class="f" id="strong-wrap"><label>&nbsp;</label><label class="switch" id="sw-strong"><input type="checkbox" id="f-strong" name="strong_only"><i></i>Strong only</label></div>
+      </div>
+    </div>
+    <div class="fl slots">
+      {% for slot, label in [("a", "Player A"), ("b", "Player B"), ("c", "Player C (optional)")] %}
+      <div class="f slot" data-slot="{{ slot }}">
+        <label for="slot-{{ slot }}"><i class="dot d{{ loop.index0 }}"></i>{{ label }}</label>
+        <div class="searchbox">
+          <input class="ctl" id="slot-{{ slot }}" name="slot_{{ slot }}" type="search" autocomplete="off" aria-label="{{ label }}" placeholder="Search a player…">
+          <div class="results" id="res-{{ slot }}" hidden></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div id="cmp-msg" role="status"></div>
+
+  <div id="cmp-body" hidden>
+    <div class="card" id="c-sum"><div class="tw"><table id="cmp-sum"></table></div><p class="note" id="cmp-sumcap"></p></div>
+
+    <div class="row tr2 cmp-pair" id="r-perf">
+      <div class="card" id="c-pt"><h2 id="pt-h">Performance · in the rating</h2><div class="sub" id="pt-sub"></div>
+        <div class="tw"><table id="cmp-pt"></table></div>
+        <details id="po-d"><summary>Other metrics</summary><div class="tw"><table id="cmp-po"></table></div></details></div>
+      <div class="card rcard" id="c-prad"><h2 id="prad-h">Performance profile</h2><div class="sub" id="prad-sub"></div><div class="rbody" id="prad"></div></div>
+    </div>
+
+    <div class="row tr2 cmp-pair" id="r-phys">
+      <div class="card" id="c-ph"><h2>Physical · in the rating</h2><div class="sub" id="ph-sub"></div>
+        <div class="tw"><table id="cmp-ph"></table></div>
+        <details id="pho-d"><summary>Other metrics</summary><div class="tw"><table id="cmp-pho"></table></div></details></div>
+      <div class="card rcard" id="c-phrad"><h2>Physical profile</h2><div class="sub" id="phrad-sub"></div><div class="rbody" id="phrad"></div></div>
+    </div>
+
+    <div class="card" id="c-pz">
+      <div class="pz-head"><div><h2>Packing zones</h2><div class="sub" id="pz-sub"></div></div>
+        <label class="pz-m">Measure <select id="pz-m" class="ctl" name="zone_measure" aria-label="Measure"></select></label></div>
+      <div class="pz-grid" id="pz"></div>
+      <div class="legend" id="pz-legend"></div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ static_url('js/compare.js') }}"></script>{% endblock %}

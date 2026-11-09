@@ -135,20 +135,9 @@ def render_flags(entries) -> None:
     `entries` is an iterable of rows shaped like `entries_table`'s input (namedtuples from
     `.itertuples()` work, since only attribute access is used).
     """
-    for e in entries:
-        pieces: list[str] = []
-        if getattr(e, "screening_failed", False):
-            pieces.append("a screening criterion was not met — the band is unchanged; this "
-                          "records the disagreement, it does not cap the figure")
-        if e.status == REJECTED:
-            reason = getattr(e, "rejection_reason", None)
-            pieces.append(f"rejected — {reason}" if (reason and str(reason).strip())
-                          else "rejected (no reason recorded)")
-        notes = getattr(e, "notes", None)
-        if pd.notna(notes) and str(notes).strip():
-            pieces.append(f"notes: {notes}")
-        if pieces:
-            st.caption(f"**{e.author_name}**, {e.created_at:%d %b %Y} — " + "; ".join(pieces))
+    from lofc.core.card import flag_lines
+    for line in flag_lines(entries):
+        st.caption(line)
 
 
 # The scout's prose, in the order the report prints it, so a reader moving between the two
@@ -216,24 +205,16 @@ def render_criterion_detail(engine, position: str | None, dimension: str, entrie
     whole point of Problem 2), several as a side-by-side comparison so a reader can see WHERE
     two scouts diverged rather than only THAT they did.
     """
-    entries = list(entries)
-    if not entries:
+    from lofc.core.card import criterion_detail
+    got = criterion_detail(engine, position, dimension, entries)
+    if got is None:
         return
-    if not position or position not in cc.POSITION_GROUPS:
-        st.caption("No club criteria are configured for this position — per-criterion "
-                   "detail is unavailable.")
+    if "note" in got:
+        st.caption(got["note"])
         return
-
-    columns, scores = [], []
-    for e in entries:
-        band = "—" if e.band is None or pd.isna(e.band) else f"{e.band:.2f}"
-        columns.append(f"{e.author_name} — band {band}")
-        scores.append(_entry_scores(engine, int(e.id)))
-    table = comparison_table(position, dimension, columns, scores)
-
-    label = f"Per-criterion detail ({len(entries)} assessment{'s' if len(entries) != 1 else ''})"
-    with st.expander(label):
-        if table.empty:
-            st.caption("No per-criterion detail recorded.")
+    with st.expander(got["label"]):
+        if "empty" in got:
+            st.caption(got["empty"])
         else:
-            st.dataframe(table, width="stretch")
+            st.dataframe(pd.DataFrame(got["rows"], columns=got["columns"]).set_index("Criterion"),
+                         width="stretch")

@@ -42,4 +42,6 @@ def season_total(metric: str, per90: float | None, minutes: float | None) -> str
     if math.isnan(value):
         return NO_TOTAL
     total = value * float(minutes) / 90.0
-    return f"{total:,.2f}" if metric in VALUE_METRICS else f"{round(total):,}"
+    # counts round half up, the one rule for whole numbers (owner 2026-11-09); round() is
+    # half to even
+    return f"{total:,.2f}" if metric in VALUE_METRICS else f"{math.floor(total + 0.5):,}"

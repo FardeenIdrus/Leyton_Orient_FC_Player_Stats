@@ -27,6 +27,7 @@ import html as _html
 import pandas as pd
 import streamlit as st
 
+from lofc.core import scout_reports_page as sp
 from lofc.dashboard import theme
 from lofc.dashboard.formatting import dash_blanks
 from lofc.config import settings
@@ -345,44 +346,26 @@ def report_card_html(row: pd.Series) -> str:
     elsewhere. Newlines become <br> AFTER escaping, so the scout's paragraphing survives
     without the text being trusted.
     """
-    tone = verdict_tone(row.get("verdict"))
-    accent = TONE_COLOURS[tone][0]
-    fixture = fixture_label(row.get("home_team"), row.get("away_team"),
-                            row.get("fixture_date"))
+    from lofc.core.scout_reports_page import report_card
 
-    played = row.get("positions_played")
-    played = ", ".join(played) if isinstance(played, list) else ""
-    wanted = row.get("recommended_positions")
-    wanted = ", ".join(wanted) if isinstance(wanted, list) else ""
-
-    meta = " · ".join(_esc(b) for b in [
-        row.get("scout"), row.get("observation"),
-        f"Grade {row.get('grade')}" if pd.notna(row.get("grade")) else None] if b)
-
-    facts = []
-    if fixture:
-        facts.append(("Fixture", fixture))
-    if played:
-        facts.append(("Played", played))
-    if wanted:
-        facts.append(("Recommended", wanted))
-    if pd.notna(row.get("squad_role")):
-        facts.append(("Squad role", row.get("squad_role")))
+    card = report_card(row)
+    tone, accent = card["tone"], card["accent"]
+    meta = " · ".join(_esc(b) for b in card["meta_parts"])
     fact_html = "".join(
         f'<div class="lofc-sr-fact"><span class="lofc-sr-k">{_esc(k)}</span>'
-        f'<span class="lofc-sr-v">{_esc(v)}</span></div>' for k, v in facts)
+        f'<span class="lofc-sr-v">{_esc(v)}</span></div>' for k, v in card["facts"])
 
-    body = _esc(row.get("comments")).replace("\n", "<br>")
+    body = _esc(card["body"]).replace("\n", "<br>")
     body_html = (f'<div class="lofc-sr-body">{body}</div>' if body else
                  '<div class="lofc-sr-body lofc-sr-empty">No written report.</div>')
 
     return f"""
     <div class="lofc-sr-card {tone}" style="border-left-color:{accent};">
       <div class="lofc-sr-head">
-        <div class="lofc-sr-name">{_esc(row.get('player_name'))}</div>
-        <div class="lofc-sr-club">{_esc(row.get('club_name'))}</div>
+        <div class="lofc-sr-name">{_esc(card['player'])}</div>
+        <div class="lofc-sr-club">{_esc(card['club'])}</div>
       </div>
-      <div class="lofc-sr-meta">{meta}{_pill(row.get('verdict') or '—', tone)}</div>
+      <div class="lofc-sr-meta">{meta}{_pill(card['verdict'], tone)}</div>
       <div class="lofc-sr-facts">{fact_html}</div>
       {body_html}
     </div>
@@ -528,6 +511,12 @@ def reports_frame(rating_season_id: int) -> pd.DataFrame:
     is, because a rating shown without that is a different claim from the one the data
     supports.
     """
+    return reports_query(rating_season_id, settings.live_season_id or rating_season_id)
+
+
+def reports_query(rating_season_id: int, live_season_id: int) -> pd.DataFrame:
+    """`reports_frame` without its cache (the web front end keys its own copy on
+    `web_data_version`, which tracks scout_reports and player_scorecards)."""
     return pd.read_sql(
         """
         WITH rated AS (
@@ -587,14 +576,18 @@ def reports_frame(rating_season_id: int) -> pd.DataFrame:
         WHERE r.missing_since IS NULL
         ORDER BY r.fixture_date DESC NULLS LAST, r.player_name
         """,
-        get_engine(), params={"prev": rating_season_id,
-                              "live": settings.live_season_id or rating_season_id,
+        get_engine(), params={"prev": rating_season_id, "live": live_season_id,
                               "floor": MIN_PEERS_FOR_RANKING})
 
 
 @st.cache_data(ttl=60)
 def last_sync() -> pd.Series | None:
     """The most recent sync record, or None if the sheet has never been read."""
+    return last_sync_row()
+
+
+def last_sync_row() -> pd.Series | None:
+    """`last_sync` without its cache (one tiny query; the web page reads it every time)."""
     frame = pd.read_sql(
         "SELECT digest, synced_at, reports_seen, reports_written, changed "
         "FROM scout_sync ORDER BY id DESC LIMIT 1", get_engine())
@@ -613,6 +606,12 @@ def consensus_by_player() -> pd.DataFrame:
     against league peers -- so the composite reformulation due next week cannot break it,
     and this cannot move the ranking.
     """
+    return consensus_frame()
+
+
+def consensus_frame() -> pd.DataFrame:
+    """`consensus_by_player` without its cache (the web front end keys its own copy on
+    `web_data_version`)."""
     rows = pd.read_sql(
         "SELECT player_id, verdict FROM scout_reports "
         "WHERE player_id IS NOT NULL AND missing_since IS NULL", get_engine())
@@ -702,24 +701,18 @@ def render(rating_season_id: int, rating_label: str) -> None:
 
     frame = reports_frame(rating_season_id)
     sync = last_sync()
-    live_id = settings.live_season_id
-    live_label = (season_name_for(live_id) if live_id and live_id != rating_season_id
-                  else rating_label)
+    live_label = sp.live_label(rating_season_id, rating_label, settings.live_season_id)
 
     if frame.empty:
         st.info("No scout reports have been synced yet. Run "
                 "`python -m lofc.store.scout_reports`.")
         return
 
-    status = sync_status(sync["synced_at"] if sync is not None else None)
     done = st.session_state.pop("scout_sync_result", None)
     left, right = st.columns([5, 1])
     with left:
-        line = status
-        if done is not None:
-            line += (" · sheet unchanged" if not done["changed"]
-                     else f" · {done['written']} reports updated")
-        (st.warning if "not updating" in status or "Never" in status else st.caption)(line)
+        line, warn = sp.sync_line(sync["synced_at"] if sync is not None else None, done)
+        (st.warning if warn else st.caption)(line)
     with right:
         # Actually reads the sheet. An earlier version only cleared the cached reads, so
         # the page reloaded the same stored rows and the "Synced" line never moved -- a
@@ -739,58 +732,49 @@ def render(rating_season_id: int, rating_label: str) -> None:
                 st.session_state["scout_sync_result"] = result
                 st.rerun()
 
-    short = lambda label: label[2:] if len(label) == 7 else label   # 2025/26 -> 25/26
-    frame = model_view(frame, season=short(rating_label), live_season=short(live_label))
     names = competition_name_by_id()
-    frame["league"] = frame["league_id"].map(names)
+    frame = sp.prepare(frame, rating_label, live_label, names)
+    totals = sp.counts(frame)
+    options = sp.filter_options(frame)
 
-    linked = int(frame["player_id"].notna().sum())
-    disagree = int(disagrees(frame[MODEL_VIEW]).sum())
-
-    browse, disagreements, scouts = st.tabs(
-        [f"All reports ({len(frame):,})", f"Data disagrees ({disagree})",
-         "Scout activity"])
+    browse, disagreements, scouts = st.tabs(sp.tab_labels(totals))
 
     with browse:
         s1, s2, s3, s4 = st.columns([3, 2, 1, 1])
         search = s1.text_input("Search for a player", placeholder="Start typing a name…",
                                key="scout_search")
-        league = s2.selectbox("League", ["All"] + sorted(frame["league"].dropna().unique()),
-                              key="scout_league")
-        max_age = s3.number_input("Max age", min_value=16, max_value=40, value=40, step=1,
+        league = s2.selectbox("League", options["League"], key="scout_league")
+        max_age = s3.number_input("Max age", min_value=sp.MAX_AGE_MIN,
+                                  max_value=sp.MAX_AGE_MAX, value=sp.MAX_AGE_MAX, step=1,
                                   key="scout_max_age")
-        foot = s4.selectbox("Foot", ["All", "Left", "Right"], key="scout_foot")
+        foot = s4.selectbox("Foot", options["Foot"], key="scout_foot")
         c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
-        scout = c1.selectbox("Scout", _options(frame, "scout"))
-        verdict = c2.selectbox("Verdict", _options(frame, "verdict"))
-        grade = c3.selectbox("Grade", _options(frame, "grade"))
-        position = c4.selectbox("Position", _position_options(frame))
-        club = c5.selectbox("Club", _options(frame, "club_name"))
-        observation = c6.selectbox("Seen", _options(frame, "observation"))
+        scout = c1.selectbox("Scout", options["Scout"])
+        verdict = c2.selectbox("Verdict", options["Verdict"])
+        grade = c3.selectbox("Grade", options["Grade"])
+        position = c4.selectbox("Position", options["Position"])
+        club = c5.selectbox("Club", options["Club"])
+        observation = c6.selectbox("Seen", options["Seen"])
         # 129 reports are on players outside the seven leagues we hold data for. Both
         # halves are worth isolating: "only players I can compare to the model", and
         # "only players the model has never seen", which is the discovery list.
-        in_our_data = c7.selectbox("Our data", ["All", "In our data", "Not in our data"])
-        data_vs_scout = c8.selectbox("Data vs scout", DATA_VS_SCOUT_GROUPS,
+        in_our_data = c7.selectbox("Our data", options["Our data"])
+        data_vs_scout = c8.selectbox("Data vs scout", options["Data vs scout"],
                                      key="scout_data_vs_scout")
         view = filter_reports(frame, scout=scout, verdict=verdict, grade=grade,
                               club=club, observation=observation, position=position,
                               search=search, in_our_data=in_our_data, league=league,
                               max_age=None if max_age >= 40 else int(max_age), foot=foot,
                               data_vs_scout=data_vs_scout)
-        st.caption(f"{len(view):,} of {len(frame):,} reports · "
-                   f"{frame['player_name'].nunique():,} players · "
-                   f"{frame['scout'].nunique()} scouts · {linked:,} matched to our data")
+        st.caption(sp.browse_caption(len(view), totals))
         _report_table(view, names, rating_label, live_label, key="scout_all")
 
     with disagreements:
         # The reason the page exists. Agreement is reassuring and carries almost no
         # information; these are the players where a recruiter's judgement is needed.
-        view = frame[disagrees(frame[MODEL_VIEW])]
-        st.caption(f"{len(view)} reports: Sign but rated under {WEAK:.1f}, or Don't sign "
-                   f"but rated {STRONG:.1f}+.")
-        _report_table(view.sort_values("rating_used"), names, rating_label, live_label,
-                      key="scout_disagree")
+        view = sp.disagree_view(frame)
+        st.caption(sp.disagree_caption(len(view)))
+        _report_table(view, names, rating_label, live_label, key="scout_disagree")
 
     with scouts:
         st.dataframe(scout_activity(frame), hide_index=True, width="stretch",
@@ -804,26 +788,18 @@ def _report_table(view: pd.DataFrame, names: dict, rating_label: str, live_label
         st.info("No reports match these filters.")
         return
 
-    table = report_display(_table(view, names).reset_index(drop=True))
+    table = sp.display_table(view, names)
+    helps = sp.column_help(rating_label, live_label)
     selection = st.dataframe(
         table, hide_index=True, width="stretch", height=680,
         on_select="rerun", selection_mode="single-row", key=key,
         column_config={
             "Rating": st.column_config.TextColumn(
-                f"Rating ({rating_label})", width="small",
-                help="The platform's 1-5 composite from the last complete season. Blank "
-                     "is not a poor rating — Data vs scout says why there is none."),
+                f"Rating ({rating_label})", width="small", help=helps["Rating"]),
             "This season": st.column_config.TextColumn(
-                f"Rating ({live_label})", width="small",
-                help="This season's rating, where he has 450+ minutes and at least 10 "
-                     "league-position peers do too. Updates every Monday."),
-            "Player": st.column_config.TextColumn(
-                "Player", help="\u2020 = name read from the report text."),
-            MODEL_VIEW: st.column_config.TextColumn(
-                MODEL_VIEW, help=f"The scout's verdict against the player's rating "
-                                 f"(this season's where he has one). Agrees: Sign and "
-                                 f"{STRONG:.1f}+, or Don't sign and under {WEAK:.1f}. "
-                                 f"Monitor is not compared."),
+                f"Rating ({live_label})", width="small", help=helps["This season"]),
+            "Player": st.column_config.TextColumn("Player", help=helps["Player"]),
+            MODEL_VIEW: st.column_config.TextColumn(MODEL_VIEW, help=helps[MODEL_VIEW]),
         })
 
     rows = selection.get("selection", {}).get("rows", []) if selection else []
@@ -842,8 +818,7 @@ def _report_detail(row: pd.Series) -> None:
     st.markdown(report_card_html(row), unsafe_allow_html=True)
 
     if pd.isna(row.get("player_id")):
-        st.caption("This player is not in the platform's data — no rating, percentile or "
-                   "peer comparison exists for him. The report above is the whole record.")
+        st.caption(sp.NOT_LINKED)
         return
 
     # Which league-season to open him in is NOT obvious, and getting it wrong renders a
@@ -854,7 +829,7 @@ def _report_detail(row: pd.Series) -> None:
 
     target = best_profile_target(player_rated_rows(int(row["player_id"])))
     if not target:
-        st.caption("Matched to our data, but he has no rated season yet — nothing to open.")
+        st.caption(sp.NO_RATED_SEASON)
         return
     if st.button(f"Open {row['player_name']} in Players",
                  key=f"open_{row['submission_id']}", type="primary"):

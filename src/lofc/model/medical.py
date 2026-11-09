@@ -41,8 +41,9 @@ SCHEDULED_GAMES: dict[int, int] = {
 
 AVAILABILITY_SEASONS = 2
 
-# Transfermarkt labels seasons "25/26"; our season_ids are 317 = 2024/25 upward.
-_SEASON_LABELS: dict[int, str] = {317: "24/25", 318: "25/26", 319: "26/27"}
+# Transfermarkt labels seasons "25/26". 316 (23/24) is here only as the earlier half of
+# the 2024/25 availability window; the platform has no 2023/24 ratings.
+_SEASON_LABELS: dict[int, str] = {316: "23/24", 317: "24/25", 318: "25/26", 319: "26/27"}
 
 # Sentinel for an ongoing injury (NULL date_until): treated as still open, so it
 # merges with -- and absorbs -- every later spell inside the window, however far

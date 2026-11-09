@@ -470,3 +470,9 @@ docker compose exec -T app python scripts/smoke_test.py --quick
 #   C="docker compose -f /opt/lofc/docker-compose.prod.yml"; $C exec -T app mkdir -p /tmp/newsrc; $C cp /tmp/newsrc.tgz app:/tmp/newsrc/newsrc.tgz
 #   $C exec -T app sh -c "cd /tmp/newsrc && rm -rf src scripts && tar xzf newsrc.tgz"
 #   $C exec -T -e PYTHONPATH=/tmp/newsrc/src app sh -c "cd /tmp/newsrc && python scripts/smoke_test.py"
+
+# --- Tracked matches (TASKS 2.36, 2026-11-09): SkillCorner count_match -> skillcorner_match_counts ---
+# Display only (Physical page). Needs the migration (alembic upgrade head). Written by every
+# `build_neutral --write` (so the weekly pipeline keeps it fresh); this fills it on its own from
+# the landed files in data/raw/skillcorner/ (no API call, no other table touched):
+docker compose exec -T app python -m lofc.model.build_neutral --match-counts

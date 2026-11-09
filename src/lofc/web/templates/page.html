@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="view on" id="v-{{ page.key }}" data-page="{{ page.key }}">
+  <div class="section-label">{{ page.group }}</div>
+  <h1>{{ page.title }}</h1>
+  {% block page_body %}
+  <div class="placeholder" style="margin-top:18px">
+    <h2>Currently building</h2>
+  </div>
+  {% endblock %}
+</section>
+{% endblock %}

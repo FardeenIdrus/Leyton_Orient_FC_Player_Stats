@@ -32,3 +32,13 @@ def test_no_slider_uses_the_all_match_average():
     for position in ("Centre Back", "Full Back", "Winger", "Centre Forward"):
         assert "top5_psv99_kmh" in mf.PHYSICAL_SLIDERS[position]
     assert mf.PHYSICAL_LABELS["top5_psv99_kmh"][0] == "Top speed (km/h)"
+
+
+def test_speed_definitions_name_the_unit_once():
+    """Owner 2026-11-09: two definitions ended 'km/h. km/h.' / '. km/h.' (stray unit)."""
+    top5 = gd.PHYSICAL["top5_psv99_kmh"][1]
+    avg = gd.PHYSICAL["psv99_kmh"][1]
+    assert top5.endswith("his movement above 15 km/h."), top5
+    assert top5.count("km/h") == 1, top5
+    assert avg == ("Average of his top speed across all his matches "
+                   "(SkillCorner PSV-99), in km/h."), avg

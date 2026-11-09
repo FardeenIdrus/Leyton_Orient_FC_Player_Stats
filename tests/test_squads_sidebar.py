@@ -41,5 +41,8 @@ def test_no_filters_is_a_no_op():
 
 
 def test_render_applies_it_to_both_the_squad_and_the_loan_view():
-    source = inspect.getsource(squads.render)
-    assert source.count("sidebar_view(") >= 2
+    # the squad view in render, the loans view in core.squads.build_view (2.36)
+    from lofc.core import squads as core
+    assert "sidebar_view(" in inspect.getsource(squads.render)
+    assert "build_view(" in inspect.getsource(squads.render)
+    assert "sidebar_view(" in inspect.getsource(core.build_view)

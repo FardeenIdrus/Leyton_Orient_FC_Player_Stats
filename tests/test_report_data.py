@@ -220,3 +220,23 @@ def test_authored_from_inputs_keeps_only_answered_screening():
     assert a.screening == {"A": "Meets", "C": "Does not meet"}
     assert data.authored_from_inputs(author_name="S", author_role="scout",
                                      screening={"A": None}) is None
+
+
+# --- season-wide inputs computed once (TASKS 2.36: the web Report page caches them) -------
+def test_build_with_precomputed_season_inputs_equals_plain_build(engine):
+    """The web page passes the season-wide frames (neutral rows, percentiles, style labels)
+    and the resolved bands it keeps in memory; the report must be exactly what Streamlit's
+    plain build gives."""
+    _assess(engine, summary="Reads the game well.")
+    plain = data.build(engine, 1, 4, 318)
+    season = data.season_inputs(engine, 318)
+    resolved = data.resolved_bands(engine)
+    assert data.build(engine, 1, 4, 318, season=season) == plain
+    assert data.build(engine, 1, 4, 318, season=season, resolved=resolved) == plain
+    assert data.build(engine, 2, 4, 318, season=season, resolved=resolved) == \
+        data.build(engine, 2, 4, 318)
+
+
+def test_season_inputs_for_another_season_are_refused(engine):
+    with pytest.raises(ValueError):
+        data.build(engine, 1, 4, 317, season=data.season_inputs(engine, 318))

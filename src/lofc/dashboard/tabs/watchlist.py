@@ -19,6 +19,7 @@ import streamlit as st
 from sqlalchemy import bindparam, text as sa_text
 
 from lofc.config import settings
+from lofc.core import watchlist_page as wp
 from lofc.dashboard import badges
 from lofc.dashboard.formatting import dash_blanks, link_or_blank, numeric_or_dash
 from lofc.dashboard.loaders import (
@@ -210,115 +211,40 @@ def _watchlist(tab, show_money: bool = False) -> None:
     with tab:
         df = watchlist.load(get_engine())
         if df.empty:
-            st.info("No players on the watchlist yet. Open any player's profile and click "
-                    "“☆ Add to watchlist” — tracked players, statuses and scout notes live here.")
+            st.info(wp.EMPTY)
             return
 
-        # Derived, never stored: joins on the same (player, competition, season) triple the
-        # profile's scout section reads, so a watchlist row and a profile row can't disagree.
-        df = assessment_status.attach(df, load_assessment_status())
-
-        # Current-season form: matched on player_id alone -- a watchlist row is keyed to
-        # whichever season he was SCORED in, but "is he playing right now" is about the live
-        # season regardless of that, exactly as the profile's own current-form section reads.
-        live = settings.live_season_id
-        if live is None:
-            df["current_form"] = "—"
-            form_header = "This season"
-        else:
-            live_rows = load_current_form()
-            df["current_form"] = df["player_id"].map(
-                lambda pid: _current_form_text(live_rows, int(pid)))
-            form_header = f"This season ({season_name_for(live)})"
-
-        # Contract countdown -- identical arithmetic to the Players tab, so the two surfaces
-        # never disagree about how long a deal has left. Stored back onto `df` itself (not
-        # kept as a standalone Series): the assessment-status filter below re-indexes `df`
-        # with `reset_index(drop=True)`, and a Series left outside that no longer lines up by
-        # position -- only a column travels correctly with its row through the filter.
-        df["contract_until_dt"] = pd.to_datetime(df["contract_until"], errors="coerce")
-        df["months_left"] = months_left_column(df["contract_until_dt"])
-
-        # Injury record, bulk-loaded for exactly the players on this list (never the whole
-        # 3,766-row table) -- recent absence is material to a recruiter revisiting a target.
-        player_ids = tuple(sorted(df["player_id"].astype(int).unique().tolist()))
-        injuries = _summarize_injuries(load_injuries_for_players(player_ids),
-                                       pd.Timestamp.now().normalize())
-        df = df.merge(injuries, on="player_id", how="left")
-        df["injury_status"] = df["injury_status"].fillna("No injury spells on record")
-
-        # The club's real 1-5 composite (replaces the old 'Quality' column, which read the
-        # RETIRED player_scores.performance_score -- a 0-100 figure from a superseded scoring
-        # model, no longer the platform's ranking anywhere else). A watched player can be
-        # scored in more than one season, so pull scorecards for every season present here.
-        season_ids = sorted(int(s) for s in df["season_id"].dropna().unique().tolist())
-        sc_cols = ["player_id", "competition_id", "season_id", "objective_composite",
-                  "performance_band", "physical_band"]
-        scorecards = (pd.concat([load_scorecards(sid)[sc_cols] for sid in season_ids],
-                                ignore_index=True) if season_ids else pd.DataFrame(columns=sc_cols))
-        df = df.merge(scorecards, on=["player_id", "competition_id", "season_id"], how="left")
+        # Assessment status, this season's form, contract countdown, latest injury spell and
+        # the club's 1-5 composite (lofc.core.watchlist_page, shared with the web page).
+        df, form_header = wp.enrich(
+            df, assessment=load_assessment_status(), live_season_id=settings.live_season_id,
+            current_form=load_current_form, injuries_for=load_injuries_for_players,
+            scorecards_for=load_scorecards)
 
         st.markdown("**Players the club is tracking.** Click a row to read the full note, "
                     "edit it, change the status, or remove the player.")
         chosen = st.multiselect(
             "Assessment status", list(assessment_status.STATUSES),
-            default=list(assessment_status.STATUSES),
-            help="Which of your targets still need a scout?")
-        df = df[df["assessment_status"].isin(chosen)].reset_index(drop=True)
+            default=list(assessment_status.STATUSES), help=wp.STATUS_HELP)
+        df = wp.filter_status(df, chosen)
         st.caption("'Scout sent' is a note you enter — it records that you asked someone to "
                    "look at a player. The assessment status records that someone did. They "
                    "are deliberately separate.")
         if df.empty:
-            st.info("No watched players match the chosen assessment status.")
+            st.info(wp.NONE_MATCH)
             return
 
-        # --- What needs a look: a quiet, always-on read of the list, not a second filter --
-        # every count here is derived from columns already computed above.
-        alerts = _watchlist_alerts(df["months_left"], df["injury_status"], df["assessment_status"])
-        a1, a2, a3, a4 = st.columns(4)
-        a1.metric("On the list", alerts["total"], border=True)
-        a2.metric("Contract ≤ 6 months", alerts["expiring_soon"], border=True,
-                 help="Known contract dates only — free to sign a pre-contract deal elsewhere.")
-        a3.metric("Currently injured", alerts["currently_injured"], border=True,
-                 help="On record as out injured right now, per the Transfermarkt scrape.")
-        a4.metric("Not yet assessed", alerts["not_assessed"], border=True,
-                 help="No Psychological or Medical assessment recorded for this player yet.")
+        # --- What needs a look: a quiet, always-on read of the list, not a second filter.
+        alerts = wp.alerts(df)
+        for col, (label, key, tip) in zip(st.columns(4), wp.TILES):
+            if tip is None:
+                col.metric(label, alerts[key], border=True)
+            else:
+                col.metric(label, alerts[key], border=True, help=tip)
 
-        name_by_id = _competition_name_by_id()   # all leagues incl. Scottish/PL2 (901/902/903)
-        frame = pd.DataFrame({
-            "Player": df["player_name"], "Club": df["team_name"],
-            "League": df["competition_id"].map(name_by_id).fillna(df["competition_name"]),
-            "Position": df["position_group"],
-            # Age/Market value/Months left/Transfermarkt render as pre-formatted text
-            # (numeric_or_dash/link_or_blank, dashboard/formatting.py), not raw numbers fed
-            # to NumberColumn/LinkColumn: confirmed directly against the running app that a
-            # missing NumberColumn/LinkColumn cell renders the literal text "None" here,
-            # regardless of whether the missing marker is a numpy NaN, a Python None or
-            # pandas' own pd.NA -- so the fix has to happen before the value ever reaches
-            # that column type, not by trying a "cleaner" null. Text formatted this way
-            # sorts as text, same known trade-off "Contract" already makes below.
-            "Age": numeric_or_dash(df["age"], "{:.1f}"),
-            "Composite": df["objective_composite"],
-            "Performance": df["performance_band"],
-            "Physical": df["physical_band"],
-            form_header: df["current_form"],
-            "Injury": df["injury_status"],
-            "Contract": df["contract_until_dt"].dt.strftime("%m/%Y").fillna("—"),
-            "Months left": numeric_or_dash(df["months_left"], "{:.0f}"),
-            "Status": df["status"],
-            "Assessed": df["assessment_status"].map(_badge_text),
-            "Note": df["note"].fillna(""),
-            "Added": pd.to_datetime(df["created_at"]).dt.strftime("%d %b %Y"),
-            "Transfermarkt": link_or_blank(
-                df["tm_player_id"], "https://www.transfermarkt.com/-/profil/spieler/{:.0f}"),
-        })
-
-        market_value = market_value_text(df, show_money)
-        if market_value is not None:
-            frame.insert(frame.columns.get_loc("Contract"), "Market value", market_value)
-
-        # Any remaining missing text cell (Position, Status, Injury...) would draw "None".
-        frame = dash_blanks(frame)
+        # Age/Market value/Months left/Transfermarkt are pre-formatted text, not raw numbers
+        # fed to NumberColumn/LinkColumn: a missing cell there renders the literal "None".
+        frame = wp.display_frame(df, form_header, show_money, _competition_name_by_id())
 
         # The key version bumps on every dialog exit, which clears the selection so
         # the dialog does not reopen on the next rerun.
