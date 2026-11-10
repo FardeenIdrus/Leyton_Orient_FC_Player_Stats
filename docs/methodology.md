@@ -415,7 +415,8 @@ percentile; the page only picks, weights by minutes and compares. Code: `src/lof
    and a peer pool big enough to rate (small pools are never rated).
 2. **Top 6.** The six League One clubs whose players have the highest average Overall rating
    this season, weighted by minutes (each player's rating × his minutes, summed, ÷ the club's
-   minutes).
+   minutes). The Top 6 card also shows Performance and Physical (the same minutes-weighted
+   club average) and Orient's own row with its rank.
 3. **Our level.** Our best player at the position rated this season in League One. Players rated
    only last season, or only in another league (on loan), are listed with a tag ("25/26", or the
    league's name) but never set our level.
@@ -426,20 +427,23 @@ percentile; the page only picks, weights by minutes and compares. Code: `src/lof
    the median of those players, and each one is named. If fewer than 4 of the 6 clubs have a
    rated player there yet (early season), last season's top 6 is used for that position, with
    last season's data, and the page says so.
-6. **Gap.** The bar minus our level, biggest first. "Where it comes from" compares our player's
-   percentiles with the median of the named players' and shows the three biggest shortfalls;
-   "Show all" lists every metric 20 or more percentile points behind (ours, top-6 median,
-   shortfall; biggest first).
+6. **Gap.** The bar minus our level, biggest first. "Biggest shortfalls" compares our player's
+   percentiles with the median of the named players' and shows the three biggest; opening a row
+   lists every metric where we are behind, biggest first, with no cut-off ("Every shortfall"). Each shortfall
+   shows ours, the top-6 median and "Behind" (the unrounded difference, .5 rounded up) — one
+   figure, the same in both lists. Percentiles are plain numbers (100 = best); ordinals are used
+   only for league ranks.
 7. **Players who could close the gap.** This season's rated players at the position (not ours)
    with an Overall above our level — **one list per league, top 15**, because a rating compares a
    player only with his own league, ranked by Overall. Three columns, one per shortfall metric
-   from "Where it comes from", show his percentile in his own league and position (green 70+,
+   from "Biggest shortfalls", show his percentile in his own league and position (green 70+,
    grey 30–69, red below 30); each column can be sorted. "vs our best" is his Overall minus our
    level (2 decimals, .5 rounded up as the card's "vs ours"); the gap is closed when it reaches
    the gap size. "Top-6 level" marks an Overall at or above the bar. Filters: age, contract,
    "Strong on 2+ of our weaknesses" (70th percentile or better on at least 2 of the 3) and
    "Top-6 level only" (at or above the bar); both off by default. No market value, fee or wage
-   is shown.
+   is shown. Leagues: a multi-select of every league with candidates (England's first),
+   default League One, Championship and League Two; the choice is remembered in that browser.
 8. **Big picture.** Our rank among League One clubs, this season and last, on the minutes-
    weighted club averages of Overall, Performance, Physical, the seven physical metrics and ten
    performance measures from players' season figures: Attack (non-pen xG, expected assists,
@@ -459,7 +463,7 @@ percentile; the page only picks, weights by minutes and compares. Code: `src/lof
 * Bar = the median of 3.46, 3.68, 3.74, 3.75, 3.82, 4.29 = (3.74 + 3.75) ÷ 2 = **3.75** (the page works from the unrounded ratings).
 * Our level = our best centre back rated this season in League One: Joseph Olowu **2.85**.
 * Gap = 3.75 − 2.85 = **0.90**, shown on the page as −0.90.
-* Where it comes from: Distance — Olowu 5th percentile, the six named centre backs' median 90th.
+* Biggest shortfall: Distance — Olowu at the 5th percentile, the six named centre backs' median 90th.
 
 Wingers that day used last season's bar: only 3 of this season's top-6 clubs had a rated winger
 yet, so the bar came from 2025/26's top 6 (5 of them had one).

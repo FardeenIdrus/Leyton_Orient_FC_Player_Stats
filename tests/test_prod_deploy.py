@@ -57,6 +57,19 @@ def test_deploy_builds_first_then_switches_and_never_recreates_both_web_containe
     assert "alembic upgrade head" in body
 
 
+def test_deploy_restarts_itself_when_the_pull_changed_it():
+    """Owner, 2026-11-10: the first deploy of the new site ran the OLD deploy.sh to the end
+    (bash keeps reading the file it started, even after git pull replaces it), so Caddy was
+    started without its upstream file and every domain went down. After pulling, a changed
+    deploy.sh must re-run itself -- once (guard variable) -- before building anything."""
+    text = (ROOT / "scripts" / "deploy.sh").read_text()
+    body = "\n".join(l for l in text.splitlines() if not l.strip().startswith("#"))
+    assert "LOFC_DEPLOY_REEXEC" in body
+    assert 'git diff --quiet "$before" "$after" -- scripts/deploy.sh' in body
+    assert 'LOFC_DEPLOY_REEXEC=1 exec "$REPO_ROOT/scripts/deploy.sh"' in body
+    assert body.index("git pull --ff-only") < body.index("LOFC_DEPLOY_REEXEC") < body.index(" build")
+
+
 @pytest.mark.skipif(not (ROOT / "scripts" / "test_web_switch.sh").exists(), reason="scripts/ not mounted")
 def test_switch_script_behaviour():
     r = subprocess.run(["bash", str(ROOT / "scripts" / "test_web_switch.sh")], capture_output=True, text=True)

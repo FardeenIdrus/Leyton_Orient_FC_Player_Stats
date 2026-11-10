@@ -1548,29 +1548,116 @@ def reference_glossary(s, w):
 
 
 def club_vs_league(s, w):
-    """Club vs League One: top 6, gap map (biggest first), a position click lists players per
-    league (tabs, top 15, all above our level), filters in the URL, rows open the card."""
+    """Club vs League One (owner's redesign 2026-11-10): Top 6 + our row, Big picture in two
+    columns, gap map (one line per position, a click opens its detail, shortfall columns aligned),
+    percentiles as plain numbers, and the remembered Leagues picker."""
+    s.page.evaluate("() => { try { localStorage.removeItem('lofc.cvl.leagues'); } catch (e) {} }")
+    s.page.reload()
     s.page.wait_for_selector("#cv-gap-t tr.pos", timeout=8000)
-    s.note("club vs league: six clubs in the top 6", None if s.page.locator("#cv-top6-t tbody tr").count() == 6 else "not 6")
-    s.note("club vs league: six positions", None if s.page.locator("#cv-gap-t tr.pos").count() == 6 else "not 6")
-    # coordinator review 2026-11-10: the Top 6 card ends at its content (no stretched white area)
+    s.shot("top", w)
+    top = s.page.locator("#cv-top6-t tbody tr:not(.us)").count()
+    us = s.page.locator("#cv-top6-t tbody tr.us")
+    s.note("club vs league: top 6 + our row", None if us.count() == 1 and top + 1 in (6, 7) else f"{top} clubs, {us.count()} our rows")
+    if us.count():
+        chips = us.locator(".chip").all_inner_texts()
+        s.note("club vs league: our row has 3 ratings", None if len(chips) == 3 and all(re.match(r"^\d\.\d\d$", c) for c in chips) else str(chips))
     gap = s.page.evaluate("""() => { const c = document.querySelector('#cv-top6'), t = document.querySelector('#cv-top6-t');
       return c.getBoundingClientRect().bottom - t.getBoundingClientRect().bottom; }""")
     s.note("club vs league: Top 6 card ends at its table", None if gap < 48 else f"{gap:.0f}px empty below the table")
     s.note("club vs league: how-it-works closed", None if not s.page.locator("#cv-how").evaluate("d => d.open") else "open")
-    s.step("club vs league: pick Centre Back", lambda p: s.page.locator("#cv-gap-t tr[data-g='Centre Back']").click(timeout=3000))
-    s.page.wait_for_timeout(300)
+    bp = s.page.locator("#cv-big-l, #cv-big-r").count()
+    side = s.page.evaluate("() => { const l = document.querySelector('#cv-big-l').getBoundingClientRect(), r = document.querySelector('#cv-big-r').getBoundingClientRect(); return Math.abs(l.top - r.top) < 2 && r.left > l.right; }")
+    s.note("club vs league: Big picture in two columns", None if bp == 2 and side else "not side by side")
+    ranks = s.page.locator("#cv-big .cv-rk").all_inner_texts()
+    s.note("club vs league: ranks are ordinals only", None if ranks and all(re.match(r"^\d+(st|nd|rd|th)$", r) for r in ranks) else str(ranks[:5]))
+    s.note("club vs league: six positions", None if s.page.locator("#cv-gap-t tr.pos").count() == 6 else "not 6")
+    vis = s.page.locator("#cv-gap-t tr.cv-det:not([hidden])")
+    first = s.page.locator("#cv-gap-t tr.pos").first.get_attribute("data-g")
+    s.note("club vs league: first gap row open by default", None if vis.count() == 1 and vis.first.get_attribute("data-d") == first else f"{vis.count()} open")
+    over = s.page.evaluate("() => { const c = document.querySelector('#cv-gap'); return c.scrollWidth - c.clientWidth; }")
+    s.note("club vs league: gap map has no sideways scroll", None if over <= 1 else f"{over}px wider than its card")
+    gtext = s.page.inner_text("#cv-gap-t")
+    s.note("club vs league: gap map percentiles are plain numbers", None if not re.search(r"\b\d+(st|nd|rd|th)\b", gtext) else "ordinal found")
+    if first != "Full Back":
+        s.step("club vs league: close the first gap row", lambda p: s.page.locator(f"#cv-gap-t tr.pos[data-g='{first}']").click(timeout=3000))
+    fb = s.page.locator("#cv-gap-t tr.pos[data-g='Full Back']")
+    if fb.count():
+        if first != "Full Back":
+            s.step("club vs league: open Full Back", lambda p: fb.click(timeout=3000))
+        det = s.page.locator("#cv-gap-t tr.cv-det[data-d='Full Back']")
+        s.note("club vs league: Full Back detail open", None if det.is_visible() else "closed")
+        # owner 2026-11-10: opening a gap row also switches "Players who could close the gap"
+        s.page.wait_for_timeout(1500)
+        pos = s.page.eval_on_selector("#cv-group", "e => e.value")
+        s.note("club vs league: a gap-row click switches the recommendations", None if pos == "Full Back" else pos)
+        s.note("club vs league: detail stays open after the switch", None if det.is_visible() else "closed")
+        if s.page.locator("#cv-gap-t tr.pos[data-g='Midfield']").count():
+            s.step("club vs league: open Midfield", lambda p: s.page.locator("#cv-gap-t tr.pos[data-g='Midfield']").click(timeout=3000))
+            s.page.wait_for_timeout(1500)
+            pos = s.page.eval_on_selector("#cv-group", "e => e.value")
+            s.note("club vs league: recommendations follow the opened row", None if pos == "Midfield" else pos)
+        # the summary row's Ours/Top 6/Behind columns line up with "Every shortfall" below
+        al = s.page.evaluate("""() => {
+          const a = [...document.querySelectorAll("#cv-gap-t tr.pos[data-g='Full Back'] .cv-sfl > span")].slice(0, 4),
+                b = [...document.querySelectorAll("#cv-gap-t tr.cv-det[data-d='Full Back'] .cv-sfd > span")].slice(0, 4),
+                h = [...document.querySelectorAll("#cv-gap-t thead .cv-sfh > span")];
+          if (a.length < 4 || b.length < 4) return 'missing';
+          const bad = [1, 2, 3].filter(i => Math.abs(a[i].getBoundingClientRect().right - b[i].getBoundingClientRect().right) > 0.5
+                                         || Math.abs(a[i].getBoundingClientRect().right - h[i].getBoundingClientRect().right) > 0.5);
+          return bad.length ? 'columns ' + bad.join(',') + ' off' : ''; }""")
+        s.note("club vs league: shortfall columns aligned", al or None)
+        same = s.page.evaluate("""() => {
+          const pick = sel => { const s = [...document.querySelectorAll(sel)], o = {};
+            for (let i = 0; i + 3 < s.length; i += 4) o[s[i].innerText] = s[i + 3].innerText; return o; };
+          const top = pick("#cv-gap-t tr.pos[data-g='Full Back'] .cv-sfl > span"),
+                all = pick("#cv-gap-t tr.cv-det[data-d='Full Back'] .cv-sfd > span:not(.h)");
+          return Object.keys(top).filter(k => k in all && all[k] !== top[k]).join(', '); }""")
+        s.note("club vs league: one Behind figure", None if not same else f"differ: {same}")
+        cut = s.page.evaluate("""() => [...document.querySelectorAll("#cv-gap-t tr.cv-det[data-d='Full Back'] td, #cv-gap-t tr.cv-det[data-d='Full Back'] span")]
+          .filter(e => e.scrollWidth > e.clientWidth + 1).length""")
+        s.note("club vs league: nothing cut off in the detail", None if not cut else f"{cut} clipped")
+        fb.scroll_into_view_if_needed()
+        s.page.evaluate("() => document.querySelector(\"#cv-gap-t tr.pos[data-g='Full Back']\").scrollIntoView({block: 'start'}); window.scrollBy(0, -130)")
+        s.shot("gap_fullback", w)
+    s.step("club vs league: pick Centre Back", lambda p: s.page.select_option("#cv-group", "Centre Back", timeout=3000))
+    s.page.wait_for_timeout(400)
     s.note("club vs league: position in the URL", None if "group=Centre" in s.page.url else s.page.url)
     rows = s.page.locator("#cv-rec-t tbody tr")
     s.note("club vs league: at most 15 per league", None if 0 < rows.count() <= 15 else f"{rows.count()} rows")
+    # Leagues picker: default three, a checklist of every league, remembered on this computer
+    btn = s.page.locator("#cv-leagues")
+    s.note("club vs league: default leagues", None if btn.inner_text().startswith("3 selected: League One, Championship, League Two") else btn.inner_text())
+    s.note("club vs league: one tab per selected league", None if s.page.locator("#cv-tabs button[data-l]").count() == 3 else "not 3 tabs")
+    cap = s.page.inner_text("#cv-count")
+    s.note("club vs league: caption names the league", None if re.match(r"^League One · top \d+ of \d+ centre backs above our level$", cap) else cap)
+    hh = s.page.evaluate("() => [document.querySelector('#cv-leagues'), document.querySelector('#cv-contract')].map(e => { const r = e.getBoundingClientRect(); return [r.top, r.bottom]; })")
+    s.note("club vs league: Leagues lines up with the other filters", None if abs(hh[0][0] - hh[1][0]) <= 2 and abs(hh[0][1] - hh[1][1]) <= 2 else str(hh))
+    s.step("club vs league: open Leagues", lambda p: btn.click(timeout=3000))
+    boxes = s.page.locator("#cv-lp-menu input[type=checkbox]")
+    s.note("club vs league: every league in the checklist", None if boxes.count() >= 3 else f"{boxes.count()} leagues")
+    s.page.evaluate("() => window.scrollTo(0, document.querySelector('#cv-rec').getBoundingClientRect().top + scrollY - 10)")
+    s.shot("leagues_open", w)
+    if boxes.count() > 3:
+        extra = boxes.nth(3)
+        s.step("club vs league: add a fourth league", lambda p: extra.check(timeout=3000))
+        s.note("club vs league: four tabs", None if s.page.locator("#cv-tabs button[data-l]").count() == 4 else "not 4")
+        s.page.keyboard.press("Escape")
+        s.page.reload(); s.page.wait_for_selector("#cv-rec-t tbody tr", timeout=8000)
+        s.note("club vs league: selection remembered", None if s.page.locator("#cv-tabs button[data-l]").count() == 4 else "forgotten")
+        s.step("club vs league: open Leagues again", lambda p: s.page.locator("#cv-leagues").click(timeout=3000))
+        s.step("club vs league: remove it", lambda p: s.page.locator("#cv-lp-menu input[type=checkbox]").nth(3).uncheck(timeout=3000))
+        s.page.keyboard.press("Escape")
+        s.note("club vs league: back to three tabs", None if s.page.locator("#cv-tabs button[data-l]").count() == 3 else "not 3")
     tab = s.page.locator("#cv-tabs button[data-l]").nth(1)
     if tab.count():
         s.step("club vs league: second league tab", lambda p: tab.click(timeout=3000))
+        s.note("club vs league: active league in the URL", None if f"league={tab.get_attribute('data-l')}" in s.page.url else s.page.url)
+        s.note("club vs league: active tab bold + underlined", None if tab.evaluate("b => b.classList.contains('on') && getComputedStyle(b).fontWeight >= 600") else "not marked")
     s.step("club vs league: strong on 2+ weaknesses", lambda p: s.page.locator("#cv-strong").click(timeout=3000))
     s.page.wait_for_timeout(300)
     s.note("club vs league: strong filter in the URL", None if "strong=1" in s.page.url else s.page.url)
     s.step("club vs league: strong off", lambda p: s.page.locator("#cv-strong").click(timeout=3000))
-    # owner 2026-11-09: three weakness columns (sortable), "vs our best", Top-6 level only, show all
+    # owner 2026-11-09: three weakness columns (sortable), "vs our best", Top-6 level only
     heads = s.page.locator("#cv-rec-t th.cv-sort")
     s.note("club vs league: Overall, vs our best and 3 weakness columns sortable",
            None if heads.count() == 5 else f"{heads.count()} sortable headings")
@@ -1579,6 +1666,7 @@ def club_vs_league(s, w):
     if col.count():
         s.step("club vs league: sort by first weakness", lambda p: col.click(timeout=3000))
         vals = s.page.locator("#cv-rec-t tbody tr td:nth-child(10)").all_inner_texts()
+        s.note("club vs league: weakness columns are plain numbers", None if all(re.match(r"^(\d+|—)$", v.strip()) for v in vals) else str(vals[:5]))
         nums = [int(re.sub(r"\D", "", v)) for v in vals if re.search(r"\d", v)]
         s.note("club vs league: weakness sort is best first", None if nums == sorted(nums, reverse=True) else str(nums))
         s.note("club vs league: sort in the URL", None if "sort=w0" in s.page.url else s.page.url)
@@ -1590,12 +1678,6 @@ def club_vs_league(s, w):
     badges = s.page.locator("#cv-rec-t tbody tr .cv-t6")
     s.note("club vs league: Top-6 level only keeps badged players", None if rows.count() == badges.count() else f"{rows.count()} rows, {badges.count()} badges")
     s.step("club vs league: Top-6 level off", lambda p: s.page.locator("#cv-top6only").click(timeout=3000))
-    more = s.page.locator("#cv-gap-t details.cv-all summary").first
-    if more.count():
-        url = s.page.url
-        s.step("club vs league: show all shortfalls", lambda p: more.click(timeout=3000))
-        s.note("club vs league: show all opens without changing position", None if s.page.url == url
-               and s.page.locator("#cv-gap-t details.cv-all[open] tbody tr").count() >= 1 else "did not open / changed position")
     s.shot("weakness_columns", w)
 
 

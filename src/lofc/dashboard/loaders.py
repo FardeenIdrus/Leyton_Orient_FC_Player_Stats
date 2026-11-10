@@ -45,7 +45,8 @@ def get_engine():
     # Streamlit's default showErrorDetails="full" (see .streamlit/config.toml, now "none"),
     # that reached the browser. admin.py's CLI engine already sets this for the same reason;
     # the dashboard's engine did not.
-    return create_engine(settings.database_url, hide_parameters=True)
+    return create_engine(settings.database_url, hide_parameters=True,
+                         pool_pre_ping=True)  # heal after a database restart (2026-11-10)
 
 
 def _read_sql_copy(sql: str) -> pd.DataFrame:

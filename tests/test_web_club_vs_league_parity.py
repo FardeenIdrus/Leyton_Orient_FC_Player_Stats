@@ -103,3 +103,33 @@ def test_every_big_picture_metric_is_held_this_season(engine, stored):
                               + " FROM player_metrics_neutral WHERE season_id = :s"), engine,
                          params={"s": cur}).iloc[0]
     assert [m for m in picture if counts[m] == 0] == []
+
+
+def test_top6_performance_physical_and_orients_row(page, engine, stored):
+    """Owner 2026-11-10: Performance / Physical columns and Orient's own row, recomputed here
+    with plain SQL (minutes-weighted over rated players that have the figure)."""
+    cur, _ = stored
+    df = pd.read_sql(text(
+        "SELECT n.team_name, n.minutes, c.objective_composite AS ovr, c.performance_band AS perf, "
+        "c.physical_band AS phys FROM player_scorecards c JOIN player_metrics_neutral n "
+        "USING (player_id, competition_id, season_id) WHERE c.archetype = 'All Metrics' "
+        "AND c.objective_composite IS NOT NULL AND c.season_id = :s AND c.competition_id = 4 "
+        "AND n.minutes > 0"), engine, params={"s": cur})
+
+    def avg(col):
+        f = df[df[col].notna()]
+        return (f[col] * f.minutes).groupby(f.team_name).sum() / f.minutes.groupby(f.team_name).sum()
+    perf, phys, ovr = avg("perf"), avg("phys"), avg("ovr")
+    for t in page["top6"]:
+        assert t["performance"] == round(float(perf[t["club"]]), 2)
+        assert t["physical"] == round(float(phys[t["club"]]), 2)
+    us = page["us"]
+    assert us["club"].lower().startswith("leyton orient")
+    assert us["avg"] == round(float(ovr[us["club"]]), 2)
+    assert us["performance"] == round(float(perf[us["club"]]), 2)
+    assert us["physical"] == round(float(phys[us["club"]]), 2)
+    assert us["rank"] == page["orient"]["rank"] and us["players"] == int((df.team_name == us["club"]).sum())
+    for g in page["gaps"]:
+        every = {s["metric"]: s["short"] for s in g["all_shortfalls"]}
+        for s in g["shortfalls"]:
+            assert isinstance(s["short"], int) and every.get(s["metric"], s["short"]) == s["short"]

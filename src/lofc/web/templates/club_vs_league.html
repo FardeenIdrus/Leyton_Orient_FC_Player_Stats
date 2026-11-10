@@ -14,25 +14,24 @@
       <li><b>Big picture</b>: each club's average of its players' figures, weighted by minutes, then ranked 1–24. Ratings rows use rated players (450+ minutes); measure rows use every player, per 90.</li>
       <li><b>Our level</b>: {{ terms["Our level"] }} Last season's ratings and loans elsewhere are shown, tagged, but never set it.</li>
       <li><b>Top-6 bar</b>: {{ terms["Top-6 bar"] }} If fewer than 4 of the 6 clubs have one yet, last season's top 6 is used, and labelled.</li>
-      <li><b>Gap</b>: {{ terms["Gap"] }} "Where it comes from" compares our player's percentiles with the named players'; "Show all" lists every metric 20+ points behind.</li>
+      <li><b>Gap</b>: {{ terms["Gap"] }} "Biggest shortfalls" compares our player's percentiles with the named players'; open a row for every metric we're behind on, biggest first.</li>
       <li><b>Players who could close the gap</b>: {{ terms["Players who could close the gap"] }} Top 15 per league, because ratings compare players within their own league; each column is his percentile (green 70+, red below 30). <b>vs our best</b>: {{ terms["vs our best"] }} <b>Top-6 level</b>: {{ terms["Top-6 level"] }}</li>
     </ol>
   </details>
 
   <div id="cv-msg" role="status"></div>
-  <div id="cv-skel" class="skeleton-page" aria-hidden="true"><div class="row tr2"><div class="skel" style="height:300px"></div><div class="skel" style="height:300px"></div></div><div class="skel" style="height:420px"></div></div>
+  <div id="cv-skel" class="skeleton-page" aria-hidden="true"><div class="skel" style="height:300px"></div><div class="skel" style="height:420px;margin-top:16px"></div></div>
 
   <div id="cv-body" hidden>
-    <div class="row tr2 cv-toprow">
-      <div class="card" id="cv-top6"><h2>Top 6 this season <span class="hlp-i" tabindex="0" data-tip="Top 6: {{ terms['Top 6'] }}">ⓘ</span></h2>
-        <div class="sub" id="cv-top6-sub"></div><div class="tw"><table id="cv-top6-t"></table></div></div>
-      <div class="card" id="cv-big"><h2>Big picture <span class="hlp-i" tabindex="0" data-tip="Our rank among League One clubs on the minutes-weighted average of our players' ratings and per-90 figures.">ⓘ</span></h2>
-        <div class="sub">Our rank among League One clubs · built from players' season figures</div><div class="tw"><table id="cv-big-t"></table></div></div>
-    </div>
+    <div class="card" id="cv-top6"><h2>Top 6 this season <span class="hlp-i" tabindex="0" data-tip="Top 6: {{ terms['Top 6'] }}">ⓘ</span></h2>
+      <div class="sub" id="cv-top6-sub"></div><table id="cv-top6-t"></table></div>
+    <div class="card" id="cv-big"><h2>Big picture <span class="hlp-i" tabindex="0" data-tip="Our rank among League One clubs on the minutes-weighted average of our players' ratings and per-90 figures.">ⓘ</span></h2>
+      <div class="sub">Our rank of <span id="cv-big-of"></span> League One clubs · minutes-weighted club figures, per 90 unless %</div>
+      <div class="cv-two"><table id="cv-big-l" class="cv-big"></table><table id="cv-big-r" class="cv-big"></table></div></div>
 
     <div class="card" id="cv-gap"><h2>Gap map <span class="hlp-i" tabindex="0" data-tip="Our level: {{ terms['Our level'] }}&#10;Top-6 bar: {{ terms['Top-6 bar'] }}&#10;Gap: {{ terms['Gap'] }}">ⓘ</span></h2>
-      <div class="sub">Biggest gap first · click a position for the players above our level</div>
-      <div class="tw"><table id="cv-gap-t"></table></div>
+      <div class="sub">Biggest gap first · shortfalls are percentiles (100 = best) · click a row for detail</div>
+      <table id="cv-gap-t"></table>
     </div>
 
     <div class="card" id="cv-rec">
@@ -43,6 +42,7 @@
           <div class="f"><label for="cv-group">Position</label><select class="ctl" id="cv-group"></select></div>
           <div class="f f-age"><label for="cv-age">Age</label><select class="ctl" id="cv-age"></select></div>
           <div class="f f-contract"><label for="cv-contract">Contract</label><select class="ctl" id="cv-contract"></select></div>
+          <div class="f f-leagues"><label for="cv-leagues">Leagues</label><div class="cv-lp"><button type="button" class="ctl cv-lp-btn" id="cv-leagues" aria-haspopup="true" aria-expanded="false" aria-controls="cv-lp-menu"></button><div class="cv-lp-menu" id="cv-lp-menu" hidden></div></div></div>
           <div class="f f-strong"><label>&nbsp;</label><label class="switch" id="cv-strong" role="switch" aria-checked="false" tabindex="0" data-tip="Only players at the 70th percentile or better on at least 2 of this position's 3 biggest shortfalls."><i></i>Strong on 2+ of our weaknesses</label></div>
           <div class="f f-strong"><label>&nbsp;</label><label class="switch" id="cv-top6only" role="switch" aria-checked="false" tabindex="0" data-tip="Top-6 level: {{ terms['Top-6 level'] }}"><i></i>Top-6 level only</label></div>
         </div>

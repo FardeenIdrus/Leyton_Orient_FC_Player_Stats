@@ -100,6 +100,7 @@ def _base() -> dict:
     squad = src.squad()
     ours = cv.our_players(squad, rated, cur, prev, src.league_names())
     table = cv.club_table(rated, cur)
+    clubs = cv.club_ratings(rated, cur)
     gaps = cv.gap_map(rated, ours, cur, prev, names)
     pc = {cur: src.pcts(cur), prev: src.pcts(prev)}
     for g in gaps:
@@ -115,11 +116,23 @@ def _base() -> dict:
         g["all_shortfalls"] = cv.all_shortfalls(mine, theirs, src.metrics(lvl["position"]), wl)
     return {"cur": cur, "prev": prev, "names": names, "rated": rated, "ours": ours,
             "squad_ids": {int(i) for i in squad["player_id"]},
-            "top6": [{"club": r.team_name, "avg": round(float(r.avg), 2), "players": int(r.n)}
-                     for r in table.head(cv.TOP_N).itertuples()],
+            "top6": [_club_out(r) for r in clubs.head(cv.TOP_N).to_dict("records")],
+            "us": _club_out(cv.orient_club(clubs), of=len(clubs)),
             "orient": cv._rank_text(table), "clubs": int(len(table)), "gaps": gaps,
             "big_picture": cv.big_picture(rated, neutral, cur, prev, getattr(src, "picture", src.physical),
                                           src.label, getattr(src, "sections", None))}
+
+
+def _club_out(r: dict | None, of: int | None = None) -> dict | None:
+    """A Top 6 card row: Overall ("avg"), Performance and Physical club averages to 2 dp."""
+    if r is None:
+        return None
+    two = lambda v: None if v is None or v != v else round(float(v), 2)   # noqa: E731
+    out = {"club": r["team_name"], "avg": two(r["overall"]), "performance": two(r["performance"]),
+           "physical": two(r["physical"]), "players": int(r["n"]), "rank": int(r["rank"])}
+    if of is not None:
+        out["of"] = int(of)
+    return out
 
 
 def clear() -> None:
@@ -155,7 +168,7 @@ def page_json(group=None, age=None, contract=None, strong=None, top6=None) -> di
         r.setdefault("label", r["measure"])
     gaps_out = [{k: v for k, v in g.items()} for g in gaps]
     return {"season": b["names"][b["cur"]], "prev_season": b["names"][b["prev"]],
-            "top6": b["top6"], "orient": b["orient"], "clubs": b["clubs"],
+            "top6": b["top6"], "us": b["us"], "orient": b["orient"], "clubs": b["clubs"],
             "gaps": gaps_out, "selected": sel, "recommendations": rec,
             "filters": {"age": age, "contract": contract, "strong": strong, "top6": top6,
                         "ages": [{"key": k, "label": l} for k, l in AGE_BANDS],

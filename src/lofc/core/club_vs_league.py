@@ -29,6 +29,9 @@ import pandas as pd
 
 LEAGUE_ONE, CHAMPIONSHIP, LEAGUE_TWO = 4, 3, 5
 DEFAULT_LEAGUES = [LEAGUE_ONE, CHAMPIONSHIP, LEAGUE_TWO]
+# England's leagues, listed first in the Leagues picker (owner 2026-11-10): the three above, then
+# the National League and Premier League 2 (lofc.leagues ids).
+ENGLAND = DEFAULT_LEAGUES + [65, 903]
 TOP_N = 6
 MIN_FOR_BAR = 4
 REC_N = 15
@@ -116,6 +119,24 @@ def club_table(rated: pd.DataFrame, season_id: int, league: int = LEAGUE_ONE,
     g = g.sort_values(["avg"], ascending=False).reset_index()
     g["rank"] = g["avg"].rank(ascending=False, method="min").astype(int)
     return g[["team_name", "avg", "n", "minutes", "rank"]]
+
+
+def club_ratings(rated: pd.DataFrame, season_id: int, league: int = LEAGUE_ONE) -> pd.DataFrame:
+    """One row per club: club_table's minutes-weighted average of Overall, Performance and
+    Physical (each over the rated players who have that figure), `n` rated players and the
+    Overall rank; best Overall first. The Top 6 card (owner 2026-11-10)."""
+    out = club_table(rated, season_id, league)[["team_name", "avg", "n", "rank"]].rename(
+        columns={"avg": "overall"})
+    for col, name in (("performance_band", "performance"), ("physical_band", "physical")):
+        t = club_table(rated, season_id, league, column=col).set_index("team_name")["avg"]
+        out[name] = out["team_name"].map(t)
+    return out[["team_name", "overall", "performance", "physical", "n", "rank"]].reset_index(drop=True)
+
+
+def orient_club(ratings: pd.DataFrame) -> dict | None:
+    """Orient's row of club_ratings, or None."""
+    hit = ratings[[_is_orient(t) for t in ratings["team_name"]]]
+    return None if hit.empty else hit.iloc[0].to_dict()
 
 
 def top_clubs(table: pd.DataFrame, n: int = TOP_N) -> list[str]:
@@ -215,10 +236,10 @@ def gap_map(rated: pd.DataFrame, ours: list[dict], cur: int, prev: int,
     return rows
 
 
-def shortfalls(ours: pd.Series, bar_rows: list[pd.Series], metrics: list[str], label,
-               n: int = 3) -> list[dict]:
-    """Where the gap comes from: our player's percentile per metric against the median
-    percentile of the named top-6 players; the `n` biggest shortfalls."""
+def _behind(ours: pd.Series, bar_rows: list[pd.Series], metrics: list[str], label) -> list[dict]:
+    """Every metric where our player's percentile is below the median percentile of the named
+    top-6 players, biggest first. `short` ("Behind" on the page) is the ONE whole-number figure
+    both lists show: the unrounded difference, .5 rounding up (owner 2026-11-10)."""
     out = []
     for m in metrics:
         mine = ours.get(m) if ours is not None else None
@@ -227,14 +248,17 @@ def shortfalls(ours: pd.Series, bar_rows: list[pd.Series], metrics: list[str], l
             continue
         med = float(pd.Series(theirs).median())
         if med > float(mine):
-            out.append((med - float(mine), m, float(mine), med))
+            out.append((med - float(mine), {"metric": m, "label": label(m), "ours": pct_int(mine),
+                                            "top6": pct_int(med), "short": _half_up(med - float(mine))}))
     out.sort(key=lambda t: -t[0])
-    res = []
-    for _d, m, mine, med in out[:n]:
-        o, t = pct_int(mine), pct_int(med)
-        res.append({"metric": m, "label": label(m), "ours": o, "top6": t,
-                    "text": f"{label(m)}: ours {ordinal(o)}, top-6 {ordinal(t)}"})
-    return res
+    return [r for _d, r in out]
+
+
+def shortfalls(ours: pd.Series, bar_rows: list[pd.Series], metrics: list[str], label,
+               n: int = 3) -> list[dict]:
+    """Where the gap comes from: our player's percentile per metric against the median
+    percentile of the named top-6 players; the `n` biggest shortfalls (any size)."""
+    return _behind(ours, bar_rows, metrics, label)[:n]
 
 
 def weak_label(label):
@@ -253,22 +277,12 @@ def _half_up(x: float) -> int:
     return int(math.floor(round(x, 6) + 0.5))
 
 
-def all_shortfalls(ours: pd.Series, bar_rows: list[pd.Series], metrics: list[str], label,
-                   min_points: int = 20) -> list[dict]:
-    """The "show all" list: every metric where our player's percentile is `min_points` or more
-    below the median percentile of the named top-6 players, biggest first."""
-    out = []
-    for m in metrics:
-        mine = ours.get(m) if ours is not None else None
-        theirs = [r.get(m) for r in bar_rows if r is not None and not _missing(r.get(m))]
-        if _missing(mine) or not theirs:
-            continue
-        med = float(pd.Series(theirs).median())
-        short = _half_up(med - float(mine))
-        if short >= min_points:
-            out.append({"metric": m, "label": label(m), "ours": pct_int(mine), "top6": pct_int(med),
-                        "short": short})
-    return sorted(out, key=lambda r: -r["short"])
+def all_shortfalls(ours: pd.Series, bar_rows: list[pd.Series], metrics: list[str], label) -> list[dict]:
+    """The "Every shortfall" list: every metric where our player's percentile is below the median
+    percentile of the named top-6 players, biggest first -- no cut-off (owner 2026-11-10), so it
+    always contains the summary's top 3 and its heading is always true. Same rows and `short` as
+    shortfalls()."""
+    return _behind(ours, bar_rows, metrics, label)
 
 
 def vs_best(overall, level) -> float | None:
@@ -325,7 +339,7 @@ def recommendations(rated: pd.DataFrame, candidates: pd.DataFrame, season_id: in
         # owner 2026-11-09: 70th percentile or better on at least 2 of the shortfall metrics
         f = f[f["weak_list"].map(lambda w: sum(v is not None and v >= STRENGTH_PCT for v in w)) >= 2]
     leagues = []
-    order = {c: i for i, c in enumerate(DEFAULT_LEAGUES)}
+    order = {c: i for i, c in enumerate(ENGLAND)}
     for comp, g in sorted(f.groupby("competition_id"),
                           key=lambda kv: (order.get(int(kv[0]), 99), league_names.get(int(kv[0]), ""))):
         g = g.sort_values(["objective_composite", "minutes"], ascending=False)
@@ -340,7 +354,7 @@ def recommendations(rated: pd.DataFrame, candidates: pd.DataFrame, season_id: in
         leagues.append({"competition_id": int(comp),
                         "league": league_names.get(int(comp), f"League {int(comp)}"),
                         "count": int(len(g)), "rows": rows})
-    return {"group": group, "level": level, "leagues": leagues,
+    return {"group": group, "level": level, "leagues": leagues, "default_leagues": list(DEFAULT_LEAGUES),
             "weak_metrics": [{"metric": m, "label": label(m)} for m in tag_metrics]}
 
 

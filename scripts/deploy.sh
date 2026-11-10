@@ -39,6 +39,15 @@ else
     git --no-pager log --oneline "$before..$after"
 fi
 
+# A running bash script keeps reading the file it started with, even after `git pull` replaces
+# it -- so a pull that changed THIS script would otherwise finish with the old steps (2026-11-10:
+# that started Caddy without its upstream file and took every domain down). Re-run the new
+# version once; the guard stops a loop.
+if [ -z "${LOFC_DEPLOY_REEXEC:-}" ] && ! git diff --quiet "$before" "$after" -- scripts/deploy.sh; then
+    say "deploy.sh itself changed -- restarting with the new version"
+    LOFC_DEPLOY_REEXEC=1 exec "$REPO_ROOT/scripts/deploy.sh" "$@"
+fi
+
 # ALWAYS rebuild, even when the commit did not move: a half-finished earlier deploy is
 # exactly the state this script exists to recover from, and a no-op rebuild is cheap.
 # Build FIRST, restart second: the web containers are switched separately below, so a plain

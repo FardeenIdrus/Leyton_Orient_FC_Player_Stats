@@ -44,7 +44,8 @@ class DbUserStore:
             from sqlalchemy import create_engine
             # hide_parameters: same reason as the Streamlit engine -- never echo a password
             # hash into an error page.
-            self._engine = create_engine(settings.database_url, hide_parameters=True)
+            self._engine = create_engine(settings.database_url, hide_parameters=True,
+                                 pool_pre_ping=True)  # heal after a database restart (2026-11-10)
         return self._engine
 
     def authenticate(self, username: str, password: str, now: datetime.datetime):

@@ -34,7 +34,8 @@ def _engine():
     # hide_parameters: an IntegrityError from an insert would otherwise print the failing
     # statement's bound parameters -- including the salt and password hash -- to stderr.
     # Not plaintext, but there is no reason for either to appear in a terminal or log.
-    return create_engine(settings.database_url, hide_parameters=True)
+    return create_engine(settings.database_url, hide_parameters=True,
+                         pool_pre_ping=True)  # heal after a database restart (2026-11-10)
 
 
 def _user_id_for(engine, username: str) -> int:

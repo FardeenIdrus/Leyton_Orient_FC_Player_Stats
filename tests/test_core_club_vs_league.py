@@ -128,7 +128,7 @@ def test_shortfalls_three_biggest_against_the_bar_players_median():
            pd.Series({"a": 70.0, "b": 70.0, "c": 80.0, "d": 40.0, "e": 40.0})]
     out = cv.shortfalls(ours, bar, ["a", "b", "c", "d", "e"], lambda m: m.upper())
     assert [s["metric"] for s in out] == ["a", "d", "b"]
-    assert out[0] == {"metric": "a", "label": "A", "ours": 20, "top6": 75, "text": "A: ours 20th, top-6 75th"}
+    assert out[0] == {"metric": "a", "label": "A", "ours": 20, "top6": 75, "short": 55}
 
 
 def test_recommendations_per_league_top15_above_our_level_never_orient():
@@ -256,14 +256,16 @@ def test_top6_level_only_keeps_players_at_or_above_the_bar():
     assert off["leagues"][0]["count"] == 3
 
 
-def test_every_shortfall_of_20_points_or_more_biggest_first():
+def test_every_shortfall_lists_every_metric_we_are_behind_on_biggest_first():
+    """Owner 2026-11-10: no cut-off -- "Every shortfall" lists every metric where our player is
+    below the top-6 players' median, biggest first, so its heading is always literally true."""
     ours = pd.Series({"a": 20.0, "b": 50.0, "c": 90.0, "d": 10.0, "e": 60.0, "f": 40.0})
     bar = [pd.Series({"a": 80.0, "b": 60.0, "c": 70.0, "d": 30.0, "e": 50.0, "f": 59.0}),
            pd.Series({"a": 70.0, "b": 70.0, "c": 80.0, "d": 40.0, "e": 40.0, "f": 60.0})]
     out = cv.all_shortfalls(ours, bar, list("abcdef"), lambda m: m.upper())
-    # a: 75-20=55, d: 35-10=25, f: 59.5-40=19.5 -> 20 (half up), b: 15 (out)
+    # a: 75-20=55, d: 35-10=25, f: 59.5-40=19.5 -> 20 (half up), b: 65-50=15; c, e: ahead (out)
     assert [(s["metric"], s["ours"], s["top6"], s["short"]) for s in out] == [
-        ("a", 20, 75, 55), ("d", 10, 35, 25), ("f", 40, 60, 20)]
+        ("a", 20, 75, 55), ("d", 10, 35, 25), ("f", 40, 60, 20), ("b", 50, 65, 15)]
     assert out[0]["label"] == "A"
 
 
@@ -275,4 +277,61 @@ def test_lower_is_better_metrics_say_so_in_the_weakness_labels():
     assert lab("sprint_count_p90") == "sprint_count_p90"
     out = cv.shortfalls(pd.Series({"turnovers_p90": 1.0}), [pd.Series({"turnovers_p90": 57.0})],
                         ["turnovers_p90"], lab)
-    assert out[0]["text"] == "Turnovers (fewer is better): ours 1st, top-6 57th"
+    assert out[0]["label"] == "Turnovers (fewer is better)" and out[0]["short"] == 56
+
+
+def test_one_behind_figure_for_the_top3_and_every_shortfall():
+    """Owner 2026-11-10: the gap map shows ONE "Behind" per shortfall -- the same whole number in
+    the summary row (top 3) and in "Every shortfall" -- and a top-3 shortfall under 20 points
+    still carries it (e.g. keeper catches 59 vs 68)."""
+    ours = pd.Series({"a": 20.0, "f": 40.0, "k": 59.0})
+    bar = [pd.Series({"a": 80.0, "f": 59.0, "k": 68.0}), pd.Series({"a": 70.0, "f": 60.0, "k": 68.0})]
+    top = cv.shortfalls(ours, bar, ["a", "f", "k"], str)
+    every = cv.all_shortfalls(ours, bar, ["a", "f", "k"], str)
+    # f: 59.5 - 40 = 19.5 -> 20 (half up) in BOTH lists; the old rounded figures said 60 - 40 = 20
+    # in one and 19.5 in the other
+    assert [(s["metric"], s["short"]) for s in top] == [("a", 55), ("f", 20), ("k", 9)]
+    # owner 2026-11-10: "Every shortfall" has no cut-off, so it always contains the summary's top 3
+    assert [(s["metric"], s["short"]) for s in every] == [("a", 55), ("f", 20), ("k", 9)]
+    for s in top:
+        hit = [e for e in every if e["metric"] == s["metric"]]
+        assert not hit or hit[0]["short"] == s["short"]
+
+
+def test_club_ratings_give_overall_performance_and_physical_for_every_club():
+    """Owner 2026-11-10: the Top 6 card shows Performance and Physical beside Overall, each the
+    same minutes-weighted club average (club_table), and Orient's own row."""
+    rated = _cards([
+        (1, 4, CUR, "Winger", 4.0, 3.0, 2.0, 900.0, "A", "a1"),
+        (2, 4, CUR, "Winger", 2.0, 4.0, None, 100.0, "A", "a2"),
+        (3, 4, CUR, "Winger", 3.0, 2.5, 3.5, 500.0, "Leyton Orient", "o1"),
+        (4, 5, CUR, "Winger", 5.0, 5.0, 5.0, 900.0, "Other league", "x"),
+    ])
+    t = cv.club_ratings(rated, CUR)
+    assert list(t["team_name"]) == ["A", "Leyton Orient"]
+    a = t.iloc[0]
+    assert a["overall"] == pytest.approx((4.0 * 900 + 2.0 * 100) / 1000)
+    assert a["performance"] == pytest.approx((3.0 * 900 + 4.0 * 100) / 1000)
+    assert a["physical"] == pytest.approx(2.0)                   # a2 has no Physical
+    assert (int(a["n"]), int(a["rank"])) == (2, 1)
+    for col, name in (("objective_composite", "overall"), ("performance_band", "performance"),
+                      ("physical_band", "physical")):
+        ct = cv.club_table(rated, CUR, column=col).set_index("team_name")["avg"]
+        assert t.set_index("team_name")[name].to_dict() == pytest.approx(ct.to_dict())
+    o = cv.orient_club(t)
+    assert o["team_name"] == "Leyton Orient" and o["rank"] == 2 and o["overall"] == pytest.approx(3.0)
+
+
+def test_recommendation_leagues_englands_first_then_by_name():
+    """Owner 2026-11-10 (Leagues picker): England's leagues first, then the rest by name."""
+    rows, pid = [], 0
+    for comp in (10047, 903, 65, 5, 4, 3, 10015):
+        pid += 1
+        rows.append((pid, comp, CUR, "Winger", 4.0, 3, 3, 900.0, f"T{comp}", f"P{comp}"))
+    rated = _cards(rows)
+    cands = rated[["player_id", "competition_id", "season_id"]].assign(age=24.0, contract_until=pd.NaT)
+    names = {3: "Championship", 4: "League One", 5: "League Two", 65: "National League",
+             903: "Premier League 2", 10047: "Allsvenskan (Sweden)", 10015: "Superligaen (Denmark)"}
+    rec = cv.recommendations(rated, cands, CUR, "Winger", level=3.0, exclude_ids=set(), league_names=names)
+    assert [l["competition_id"] for l in rec["leagues"]] == [4, 3, 5, 65, 903, 10047, 10015]
+    assert rec["default_leagues"] == [4, 3, 5]

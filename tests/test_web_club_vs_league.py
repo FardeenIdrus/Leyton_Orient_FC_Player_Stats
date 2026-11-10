@@ -189,3 +189,61 @@ def test_weakness_labels_use_the_fewer_is_better_wording(fake, monkeypatch):
     labels = [s["label"] for s in sel["shortfalls"]] + [w["label"] for w in d["recommendations"]["weak_metrics"]]
     assert labels and all(l == "Sprints (fewer is better)" for l in labels)
     assert [b for b in d["big_picture"] if b["measure"] == "sprint_count_p90"][0]["label"] == "Sprints"
+
+
+def test_top6_has_performance_and_physical_and_orients_own_row(fake):
+    """Owner 2026-11-10: Top 6 shows Overall, Performance and Physical (the same minutes-weighted
+    club average) for the six clubs, then Orient's own row with its rank."""
+    d = _client().get("/api/club-vs-league").json()
+    cards, neutral = fake.cards(), fake.neutral()
+    rated = cv.rated_frame(cards, neutral)
+    want = cv.club_ratings(rated, CUR).set_index("team_name")
+    for t in d["top6"]:
+        w = want.loc[t["club"]]
+        assert (t["avg"], t["performance"], t["physical"]) == (
+            round(w["overall"], 2), round(w["performance"], 2), round(w["physical"], 2))
+    us = d["us"]
+    assert us["club"] == "Leyton Orient" and us["rank"] == 9 and us["of"] == 9
+    w = want.loc["Leyton Orient"]
+    assert (us["avg"], us["performance"], us["physical"], us["players"]) == (
+        round(w["overall"], 2), round(w["performance"], 2), round(w["physical"], 2), int(w["n"]))
+
+
+def test_every_shortfall_carries_one_behind_figure(fake, monkeypatch):
+    ours = set(fake.neutral().query("team_name == 'Leyton Orient'")["player_id"])
+    base = fake.pcts
+    fake.pcts = lambda season: base(season).assign(
+        sprint_count_p90=lambda f: f["player_id"].map(lambda p: 40.0 if p in ours else 59.5))
+    api.clear()
+    d = _client().get("/api/club-vs-league?group=Winger").json()
+    sel = next(g for g in d["gaps"] if g["group"] == "Winger")
+    assert [(s["ours"], s["top6"], s["short"]) for s in sel["shortfalls"]] == [(40, 60, 20)]
+    assert [s["short"] for s in sel["all_shortfalls"]] == [20]
+    assert "text" not in sel["shortfalls"][0]          # no ordinal percentiles on this page
+
+
+def test_recommendations_name_the_default_leagues(fake):
+    d = _client().get("/api/club-vs-league?group=Winger").json()
+    assert d["recommendations"]["default_leagues"] == [4, 3, 5]
+
+
+def test_page_shell_has_the_new_layout(fake):
+    """Owner 2026-11-10 redesign: Top 6 and Big picture full width (Big picture in two
+    columns), the gap map's subtitle, and a Leagues multi-select in place of fixed tabs."""
+    html = _client().get("/club-vs-league").text
+    assert 'class="row tr2 cv-toprow"' not in html
+    assert 'id="cv-big-l"' in html and 'id="cv-big-r"' in html
+    assert "Our rank of <span id=\"cv-big-of\"></span> League One clubs · minutes-weighted club figures, per 90 unless %" in html
+    assert "Biggest gap first · shortfalls are percentiles (100 = best) · click a row for detail" in html
+    assert 'id="cv-leagues"' in html and ">Leagues<" in html
+    how = html.split('id="cv-how"')[1].split("</details>")[0]
+    assert "Where it comes from" not in how and "Show all" not in how
+    assert "/js/club_vs_league_rules.js" not in html          # imported by the page module
+
+
+def test_fold_out_describes_every_shortfall_without_a_cut_off(fake):
+    """Owner 2026-11-10: "Every shortfall" lists every metric we're behind on (no 20-point cut-off)."""
+    html = _client().get("/club-vs-league").text
+    how = html.split('id="cv-how"')[1].split("</details>")[0]
+    assert "20+" not in how
+    assert "open a row for every metric we're behind on, biggest first." in how
