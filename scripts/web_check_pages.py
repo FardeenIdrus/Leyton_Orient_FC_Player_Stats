@@ -21,6 +21,11 @@ import time
 from urllib.parse import urlparse
 
 
+def _radar_scroll(s, label):
+    from web_check import radar_scroll_check     # lazy: web_check imports this module
+    radar_scroll_check(s, label)
+
+
 def _first_row(s):
     """First clickable result row / player link in the main ranking, or None."""
     for sel in ("main tr[data-href]", "main [data-href]", "main table tbody tr",
@@ -534,6 +539,7 @@ def radar_behaviour(s, where: str, fig_sel: str):
 def card_radars(s, w):
     radar_behaviour(s, "card performance radar", "#pp .rdr")
     radar_behaviour(s, "card physical radar", "#prad .rdr")
+    _radar_scroll(s, "card")
 
 
 def card_rated_tables(s, w):
@@ -561,15 +567,23 @@ def card_rated_tables(s, w):
                None if "percentile" in txt else f"tooltip {txt!r}")
 
 
+COMPARE_CROSS = "/compare?season=318&position=Winger&a=39154-5&b=24835-4"
+
+
 def compare_radars(s, w):
     s.goto("/compare?season=318&position=Winger&a=39154-5&b=150216-5&c=47739-5", check=True,
            desc="compare: three players for the radar")
     radar_behaviour(s, "compare performance radar", "#prad .rdr")
+    _radar_scroll(s, "compare, three players")
+    s.goto(COMPARE_CROSS, check=True, desc="compare: players from different leagues")
+    _radar_scroll(s, "compare, different leagues")
+    s.shot("radar_notes", w)
 
 
 def report_radar(s, w):
     s.goto(REPORT_BASE, check=True, desc="report: radar")
     radar_behaviour(s, "report physical radar", "#p-radar .rdr")
+    _radar_scroll(s, "report")
 
 
 def home_first_view(s, w):
@@ -1539,6 +1553,10 @@ def club_vs_league(s, w):
     s.page.wait_for_selector("#cv-gap-t tr.pos", timeout=8000)
     s.note("club vs league: six clubs in the top 6", None if s.page.locator("#cv-top6-t tbody tr").count() == 6 else "not 6")
     s.note("club vs league: six positions", None if s.page.locator("#cv-gap-t tr.pos").count() == 6 else "not 6")
+    # coordinator review 2026-11-10: the Top 6 card ends at its content (no stretched white area)
+    gap = s.page.evaluate("""() => { const c = document.querySelector('#cv-top6'), t = document.querySelector('#cv-top6-t');
+      return c.getBoundingClientRect().bottom - t.getBoundingClientRect().bottom; }""")
+    s.note("club vs league: Top 6 card ends at its table", None if gap < 48 else f"{gap:.0f}px empty below the table")
     s.note("club vs league: how-it-works closed", None if not s.page.locator("#cv-how").evaluate("d => d.open") else "open")
     s.step("club vs league: pick Centre Back", lambda p: s.page.locator("#cv-gap-t tr[data-g='Centre Back']").click(timeout=3000))
     s.page.wait_for_timeout(300)
@@ -1552,6 +1570,33 @@ def club_vs_league(s, w):
     s.page.wait_for_timeout(300)
     s.note("club vs league: strong filter in the URL", None if "strong=1" in s.page.url else s.page.url)
     s.step("club vs league: strong off", lambda p: s.page.locator("#cv-strong").click(timeout=3000))
+    # owner 2026-11-09: three weakness columns (sortable), "vs our best", Top-6 level only, show all
+    heads = s.page.locator("#cv-rec-t th.cv-sort")
+    s.note("club vs league: Overall, vs our best and 3 weakness columns sortable",
+           None if heads.count() == 5 else f"{heads.count()} sortable headings")
+    s.note("club vs league: no tag column", None if "Strong where we are weak" not in s.page.inner_text("#cv-rec-t") else "old column")
+    col = s.page.locator("#cv-rec-t th[data-sort='w0']")
+    if col.count():
+        s.step("club vs league: sort by first weakness", lambda p: col.click(timeout=3000))
+        vals = s.page.locator("#cv-rec-t tbody tr td:nth-child(10)").all_inner_texts()
+        nums = [int(re.sub(r"\D", "", v)) for v in vals if re.search(r"\d", v)]
+        s.note("club vs league: weakness sort is best first", None if nums == sorted(nums, reverse=True) else str(nums))
+        s.note("club vs league: sort in the URL", None if "sort=w0" in s.page.url else s.page.url)
+        s.step("club vs league: back to Overall", lambda p: s.page.locator("#cv-rec-t th[data-sort='']").click(timeout=3000))
+    s.step("club vs league: Top-6 level only", lambda p: s.page.locator("#cv-top6only").click(timeout=3000))
+    s.page.wait_for_timeout(300)
+    s.note("club vs league: top6 filter in the URL", None if "top6=1" in s.page.url else s.page.url)
+    rows = s.page.locator("#cv-rec-t tbody tr")
+    badges = s.page.locator("#cv-rec-t tbody tr .cv-t6")
+    s.note("club vs league: Top-6 level only keeps badged players", None if rows.count() == badges.count() else f"{rows.count()} rows, {badges.count()} badges")
+    s.step("club vs league: Top-6 level off", lambda p: s.page.locator("#cv-top6only").click(timeout=3000))
+    more = s.page.locator("#cv-gap-t details.cv-all summary").first
+    if more.count():
+        url = s.page.url
+        s.step("club vs league: show all shortfalls", lambda p: more.click(timeout=3000))
+        s.note("club vs league: show all opens without changing position", None if s.page.url == url
+               and s.page.locator("#cv-gap-t details.cv-all[open] tbody tr").count() >= 1 else "did not open / changed position")
+    s.shot("weakness_columns", w)
 
 
 def users_first_view(s, w):

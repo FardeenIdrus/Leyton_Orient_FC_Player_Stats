@@ -167,15 +167,22 @@ def test_recommendation_filters_age_band_and_contract():
     assert [r["name"] for r in c27["leagues"][0]["rows"]] == ["Old", "Young"]
 
 
-def test_strength_tag_on_a_shortfall_metric():
+def test_one_percentile_column_per_shortfall_metric():
+    """Owner 2026-11-09: the tag column became three columns, one per weak metric of the position;
+    each cell is the player's percentile (None where he has no figure)."""
     rated = _cards([(1, 4, CUR, "Winger", 3.5, 3, 3, 900.0, "T", "Quick")])
     cands = rated[["player_id", "competition_id", "season_id"]].assign(age=24.0, contract_until=pd.NaT)
     pcts = pd.DataFrame({"player_id": [1], "competition_id": [4], "season_id": [CUR],
-                         "position_group": ["Winger"], "sprint_count_p90": [82.4], "distance_p90": [40.0]})
+                         "position_group": ["Winger"], "sprint_count_p90": [82.4], "distance_p90": [40.0],
+                         "hsr_p90": [None]})
     rec = cv.recommendations(rated, cands, CUR, "Winger", 3.0, set(), {4: "League One"},
-                             pcts=pcts, tag_metrics=["sprint_count_p90", "distance_p90"],
+                             pcts=pcts, tag_metrics=["sprint_count_p90", "distance_p90", "hsr_p90"],
                              label=lambda m: {"sprint_count_p90": "Sprints"}.get(m, m))
-    assert rec["leagues"][0]["rows"][0]["tags"] == ["Sprints 82nd"]
+    assert rec["weak_metrics"] == [{"metric": "sprint_count_p90", "label": "Sprints"},
+                                   {"metric": "distance_p90", "label": "distance_p90"},
+                                   {"metric": "hsr_p90", "label": "hsr_p90"}]
+    row = rec["leagues"][0]["rows"][0]
+    assert row["weak"] == [82, 40, None] and "tags" not in row
 
 
 def test_big_picture_ranks_this_season_and_last():
@@ -220,3 +227,52 @@ def test_strong_on_two_of_our_weaknesses_filter():
     assert off["leagues"][0]["count"] == 3
     on = cv.recommendations(rated, cands, CUR, "Winger", 3.0, set(), {4: "League One"}, strong2=True, **kw)
     assert [r["name"] for r in on["leagues"][0]["rows"]] == ["Three", "Two"] and on["leagues"][0]["count"] == 2
+
+
+# --- owner additions 2026-11-09: vs our best, Top-6 level only, every big shortfall ------------
+def test_vs_our_best_is_overall_minus_our_level_rounded_half_up():
+    rated = _cards([(1, 4, CUR, "Winger", 3.705, 3, 3, 900.0, "T", "A"),
+                    (2, 4, CUR, "Winger", 3.2, 3, 3, 900.0, "T", "B")])
+    cands = rated[["player_id", "competition_id", "season_id"]].assign(age=24.0, contract_until=pd.NaT)
+    rec = cv.recommendations(rated, cands, CUR, "Winger", 2.75, set(), {4: "League One"})
+    assert [r["vs_best"] for r in rec["leagues"][0]["rows"]] == [0.96, 0.45]
+    none = cv.recommendations(rated, cands, CUR, "Winger", None, set(), {4: "League One"})
+    assert all(r["vs_best"] is None for r in none["leagues"][0]["rows"])
+
+
+def test_vs_best_rounding_matches_the_card_half_up():
+    assert cv.vs_best(3.705, 2.75) == 0.96 and cv.vs_best(2.745, 3.0) == -0.25
+    assert cv.vs_best(3.0, None) is None
+
+
+def test_top6_level_only_keeps_players_at_or_above_the_bar():
+    rated = _cards([(1, 4, CUR, "Winger", 3.9, 3, 3, 900.0, "T", "At"),
+                    (2, 4, CUR, "Winger", 3.5, 3, 3, 900.0, "T", "Below"),
+                    (3, 4, CUR, "Winger", 4.2, 3, 3, 900.0, "T", "Above")])
+    cands = rated[["player_id", "competition_id", "season_id"]].assign(age=24.0, contract_until=pd.NaT)
+    on = cv.recommendations(rated, cands, CUR, "Winger", 3.0, set(), {4: "League One"}, bar=3.9, top6_only=True)
+    assert [r["name"] for r in on["leagues"][0]["rows"]] == ["Above", "At"] and on["leagues"][0]["count"] == 2
+    off = cv.recommendations(rated, cands, CUR, "Winger", 3.0, set(), {4: "League One"}, bar=3.9)
+    assert off["leagues"][0]["count"] == 3
+
+
+def test_every_shortfall_of_20_points_or_more_biggest_first():
+    ours = pd.Series({"a": 20.0, "b": 50.0, "c": 90.0, "d": 10.0, "e": 60.0, "f": 40.0})
+    bar = [pd.Series({"a": 80.0, "b": 60.0, "c": 70.0, "d": 30.0, "e": 50.0, "f": 59.0}),
+           pd.Series({"a": 70.0, "b": 70.0, "c": 80.0, "d": 40.0, "e": 40.0, "f": 60.0})]
+    out = cv.all_shortfalls(ours, bar, list("abcdef"), lambda m: m.upper())
+    # a: 75-20=55, d: 35-10=25, f: 59.5-40=19.5 -> 20 (half up), b: 15 (out)
+    assert [(s["metric"], s["ours"], s["top6"], s["short"]) for s in out] == [
+        ("a", 20, 75, 55), ("d", 10, 35, 25), ("f", 40, 60, 20)]
+    assert out[0]["label"] == "A"
+
+
+def test_lower_is_better_metrics_say_so_in_the_weakness_labels():
+    """Coordinator review 2026-11-10: turnovers' percentile is already inverted (higher = better,
+    model.scorecard), so "ours 1st" means many turnovers; the label says fewer is better."""
+    lab = cv.weak_label(lambda m: {"turnovers_p90": "Turnovers"}.get(m, m))
+    assert lab("turnovers_p90") == "Turnovers (fewer is better)"
+    assert lab("sprint_count_p90") == "sprint_count_p90"
+    out = cv.shortfalls(pd.Series({"turnovers_p90": 1.0}), [pd.Series({"turnovers_p90": 57.0})],
+                        ["turnovers_p90"], lab)
+    assert out[0]["text"] == "Turnovers (fewer is better): ours 1st, top-6 57th"

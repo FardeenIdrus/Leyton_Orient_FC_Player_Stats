@@ -116,7 +116,16 @@ def test_strong_filter_is_off_by_default_and_follows_the_url(fake):
     assert d["filters"]["strong"] is False
     on = _client().get("/api/club-vs-league?group=Winger&strong=1").json()
     assert on["filters"]["strong"] is True
-    assert all(len(r["tags"]) >= 2 for l in on["recommendations"]["leagues"] for r in l["rows"])
+    assert all(sum(v is not None and v >= 70 for v in r["weak"]) >= 2
+               for l in on["recommendations"]["leagues"] for r in l["rows"])
+
+
+def test_weak_metric_columns_follow_the_positions_shortfalls(fake):
+    d = _client().get("/api/club-vs-league?group=Winger").json()
+    sel = next(g for g in d["gaps"] if g["group"] == "Winger")
+    rec = d["recommendations"]
+    assert [w["metric"] for w in rec["weak_metrics"]] == [s["metric"] for s in sel["shortfalls"]]
+    assert all(len(r["weak"]) == len(rec["weak_metrics"]) for l in rec["leagues"] for r in l["rows"])
 
 
 def test_top6_level_badge_and_the_pages_wording(fake):
@@ -127,5 +136,42 @@ def test_top6_level_badge_and_the_pages_wording(fake):
             assert r["top6_level"] == (r["overall"] >= sel["bar"]["median"])
     html = _client().get("/club-vs-league").text
     from markupsafe import escape
-    for k in ("Top 6", "Our level", "Top-6 bar", "Gap", "Top-6 level"):
+    for k in ("Top 6", "Our level", "Top-6 bar", "Gap", "Top-6 level", "Players who could close the gap"):
         assert str(escape(cv.TERMS[k])) in html
+
+
+def test_the_recommendations_help_is_the_owners_sentence(fake):
+    assert cv.TERMS["Players who could close the gap"] == (
+        "Players rated above our best at this position, best first; the three right-hand columns "
+        "show how each scores on the areas where we're weakest.")
+    html = _client().get("/club-vs-league").text
+    assert "Strong where we are weak" not in html
+
+
+def test_owner_additions_vs_best_top6_filter_and_all_shortfalls(fake):
+    d = _client().get("/api/club-vs-league?group=Winger").json()
+    sel = next(g for g in d["gaps"] if g["group"] == "Winger")
+    assert d["filters"]["top6"] is False and "all_shortfalls" in sel
+    for l in d["recommendations"]["leagues"]:
+        for r in l["rows"]:
+            assert r["vs_best"] == cv.vs_best(r["overall"], sel["level"]["rating"])
+    on = _client().get("/api/club-vs-league?group=Winger&top6=1").json()
+    assert on["filters"]["top6"] is True
+    assert all(r["top6_level"] for l in on["recommendations"]["leagues"] for r in l["rows"])
+    assert d["terms"]["vs our best"] == ("His rating minus our best at this position; the gap is "
+                                         "closed when this reaches the gap size.")   # the column's ⓘ
+
+
+def test_weakness_labels_use_the_fewer_is_better_wording(fake, monkeypatch):
+    from lofc.model import club_framework as cf
+    monkeypatch.setattr(cf, "LOWER_IS_BETTER", {"sprint_count_p90"})
+    ours = set(fake.neutral().query("team_name == 'Leyton Orient'")["player_id"])
+    base = fake.pcts
+    fake.pcts = lambda season: base(season).assign(
+        sprint_count_p90=lambda f: f["player_id"].map(lambda p: 10.0 if p in ours else 60.0))
+    api.clear()
+    d = _client().get("/api/club-vs-league?group=Winger").json()
+    sel = next(g for g in d["gaps"] if g["group"] == "Winger")
+    labels = [s["label"] for s in sel["shortfalls"]] + [w["label"] for w in d["recommendations"]["weak_metrics"]]
+    assert labels and all(l == "Sprints (fewer is better)" for l in labels)
+    assert [b for b in d["big_picture"] if b["measure"] == "sprint_count_p90"][0]["label"] == "Sprints"

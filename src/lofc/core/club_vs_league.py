@@ -52,6 +52,11 @@ TERMS = {
     "Gap": ("How far our level is below the top-6 bar (the bar minus our level); a minus "
             "figure on the page means we fall short."),
     "Top-6 level": "A player whose Overall is at or above the position's top-6 bar.",
+    "vs our best": ("His rating minus our best at this position; the gap is closed when this "
+                    "reaches the gap size."),
+    "Players who could close the gap": (
+        "Players rated above our best at this position, best first; the three right-hand columns "
+        "show how each scores on the areas where we're weakest."),
 }
 
 
@@ -232,15 +237,57 @@ def shortfalls(ours: pd.Series, bar_rows: list[pd.Series], metrics: list[str], l
     return res
 
 
+def weak_label(label):
+    """`label`, plus " (fewer is better)" for a lower-is-better metric (cf.LOWER_IS_BETTER,
+    e.g. turnovers). Their percentiles are already inverted by the scorecard (higher = better),
+    so "Turnovers: ours 1st" means many turnovers; the label says which way is good."""
+    def lab(m):
+        from lofc.model import club_framework as cf
+        return f"{label(m)} (fewer is better)" if m in cf.LOWER_IS_BETTER else label(m)
+    return lab
+
+
+def _half_up(x: float) -> int:
+    """Whole points, .5 rounding UP also for negatives (the card's "vs ours": -10.5 -> -10)."""
+    import math
+    return int(math.floor(round(x, 6) + 0.5))
+
+
+def all_shortfalls(ours: pd.Series, bar_rows: list[pd.Series], metrics: list[str], label,
+                   min_points: int = 20) -> list[dict]:
+    """The "show all" list: every metric where our player's percentile is `min_points` or more
+    below the median percentile of the named top-6 players, biggest first."""
+    out = []
+    for m in metrics:
+        mine = ours.get(m) if ours is not None else None
+        theirs = [r.get(m) for r in bar_rows if r is not None and not _missing(r.get(m))]
+        if _missing(mine) or not theirs:
+            continue
+        med = float(pd.Series(theirs).median())
+        short = _half_up(med - float(mine))
+        if short >= min_points:
+            out.append({"metric": m, "label": label(m), "ours": pct_int(mine), "top6": pct_int(med),
+                        "short": short})
+    return sorted(out, key=lambda r: -r["short"])
+
+
+def vs_best(overall, level) -> float | None:
+    """His Overall minus our level, to 2 decimals, .5 rounding UP as the card's "vs ours"."""
+    if overall is None or level is None or _missing(overall) or _missing(level):
+        return None
+    return _half_up((float(overall) - float(level)) * 100) / 100
+
+
 # --- recommendations ----------------------------------------------------------------------------
 def recommendations(rated: pd.DataFrame, candidates: pd.DataFrame, season_id: int, group: str,
                     level: float | None, exclude_ids, league_names: dict, *, age: str = "",
                     contract: str = "", today=None, pcts: pd.DataFrame | None = None,
-                    tag_metrics=(), label=str, n: int = REC_N, strong2: bool = False) -> dict:
+                    tag_metrics=(), label=str, n: int = REC_N, strong2: bool = False,
+                    bar: float | None = None, top6_only: bool = False) -> dict:
     """This season's rated players in `group` (not Orient's) with an Overall above our level,
     ONE LIST PER LEAGUE (ratings compare players within their own league), top `n` by Overall in
-    each. Age band and contract horizon filter the players first. A tag marks a player at or
-    above the STRENGTH_PCT percentile on one of the position's shortfall metrics."""
+    each. Age band and contract horizon filter the players first. Each row carries his percentile
+    on each of the position's shortfall metrics (`weak`, one column each on the page)."""
     from lofc.core.physical_page import in_age_band
     from lofc.dashboard import seasons as S
     keys = ["player_id", "competition_id", "season_id"]
@@ -249,6 +296,9 @@ def recommendations(rated: pd.DataFrame, candidates: pd.DataFrame, season_id: in
               & ~rated["team_name"].map(_is_orient)]
     if level is not None:
         f = f[f["objective_composite"] > level]
+    if top6_only and bar is not None:
+        # owner 2026-11-09: "Top-6 level only" -- at or above the position's top-6 bar
+        f = f[f["objective_composite"] >= bar]
     f = f.merge(candidates[keys + ["age", "contract_until"]], on=keys, how="left")
     if age:
         f = f[[in_age_band(a, age) for a in f["age"]]]
@@ -259,21 +309,21 @@ def recommendations(rated: pd.DataFrame, candidates: pd.DataFrame, season_id: in
     if pcts is not None and len(tag_metrics):
         p = pcts.set_index(keys + ["position_group"])
 
-    def tags_of(r) -> list[str]:
+    def weak_of(r) -> list:
+        """His percentile on each shortfall metric, in order (None where he has no figure)."""
         if p is None:
-            return []
+            return [None] * len(tag_metrics)
         k = (r.player_id, r.competition_id, r.season_id, r.position_group)
         if k not in p.index:
-            return []
+            return [None] * len(tag_metrics)
         pr = p.loc[k]
         if isinstance(pr, pd.DataFrame):
             pr = pr.iloc[0]
-        return [f"{label(m)} {ordinal(pct_int(pr[m]))}" for m in tag_metrics
-                if m in pr.index and not _missing(pr[m]) and float(pr[m]) >= STRENGTH_PCT]
-    f = f.assign(tags_list=[tags_of(r) for r in f.itertuples()])
+        return [None if m not in pr.index or _missing(pr[m]) else pct_int(pr[m]) for m in tag_metrics]
+    f = f.assign(weak_list=[weak_of(r) for r in f.itertuples()])
     if strong2:
         # owner 2026-11-09: 70th percentile or better on at least 2 of the shortfall metrics
-        f = f[f["tags_list"].map(len) >= 2]
+        f = f[f["weak_list"].map(lambda w: sum(v is not None and v >= STRENGTH_PCT for v in w)) >= 2]
     leagues = []
     order = {c: i for i, c in enumerate(DEFAULT_LEAGUES)}
     for comp, g in sorted(f.groupby("competition_id"),
@@ -281,16 +331,17 @@ def recommendations(rated: pd.DataFrame, candidates: pd.DataFrame, season_id: in
         g = g.sort_values(["objective_composite", "minutes"], ascending=False)
         rows = []
         for r in g.head(n).itertuples():
-            tags = r.tags_list
             rows.append({"name": r.player_name, "club": r.team_name, "position": r.position_group,
                          "age": _num(r.age), "minutes": _num(r.minutes),
-                         "overall": float(r.objective_composite), "performance": _num(r.performance_band),
-                         "physical": _num(r.physical_band), "tags": tags,
+                         "overall": float(r.objective_composite),
+                         "vs_best": vs_best(r.objective_composite, level), "performance": _num(r.performance_band),
+                         "physical": _num(r.physical_band), "weak": r.weak_list,
                          "ids": [int(r.player_id), int(r.competition_id), int(r.season_id)]})
         leagues.append({"competition_id": int(comp),
                         "league": league_names.get(int(comp), f"League {int(comp)}"),
                         "count": int(len(g)), "rows": rows})
-    return {"group": group, "level": level, "leagues": leagues}
+    return {"group": group, "level": level, "leagues": leagues,
+            "weak_metrics": [{"metric": m, "label": label(m)} for m in tag_metrics]}
 
 
 # --- big picture ----------------------------------------------------------------------------------

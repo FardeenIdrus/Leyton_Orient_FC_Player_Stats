@@ -30,7 +30,15 @@ h2 .hlp-i{font-size:12px;cursor:help;vertical-align:2px}
 #cv-rec-t tr.click{cursor:pointer}
 .cv-star{font:inherit;font-size:16px;background:none;border:1px solid var(--line);border-radius:7px;width:32px;height:30px;cursor:pointer;color:var(--muted)}
 .cv-star.on{color:#C98A00;border-color:#E9C46A}
-.cv-str{display:inline-block;font-size:11.5px;font-weight:600;color:var(--hi);border:1px solid #A9D3B9;border-radius:10px;padding:1px 7px;margin:1px 3px 1px 0;white-space:nowrap}
+.cv-pp{display:inline-block;min-width:44px;font-size:12.5px;font-weight:700;border-radius:10px;padding:2px 7px;text-align:center;white-space:nowrap}
+.cv-pp.hi{background:#2E7D4F;color:#fff}.cv-pp.mid{background:#E6E8EC;color:#15171C}.cv-pp.lo{background:#C0392B;color:#fff}
+#cv-rec-t th.cv-sort{cursor:pointer;white-space:normal;user-select:none}
+#cv-rec-t th.cv-sort:hover,#cv-rec-t th.cv-sort.on{color:var(--ink)}
+#cv-rec-t .vs{font-weight:700;white-space:nowrap}#cv-rec-t .vs.up{color:var(--hi)}#cv-rec-t .vs.dn{color:var(--lo)}
+.cv-all{margin-top:6px;font-size:12.5px}
+.cv-all summary{cursor:pointer;color:var(--muted)}
+.cv-all table{margin-top:4px;width:auto}
+.cv-all th,.cv-all td{padding:3px 8px 3px 0;font-size:12.5px;white-space:nowrap}
 #v-club-vs-league td,#v-club-vs-league th{overflow-wrap:normal;word-break:normal}
 #v-club-vs-league td.n{white-space:nowrap}
 .cv-pos{white-space:nowrap}
@@ -67,3 +75,8 @@ h2 .hlp-i{font-size:12px;cursor:help;vertical-align:2px}
 .cv-rec-head .f-strong{min-width:0}
 #cv-strong{white-space:nowrap;font-size:14px}
 .cv-t6{display:inline-block;font-size:11px;font-weight:700;color:#fff;background:var(--hi);border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:1px;cursor:help}
+@media (max-width:1500px){.cv-why div,.cv-also div{white-space:normal}.cv-named div{white-space:normal}.cv-barc{min-width:190px}}
+#cv-gap-t td:nth-child(2){min-width:150px}
+.cv-all:not([open]) table{display:none}
+/* each card ends at its content: the Top 6 card no longer stretches to Big picture's height */
+.cv-toprow{align-items:start}

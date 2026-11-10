@@ -152,3 +152,13 @@ def test_account_actions_are_never_pressed_by_the_exerciser():
     for label in ("Clear lockout", "Reactivate account", "Deactivate account", "Reset password",
                   "Create account"):
         assert wc.is_destructive(label), label
+
+
+def test_radar_sibling_overlap_after_scrolling():
+    """Owner bug 2026-11-09 (Compare): a sticky radar slid over the notes written under it in the
+    same card. Any overlap between a radar and a sibling in its card is a failure."""
+    clean = [{"name": "prad", "radar": box("r", 0, 0, 400, 300), "siblings": [box("note", 0, 310, 400, 20)]}]
+    assert wc.radar_sibling_overlaps(clean) == []
+    bad = [{"name": "prad", "radar": box("r", 0, 100, 400, 300), "siblings": [box("Different leagues", 0, 310, 400, 20)]}]
+    out = wc.radar_sibling_overlaps(bad)
+    assert len(out) == 1 and "prad" in out[0] and "Different leagues" in out[0]

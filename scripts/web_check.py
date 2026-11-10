@@ -91,6 +91,17 @@ def misaligned_columns(cols: list[dict], tol: float = 4.0) -> list[str]:
     return out
 
 
+def radar_sibling_overlaps(cards: list[dict]) -> list[str]:
+    """Radars that cover another element of their own card (e.g. a sticky radar sliding over
+    the notes under it). cards: {name, radar: {x,y,w,h}, siblings: [{text,x,y,w,h}]}."""
+    out = []
+    for c in cards:
+        for sib in c["siblings"]:
+            if rects_overlap(c["radar"], sib, tol=1.0):
+                out.append(f"radar in {c['name']!r} overlaps {sib.get('text', '')[:40]!r}")
+    return out
+
+
 def clipped_tables(items: list[dict], tol: float = 1.0) -> list[str]:
     """Tables (or their scroll wrappers) inside a card whose content is wider than their box:
     columns are hidden or need a sideways scroll. items: {name, scrollWidth, clientWidth}."""
@@ -229,7 +240,11 @@ DISCOVER_JS = r"""
       add(e, 'text', {num: t === 'number', min: e.min, max: e.max});
   });
   main.querySelectorAll('textarea').forEach(e => add(e, 'text'));
-  main.querySelectorAll('[data-href], tr[onclick], [data-row]').forEach(e => add(e, 'row'));
+  // a row with data-href opens another page (a player's card): navigation is its job
+  main.querySelectorAll('[data-href], tr[onclick], [data-row]').forEach(e => {
+    const h = e.getAttribute('data-href');
+    add(e, 'row', h ? {allowNav: new URL(h, location.href).pathname !== cur} : {});
+  });
   main.querySelectorAll('button, [role=button], [data-action], summary, [onclick]').forEach(e => {
     if (!e.closest('select')) add(e, 'button');
   });
@@ -309,6 +324,25 @@ STATIC_JS = r"""
   return res;
 }
 """ % {"main": _MAIN, "min": MIN_CHIP_PX}
+
+RADAR_SIBLINGS_JS = r"""
+() => {
+  const out = [];
+  document.querySelectorAll('main .card').forEach((card, k) => {
+    const rd = card.querySelector('.rdr');
+    if (!rd || !rd.offsetParent) return;
+    const r = rd.getBoundingClientRect();
+    const sibs = [];
+    card.querySelectorAll('h2, .sub, p, .note, .rdr-note, table, .rkey').forEach(e => {
+      if (rd.contains(e) || e.contains(rd) || !e.offsetParent) return;
+      const b = e.getBoundingClientRect();
+      if (b.width && b.height) sibs.push({text: (e.innerText || '').trim().slice(0, 40), x: b.x, y: b.y, w: b.width, h: b.height});
+    });
+    out.push({name: card.id || ('card' + k), radar: {x: r.x, y: r.y, w: r.width, h: r.height}, siblings: sibs});
+  });
+  return out;
+}
+"""
 
 ALIGN_JS = r"""
 () => {
@@ -690,7 +724,7 @@ class Session:
         elif k == "link":
             yield (f"click link '{lab}'", lambda l: l.click(timeout=3000), c.get("allowNav", False))
         else:
-            yield (f"click {k} '{lab}'", lambda l: l.click(timeout=3000), False)
+            yield (f"click {k} '{lab}'", lambda l: l.click(timeout=3000), c.get("allowNav", False))
 
     def _url_roundtrip(self, desc: str, before_url: str):
         """After a control changed the URL: back restores it, and the new URL reproduces the
@@ -764,7 +798,29 @@ def align_checks(s: "Session", path: str) -> None:
         check(f"@{w}")
     s.page.set_viewport_size({"width": 1100, "height": 900})     # live resize, no reload
     check("after resize 1920 -> 1100")
+    s.page.set_viewport_size({"width": 1440, "height": 900})
+    s.goto(path, check=False, desc="radar siblings @1440")
+    radar_scroll_check(s, path)
 
+
+def radar_scroll_check(s: "Session", label: str) -> None:
+    """Scroll the current page top to bottom; at each step no radar may cover another element of
+    its own card (owner bug 2026-11-09, Compare: a sticky radar slid over its notes)."""
+    try:
+        height = s.page.evaluate("document.body.scrollHeight")
+        fails, seen = [], 0
+        for y in range(0, int(height) + 300, 150):
+            s.page.evaluate(f"window.scrollTo(0, {y})")
+            s.page.wait_for_timeout(40)
+            cards = s.page.evaluate(RADAR_SIBLINGS_JS)
+            seen = max(seen, len(cards))
+            fails += radar_sibling_overlaps(cards)
+        s.page.evaluate("window.scrollTo(0, 0)")
+        if seen:
+            s.note(f"radar never covers a note while scrolling ({label})",
+                   "; ".join(sorted(set(fails))[:4]) or None)
+    except Exception as e:
+        s.note(f"radar never covers a note while scrolling ({label})", f"check could not run: {e}")
 
 def run_page(s: Session, name: str, spec: dict, widths: list[int], primary: int):
     s.cur_page, s.cur_path = name, spec["path"]

@@ -37,8 +37,8 @@ def _sources():
     phys = list(cf.PHYSICAL_METRICS["Winger"])
     # owner 2026-11-09: performance measures from players' season figures (same method)
     perf = {"Attack": ["np_xg_p90", "xa_p90", "touches_in_box_p90"],
-            "Progression": ["packing_bypassed_opponents_p90", "progressive_passes_p90", "passes_into_box_p90"],
-            "Without the ball": ["pressures_p90", "ball_recoveries_p90", "ground_duel_win_pct", "aerial_win_pct"]}
+            "Progression": ["packing_bypassed_opponents_p90", "deep_progressions_p90", "passes_into_box_p90"],
+            "Without the ball": ["pressures_p90", "ball_wins_p90", "ground_duel_win_pct", "aerial_win_pct"]}
     sections = {m: "Physical" for m in phys} | {m: sec for sec, ms in perf.items() for m in ms}
     picture = phys + [m for ms in perf.values() for m in ms]
 
@@ -104,13 +104,15 @@ def _base() -> dict:
     pc = {cur: src.pcts(cur), prev: src.pcts(prev)}
     for g in gaps:
         lvl, b = g["level"], g["bar"]
-        g["shortfalls"] = []
+        g["shortfalls"], g["all_shortfalls"] = [], []
         if lvl is None or not b["players"]:
             continue
         mine = _pct_row(pc[cur], (lvl["player_id"], lvl["competition_id"], lvl["season_id"], lvl["position"]))
         theirs = [_pct_row(pc[b["season_id"]], (p["player_id"], p["competition_id"], p["season_id"], p["position"]))
                   for p in b["players"]]
-        g["shortfalls"] = cv.shortfalls(mine, theirs, src.metrics(lvl["position"]), src.label)
+        wl = cv.weak_label(src.label)
+        g["shortfalls"] = cv.shortfalls(mine, theirs, src.metrics(lvl["position"]), wl)
+        g["all_shortfalls"] = cv.all_shortfalls(mine, theirs, src.metrics(lvl["position"]), wl)
     return {"cur": cur, "prev": prev, "names": names, "rated": rated, "ours": ours,
             "squad_ids": {int(i) for i in squad["player_id"]},
             "top6": [{"club": r.team_name, "avg": round(float(r.avg), 2), "players": int(r.n)}
@@ -124,7 +126,7 @@ def clear() -> None:
     _base.clear()
 
 
-def page_json(group=None, age=None, contract=None, strong=None) -> dict:
+def page_json(group=None, age=None, contract=None, strong=None, top6=None) -> dict:
     from lofc.core.physical_page import AGE_BANDS
     from lofc.dashboard import seasons as S
     src = _sources()
@@ -135,12 +137,13 @@ def page_json(group=None, age=None, contract=None, strong=None) -> dict:
     age = age if age in {k for k, _ in AGE_BANDS} else ""
     contract = contract if contract in S.CONTRACT_HORIZONS and contract != "Any" else ""
     strong = str(strong or "").lower() in ("1", "true", "on", "yes")
+    top6 = str(top6 or "").lower() in ("1", "true", "on", "yes")
     row = next(g for g in gaps if g["group"] == sel)
     level = row["level"]["rating"] if row["level"] else None
     rec = cv.recommendations(b["rated"], src.candidates(b["cur"]), b["cur"], sel, level, b["squad_ids"],
                              src.league_names(), age=age, contract=contract, pcts=src.pcts(b["cur"]),
-                             tag_metrics=[s["metric"] for s in row["shortfalls"]], label=src.label,
-                             strong2=strong)
+                             tag_metrics=[s["metric"] for s in row["shortfalls"]], label=cv.weak_label(src.label),
+                             strong2=strong, bar=row["bar"]["median"], top6_only=top6)
     watched = src.watched()
     for lg in rec["leagues"]:
         for r in lg["rows"]:
@@ -154,7 +157,7 @@ def page_json(group=None, age=None, contract=None, strong=None) -> dict:
     return {"season": b["names"][b["cur"]], "prev_season": b["names"][b["prev"]],
             "top6": b["top6"], "orient": b["orient"], "clubs": b["clubs"],
             "gaps": gaps_out, "selected": sel, "recommendations": rec,
-            "filters": {"age": age, "contract": contract, "strong": strong,
+            "filters": {"age": age, "contract": contract, "strong": strong, "top6": top6,
                         "ages": [{"key": k, "label": l} for k, l in AGE_BANDS],
                         "contracts": [k for k in S.CONTRACT_HORIZONS if k != "Any"]},
             "big_picture": b["big_picture"], "terms": cv.TERMS}
@@ -164,7 +167,7 @@ def page_json(group=None, age=None, contract=None, strong=None) -> dict:
 async def club_vs_league_json(request: Request, user: WebUser = Depends(current_user)):
     q = request.query_params
     data = await run_in_threadpool(page_json, q.get("group"), q.get("age"), q.get("contract"),
-                                   q.get("strong"))
+                                   q.get("strong"), q.get("top6"))
     return JSONResponse(data)
 
 

@@ -82,3 +82,24 @@ def test_recommendations_are_per_league_above_our_level_and_never_ours(page, sto
         assert all(level is None or o > level for o in ov)
         assert all(not r["club"].lower().startswith("leyton orient") for r in lg["rows"])
         assert all(r["ids"][1] == lg["competition_id"] for r in lg["rows"])
+
+
+def test_every_big_picture_measure_has_league_one_data_this_season(page):
+    """Owner 2026-11-10: no all-"—" row. Progressive passes / Ball recoveries were NULL under
+    Impect and were replaced by Deep progressions / Ball wins."""
+    empty = [b["label"] for b in page["big_picture"] if b["now"] is None]
+    assert empty == []
+    labels = [b["label"] for b in page["big_picture"]]
+    assert "Deep progressions" in labels and "Ball wins" in labels
+    assert "Progressive Passes" not in labels and "Ball Recoveries" not in labels
+
+
+def test_every_big_picture_metric_is_held_this_season(engine, stored):
+    """Guard: each metric the Big picture lists has at least one value this season."""
+    from lofc.web.api import club_vs_league as api
+    cur, _ = stored
+    picture = api._sources().picture
+    counts = pd.read_sql(text("SELECT " + ", ".join(f"COUNT({m}) AS {m}" for m in picture)
+                              + " FROM player_metrics_neutral WHERE season_id = :s"), engine,
+                         params={"s": cur}).iloc[0]
+    assert [m for m in picture if counts[m] == 0] == []

@@ -427,15 +427,26 @@ percentile; the page only picks, weights by minutes and compares. Code: `src/lof
    rated player there yet (early season), last season's top 6 is used for that position, with
    last season's data, and the page says so.
 6. **Gap.** The bar minus our level, biggest first. "Where it comes from" compares our player's
-   percentiles with the median of the named players' and shows the three biggest shortfalls.
+   percentiles with the median of the named players' and shows the three biggest shortfalls;
+   "Show all" lists every metric 20 or more percentile points behind (ours, top-6 median,
+   shortfall; biggest first).
 7. **Players who could close the gap.** This season's rated players at the position (not ours)
    with an Overall above our level — **one list per league, top 15**, because a rating compares a
-   player only with his own league. A tag marks the 70th percentile or better on one of the
-   three shortfall metrics; "Top-6 level" marks an Overall at or above the bar. Filters: age,
-   contract, and "Strong on 2+ of our weaknesses". No market value, fee or wage is shown.
+   player only with his own league, ranked by Overall. Three columns, one per shortfall metric
+   from "Where it comes from", show his percentile in his own league and position (green 70+,
+   grey 30–69, red below 30); each column can be sorted. "vs our best" is his Overall minus our
+   level (2 decimals, .5 rounded up as the card's "vs ours"); the gap is closed when it reaches
+   the gap size. "Top-6 level" marks an Overall at or above the bar. Filters: age, contract,
+   "Strong on 2+ of our weaknesses" (70th percentile or better on at least 2 of the 3) and
+   "Top-6 level only" (at or above the bar); both off by default. No market value, fee or wage
+   is shown.
 8. **Big picture.** Our rank among League One clubs, this season and last, on the minutes-
    weighted club averages of Overall, Performance, Physical, the seven physical metrics and ten
-   performance measures from players' season figures.
+   performance measures from players' season figures: Attack (non-pen xG, expected assists,
+   touches in box), Progression (bypassed opponents, deep progressions, passes into box) and
+   Without the ball (pressures, ball wins, ground-duel win %, aerial win %). Every measure must
+   have League One data this season (tested): progressive passes and ball recoveries were
+   replaced on 10 Nov 2026 because Impect does not provide them.
 
 **Worked example (real data, 9 Nov 2026, season 2026/27): Centre Back**
 

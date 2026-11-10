@@ -335,6 +335,11 @@ success/failure markers in `data/ops/`. On a new server, install the cron lines 
 "The live server" above. Check `data/ops/last_success` / `data/ops/last_failure` to see
 whether the last run worked.
 
+**Correcting a player's current club** (Impect's club is stale, e.g. Jack Currie): add a row to
+`src/lofc/reference/current_club_overrides.csv` (player_id, club_name, impect_squad_id, note, added),
+commit, push, run `/opt/lofc/scripts/deploy.sh`, then on the server
+`docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python -m lofc.model.current_club`.
+
 ### Why no Caddy basic-auth
 Caddy used to also gate the dashboard behind its own shared basic-auth password
 (`DASHBOARD_USER` / `DASHBOARD_PASSWORD_HASH`), because at the time it was the *only*

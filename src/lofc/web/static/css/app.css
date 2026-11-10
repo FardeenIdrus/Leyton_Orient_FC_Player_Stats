@@ -212,8 +212,9 @@ img,svg{max-width:100%}
 /* table + radar: 50/50, equal height; the radar fills its half, stays round, sits centred */
 .row.tr2{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 .rcard{display:flex;flex-direction:column}
-.rcard>.rbody{flex:1;display:flex;flex-direction:column;justify-content:center;min-height:0}
-.rcard .rdr{position:sticky;top:64px}
+/* the radar and the notes under it are ONE sticky unit, the last thing in the card: it can
+   never slide over a note (owner bug 2026-11-09, Compare). Centred while the card is taller. */
+.rcard>.rbody{position:sticky;top:64px;margin:auto 0;display:flex;flex-direction:column;min-height:0}
 @media (max-width:1100px){.row.tr2{grid-template-columns:minmax(0,1fr)}}
 
 /* ---- U11 smoothness: page changes cross-fade (Chrome/Edge/Safari 18+), the nav and the info

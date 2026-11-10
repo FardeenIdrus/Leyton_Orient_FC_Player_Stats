@@ -49,6 +49,73 @@ def test_the_latest_season_wins_when_a_player_appears_twice():
     assert out["club_name"].tolist() == ["New FC"]
 
 
+# --- owner corrections: a committed file overrides a stale currentSquadId (owner, 2026-11-09) ---
+# Jack Currie (Impect 75517): currentSquadId says Leyton Orient in every list, but he played 977
+# League One minutes for Oxford United in 2026/27; Transfermarkt agrees. A general "minutes this
+# season win" rule was tried and rejected: it sent 28 loanees back to their parent clubs.
+import pytest  # noqa: E402
+
+_COLS = "player_id,club_name,impect_squad_id,note,added\n"
+
+
+def _resolved():
+    return pd.DataFrame({"player_id": [72298, 42948, 2000109108],
+                         "impect_squad_id": [966, 966, 966],
+                         "club_name": ["Leyton Orient"] * 3})
+
+
+def test_the_committed_file_moves_currie_to_oxford_and_nobody_else():
+    fixes = cc.load_overrides()
+    assert fixes["player_id"].tolist() == [72298]
+    out, n = cc.apply_overrides(_resolved(), fixes, {958: "Oxford United"})
+    assert n == 1
+    got = out.set_index("player_id")
+    assert got.loc[72298, "club_name"] == "Oxford United" and got.loc[72298, "impect_squad_id"] == 958
+    assert (got.loc[[42948, 2000109108], "club_name"] == "Leyton Orient").all()   # Dovin, Gordon
+
+
+def test_a_correction_without_a_squad_id_takes_impects_id_for_that_club_name(tmp_path):
+    f = tmp_path / "o.csv"
+    f.write_text(_COLS + "42948,Oxford United,,test,2026-11-09\n")
+    out, n = cc.apply_overrides(_resolved(), cc.load_overrides(f), {958: "Oxford United"})
+    assert n == 1 and out.set_index("player_id").loc[42948, "impect_squad_id"] == 958
+
+
+def test_a_club_name_impect_does_not_know_needs_its_squad_id(tmp_path):
+    f = tmp_path / "o.csv"
+    f.write_text(_COLS + "42948,Somewhere FC,,test,2026-11-09\n")
+    with pytest.raises(ValueError, match="Somewhere FC"):
+        cc.apply_overrides(_resolved(), cc.load_overrides(f), {958: "Oxford United"})
+
+
+def test_an_unknown_player_fails_loudly(tmp_path):
+    f = tmp_path / "o.csv"
+    f.write_text(_COLS + "999,Oxford United,958,typo,2026-11-09\n")
+    with pytest.raises(ValueError, match="999"):
+        cc.apply_overrides(_resolved(), cc.load_overrides(f))
+
+
+def test_a_duplicate_row_fails_loudly(tmp_path):
+    f = tmp_path / "o.csv"
+    f.write_text(_COLS + "72298,Oxford United,958,a,2026-11-09\n72298,Oxford United,958,b,2026-11-09\n")
+    with pytest.raises(ValueError, match="72298"):
+        cc.load_overrides(f)
+
+
+def test_a_missing_club_name_fails_loudly(tmp_path):
+    f = tmp_path / "o.csv"
+    f.write_text(_COLS + "72298,,958,a,2026-11-09\n")
+    with pytest.raises(ValueError, match="club_name"):
+        cc.load_overrides(f)
+
+
+def test_the_step_is_unchanged_without_corrections(tmp_path):
+    f = tmp_path / "o.csv"
+    f.write_text(_COLS)
+    out, n = cc.apply_overrides(_resolved(), cc.load_overrides(f))
+    assert n == 0 and out.equals(_resolved())
+
+
 # --- display --------------------------------------------------------------------------
 
 def test_the_club_label_adds_now_only_when_he_has_moved():
