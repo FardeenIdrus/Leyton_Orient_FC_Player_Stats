@@ -69,6 +69,20 @@ def test_page_shell_and_nav_entry(fake):
     assert 'href="/club-vs-league"' in r.text and "Club vs League One" in r.text
 
 
+def test_how_it_is_worked_out_explains_the_big_picture_ranks(fake):
+    """Owner 2026-11-10: the fold-out says how Big picture ranks are built; the ⓘ no longer
+    says "physical" only, since the table holds performance measures too."""
+    html = _client().get("/club-vs-league").text
+    how = html.split('id="cv-how"')[1].split("</details>")[0]
+    assert ("<b>Big picture</b>: each club's average of its players' figures, weighted by "
+            "minutes, then ranked 1–24. Ratings rows use rated players (450+ minutes); "
+            "measure rows use every player, per 90.") in how
+    assert how.index("<b>Top 6</b>") < how.index("<b>Big picture</b>") < how.index("<b>Our level</b>")
+    assert ("Our rank among League One clubs on the minutes-weighted average of our players' "
+            "ratings and per-90 figures.") in html
+    assert "per-90 physical figures" not in html
+
+
 def test_api_needs_login():
     c, *_ = make(FakeStore())
     assert c.get("/api/club-vs-league").status_code == 401
