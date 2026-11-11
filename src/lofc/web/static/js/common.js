@@ -38,6 +38,14 @@ export const chip = v => {
 export const pcol = p => p >= 70 ? 'var(--hi)' : p >= 30 ? 'var(--mid)' : 'var(--lo)';
 
 /** Percentile bar (.pb). */
+/** A percentile as a plain coloured number (green 70+, red below 30) -- where a bar has no room
+ *  (owner 2026-11-10: the player page's physical tables). */
+export const pctNum = p => {
+  const x = num(p);
+  if (x == null || isNaN(x)) return '<span class="note">—</span>';
+  const r = Math.round(x);
+  return `<span class="pctn${r >= 70 ? ' hi' : r < 30 ? ' lo' : ''}">${r}</span>`;
+};
 export const bar = p => {
   const x = num(p);
   if (x == null || isNaN(x)) return '<span class="note">—</span>';

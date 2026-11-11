@@ -498,3 +498,67 @@ def test_a_rated_card_keeps_its_headings(engine):
     assert d["performance"]["profile"]["sub"] == f"Percentile vs {league} Wingers"
     assert d["physical"]["sub"] == f"Percentile vs {league} Wingers · rated physical metrics"
     assert d["physical"]["table_sub"] == f"SkillCorner · per 90 · percentile vs {league} Wingers"
+
+
+# --- "vs ours" in the two extra tables (All tracked metrics, Other physical metrics) ----------
+def _expected_vs(engine, p, c, s, labels, names):
+    from lofc.core import card as C, squad
+    from lofc.dashboard import loaders as L
+    from lofc.dashboard.tabs import players as P
+    row, _, _ = C.card_row(p, c, s)
+    prow = P._sc_pct_series(L.load_scorecard_percentiles(s), p, c, s)
+    orient, n = squad.orient_median(row["position_group"], s, exclude_player_id=p)
+    keys = C.keys_by_label(labels, names)
+    assert None not in keys
+    return [C.gap_to_ours(prow.get(k), orient.get(k)) for k in keys], C.vs_ours_help(row["position_group"], n)
+
+
+def _phys_names():
+    from lofc.dashboard import detail_section as ds
+    return {**{m: lbl for m, lbl in ds.PHASE_METRICS}, **{m: lbl for m, lbl, _ in ds.SPEED_METRICS}}
+
+
+def test_all_tracked_has_vs_ours_against_the_orient_median(engine, cards):
+    from lofc.dashboard.labels import LABELS
+    A = cards["winger"]["performance"]["all_tracked"]
+    want, help_ = _expected_vs(engine, 39154, 5, 318, [r[0] for r in A["rows"]], LABELS)
+    assert A["vs_ours"] == want and any(v is not None for v in want)
+    assert all(v is None or isinstance(v, int) for v in A["vs_ours"])
+    assert A["vs_ours_help"] == help_ == cards["winger"]["performance"]["vs_ours_help"]
+    assert A["columns"] == ["Metric", "Source", "Season total", "Per 90 / rate", "Percentile"]
+    assert "metrics" not in A
+
+
+def test_other_physical_has_vs_ours_against_the_orient_median(engine, cards):
+    O = cards["winger"]["physical"]["other"]
+    want, help_ = _expected_vs(engine, 39154, 5, 318, [r[0] for r in O["rows"]], _phys_names())
+    assert O["vs_ours"] == want and any(v is not None for v in want)
+    assert O["vs_ours_help"] == help_ == cards["winger"]["physical"]["in_rating"]["vs_ours_help"]
+    assert "metrics" not in O
+
+
+def test_extra_tables_have_no_vs_ours_without_orient_players(engine, monkeypatch):
+    from lofc.core import card, squad
+    monkeypatch.setattr(squad, "orient_median", lambda *a, **k: ({}, 0))
+    d = card.build_card(engine, 39154, 5, 318)
+    for t in (d["performance"]["all_tracked"], d["physical"]["other"]):
+        assert t["rows"] and t["vs_ours"] is None and t["vs_ours_help"] is None
+
+
+def test_extra_tables_vs_ours_blank_for_a_thin_pool(engine, monkeypatch):
+    from lofc.core import card
+    monkeypatch.setattr(card, "thin_pool_size", lambda *a, **k: 8)
+    d = card.build_card(engine, 39154, 5, 318)
+    for t in (d["performance"]["all_tracked"], d["physical"]["other"]):
+        assert t["rows"] and t["vs_ours"] == [None] * len(t["rows"])
+
+
+def test_all_metrics_csv_is_unchanged_by_vs_ours(engine):
+    from lofc.core import card
+    from lofc.dashboard import loaders as L
+    from lofc.dashboard.tabs import players as P
+    name, text = card.scorecard_csv(engine, 39154, 5, 318, "metrics")
+    row, _, _ = card.card_row(39154, 5, 318)
+    want = P._full_stats_table(row, L.load_scorecard_percentiles(318), L.load_metric_values(318))
+    assert text == want.to_csv(index=False)
+    assert text.splitlines()[0] == "Metric,Source,Season total,Per 90 / rate,Percentile"

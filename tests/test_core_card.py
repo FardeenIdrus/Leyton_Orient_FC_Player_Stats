@@ -332,6 +332,12 @@ def test_vs_ours_help_names_the_median():
     assert C.vs_ours_help("Winger", 0) is None
 
 
+def test_keys_by_label_maps_each_row_label_back_to_its_metric():
+    names = {"a_p90": "A per 90", "b_pct": "B share"}
+    assert C.keys_by_label(["B share", "Unknown", "A per 90"], names) == ["b_pct", None, "a_p90"]
+    assert C.keys_by_label([], names) == []
+
+
 def test_weight_tiers_follow_rating_metrics():
     from lofc.dashboard import compare_tables as ct
     from lofc.model import club_framework as cf

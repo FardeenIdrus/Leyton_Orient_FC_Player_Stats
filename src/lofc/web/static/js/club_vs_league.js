@@ -28,6 +28,10 @@ function sorted(rows, key) {
 const vsCell = v => v == null ? '<span class="note">—</span>'
   : `<span class="vs ${v > 0 ? 'up' : v < 0 ? 'dn' : ''}">${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(2)}</span>`;
 
+// owner 2026-11-10: a player opened here comes back to "Players who could close the gap" with
+// every filter still set -- the filters live in this page's address, so the way back carries it
+const backQ = () => '?back=' + encodeURIComponent('/club-vs-league' + location.search + '#cv-rec');
+
 function commit(patch, refetch = true) {
   const q = new URLSearchParams(location.search);
   for (const [k, v] of Object.entries(patch)) v ? q.set(k, v) : q.delete(k);
@@ -141,7 +145,7 @@ function drawRec() {
     + `<th class="c cv-sort${key ? '' : ' on'}" data-sort="" tabindex="0" role="button" aria-label="Sort by Overall">Overall${key ? '' : ' ▼'}</th>`
     + sortTh('vb', 'vs our best', D.terms['vs our best']) + '<th class="c">Performance</th><th class="c">Physical</th>'
     + W.map((w, k) => sortTh(`w${k}`, w.label)).join('') + '<th></th></tr></thead><tbody>'
-    + sorted(cur.rows, key).map(([r, i]) => `<tr class="click" data-href="${esc(r.href)}"><td class="n note">${i + 1}</td><td><a class="pname" href="${esc(r.href)}">${esc(r.name)}</a>${r.position !== D.selected ? `<span class="cv-tag">${esc(r.position)}</span>` : ''}${r.top6_level ? `<span class="cv-t6" data-tip="Top-6 level: ${esc(D.terms['Top-6 level'])}">Top-6 level</span>` : ''}</td><td>${esc(r.club)}</td>`
+    + sorted(cur.rows, key).map(([r, i]) => `<tr class="click" data-href="${esc(r.href)}"><td class="n note">${i + 1}</td><td><a class="pname" href="${esc(r.href + backQ())}">${esc(r.name)}</a>${r.position !== D.selected ? `<span class="cv-tag">${esc(r.position)}</span>` : ''}${r.top6_level ? `<span class="cv-t6" data-tip="Top-6 level: ${esc(D.terms['Top-6 level'])}">Top-6 level</span>` : ''}</td><td>${esc(r.club)}</td>`
       + `<td class="n">${r.age == null ? '—' : r.age.toFixed(1)}</td><td class="n">${fmtInt(r.minutes)}</td><td class="c">${chip(r.overall)}</td><td class="c">${vsCell(r.vs_best)}</td><td class="c">${chip(r.performance)}</td><td class="c">${chip(r.physical)}</td>`
       + W.map((_, k) => `<td class="c">${pct(r.weak[k])}</td>`).join('')
       + `<td><button type="button" class="cv-star${r.watched ? ' on' : ''}" data-ids="${r.ids.join('/')}" aria-label="${r.watched ? 'On watchlist' : 'Add to watchlist'}: ${esc(r.name)}">${r.watched ? '★' : '☆'}</button></td></tr>`).join('')
@@ -188,6 +192,7 @@ async function load() {
   drawTop(); drawGap(); drawRec();
   $('cv-skel').hidden = true; $('cv-body').hidden = false;
   if (first) $('cv-body').classList.add('fade-in');
+  if (first && location.hash === '#cv-rec') $('cv-rec').scrollIntoView({block: 'start'});
 }
 
 $('cv-gap-t').addEventListener('click', ev => { const tr = ev.target.closest('tr[data-g]'); if (tr) toggleGap(tr); });
@@ -213,7 +218,7 @@ $('cv-rec-t').addEventListener('click', async ev => {
     return;
   }
   const tr = ev.target.closest('tr[data-href]');
-  if (tr && !ev.target.closest('a')) location.assign(tr.dataset.href + '?back=' + encodeURIComponent(location.pathname + location.search));
+  if (tr && !ev.target.closest('a')) location.assign(tr.dataset.href + backQ());
 });
 function sortBy(th) {
   const k = th.dataset.sort, cur = st().sort;

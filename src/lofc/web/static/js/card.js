@@ -1,7 +1,7 @@
 // Player card page (mockup v5 v-card + the "Against our <position>s" section).
 // Draws what /api/card/... sends; it computes no number. Provider strings go through esc()/md()
 // or textContent, never raw into innerHTML.
-import {esc, dash, fmtInt, chip, pcol, bar, thead, radar, orientSeries, api, readState, writeState, onStateChange} from './common.js';
+import {esc, dash, fmtInt, chip, pcol, bar, pctNum, thead, radar, orientSeries, api, readState, writeState, onStateChange} from './common.js';
 
 const $ = id => document.getElementById(id);
 const root = $('v-card');
@@ -36,12 +36,14 @@ const fixed = (v, d = 2) => (v == null || !Number.isFinite(+v)) ? '—' : (+v).t
 
 /** Generic table: cell(colName, value, rowIndex) returns inner HTML (already safe). */
 function table(columns, rows, cell, {nowrap = false, helps = {}} = {}) {
+  const num = c => NUMERIC.test(c) || c === VS;
   const head = '<tr>' + columns.map(c =>
-    `<th${NUMERIC.test(c) ? ' class="n"' : ''}${helps[c] ? ` title="${esc(helps[c])}"` : ''}>${esc(c)}</th>`).join('') + '</tr>';
+    `<th class="${num(c) ? 'n ' : ''}col-${colSlug(c)}"${helps[c] ? ` title="${esc(helps[c])}"` : ''}>${esc(c)}</th>`).join('') + '</tr>';
   const body = rows.map((r, ri) => '<tr>' + r.map((v, i) =>
-    `<td${NUMERIC.test(columns[i]) ? ' class="n"' : ''}>${cell(columns[i], v, ri)}</td>`).join('') + '</tr>').join('');
+    `<td${num(columns[i]) ? ' class="n"' : ''}>${cell(columns[i], v, ri)}</td>`).join('') + '</tr>').join('');
   return `<table${nowrap ? ' style="white-space:nowrap"' : ''}><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
+const colSlug = c => String(c).replace(/[^a-z0-9]+/gi, '-').toLowerCase();
 const plainCell = (c, v) => esc(dash(v));
 
 // "vs ours": his percentile minus our position median's, computed by the API (core.card).
@@ -58,7 +60,7 @@ function withVs(columns, rows, vs) {
 /** Rated-metrics table, optionally under thin weight-group headings (High / Mid / Low). */
 function ratedTable(columns, rows, cell, {helps = {}, tiers = null} = {}) {
   const head = '<tr>' + columns.map(c =>
-    `<th class="${NUMERIC.test(c) || c === VS || c === 'Band' ? 'n' : ''} col-${esc(c.replace(/[^a-z0-9]+/gi, '-').toLowerCase())}"${helps[c] ? ` title="${esc(helps[c])}"` : ''}>${esc(c)}</th>`).join('') + '</tr>';
+    `<th class="${NUMERIC.test(c) || c === VS || c === 'Band' ? 'n' : ''} col-${esc(colSlug(c))}"${helps[c] ? ` title="${esc(helps[c])}"` : ''}>${esc(c)}</th>`).join('') + '</tr>';
   const line = r => '<tr>' + r.map((v, i) =>
     `<td class="${NUMERIC.test(columns[i]) || columns[i] === VS || columns[i] === 'Band' ? 'n' : ''}">${cell(columns[i], v)}</td>`).join('') + '</tr>';
   let body;
@@ -130,7 +132,8 @@ function renderHeader(c) {
   // there, and a plain "← Back" from any other page (Compare, Scout reports, Watchlist, …).
   const from = new URL($('back').href, location.href).pathname;
   $('back').textContent = from === '/players' ? `← Back to ${c.meta.back_label}`
-    : from === '/squads' ? '← Back to Squads & loans' : '← Back';
+    : from === '/squads' ? '← Back to Squads & loans'
+    : from === '/club-vs-league' ? '← Back to Club vs League One' : '← Back';
 }
 
 function setWatch(on) {
@@ -262,8 +265,11 @@ function renderPerformance(c) {
   const atCsv = $('at-csv');
   atCsv.hidden = !A;
   if (A) {
-    $('at').innerHTML = table(A.columns, A.rows, (col, v) =>
-      col === 'Percentile' ? bar(v) : col === 'Source' ? `<span class="note">${esc(dash(v))}</span>` : esc(dash(v)), {helps: ALL_HELP});
+    const [cols, rows] = withVs(A.columns, A.rows, A.vs_ours);
+    $('at').innerHTML = table(cols, rows, (col, v) =>
+      col === 'Percentile' ? bar(v) : col === VS ? vsCell(v)
+        : col === 'Source' ? `<span class="note">${esc(dash(v))}</span>` : esc(dash(v)),
+      {helps: {...ALL_HELP, [VS]: A.vs_ours_help}});
     $('at-csv').href = `${base}/csv${query({kind: 'metrics', rank_as: card.meta.rank_as})}`;
   }
   const PP = P.profile;
@@ -324,22 +330,38 @@ function renderReceptions(R, c) {
 }
 
 // ---- physical ---------------------------------------------------------------------------
+// The rated table and "Other physical metrics" share ONE fixed column grid (card.css .phys),
+// so their columns line up; Other has no Band, so it keeps an empty Band slot.
+const PHYS_GRID = ['metric', 'all-phases', 'in-possession', 'out-of-possession', 'percentile', 'vs-ours', 'band'];
+function physGrid(html, hasVs) {
+  const cols = PHYS_GRID.filter(c => hasVs || c !== 'vs-ours');
+  return html.replace(/^<table(?: class="([^"]*)")?>/, (_, cls) => `<table class="${cls ? cls + ' ' : ''}phys${hasVs ? '' : ' novs'}">`
+    + '<colgroup>' + cols.map(c => `<col class="pc-${c}">`).join('') + '</colgroup>');
+}
+
 function renderPhysical(Ph, c) {
   $('rad-sub').textContent = Ph.sub;
   $('ph-sub').textContent = Ph.table_sub;
   $('prad').innerHTML = Ph.radar ? radarBlock(Ph.radar.labels, Ph.radar.player, Ph.radar.orient, c.header.name, Ph.radar.orient_label, rawFor(Ph.radar.labels, Ph.in_rating, Ph.in_rating && Ph.in_rating.columns[1]))
     : empty(Ph.in_rating ? 'Not enough rated physical metrics for a profile.' : (Ph.gap || "No physical data for this goalkeeper — physical does not count in a goalkeeper's rating."));
-  const cell = (col, v) => col === 'Percentile' ? bar(v) : col === 'Band' ? chip(v) : esc(dash(v));
+  const cell = (col, v) => col === 'Percentile' ? pctNum(v) : col === 'Band' ? chip(v) : esc(dash(v));
   const helps = {Percentile: 'Against the same position in his league.', Band: '1-5.'};
   $('ph-empty').innerHTML = !Ph.in_rating && !Ph.other ? empty(Ph.gap || "No physical data for this goalkeeper — physical does not count in a goalkeeper's rating.") : '';
   const IR = Ph.in_rating;
   if (IR && IR.rows.length) {
     const [cols, rows] = withVs(IR.columns, IR.rows, IR.vs_ours);
-    $('ph').innerHTML = ratedTable(cols, rows, (col, v) => col === VS ? vsCell(v) : cell(col, v),
-      {helps: {...helps, [VS]: IR.vs_ours_help}});
+    $('ph').innerHTML = physGrid(ratedTable(cols, rows, (col, v) => col === VS ? vsCell(v) : cell(col, v),
+      {helps: {...helps, [VS]: IR.vs_ours_help}}), !!IR.vs_ours);
   } else $('ph').innerHTML = '';
-  show('po-d', !!(Ph.other && Ph.other.rows.length));
-  $('po').innerHTML = Ph.other && Ph.other.rows.length ? table(Ph.other.columns, Ph.other.rows, cell, {helps}) : '';
+  const O = Ph.other;
+  show('po-d', !!(O && O.rows.length));
+  if (O && O.rows.length) {
+    const [cols, rows] = withVs(O.columns, O.rows, O.vs_ours);
+    // the empty Band slot: a blank last column, so the row lines run the full width
+    $('po').innerHTML = physGrid(table([...cols, ''], rows.map(r => [...r, null]),
+      (col, v) => col === VS ? vsCell(v) : col === '' ? '' : cell(col, v),
+      {helps: {...helps, [VS]: O.vs_ours_help}}), !!O.vs_ours);
+  } else $('po').innerHTML = '';
   $('ph-cap').textContent = Ph.in_rating || Ph.other ? Ph.caption : '';
 }
 
@@ -526,6 +548,7 @@ function init() {
   // link never shows the wrong page while the player loads.
   const from = new URL($('back').href, location.href).pathname;
   if (from === '/squads') $('back').textContent = '← Back to Squads & loans';
+  else if (from === '/club-vs-league') $('back').textContent = '← Back to Club vs League One';
   else if (from !== '/players') $('back').textContent = '← Back';
   setSwitch();
   const flip = () => { state.money = !state.money; setSwitch(); writeState({money: state.money ? '1' : ''}); loadCard({squad: false}); };

@@ -427,6 +427,12 @@ def card_back_link(s, w):
     s.goto(base + "?back=https%3A%2F%2Fevil.example%2F", check=True, desc="card: off-site ?back=")
     href = s.page.locator("#back").get_attribute("href")
     s.note("card: an off-site ?back= is ignored", None if href == "/players" else f"href was {href!r}")
+    s.goto(base + "?back=%2Fclub-vs-league%3Fcontract%3DOut%26strong%3D1%23cv-rec", check=True,
+           desc="card: open from Club vs League One")
+    s.note("card: back to Club vs League One keeps its filters",
+           None if s.page.locator("#back").get_attribute("href") == "/club-vs-league?contract=Out&strong=1#cv-rec"
+           and s.page.locator("#back").inner_text().strip() == "← Back to Club vs League One"
+           else f"{s.page.locator('#back').get_attribute('href')!r} {s.page.locator('#back').inner_text()!r}")
 
 
 def card_money_switch(s, w):
@@ -491,6 +497,94 @@ def card_watchlist(s, w):
     s.note("card: watchlist shows on", None if "On watchlist" in b.inner_text() else b.inner_text())
     s.step("card: remove from watchlist", lambda p: b.click(timeout=3000))
     s.note("card: watchlist shows off", None if "Add to watchlist" in b.inner_text() else b.inner_text())
+
+
+_PHYS_COLS = ["metric", "all-phases", "in-possession", "out-of-possession", "percentile", "vs-ours"]
+_VS_TEXT = re.compile(r"^([+−]\d+|0|—)$")
+
+
+def card_extra_tables(s, w):
+    """'vs ours' in All tracked metrics (#at) and Other physical metrics (#po); the two physical
+    tables share one column grid; the Out of possession figure keeps clear of the percentile bar;
+    nothing overflows. Element screenshots at 1280 and 1440."""
+    for width in (1280, 1440):
+        s.page.set_viewport_size({"width": width, "height": 900})
+        s.page.wait_for_timeout(250)
+        s.page.evaluate("() => ['po-d', 'at-d'].forEach(i => { const d = document.getElementById(i); if (d) d.open = true; })")
+        s.page.wait_for_timeout(150)
+        for sel, name in (("#at", "All tracked metrics"), ("#po", "Other physical metrics")):
+            th = s.page.locator(f"{sel} th.col-vs-ours")
+            cells = s.page.evaluate(f"""() => {{
+                const t = document.querySelector('{sel} table'); if (!t) return null;
+                const i = [...t.tHead.rows[0].cells].findIndex(c => c.classList.contains('col-vs-ours'));
+                if (i < 0) return null;
+                const pi = [...t.tHead.rows[0].cells].findIndex(c => c.classList.contains('col-percentile'));
+                return {{after: i === pi + 1, v: [...t.tBodies[0].rows].map(r => r.cells[i].textContent.trim())}};
+            }}""")
+            ok = (th.count() and "median" in (th.get_attribute("data-tip") or "") and cells
+                  and cells["after"] and cells["v"] and all(_VS_TEXT.match(x) for x in cells["v"])
+                  and any(x != "—" for x in cells["v"]))
+            s.note(f"card: {name} has 'vs ours' after Percentile, whole signed points @{width}",
+                   None if ok else f"column {th.count()} cells {cells and cells['v'][:6]}")
+        geo = s.page.evaluate("""cols => {
+            const left = sel => { const t = document.querySelector(sel + ' table'); if (!t) return null;
+              const h = t.tHead.rows[0].cells, o = {};
+              cols.forEach(c => { const x = [...h].find(e => e.classList.contains('col-' + c)); o[c] = x ? x.getBoundingClientRect().left : null; });
+              return o; };
+            const gaps = sel => [...document.querySelectorAll(sel + ' tbody tr')].map(r => {
+              const h = [...r.closest('table').tHead.rows[0].cells];
+              const oi = h.findIndex(e => e.classList.contains('col-out-of-possession'));
+              const pi = h.findIndex(e => e.classList.contains('col-percentile'));
+              if (oi < 0 || pi < 0 || !r.cells[oi]) return null;
+              const rg = document.createRange(); rg.selectNodeContents(r.cells[oi]);
+              const txt = rg.getBoundingClientRect();
+              const pb = r.cells[pi].querySelector('.pb .t');
+              const tgt = pb && pb.getBoundingClientRect().width > 0 ? pb : r.cells[pi].querySelector('.pctn, .pb b, .note') || r.cells[pi];
+              return Math.round(tgt.getBoundingClientRect().left - txt.right);
+            }).filter(v => v != null);
+            const over = sel => { const e = document.querySelector(sel); if (!e) return null;
+              const card = e.closest('.card').getBoundingClientRect(), t = e.querySelector('table');
+              return {scroll: e.scrollWidth - e.clientWidth, past: t ? Math.round(t.getBoundingClientRect().right - card.right) : 0,
+                      clipped: [...e.querySelectorAll('td, th')].filter(c => c.scrollWidth > c.clientWidth + 1).map(c => `${c.textContent.trim()} ${c.scrollWidth}>${c.clientWidth}`)}; };
+            // owner 2026-11-10: no bars in the physical tables (coloured numbers); in the half-width card the
+            // two longest names need 3 lines (7 columns leave ~120px for Metric at 1440)
+            const lines = sel => [...document.querySelectorAll(sel + ' tbody td:first-child')].map(td => {
+              const rg = document.createRange(); rg.selectNodeContents(td);
+              const tops = new Set([...rg.getClientRects()].map(r => Math.round(r.top)));
+              return [td.textContent.trim(), tops.size]; }).filter(x => x[1] > 3);
+            const pcts = sel => [...document.querySelectorAll(sel + ' tbody td.c-percentile, ' + sel + ' tbody td')].length
+              ? {bars: document.querySelectorAll(sel + ' .pb').length, nums: document.querySelectorAll(sel + ' .pctn').length} : null;
+            return {ph: left('#ph'), po: left('#po'), gph: gaps('#ph'), gpo: gaps('#po'),
+                    lines: [...lines('#ph'), ...lines('#po')], pct: {ph: pcts('#ph'), po: pcts('#po')},
+                    o: {ph: over('#ph'), po: over('#po'), at: over('#at')}};
+        }""", _PHYS_COLS)
+        bad = [c for c in _PHYS_COLS if geo["ph"] is None or geo["po"] is None or geo["ph"][c] is None
+               or geo["po"][c] is None or abs(geo["ph"][c] - geo["po"][c]) > 1]
+        s.note(f"card: physical tables' columns line up @{width}",
+               None if not bad else f"misaligned {bad}: rated {geo['ph']} other {geo['po']}")
+        g = (geo["gph"] or []) + (geo["gpo"] or [])
+        s.note(f"card: Out of possession keeps >= 16px from the percentile @{width}",
+               None if g and min(g) >= 16 else f"gaps {sorted(g)[:5]}")
+        s.note(f"card: physical percentiles are coloured numbers, no bars @{width}",
+               None if all(v and v["bars"] == 0 and v["nums"] > 0 for v in geo["pct"].values()) else f"{geo['pct']}")
+        s.note(f"card: physical metric names take at most 3 lines @{width}",
+               None if not geo["lines"] else f"{geo['lines'][:4]}")
+        bad = {k: v for k, v in geo["o"].items() if v is None or v["scroll"] > 1 or v["past"] > 1 or v["clipped"]}
+        s.note(f"card: physical and all-tracked tables fit their card @{width}",
+               None if not bad else f"overflow {bad}")
+        s.out.mkdir(parents=True, exist_ok=True)
+        for el, name in (("#c-phys", "physical"), ("#c-perf", "all_tracked")):
+            if name == "all_tracked" and width != 1440:
+                continue
+            p = s.out / f"card_{name}_open_{width}.png"
+            try:                         # the fixed bar at the foot would cover part of the card
+                s.page.evaluate("() => { const b = document.getElementById('infobar'); if (b) b.style.visibility = 'hidden'; }")
+                s.page.locator(el).screenshot(path=str(p))
+                s.page.evaluate("() => { const b = document.getElementById('infobar'); if (b) b.style.visibility = ''; }")
+                s.shots.append(str(p))
+            except Exception as e:
+                s.note(f"screenshot {p.name}", f"screenshot failed: {e}")
+    s.page.set_viewport_size({"width": w, "height": 900})
 
 
 def radar_behaviour(s, where: str, fig_sel: str):
@@ -1679,6 +1773,27 @@ def club_vs_league(s, w):
     s.note("club vs league: Top-6 level only keeps badged players", None if rows.count() == badges.count() else f"{rows.count()} rows, {badges.count()} badges")
     s.step("club vs league: Top-6 level off", lambda p: s.page.locator("#cv-top6only").click(timeout=3000))
     s.shot("weakness_columns", w)
+    # owner 2026-11-10: a player opened from "Players who could close the gap" comes back to
+    # this section with every filter still set (contract, "Strong on 2+", league, ...)
+    s.step("club vs league: set a contract filter", lambda p: s.page.select_option("#cv-contract", index=1))
+    s.page.wait_for_timeout(1200)
+    s.step("club vs league: Strong on 2+ on", lambda p: s.page.locator("#cv-strong").click(timeout=3000))
+    s.page.wait_for_timeout(1200)
+    before = s.page.url
+    names = s.page.locator("#cv-rec-t a.pname")
+    if names.count() == 0:
+        return s.note("club vs league: back from a player", skipped="no players under these filters")
+    _go_card(s, "club vs league: open a player by name", lambda: names.first.click(timeout=3000))
+    s.page.wait_for_selector("#back", timeout=8000)
+    s.note("club vs league: player page names the way back",
+           None if s.page.inner_text("#back").strip() == "← Back to Club vs League One" else s.page.inner_text("#back"))
+    s.goto(s.page.locator("#back").get_attribute("href"), check=True, desc="club vs league: back from the player")
+    s.page.wait_for_selector("#cv-rec-t tbody tr", timeout=8000)
+    s.page.wait_for_timeout(800)
+    s.note("club vs league: filters kept after coming back",
+           None if ("contract=" in s.page.url and "strong=1" in s.page.url) else f"{before} -> {s.page.url}")
+    s.note("club vs league: lands on the players section", None if s.page.evaluate(
+        "() => { const r = document.getElementById('cv-rec').getBoundingClientRect(); return r.top < innerHeight && r.bottom > 0; }") else "not scrolled to it")
 
 
 def users_first_view(s, w):
@@ -1903,7 +2018,7 @@ PAGES = {
         players_metric_filters, players_assessed, players_download, players_history_and_url]},
     "card": {"path": "/player/39154/5/318", "exercise": True, "scenarios": [
         card_back_link, card_money_switch, card_rank_as, card_zones, card_squad_season,
-        card_watchlist, card_radars, card_rated_tables, card_other_players]},
+        card_watchlist, card_radars, card_rated_tables, card_extra_tables, card_other_players]},
     "compare": {"path": "/compare?season=318&position=Winger", "exercise": True, "scenarios": [
         compare_three_players_every_width, compare_defaults_fill_the_url,
         compare_position_season_back_forward, compare_pick_from_pool_list,

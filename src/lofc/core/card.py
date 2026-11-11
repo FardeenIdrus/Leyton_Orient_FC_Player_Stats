@@ -138,6 +138,13 @@ def vs_ours_column(metrics, prow, orient: dict, thin) -> list:
     return out
 
 
+def keys_by_label(labels, names: dict) -> list:
+    """The metric key of each table row, found by its label (`names`: key -> label, whose
+    labels are unique). None for a label it does not know."""
+    key_of = {label: m for m, label in names.items()}
+    return [key_of.get(x) for x in labels]
+
+
 def vs_ours_help(position: str, n_orient: int) -> str | None:
     if not n_orient:
         return None
@@ -863,10 +870,11 @@ def _physical_block(row, mv_row, prow, position: str, orient: dict, n_orient: in
                           fm(x["Out of possession"]), clean(x["Percentile"])]
                          + ([clean(x["Band"])] if band else []) for _, x in t.iterrows()]}
             rated, other = fmt(r, True), fmt(o, False)
-            # the metric key of each rated row, by its label (for "vs ours"; popped by the caller)
-            key_of = {label: m for m, label in ds.PHASE_METRICS}
-            key_of.update({label: m for m, label, _ in ds.SPEED_METRICS})
-            rated["metrics"] = [key_of.get(x) for x in r["Metric"]]
+            # the metric key of each row, by its label (for "vs ours"; popped by the caller)
+            names = {m: label for m, label in ds.PHASE_METRICS}
+            names.update({m: label for m, label, _ in ds.SPEED_METRICS})
+            rated["metrics"] = keys_by_label(r["Metric"], names)
+            other["metrics"] = keys_by_label(o["Metric"], names)
     if rated is None:
         gap = ds.physical_gap(detail_store.league_has_physical(cid, sid), position)
         if gap is not None:
@@ -1124,7 +1132,11 @@ def build_card(engine, player_id: int, competition_id: int, season_id: int,
         else vs_ours_column(perf_metrics, prow, orient, thin),
         "vs_ours_help": vs_ours_help(position, n_orient),
         "scored_on_lens": None if lens == cf.DEFAULT_ARCHETYPE else lens,
-        "all_tracked": None if full is None or full.empty else as_table(full),
+        "all_tracked": None if full is None or full.empty else {
+            **as_table(full),
+            "vs_ours": vs_ours_column(keys_by_label(full["Metric"], LABELS), prow, orient, thin)
+            if n_orient else None,
+            "vs_ours_help": vs_ours_help(position, n_orient)},
         "profile": None if len(chart_metrics) < 3 else {
             "sub": f"Percentile vs {vs}",
             "metrics": chart_metrics, "labels": [LABELS.get(m, m) for m in chart_metrics],
@@ -1136,11 +1148,12 @@ def build_card(engine, player_id: int, competition_id: int, season_id: int,
 
     physical_block = _physical_block(row, mv_df.iloc[0] if not mv_df.empty else None, prow,
                                      position, orient, n_orient)
-    if physical_block["in_rating"] is not None:
-        keys = physical_block["in_rating"].pop("metrics")
-        physical_block["in_rating"]["vs_ours"] = (vs_ours_column(keys, prow, orient, thin)
-                                                  if n_orient else None)
-        physical_block["in_rating"]["vs_ours_help"] = vs_ours_help(position, n_orient)
+    for part in ("in_rating", "other"):
+        if physical_block[part] is not None:
+            keys = physical_block[part].pop("metrics")
+            physical_block[part]["vs_ours"] = (vs_ours_column(keys, prow, orient, thin)
+                                               if n_orient else None)
+            physical_block[part]["vs_ours_help"] = vs_ours_help(position, n_orient)
     physical_block["sub"] = f"Percentile vs {vs} · rated physical metrics"
     physical_block["table_sub"] = f"SkillCorner · per 90 · percentile vs {vs}"
     out = {

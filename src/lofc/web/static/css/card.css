@@ -136,3 +136,41 @@ table.rated .chip{min-width:0;padding:3px 7px;font-size:13.5px}
 /* at 1280 the physical table's percentile shows as its number only (the bar returns at 1440+) */
 @media (max-width:1380px){#ph table.rated .pb .t{display:none}#ph table.rated .pb{min-width:0}#ph table.rated th.col-percentile{min-width:0}}
 @media (max-width:1380px){#ph th,#po th{font-size:11.5px}}
+/* ---- physical: the rated table (#ph) and Other physical metrics (#po) share ONE fixed grid
+   (colgroup from card.js physGrid), so their columns line up; a clear gap before the bar ---- */
+#ph table.phys,#po table.phys{table-layout:fixed;width:100%}
+.phys col.pc-metric{width:29%}.phys.novs col.pc-metric{width:37%}
+.phys col.pc-all-phases{width:12.5%}
+.phys col.pc-in-possession,.phys col.pc-out-of-possession{width:13.5%}
+.phys col.pc-percentile{width:14.5%}
+.phys col.pc-vs-ours{width:8%}
+.phys col.pc-band{width:9%}
+#ph table.phys td,#ph table.phys th,#po table.phys td,#po table.phys th{padding:8px 5px;min-width:0}
+#ph table.phys th,#po table.phys th{white-space:normal;vertical-align:bottom;line-height:1.25;font-size:12px}
+#ph table.phys td:first-child,#po table.phys td:first-child{min-width:0;white-space:normal;line-height:1.3}
+#ph table.phys tr>td:nth-child(5),#po table.phys tr>td:nth-child(5){padding-left:18px;text-align:right}
+#ph table.phys .pb,#po table.phys .pb{min-width:0;gap:6px}
+#ph table.phys .pb .t,#po table.phys .pb .t{display:block}
+#ph table.phys th.col-percentile,#ph table.phys th.col-band,#ph table.phys th.col-vs-ours{min-width:0}
+#po th.col-vs-ours,#at th.col-vs-ours{cursor:help;text-decoration:underline dotted;text-underline-offset:3px}
+#at th.col-vs-ours{white-space:nowrap}
+#ph table.phys .chip{min-width:0;padding:3px 6px;font-size:13.5px}
+@media (max-width:1380px){
+  .phys col.pc-metric{width:25%}.phys.novs col.pc-metric{width:33.5%}
+  .phys col.pc-all-phases{width:13%}
+  .phys col.pc-in-possession,.phys col.pc-out-of-possession{width:14.5%}
+  .phys col.pc-percentile{width:15.5%}
+  .phys col.pc-vs-ours{width:8.5%}
+  .phys col.pc-band{width:9%}
+  #ph table.phys td,#ph table.phys th,#po table.phys td,#po table.phys th{padding:7px 3px;font-size:13.5px}
+  #ph table.phys th,#po table.phys th{font-size:11.5px}
+  #ph table.phys tr>td:nth-child(5),#po table.phys tr>td:nth-child(5){padding-left:16px}
+  #ph table.phys .pb,#po table.phys .pb{gap:5px}
+  #ph table.phys .chip{padding:3px 4px;font-size:13px}
+}
+@media (max-width:1380px){
+  #at td,#at th{padding:7px 4px}
+  #at th{white-space:normal;vertical-align:bottom;line-height:1.25}
+  #at th.col-vs-ours{white-space:normal}
+  #at .pb{min-width:40px;gap:5px}
+}
