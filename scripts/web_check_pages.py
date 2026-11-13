@@ -1039,6 +1039,103 @@ def report_downloads(s, w):
     _clear_drafts(s)
 
 
+# owner 2026-11-13: the downloaded file, opened in a browser, is the preview (same sheet width,
+# centred, nothing outside the sheet); printed, one landscape page filling its width; no help
+# icons or tooltips in it.
+_FILE_FIT_JS = """() => {
+  const S = document.querySelector('.rp-sheet'); if (!S) return null;
+  const b = S.getBoundingClientRect(), col = document.querySelector('#r-right');
+  const box = e => { const q = e && e.getBoundingClientRect(); return q && [Math.round(q.left), Math.round(q.right)]; };
+  const vis = e => !e.closest('[hidden]') && e.getBoundingClientRect().width > 0;
+  const out = [...document.body.querySelectorAll('*')].filter(e => e !== S && !e.matches('main') && vis(e))
+    .filter(e => { const q = e.getBoundingClientRect(); return q.right > b.right + 1 || q.left < b.left - 1; })
+    .map(e => (e.id || e.getAttribute('class') || e.tagName) + ' ' + box(e)).slice(0, 4);
+  const c = col && col.getBoundingClientRect();
+  const inCol = s => { const e = document.querySelector(s); if (!e || !c) return null;
+    const q = e.getBoundingClientRect(); return q.left >= c.left - 1 && q.right <= c.right + 1; };
+  return {width: Math.round(b.width), left: Math.round(b.left), right: Math.round(innerWidth - b.right),
+    out, radar: inCol('svg.rdr-svg'), avail: inCol('#p-avail'), col: box(col), svg: box(document.querySelector('svg.rdr-svg')),
+    hscroll: document.documentElement.scrollWidth > innerWidth + 1};
+}"""
+_FILE_HELP = ('class="hlp', "hlp-i", "has-help", "data-tip", " title=", "ⓘ", "tabindex", "rdr-hit")
+
+
+def report_download_fits(s, w):
+    """The two downloads (photo, availability row, scout verdicts) opened at 1280/1440/1920:
+    the preview's sheet width, centred, every element inside the sheet, the radar and the
+    availability inside their column; printed: one landscape A4 page, sheet >= 95% of its width."""
+    s.goto(REPORT_SCOUTED, check=True, desc="report: download fit, scouted player")
+    if not _report_ready(s):
+        return s.note("report: download fit", "report body never shown")
+    s.step("report: choose a photo", lambda p: (p.set_input_files(
+        "#rp-photo-file", files=[{"name": "p.png", "mimeType": "image/png", "buffer": _PHOTO_PNG}]),
+        p.wait_for_timeout(500)))
+    s.step("report: open the form", lambda p: p.locator("#rp-write").click(timeout=3000))
+    s.step("report: add an availability row", lambda p: p.locator("#f-avail-add").click(timeout=3000))
+    row = s.page.locator("#f-avail .rp-avrow").last
+    s.step("report: fill the row", lambda p: (
+        row.locator("[data-av=dates]").fill("Oct–Dec 2025", timeout=3000),
+        row.locator("[data-av=injury]").fill("Hamstring tear", timeout=3000),
+        row.locator("[data-av=missed]").fill("6", timeout=3000), p.wait_for_timeout(300)))
+    s.page.set_viewport_size({"width": 1920, "height": 900})     # the owner's window: the radar drawn large
+    s.page.wait_for_timeout(500)
+    files = {}
+    for kind, button in (("authored", "#rp-dl"), ("data-only", "#rp-dl-data")):
+        name, text = _report_file(s, button, f"report: download {kind} (fit)")
+        if not name:
+            s.note(f"report: download {kind} (fit)", text)
+            continue
+        files[kind] = text
+        body = text.split("<body", 1)[-1]          # the stylesheet names these classes; the content must not use them
+        left = [m for m in _FILE_HELP if m in body]
+        s.note(f"report: {kind} file has no help icons or tooltips", None if not left else left)
+    for width in s.widths + ([] if s.quick else [2560]):
+        s.page.set_viewport_size({"width": width, "height": 900})
+        s.page.wait_for_timeout(300)
+        want = round(s.page.locator("#rp-sheet").bounding_box()["width"])
+        for kind, text in files.items():
+            fresh = s.page.context.new_page()
+            try:
+                fresh.set_viewport_size({"width": width, "height": 900})
+                fresh.set_content(text, wait_until="load")
+                m = fresh.evaluate(_FILE_FIT_JS) or {}
+                s.note(f"report: {kind} file sheet = preview width @{width}",
+                       None if abs(m.get("width", 0) - want) <= 2 else f"file {m.get('width')} vs preview {want}")
+                s.note(f"report: {kind} file sheet centred @{width}",
+                       None if abs(m.get("left", 0) - m.get("right", 99)) <= 2 else m)
+                s.note(f"report: {kind} file, nothing outside the sheet @{width}",
+                       None if not m.get("out") and not m.get("hscroll") else m)
+                s.note(f"report: {kind} file radar and availability inside their column @{width}",
+                       None if m.get("radar") is not False and m.get("avail") else m)
+                if kind == "authored" and width in (1440, 1920):
+                    fresh.evaluate("document.querySelector('#c-avail').scrollIntoView({block: 'end'})")
+                    p = s.out / f"{s.cur_page}_file_bottom_{width}.png"
+                    fresh.screenshot(path=str(p))
+                    s.shots.append(str(p))
+                if width == s.widths[0]:
+                    fresh.emulate_media(media="print")
+                    pdf = fresh.pdf(format="A4", print_background=True, prefer_css_page_size=True)
+                    pages = pdf.count(b"/Type /Page") - pdf.count(b"/Type /Pages")
+                    box = re.search(rb"/MediaBox\s*\[\s*0 0 ([\d.]+) ([\d.]+)", pdf)
+                    land = bool(box) and float(box.group(1)) > float(box.group(2))
+                    s.note(f"report: {kind} file prints on one landscape A4 page",
+                           None if pages == 1 and land else f"{pages} pages, landscape={land}")
+                    # printable width: A4 landscape inside 8 mm margins = 1062 CSS px (rect includes zoom)
+                    got = fresh.evaluate("() => document.querySelector('.rp-sheet').getBoundingClientRect().width") / 1062
+                    s.note(f"report: {kind} printed sheet >= 95% of the page width",
+                           None if got >= 0.95 else f"{got:.0%}")
+                    if kind == "authored":
+                        s.out.mkdir(parents=True, exist_ok=True)
+                        (s.out / f"{s.cur_page}_file_printed.pdf").write_bytes(pdf)
+            except Exception as e:
+                s.note(f"report: open the {kind} file @{width}", str(e).splitlines()[0][:100])
+            finally:
+                fresh.close()
+    s.page.set_viewport_size({"width": w, "height": 900})
+    s.step("report: remove the photo", lambda p: p.locator("#rp-photo-del").click(timeout=3000))
+    _clear_drafts(s)
+
+
 _SHEET_JS = """() => {
   const sh = [...document.querySelectorAll('#v-report .rp-sheet')];
   if (sh.length !== 1) return {sheets: sh.length};
@@ -3323,7 +3420,7 @@ PAGES = {
         compare_remembers_players, compare_download]},
     "report": {"path": REPORT_BASE, "exercise": True, "scenarios": [
         report_empty_state, report_cases, report_search_pick, report_scout_verdicts,
-        report_empty_search_lists, report_form_live, report_downloads,
+        report_empty_search_lists, report_form_live, report_downloads, report_download_fits,
         report_season_switch, report_history_and_url, report_layout_widths, report_radar,
         report_one_sheet, report_draft, report_remembers]},
     "squads": {"path": "/squads", "exercise": False, "scenarios": [

@@ -287,9 +287,17 @@ function pageCss() {
   return out.join('\n');
 }
 
+// On screen the file is the preview: the sheet as wide as on the page (the window less the
+// sidebar, app.css .app; main keeps app.css's padding), centred; columns never wider than their
+// track, so the radar (scaled by its viewBox) and the availability table stay inside the sheet.
 const FILE_CSS = `html,body{margin:0}
 body{background:var(--page)}
-main{max-width:1500px;margin:0 auto;padding:24px}
+@media screen{main{max-width:none;margin:0 auto;padding-top:24px;width:calc(100% - 236px)}}
+@media screen and (max-width:1280px){main{width:calc(100% - 208px)}}
+@media screen and (max-width:900px){main{width:auto}}
+.rp-col{grid-template-columns:minmax(0,1fr)}
+.rp-col>*,.rdr,.rdr-stage{min-width:0;max-width:100%}
+.rdr-svg{max-width:100%;height:auto}
 .rp-photo-pick{cursor:default}
 .rdr-key{cursor:default}
 @page{size:A4 landscape;margin:8mm}`;
@@ -339,6 +347,13 @@ async function reportFile(v, authored) {
   try { paint(v, {withRadar: false, rows: authored ? availRows() : []}); } finally { scope = null; }
   copy.querySelectorAll('.rp-write2, .rdr-tools, #rp-photo-file, .rp-photo-add, #rp-photo-del')
     .forEach(e => e.remove());
+  // on-screen help only (owner 2026-11-13): no ⓘ / ? icons, tooltips or hover targets in the file
+  copy.querySelectorAll('.hlp, .hlp-i, .rdr-hits').forEach(e => e.remove());
+  copy.querySelectorAll('[title], [data-tip], [tabindex], .has-help').forEach(e => {
+    e.removeAttribute('title'); e.removeAttribute('data-tip'); e.removeAttribute('tabindex');
+    e.classList.remove('has-help');
+    if (!e.classList.length) e.removeAttribute('class');
+  });
   if (!photo) copy.querySelector('#rp-photo').remove();
   copy.querySelectorAll('#c-scouts[hidden], #r-left[hidden], #h-style[hidden], #c-style[hidden]').forEach(e => e.remove());
   copy.querySelectorAll('.rdr-svg[data-vb]').forEach(svg => svg.setAttribute('viewBox', svg.dataset.vb));
