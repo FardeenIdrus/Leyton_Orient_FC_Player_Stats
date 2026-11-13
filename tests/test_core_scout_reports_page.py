@@ -157,3 +157,25 @@ def test_best_targets_uses_best_profile_target():
                          "season_id": [318, 318, 317], "minutes": [900, 1200, 500],
                          "objective_composite": [3.0, 3.1, None]})
     assert sp.best_targets(rows) == {1: (5, 318)}
+
+
+ROLES = ["Core (>70% of Minutes)", "Support (21-69% of Minutes)", "Fringe (<20% of Minutes)",
+         "Emerging Talent (Ready in Next 12-18 Months)", "Below the Required Standard for LOFC"]
+
+
+def test_squad_role_options_come_from_the_data_in_the_sheet_order():
+    rows = [dict(ROWS[0], squad_role=ROLES[4]), dict(ROWS[1], squad_role=ROLES[0]),
+            dict(ROWS[2], squad_role="A new role")]
+    f = sp.prepare(_frame(rows), "2025/26", "2026/27", NAMES)
+    assert sp.filter_options(f)["Squad role"] == ["All", ROLES[0], ROLES[4], "A new role"]
+
+
+def test_squad_role_filter_narrows_and_combines():
+    rows = [dict(ROWS[0], squad_role=ROLES[0]), dict(ROWS[1], squad_role=ROLES[1]),
+            dict(ROWS[2], squad_role=ROLES[0])]
+    f = sp.prepare(_frame(rows), "2025/26", "2026/27", NAMES)
+    assert list(sp.apply_filters(f, {"role": ROLES[0]})["submission_id"]) == ["a", "c"]
+    assert list(sp.apply_filters(f, {"role": ROLES[0], "scout": "Bob"})["submission_id"]) == []
+    assert list(sp.apply_filters(f, {"role": ROLES[0], "data": "In our data"})["submission_id"]) == ["a"]
+    assert len(sp.apply_filters(f, {"role": "All"})) == 3
+    assert len(sp.apply_filters(f, {"role": ""})) == 3

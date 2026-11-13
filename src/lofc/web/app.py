@@ -106,6 +106,7 @@ class InfoBar:
                      f"<b>{infobar.league_count(engine)}</b> leagues"]
             if label:
                 items.append(f"<b>{html.escape(str(label))}</b> season")
+            items += infobar.pull_date_items(infobar.pull_dates(engine))
         except Exception:
             log.exception("info bar counts unavailable")
             return []

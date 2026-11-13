@@ -56,3 +56,4 @@
 #v-compare tr.sec.wt td{background:transparent;color:var(--muted);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;padding:14px 6px 5px}
 #v-compare tbody tr.sec.wt:first-child td{padding-top:6px}
 @media (max-width:1380px){#v-compare .cmp-pair td,#v-compare .cmp-pair th{padding:7px 4px;font-size:13.5px}#v-compare td.ml{min-width:110px}}
+#v-compare .cmp-tools{display:flex;justify-content:flex-end;margin:0 0 10px}

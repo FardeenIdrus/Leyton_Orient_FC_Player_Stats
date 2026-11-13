@@ -195,3 +195,46 @@ def test_authored_from_body_keeps_only_known_criteria_and_valid_values():
         assert a.screening == {screen: "Meets"}
     assert rp.authored_from_body("Winger", {}, "Ann", "scout") is None
     assert rp.authored_from_body("Winger", {"medical_band": 7, "summary": "  "}, "Ann", "scout") is None
+
+
+# ---- Scout verdicts block (owner, 2026-11-13) --------------------------------------------
+def _scout_rows(rows):
+    cols = ["scout", "verdict", "fixture_date", "submitted_at", "missing_since"]
+    return pd.DataFrame([{**dict.fromkeys(cols), **r} for r in rows], columns=cols)
+
+
+def test_scout_verdicts_latest_per_scout_newest_first():
+    rows = _scout_rows([
+        dict(scout="Ann", verdict="Monitor", fixture_date=dt.date(2026, 8, 1)),
+        dict(scout="Ann", verdict="Sign", fixture_date=dt.date(2026, 9, 12)),      # Ann's latest
+        dict(scout="Bob", verdict="Don't sign", fixture_date=dt.date(2026, 10, 3)),
+        dict(scout="Cy", verdict="Unrealistic Player: Wages / Fee",
+             fixture_date=dt.date(2026, 7, 5)),
+    ])
+    assert rp.scout_verdicts(rows) == [
+        {"scout": "Bob", "verdict": "Don't sign", "date": "3 Oct 2026", "tone": "negative"},
+        {"scout": "Ann", "verdict": "Sign", "date": "12 Sep 2026", "tone": "positive"},
+        {"scout": "Cy", "verdict": "Unrealistic Player: Wages / Fee", "date": "5 Jul 2026",
+         "tone": "other"},
+    ]
+
+
+def test_scout_verdicts_ignore_withdrawn_reports_and_break_ties_on_submission():
+    rows = _scout_rows([
+        dict(scout="Ann", verdict="Sign", fixture_date=dt.date(2026, 9, 12),
+             missing_since=pd.Timestamp("2026-10-01")),                            # withdrawn
+        dict(scout="Ann", verdict="Monitor Priority", fixture_date=dt.date(2026, 8, 1),
+             submitted_at=dt.date(2026, 8, 2)),
+        dict(scout="Ann", verdict="Monitor", fixture_date=dt.date(2026, 8, 1),
+             submitted_at=dt.date(2026, 8, 9)),                                    # same match, later
+    ])
+    assert rp.scout_verdicts(rows) == [
+        {"scout": "Ann", "verdict": "Monitor", "date": "1 Aug 2026", "tone": "neutral"}]
+
+
+def test_scout_verdicts_none_and_blanks():
+    assert rp.scout_verdicts(_scout_rows([])) == []
+    rows = _scout_rows([dict(scout="Ann", verdict=None, fixture_date=None,
+                             submitted_at=dt.date(2026, 9, 1))])
+    assert rp.scout_verdicts(rows) == [{"scout": "Ann", "verdict": "—", "date": "—",
+                                        "tone": "other"}]

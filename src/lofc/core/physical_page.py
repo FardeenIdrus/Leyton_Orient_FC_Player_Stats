@@ -36,12 +36,14 @@ _POOL_COLS = ["player_id", "competition_id", "season_id", "player_name", "team_n
 # --- metrics and wording -----------------------------------------------------------------------
 def metric_list() -> list[dict]:
     """The card's physical rows, in the card's order and with the card's labels; `rated` = one
-    of the rating's Physical metrics; `definition` = the Glossary's (SkillCorner's) wording."""
+    of the rating's Physical metrics; `lower` = lower is better (`cf.LOWER_IS_BETTER`: the
+    timing tests); `definition` = the Glossary's (SkillCorner's) wording."""
     from lofc.dashboard import detail_section as ds
     from lofc.dashboard.glossary_data import PHYSICAL
     rated = set(cf.PHYSICAL_METRICS["Centre Back"])
     entries = list(ds.PHASE_METRICS) + [(m, label) for m, label, _ in ds.SPEED_METRICS]
-    return [{"key": m, "label": label, "rated": m in rated, "definition": PHYSICAL[m][1]}
+    return [{"key": m, "label": label, "rated": m in rated, "lower": m in cf.LOWER_IS_BETTER,
+             "definition": PHYSICAL[m][1]}
             for m, label in entries]
 
 
@@ -148,17 +150,76 @@ def rating_leaders(pool: pd.DataFrame, ranks: dict) -> dict:
     return {"n": n, "thin": None, "order": [[i, ranks[ids[i]]["rank"]] for i in order]}
 
 
-def scatter_summary(players: list[dict], x: str, y: str, band: str) -> dict:
-    """The two-metric chart's plotted pool (rows with both values, in the age band), the median
-    of each axis over that pool, and the five dots to name: highest combined percentile
-    (x + y), ties by name; none when the percentiles are withheld (thin pool)."""
+TOP_SHOWN, TOP_MARKED = 8, 5        # "Better on both": rows listed / dots numbered in red
+NOBODY_BETTER_ON_BOTH = "Nobody better on both."
+MIN_MINUTES = [450, 900, 1350, 1800]   # "Min minutes" on Two metrics (owner 2026-11-13); [0] = default
+MINUTES_STEP = 90                      # owner 2026-11-13: a slider from 450 in steps of 90
+
+
+def min_minutes(v) -> int:
+    """The "Min minutes" slider value from the URL: 450 or more in steps of 90; anything else is
+    the default (450)."""
+    try:
+        m = int(v)
+    except (TypeError, ValueError):
+        return MIN_MINUTES[0]
+    return m if m >= MIN_MINUTES[0] and m % MINUTES_STEP == 0 else MIN_MINUTES[0]
+
+
+def minutes_max(players: list[dict], x: str, y: str, band: str) -> int:
+    """The slider's top: the most minutes of anyone the chart plots at 450+, rounded up to a
+    multiple of 90 (never below 450)."""
+    import math
+    mins = [r["mins"] for r in players if r["v"].get(x) is not None and r["v"].get(y) is not None
+            and band in r["bands"] and r.get("mins") is not None]
+    top = max(mins, default=0)
+    return max(MIN_MINUTES[0], int(math.ceil(top / MINUTES_STEP)) * MINUTES_STEP)
+
+
+def better_on_both(players: list[dict], idx: list[int], x: str, y: str, mx, my,
+                   rev_x: bool = False, rev_y: bool = False) -> list[int]:
+    """Owner 2026-11-13: the plotted players better than BOTH medians, best first by
+    x / median_x + y / median_y (ties by name), at most TOP_SHOWN. On a lower-is-better axis
+    (`rev_*`) better = below the median and the term is median / value. Nobody when the plotted
+    pool is below MIN_PEERS_FOR_RANKING (no ranking from a thin pool) or a median is not
+    positive."""
+    if len(idx) < MIN_PEERS_FOR_RANKING or mx is None or my is None or mx <= 0 or my <= 0:
+        return []
+
+    def term(v, med, rev):                     # None = not better than the median
+        if rev:
+            return med / v if 0 < v < med else None
+        return v / med if v > med else None
+    score = {}
+    for i in idx:
+        a, b = term(players[i]["v"][x], mx, rev_x), term(players[i]["v"][y], my, rev_y)
+        if a is not None and b is not None:
+            score[i] = a + b
+    return sorted(score, key=lambda i: (-score[i], players[i]["name"]))[:TOP_SHOWN]
+
+
+def scatter_summary(players: list[dict], x: str, y: str, band: str,
+                    min_minutes: int = MIN_MINUTES[0], lower=None) -> dict:
+    """The two-metric chart's plotted pool (rows with both values, in the age band, with at
+    least `min_minutes`), the median of each axis over that pool, which axes are reversed
+    (`rev`: lower is better, `lower` defaults to cf.LOWER_IS_BETTER) and the "Better on both"
+    list (`better_on_both`); the browser numbers the first `top_marked` of `top` in red."""
+    lower = cf.LOWER_IS_BETTER if lower is None else lower
+    mm = min_minutes
+
+    def enough(r):
+        if mm <= MIN_MINUTES[0]:
+            return True                        # the pool is already the 450+ rankable rows
+        return r.get("mins") is not None and r["mins"] >= mm
     idx = [i for i, r in enumerate(players) if r["v"].get(x) is not None
-           and r["v"].get(y) is not None and band in r["bands"]]
+           and r["v"].get(y) is not None and band in r["bands"] and enough(r)]
     mx = float(pd.Series([players[i]["v"][x] for i in idx]).median()) if idx else None
     my = float(pd.Series([players[i]["v"][y] for i in idx]).median()) if idx else None
-    both = [i for i in idx if players[i]["p"].get(x) is not None and players[i]["p"].get(y) is not None]
-    top = sorted(both, key=lambda i: (-(players[i]["p"][x] + players[i]["p"][y]), players[i]["name"]))[:5]
-    return {"idx": idx, "top": top,
+    rev = {"x": x in lower, "y": y in lower}
+    top = better_on_both(players, idx, x, y, mx, my, rev["x"], rev["y"])
+    note = (None if top or not idx else thin_caption(len(idx)) if len(idx) < MIN_PEERS_FOR_RANKING
+            else NOBODY_BETTER_ON_BOTH)
+    return {"idx": idx, "top": top, "top_marked": TOP_MARKED, "top_note": note, "rev": rev,
             "median": {"x": mx, "y": my, "x_t": value_text(mx), "y_t": value_text(my)}}
 
 
@@ -309,3 +370,166 @@ def default_league(squad_ids, rows: pd.DataFrame, leagues: list[int]) -> int | N
         return leagues[0]
     counts = comps.value_counts()
     return int(min(counts[counts == counts.max()].index, key=leagues.index))
+
+
+# --- the squad card's "Performance" view (owner 2026-11-13) ----------------------------------
+UNRATED_WHY = "(under 450 minutes or too few peers)"
+
+
+def unrated_text(n: int, season_name: str) -> str | None:
+    """The line under the Performance view; names the season shown (owner 2026-11-13)."""
+    if not n:
+        return None
+    return f"{n} squad player{'' if n == 1 else 's'} not rated in {season_name} {UNRATED_WHY}"
+
+
+def strong_weak(prow, metrics: list[str], label_for) -> dict:
+    """Strongest / weakest over his rated metrics with a percentile: the card's Strengths /
+    Watch-outs rule itself (`card.split_strong_weak`, one function so the two always agree)."""
+    from lofc.core.card import split_strong_weak
+    high, low = split_strong_weak(prow, metrics)
+    item = lambda m, v: {"label": label_for(m), "pct": round(v)}
+    return {"strong": [item(m, v) for m, v in high], "weak": [item(m, v) for m, v in low]}
+
+
+def performance_rows(squad: pd.DataFrame, rows: pd.DataFrame, pcts: pd.DataFrame,
+                     season_id: int, league_names: dict, href, season_name: str = "") -> dict:
+    """Our current squad's RATED players (an Overall on his `rows` row: `core.squad.rated_rows`,
+    the peer floor applied, as the Physical view and the workbook), grouped as Club vs League
+    One groups positions (GK, CB, FB, Midfield, W, CF), best Overall first. Strongest / weakest
+    three = `strong_weak` (the card's Strengths / Watch-outs order, no metric in both) over his
+    position's Performance metrics (the card's list), from the scorecard percentiles `pcts` (league,
+    position and season; lower-is-better already inverted, labelled "(fewer is better)").
+    A player rated outside League One carries his league as `league` (his percentiles are vs
+    that league). Unrated players are only counted."""
+    from lofc.core.club_vs_league import GROUPS, LEAGUE_ONE, group_of, weak_label
+    from lofc.dashboard.labels import LABELS
+    from lofc.model.scorecard import _resolved_performance
+    label = weak_label(lambda m: LABELS.get(m, m))
+    if pcts is None or "player_id" not in getattr(pcts, "columns", []):
+        pcts = pd.DataFrame(columns=["player_id", "competition_id"])
+    sc = pcts[pcts["season_id"] == season_id] if "season_id" in pcts.columns else pcts
+    sc = sc.drop_duplicates(["player_id", "competition_id"]).set_index(
+        ["player_id", "competition_id"])
+    groups: dict[str, list] = {g: [] for g in GROUPS}
+    unrated = 0
+    for s in squad.itertuples(index=False):
+        pid = int(s.player_id)
+        r = rows.loc[pid] if pid in rows.index else None
+        if isinstance(r, pd.DataFrame):
+            r = r.iloc[0]
+        if r is None or _missing(r.get("objective_composite")) or bool(r.get("thin", False)):
+            unrated += 1
+            continue
+        comp, pos = int(r["competition_id"]), str(r["position_group"])
+        prow = sc.loc[(pid, comp)] if (pid, comp) in sc.index else None
+        sw = strong_weak(prow, _resolved_performance(pos), label)
+        league = None if comp == LEAGUE_ONE else league_names.get(comp, f"League {comp}")
+        group = group_of(pos)
+        groups.setdefault(group, []).append({
+            "name": str(s.player_name), "href": href(pid, comp, season_id), "pos": pos,
+            "pos_tag": pos if group != pos else None,
+            "league": league, "league_tip": None if league is None else f"Percentiles vs {league} {pos}s",
+            "mins": _num(r["minutes"]), "mins_t": minutes_text(r["minutes"]),
+            "overall": _num(r["objective_composite"]), "perf": _num(r.get("performance_band")),
+            "phys": _num(r.get("physical_band")),
+            "strong": sw["strong"], "weak": sw["weak"]})
+    out = []
+    for g, rs in groups.items():
+        if rs:
+            rs.sort(key=lambda x: (-x["overall"], -(x["mins"] or 0), x["name"]))
+            out.append({"group": g, "rows": rs})
+    return {"groups": out, "unrated": unrated, "unrated_t": unrated_text(unrated, season_name)}
+
+
+# --- "Download squad (Excel)" (owner R5) -------------------------------------------------------
+EXPORT_COLUMNS = ["Player", "Position", "Age", "Contract until", "Minutes", "Overall",
+                  "Performance", "Physical", "League One rank (position)", "Availability"]
+EXPORT_SHEET = "Leyton Orient squad"
+# owner R5: GK, CB, FB, midfield, W, CF
+EXPORT_POSITION_ORDER = ["Goalkeeper", "Centre Back", "Full Back", "Defensive Mid", "Central Mid",
+                         "Attacking Mid", "Winger", "Centre Forward"]
+_WIDTHS = {"Player": 26, "Position": 16, "Age": 7, "Contract until": 15, "Minutes": 10,
+           "Overall": 10, "Performance": 13, "Physical": 10, "League One rank (position)": 26,
+           "Availability": 13}
+
+
+def _rating(v) -> float | None:
+    """Two decimals, half-up (the site's rating chips)."""
+    from decimal import ROUND_HALF_UP, Decimal
+    return None if _missing(v) else float(Decimal(repr(float(v))).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def squad_export_rows(squad: pd.DataFrame, rows: pd.DataFrame, rank_of, availability_of,
+                      age_of=None) -> list[dict]:
+    """One row per current Orient player (goalkeepers too). `squad` = `core.squad.squad()`;
+    `rows` = `core.squad.rated_rows(season)` (his most-minutes row, the peer floor applied: the
+    ratings the page and the card show). `rank_of(pid, comp, pos)` -> (rank, n) among rated
+    League One players at his position (`scorecard.rank_in_pool`); asked only for a rated
+    League One row. `availability_of(pid, comp, minutes)` -> the card's availability (0-1) or
+    None. `age_of(birth)` -> age (default `core.squad._age_now`, as Squads and Compare)."""
+    from lofc.core.card import _half_up
+    from lofc.core.club_vs_league import LEAGUE_ONE
+    if age_of is None:
+        from lofc.core.squad import _age_now as age_of
+    order = {p: i for i, p in enumerate(EXPORT_POSITION_ORDER)}
+    out = []
+    for s in squad.itertuples(index=False):
+        pid = int(s.player_id)
+        r = rows.loc[pid] if pid in rows.index else None
+        if isinstance(r, pd.DataFrame):
+            r = r.iloc[0]
+        pos = str(r["position_group"]) if r is not None else str(s.position_group)
+        contract = getattr(s, "contract_until", None)
+        row = {"Player": str(s.player_name), "Position": pos,
+               "Age": age_of(getattr(s, "birth_date", None)),
+               "Contract until": None if _missing(contract) else pd.Timestamp(contract).date(),
+               "Minutes": None, "Overall": None, "Performance": None, "Physical": None,
+               "League One rank (position)": None, "Availability": None}
+        if r is not None:
+            comp = int(r["competition_id"])
+            minutes = None if _missing(r["minutes"]) else _half_up(r["minutes"])
+            thin = bool(r.get("thin", False))
+            row.update(Minutes=minutes,
+                       Overall=None if thin else _rating(r["objective_composite"]),
+                       Performance=None if thin else _rating(r["performance_band"]),
+                       Physical=None if thin else _rating(r["physical_band"]))
+            if comp == LEAGUE_ONE and row["Overall"] is not None:
+                rank, n = rank_of(pid, comp, pos)
+                if rank is not None:
+                    row["League One rank (position)"] = f"{rank} of {n}"
+            a = availability_of(pid, comp, None if _missing(r["minutes"]) else float(r["minutes"]))
+            row["Availability"] = None if _missing(a) else float(a)
+        out.append(row)
+    out.sort(key=lambda x: (order.get(x["Position"], 99),
+                            -(x["Overall"] if x["Overall"] is not None else -1), x["Player"]))
+    return out
+
+
+def squad_xlsx(rows: list[dict]) -> bytes:
+    """The workbook: one sheet, bold frozen header, numbers as numbers."""
+    import io
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+    wb = Workbook()
+    ws = wb.active
+    ws.title = EXPORT_SHEET
+    ws.append(EXPORT_COLUMNS)
+    for c in ws[1]:
+        c.font = Font(bold=True)
+    fmt = {"Age": "0.0", "Contract until": "dd mmm yyyy", "Minutes": "#,##0", "Overall": "0.00",
+           "Performance": "0.00", "Physical": "0.00", "Availability": "0%"}
+    for r in rows:
+        ws.append([r[k] for k in EXPORT_COLUMNS])
+        for i, k in enumerate(EXPORT_COLUMNS, start=1):
+            if k in fmt and r[k] is not None:
+                ws.cell(row=ws.max_row, column=i).number_format = fmt[k]
+    for i, k in enumerate(EXPORT_COLUMNS, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = _WIDTHS[k]
+    ws.freeze_panes = "A2"
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

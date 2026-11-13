@@ -39,16 +39,34 @@
         <div class="fl ph-axes">
           <div class="f"><label for="f-x">Across</label><select class="ctl" id="f-x" name="x"></select></div>
           <div class="f"><label for="f-y">Up</label><select class="ctl" id="f-y" name="y"></select></div>
-          <div class="f f-find"><label for="f-find">Find a player</label><input class="ctl" id="f-find" type="search" autocomplete="off" placeholder="Name…"></div>
+          <div class="f f-min"><label for="f-min">Min minutes</label><div class="pair"><input type="range" id="f-min" name="min" min="450" max="450" step="90" value="450"><output id="min-out" class="val" for="f-min"></output></div></div>
+          <div class="f f-find"><label for="f-find">Find a player</label><div class="ph-findbox"><input class="ctl" id="f-find" type="search" autocomplete="off" placeholder="Name…" aria-controls="find-results"><div class="results" id="find-results" hidden></div></div></div>
         </div>
-        <div class="ph-key"><span><i class="ph-dot orient"></i>Leyton Orient</span><span><i class="ph-dot"></i>Others</span><span><i class="ph-med"></i>Median</span><span class="note">Click a dot to open the player</span></div>
-        <div id="sc-plot" class="ph-plot"></div>
+        <div class="sc-grid">
+          <div class="sc-chart">
+            <div id="sc-plot" class="ph-plot"></div>
+            <div class="ph-key"><span><i class="ph-dot t5"></i>Top 5 better on both</span><span><i class="ph-dot orient"></i>Leyton Orient</span><span><i class="ph-dot"></i>Others</span><span><i class="ph-med"></i>Median</span><span class="note">Click a dot to open the player</span></div>
+          </div>
+          <div class="sc-side" id="sc-side">
+            <h3>Better on both <span class="m">· top right, best first</span></h3>
+            <div class="tw"><table id="sc-top"><colgroup><col class="sc-c-n"><col><col class="sc-c-v"><col class="sc-c-v"></colgroup><thead id="sc-top-head"></thead><tbody id="sc-top-body"></tbody></table></div>
+            <p class="note" id="sc-top-note" hidden></p>
+          </div>
+        </div>
       </div>
     </div>
 
     <div class="card" id="ph-squad">
-      <div class="ph-head"><div class="ph-title"><h2 id="sq-title">Leyton Orient squad</h2><div class="sub" id="sq-sub"></div></div></div>
+      <div class="ph-head"><div class="ph-title"><h2 id="sq-title">Leyton Orient squad</h2><div class="sub" id="sq-sub"></div></div>
+        <div class="ph-sq-acts"><div class="seg" id="sq-view" role="group" aria-label="View"><button type="button" data-view="" aria-pressed="true" class="on">Physical</button><button type="button" data-view="perf" aria-pressed="false">Performance</button></div>
+        <a class="btn small" id="sq-xlsx" href="/api/physical/squad.xlsx" download>⬇ Download squad (Excel)</a></div></div>
       <div class="tw" id="sq-tw"><table><thead id="sq-head"></thead><tbody id="sq-body"></tbody></table></div>
+      <div id="sq-perf" hidden>
+        <div class="tw" id="sp-tw"><table id="sp-table"><colgroup><col class="sp-c-name"><col class="sp-c-min"><col class="sp-c-r"><col class="sp-c-r"><col class="sp-c-r"><col><col></colgroup>
+          <thead><tr><th>Player</th><th class="n">Minutes</th><th class="c">Overall</th><th class="c">Performance</th><th class="c">Physical</th><th>Strongest 3</th><th>Weakest 3</th></tr></thead>
+          <tbody id="sp-body"></tbody></table></div>
+        <p class="note" id="sp-unrated" hidden></p>
+      </div>
     </div>
   </div>
 </section>

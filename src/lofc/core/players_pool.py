@@ -616,6 +616,20 @@ def _search_index_for(version: str, season_id: int) -> pd.DataFrame:
     return build_search_index(L.load_candidates(1.0, season_id))
 
 
+def season_players(season_id: int) -> list[list]:
+    """Every player of the season, A-Z (the search index: every position and league), for the
+    Report's player list (owner 2026-11-13): [player_id, competition_id, name, position, club,
+    league or None, key]. `key` is the server's own fold of the search label, so a browser that
+    keeps rows whose key contains the folded query matches exactly what `search` would."""
+    from lofc.dashboard.search import fold
+    idx = _search_index_for(L.data_version(with_scorecards=True), int(season_id))
+    rows = sorted(idx.itertuples(), key=lambda r: (fold(r.player_name), str(r.player_name)))   # A-Z as read
+    return [[int(r.player_id), int(r.competition_id), str(r.player_name), str(r.position_group),
+             "Unknown club" if pd.isna(r.team_name) else str(r.team_name),
+             None if pd.isna(r.league) else str(r.league), fold(r.label)]
+            for r in rows]
+
+
 def search(season_id: int, query: str, limit: int = 30) -> list[dict]:
     """Players in this season matching `query` -- every position and league (the index is built
     before any filter), accent/case/punctuation-insensitive like the Streamlit box."""

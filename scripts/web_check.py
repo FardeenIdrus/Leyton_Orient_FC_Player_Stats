@@ -553,7 +553,20 @@ class Session:
         return timeout
 
     # -- navigation ---------------------------------------------------------------------
-    def goto(self, path: str, check: bool = True, desc: str | None = None, label: str = "load"):
+    def forget_pages(self):
+        """Drop every page's remembered settings ('lofc.<page>.last', owner 2026-11-13) so a
+        bare URL opens on its defaults, as each scenario expects. Drafts etc. are kept."""
+        try:
+            if self.page.url.startswith(self.base):
+                self.page.evaluate("""() => { try { for (const k of Object.keys(localStorage))
+                    if (/^lofc\\.[\\w-]+\\.last$/.test(k)) localStorage.removeItem(k); } catch (e) {} }""")
+        except Exception:
+            pass
+
+    def goto(self, path: str, check: bool = True, desc: str | None = None, label: str = "load",
+             forget: bool = True):
+        if forget:
+            self.forget_pages()
         first = path not in self.visited
         self.visited.add(path)
         self.rec.drain()
@@ -749,6 +762,7 @@ class Session:
                   None if snap2["controls"] == snap["controls"] else
                   f"controls differ when {after_url} is opened fresh: "
                   f"{ {k: (snap['controls'][k], snap2['controls'].get(k)) for k in snap['controls'] if snap['controls'][k] != snap2['controls'].get(k)} }")
+        self.forget_pages()
         self.page.goto(self.base + self.cur_path)
 
 
@@ -897,6 +911,7 @@ def main(argv=None) -> int:
     ap.add_argument("--role", default="head_of_recruitment")
     ap.add_argument("--allow-writes", action="store_true")
     ap.add_argument("--max-actions", type=int, default=60)
+    ap.add_argument("--only", default="", help="comma list of scenario names: run just those (no layout pass or exerciser); for iterating")
     a = ap.parse_args(argv)
 
     if not is_local_base(a.base):
@@ -966,7 +981,12 @@ def main(argv=None) -> int:
                     if name == "login":
                         continue
                     try:
-                        ok = run_page(s, name, PAGES[name], widths, primary)
+                        spec = PAGES[name]
+                        if a.only:
+                            keep = [x for x in a.only.split(",") if x]
+                            spec = {**spec, "exercise": False,
+                                    "scenarios": [f for f in spec.get("scenarios", []) if f.__name__ in keep]}
+                        ok = run_page(s, name, spec, [] if a.only else widths, primary)
                     except Exception as e:      # a harness/browser crash is a failure, not a pass
                         s.cur_page = name
                         s.note("harness crashed", f"{type(e).__name__}: {str(e).splitlines()[0][:200]}")

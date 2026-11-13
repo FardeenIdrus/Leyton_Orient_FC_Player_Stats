@@ -2,12 +2,12 @@
 // caption and option comes from the API (the Streamlit page's own functions). The URL query
 // string is the page state (tab, filters, sort, open report). Scout text is free text written by
 // people: it only ever reaches the page through esc() or textContent.
-import {api, esc, dash} from './common.js';
+import {api, esc, dash, rememberState, restoreState} from './common.js';
 
 const $ = id => document.getElementById(id);
-const FILTERS = ['q', 'league', 'max_age', 'foot', 'scout', 'verdict', 'grade', 'position', 'club', 'seen', 'data', 'dvs'];
+const FILTERS = ['q', 'league', 'max_age', 'foot', 'scout', 'verdict', 'grade', 'position', 'club', 'seen', 'data', 'dvs', 'role'];
 const SELECTS = {league: 'League', foot: 'Foot', scout: 'Scout', verdict: 'Verdict', grade: 'Grade',
-  position: 'Position', club: 'Club', seen: 'Seen', data: 'Our data', dvs: 'Data vs scout'};
+  position: 'Position', club: 'Club', seen: 'Seen', data: 'Our data', dvs: 'Data vs scout', role: 'Squad role'};
 const TONE = {positive: 'verdict-pos', negative: 'verdict-neg', neutral: 'verdict-mid'};
 
 let seq = 0, last = null, detailSeq = 0;
@@ -26,6 +26,7 @@ function push(patch, {replace = false} = {}) {
   }
   const url = location.pathname + (q.toString() ? '?' + q : '');
   if (url !== location.pathname + location.search) history[replace ? 'replaceState' : 'pushState']({}, '', url);
+  remember();
 }
 const apiQuery = s => {
   const q = new URLSearchParams();
@@ -162,13 +163,18 @@ async function load() {
   const s = state(), mine = ++seq;
   try {
     const d = await api('/api/scout-reports' + apiQuery(s));
-    if (mine === seq) draw(d, s);
+    if (mine === seq) { draw(d, s); remember(); }
   } catch (e) {
     if (mine === seq) { $('sr-sync').textContent = `Could not load the reports (${e.message}).`; }
   }
 }
 
+// owner 2026-11-13: the nav link (a bare URL) reopens the last filters and sort; the open row
+// is a one-off and is not kept
+const remember = () => rememberState('scout-reports', {drop: ['open']});
+
 function init() {
+  restoreState('scout-reports');
   for (const k of Object.keys(SELECTS)) $('f-' + k).onchange = ev => { push({[k]: ev.target.value, open: ''}); load(); };
   let t = null;
   $('f-q').oninput = ev => {

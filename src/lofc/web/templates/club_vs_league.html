@@ -15,7 +15,9 @@
       <li><b>Our level</b>: {{ terms["Our level"] }} Last season's ratings and loans elsewhere are shown, tagged, but never set it.</li>
       <li><b>Top-6 bar</b>: {{ terms["Top-6 bar"] }} If fewer than 4 of the 6 clubs have one yet, last season's top 6 is used, and labelled.</li>
       <li><b>Gap</b>: {{ terms["Gap"] }} "Biggest shortfalls" compares our player's percentiles with the named players'; open a row for every metric we're behind on, biggest first.</li>
-      <li><b>Players who could close the gap</b>: {{ terms["Players who could close the gap"] }} Top 15 per league, because ratings compare players within their own league; each column is his percentile (green 70+, red below 30). <b>vs our best</b>: {{ terms["vs our best"] }} <b>Top-6 level</b>: {{ terms["Top-6 level"] }}</li>
+      <li>Pick any of our rated players in a position to measure the gap and the list against him.</li>
+      <li><b>Players who could close the gap</b>: {{ terms["Players who could close the gap"] }} One list per league, because ratings compare players within their own league; each column is his percentile (green 70+, red below 30). <b>vs our best</b>: {{ terms["vs our best"] }} <b>Top-6 level</b>: {{ terms["Top-6 level"] }}</li>
+      <li id="cv-how-gc"><b>Gap closed</b>: {{ terms["Gap closed"] }} Each metric counts by its weight in the Overall rating.</li>
     </ol>
   </details>
 
@@ -48,6 +50,11 @@
         </div>
       </div>
       <div class="cv-level" id="cv-level"></div>
+      <div class="cv-tools">
+        <div class="cv-cols"><span class="cv-tl">Metric columns</span><span id="cv-cols"></span><select class="ctl cv-add" id="cv-add" aria-label="Add a metric column"></select><button type="button" class="cv-reset" id="cv-reset" hidden>Reset to our 3 biggest shortfalls</button></div>
+        <div class="cv-rankby"><span class="cv-tl">Rank by</span><div class="cv-seg" id="cv-rank" role="group" aria-label="Rank by"><button type="button" data-r="">Overall</button><button type="button" data-r="gap">Gap closed</button></div></div>
+      </div>
+      <div class="cv-cols-note" id="cv-cols-note" hidden></div>
       <div class="cv-tabs" id="cv-tabs" role="tablist" aria-label="League"></div>
       <div class="cv-count" id="cv-count"></div>
       <div class="tw"><table id="cv-rec-t"></table></div>

@@ -434,10 +434,14 @@ percentile; the page only picks, weights by minutes and compares. Code: `src/lof
    figure, the same in both lists. Percentiles are plain numbers (100 = best); ordinals are used
    only for league ranks.
 7. **Players who could close the gap.** This season's rated players at the position (not ours)
-   with an Overall above our level — **one list per league, top 15**, because a rating compares a
-   player only with his own league, ranked by Overall. Three columns, one per shortfall metric
+   with an Overall above our level — **one list per league, every such player** (no top-15 cap
+   since 13 Nov 2026; caption "<N> full backs above <our player> · ranked within <league>"),
+   because a rating compares a player only with his own league, ranked by Overall. Every
+   heading sorts the list (13 Nov 2026): numbers highest first, Player and Club A–Z, a second
+   click reverses; the choice is kept in the address (`sort=`). Three columns, one per shortfall metric
    from "Biggest shortfalls", show his percentile in his own league and position (green 70+,
-   grey 30–69, red below 30); each column can be sorted. "vs our best" is his Overall minus our
+   grey 30–69, red below 30); each column can be sorted, and the recruiter can choose other
+   metric columns (Gap closed, below). "vs our best" is his Overall minus our
    level (2 decimals, .5 rounded up as the card's "vs ours"); the gap is closed when it reaches
    the gap size. "Top-6 level" marks an Overall at or above the bar. Filters: age, contract,
    "Strong on 2+ of our weaknesses" (70th percentile or better on at least 2 of the 3) and
@@ -450,7 +454,12 @@ percentile; the page only picks, weights by minutes and compares. Code: `src/lof
    touches in box), Progression (bypassed opponents, deep progressions, passes into box) and
    Without the ball (pressures, ball wins, ground-duel win %, aerial win %). Every measure must
    have League One data this season (tested): progressive passes and ball recoveries were
-   replaced on 10 Nov 2026 because Impect does not provide them.
+   replaced on 10 Nov 2026 because Impect does not provide them. The Physical section has a
+   switch (13 Nov 2026): All phases · In possession · Out of possession (`phase=tip|otip` in the
+   address). In / out of possession use SkillCorner's phase splits (`player_detail_metrics`
+   "phys_tip.<metric>" / "phys_otip.<metric>", per 90), with the same club calculation
+   (minutes-weighted, ranked 1–24, both seasons). Top speed and Average match top speed have no
+   split and show "—" there. Code: `club_vs_league.phase_frame`.
 
 **Worked example (real data, 9 Nov 2026, season 2026/27): Centre Back**
 
@@ -467,3 +476,73 @@ percentile; the page only picks, weights by minutes and compares. Code: `src/lof
 
 Wingers that day used last season's bar: only 3 of this season's top-6 clubs had a rated winger
 yet, so the bar came from 2025/26's top 6 (5 of them had one).
+
+**Gap closed (owner 2026-11-13)**
+
+How much of our weighted shortfall against the top 6 a player would close. "Ours" = our best
+player's percentiles (the Gap map's player); "bar" = the median percentile of the named top-6
+players. For every metric where bar > ours (the "Every shortfall" set):
+
+* gap = bar − ours; closed = his percentile − ours, kept between 0 and gap (no credit beyond the
+  top-6 level, none for being worse than ours; a metric he has no figure for closes nothing).
+* w = the metric's share of the Overall rating = its weight inside its dimension × that
+  dimension's share. Overall = Performance × 4/7 + Physical × 3/7 for outfielders (the club's
+  40 : 30); goalkeepers Performance only. Inside Performance: the club's "All Metrics" weights
+  (`performance_weights.py`); inside Physical: equal (1/7 each). Code: `club_vs_league.overall_weights`.
+* **Gap closed = 100 × Σ w·closed ÷ Σ w·gap**, a whole number (.5 up); "—" if there is no
+  shortfall to close. His percentiles are his own (his league and position), as in the metric
+  columns.
+
+By default it counts every shortfall. When the recruiter chooses the metric columns (up to 5),
+it counts only those; if none of them is a shortfall it shows "—". "Rank by: Gap closed" lists
+each league's list by it (ties by Overall). "Strong on 2+" always uses the 3 biggest shortfalls.
+
+**On the page (13 Nov 2026).** "How this is worked out" shows Gap closed as a mini table built
+live from the page's own figures: the selected position, the player it is measured against (our
+best, or the picked player) and the first player by Gap closed in the active league tab (his %
+is the list's figure; nothing is worked out twice). Rows: our player's 3 biggest shortfalls by
+weight × gap that the target has a figure for; "Target − Ours" is the raw difference; "Counted"
+keeps it between 0 and the gap ("(capped at the gap)" when it went past). Without a target it
+shows the one-line definition. Code: `club_vs_league.gap_example`.
+
+When our player is already above the top-6 bar (e.g. a centre forward rated above it), the last
+line reads "… = X% of his remaining shortfalls on these measures." instead.
+
+*Worked example (real data, 13 Nov 2026, season 2026/27): Full Back, League One tab.* Our best
+full back Charlie Wellens 2.38; top-6 bar 3.67 (gap −1.29). First by Gap closed in League One:
+Ryan Glover (Stockport County).
+
+Gap closed: how much of our player's shortfall a target would make up.
+Scores are out of 100 (100 = best at his position in his league).
+
+| Measure | Ours (Wellens) | Top 6 | Gap (Top 6 − Ours) | Target (Glover) | Target − Ours | Counted |
+|---|---:|---:|---:|---:|---:|---:|
+| Average match top speed | 4 | 79 | 75 | 78 | 73 | 73 |
+| High-speed runs | 8 | 80 | 73 | 99 | 92 | 73 (capped at the gap) |
+| Sprints | 1 | 70 | 69 | 98 | 97 | 69 (capped at the gap) |
+| …and 14 more measures | | | | | | |
+
+Gap closed = total Counted ÷ total Gap = 94%. Measures that count more in the Full Back rating
+count more. *Why: it ranks players by how much they fix our weaknesses, not just by how good
+they are.*
+
+Gap, Target − Ours and Counted are worked from the unrounded percentiles (.5 rounded up), as
+"Behind" in the Gap map, so they can differ by 1 from the difference of the rounded figures
+shown (e.g. 78 − 4 above reads 73: unrounded 77.5 − 4.2).
+
+**Measure against any of our players (owner 2026-11-13)**
+
+By default a position is measured against our best player there. In the open Gap-map row, any
+of our players who counts toward our level (rated this season in League One — the same rule as
+our best) can be picked instead; the choice is kept in the address (`vs=<player id>`). For that
+position only:
+
+* Gap = the top-6 bar − **his** Overall; "Biggest shortfalls" and "Every shortfall" use **his**
+  percentiles; the Gap-map row shows him, with "Back to our best".
+* "Players who could close the gap" lists players rated above **him**; "vs our best" becomes
+  "vs him" (his Overall minus the picked player's); Gap closed uses his shortfalls; the default
+  metric columns and "Strong on 2+" use his 3 biggest shortfalls.
+* Everything else is unchanged: the bar, the top 6, leagues, filters, "Top-6 level" (at
+  or above the bar) and the other positions. Changing position goes back to our best; a player
+  who does not count (rated elsewhere, last season only, another position, not ours) is ignored.
+  Code: `club_vs_league.compared_player`, `gap_detail`, `measure_against`.

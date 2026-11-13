@@ -11,6 +11,7 @@
 #v-scout-reports .f-foot{flex:0 0 110px;min-width:110px}
 #v-scout-reports .sr-row2{margin-top:10px}
 #v-scout-reports .sr-row2 .f{flex:1 1 110px;min-width:110px}
+#v-scout-reports .f-role{flex:0 1 270px;min-width:200px}
 #v-scout-reports .sr-head{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
 #sr-tw{max-height:min(680px,calc(100vh - 300px));min-height:240px;margin-top:8px}
 #v-scout-reports table{border-collapse:separate;border-spacing:0}

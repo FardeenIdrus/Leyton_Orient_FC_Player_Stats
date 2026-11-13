@@ -136,4 +136,21 @@ def test_api_json_is_the_view(engine, pairs):
         want = json.loads(json.dumps(rp.view(pairs[label][0],
                                              {"player": p, "competition": comp, "season": season})))
         got.pop("form")
+        assert got.pop("scouts") == rp.scout_verdicts_from_db(engine, p), label
         assert got == want, label
+
+
+def test_scout_verdicts_are_each_scouts_latest_report(engine):
+    """The Scout verdicts block on the real table: one line per scout, that scout's latest
+    report by fixture date (independent SQL), withdrawn rows left out, newest first."""
+    import pandas as pd
+    from lofc.core import report_page as rp
+    want = pd.read_sql(
+        "SELECT DISTINCT ON (scout) scout, verdict, fixture_date FROM scout_reports "
+        "WHERE player_id = 52132 AND missing_since IS NULL "
+        "ORDER BY scout, fixture_date DESC NULLS LAST, submitted_at DESC NULLS LAST", engine)
+    got = rp.scout_verdicts_from_db(engine, 52132)
+    assert len(got) == len(want) >= 2
+    assert {(g["scout"], g["verdict"]) for g in got} == set(zip(want["scout"], want["verdict"]))
+    dates = [pd.Timestamp(d) for d in sorted(want["fixture_date"], reverse=True)]
+    assert [g["date"] for g in got] == [f"{d.day} {d:%b %Y}" for d in dates]

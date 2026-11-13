@@ -53,6 +53,7 @@ def install_fake(monkeypatch):
         candidates=lambda s: frames.get(s, _season_frames(s, n=0))[0],
         values=lambda s: frames.get(s, _season_frames(s, n=0))[1],
         pcts=lambda s: frames.get(s, _season_frames(s, n=0))[2],
+        perf_pcts=lambda s: frames.get(s, _season_frames(s, n=0))[2],
         squad=lambda: squad, rated_rows=lambda s: rows,
         has_physical=lambda c, s: s in (318, 319),
         match_counts=lambda s: {(3, 4): 23} if s == 319 else {},
@@ -72,6 +73,14 @@ def test_page_shell_renders_with_filters_and_script(fake):
     assert "Currently building" not in r.text
     for label in ('for="f-season"', 'for="f-league"', 'for="f-position"', 'for="f-metric"'):
         assert label in r.text
+
+
+def test_find_a_player_has_its_list(fake):
+    """Owner 2026-11-13: the empty Find a player box lists the plotted players (drawn by
+    physical.js into this list, beside the box)."""
+    r = _client().get("/physical")
+    assert 'id="f-find"' in r.text and 'aria-controls="find-results"' in r.text
+    assert '<div class="results" id="find-results" hidden></div>' in r.text
 
 
 def test_api_needs_login():
@@ -150,7 +159,34 @@ def test_age_bands_and_scatter_follow_the_url(fake):
     full = _client().get("/api/physical?age=bad").json()
     assert full["filters"]["age"] == "" and len(full["scatter"]["idx"]) == 12
     assert full["scatter"]["median"]["x_t"] == "6.5"
-    assert len(full["scatter"]["top"]) == 5
+    # "Better on both": above both medians (6.5), best first; the first five are marked
+    top = [full["pool"]["players"][i]["name"] for i in full["scatter"]["top"]]
+    assert top == ["P<12>", "P<11>", "P<10>", "P<9>", "P<8>", "P<7>"]
+    assert full["scatter"]["top_marked"] == 5
+
+
+def test_min_minutes_follows_the_url(fake):
+    """Owner 2026-11-13: "Min minutes" slider on Two metrics: 450 (default) up to the plotted
+    pool's most minutes rounded up to 90, step 90."""
+    d = _client().get("/api/physical").json()
+    assert d["min_range"] == {"min": 450, "max": 1080, "step": 90}          # every fake player: 1,000
+    assert d["filters"]["min"] == 450 and d["scatter"]["sub"].endswith("· 450+ minutes")
+    assert len(d["scatter"]["idx"]) == 12
+    hi = _client().get("/api/physical?min=1350").json()      # every fake player has 1,000
+    assert hi["filters"]["min"] == 1350 and hi["scatter"]["idx"] == [] and hi["scatter"]["top"] == []
+    assert hi["scatter"]["sub"].endswith("· 1350+ minutes")
+    assert len(hi["pool"]["leaders"]["sprint_count_p90"]["order"]) == 12   # leaders untouched
+    assert _client().get("/api/physical?min=1000").json()["filters"]["min"] == 450
+    assert _client().get("/api/physical?min=990").json()["filters"]["min"] == 990
+    assert hi["min_range"]["max"] == 1350              # the slider reaches the chosen value
+
+
+def test_lower_is_better_axis_flagged(fake):
+    d = _client().get("/api/physical?x=time_to_sprint&y=top5_psv99_kmh").json()
+    assert d["scatter"]["rev"] == {"x": True, "y": False}
+    assert {m["key"]: m["lower"] for m in d["metrics"]}["time_to_sprint"] is True
+    # better on both: quicker (lower) than the median and faster: none in the fake (values rise together)
+    assert d["scatter"]["top"] == [] and d["scatter"]["top_note"] == "Nobody better on both."
 
 
 def test_tracked_matches_in_pool_and_squad(fake):

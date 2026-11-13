@@ -12,7 +12,7 @@
         <select id="rp-season" class="ctl">{% for s in seasons %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select></div>
       <div class="f grow"><label for="rp-search">Find a player</label>
         <div class="searchbox">
-          <input id="rp-search" class="ctl" type="search" autocomplete="off" placeholder="Any player, any position, any league…">
+          <input id="rp-search" class="ctl" type="search" autocomplete="off" placeholder="Any player, any position, any league…" aria-controls="rp-results">
           <button class="btn small" id="rp-clear" type="button" aria-label="Clear search" disabled>✕ Clear</button>
           <div class="results" id="rp-results" hidden></div>
         </div></div>
@@ -22,54 +22,72 @@
   <div id="rp-status" class="rp-status" role="status"></div>
 
   <div id="rp-body" hidden>
-    <div class="rp-head">
-      <div class="rp-id">
-        <div class="section-label" id="h-sub"></div>
-        <div class="rp-name" id="h-name"></div>
-        <div class="meta" id="h-club"></div>
-        <div class="reg" id="h-bio"></div>
-        <div class="note rp-line" id="h-split"></div>
-        <div class="note rp-line" id="h-style" hidden></div>
-        <div class="note rp-line" id="h-cmp"></div>
-      </div>
-      <div class="rp-actions">
-        <div class="rp-stamp"><span class="pill" id="h-stamp"></span><span class="note" id="h-asof"></span></div>
-        <button class="btn" id="rp-write" type="button" aria-expanded="false" aria-controls="rp-form">✎ Write your report</button>
-        <button class="btn primary" id="rp-dl" type="button">⬇ Download report</button>
-        <a class="btn" id="rp-dl-data" download>⬇ Download data-only report</a>
-      </div>
+    <div class="rp-bar-top">
+      <button class="btn" id="rp-write" type="button" aria-expanded="false" aria-controls="rp-form">✎ Write your report</button>
+      <button class="btn primary" id="rp-dl" type="button">⬇ Download report</button>
+      <button class="btn" id="rp-dl-data" type="button">⬇ Download data-only report</button>
+      <span class="note" id="rp-draft-note" role="status"></span>
     </div>
 
     <div class="card rp-form" id="rp-form" hidden>
       <div class="rp-form-head"><h2>Write your report</h2>
-        <span class="note">All optional. Psychological and Medical are your view only; they never change any rating.</span></div>
+        <span class="note">All optional. Psychological and Medical are your view only; they never change any rating.</span>
+        <button class="btn small" id="rp-draft-clear" type="button">Clear draft</button>
+        <span class="rp-confirm" id="rp-draft-confirm" role="group" hidden>Clear your draft? <button class="btn small" id="rp-draft-yes" type="button">Yes</button> · <button class="btn small" id="rp-draft-no" type="button">No</button></span></div>
       <div class="rp-form-grid">
         <div id="f-text"></div>
         <div><h3>Psychological</h3><div id="f-psych"></div><div class="rp-band" id="f-psych-band"></div></div>
         <div><h3>Medical</h3><div id="f-med"></div></div>
       </div>
+      <div class="rp-avform"><h3>Availability history</h3>
+        <div id="f-avail"></div>
+        <button class="btn small" id="f-avail-add" type="button">+ Add row</button></div>
     </div>
 
-    <div class="row rp-top">
-      <div class="card" id="c-verdict"><h2>Composite</h2><div class="sub" id="v-rank"></div>
-        <div id="v-body"></div></div>
-      <div class="card" id="c-summary"><h2>Summary</h2><div id="n-body"></div></div>
-    </div>
+    <article class="rp-sheet" id="rp-sheet">
+      <header class="rp-head">
+        <div class="rp-photo" id="rp-photo">
+          <label class="rp-photo-pick" title="Choose a photo (kept on this computer only)">
+            <input type="file" accept="image/*" id="rp-photo-file" aria-label="Add photo">
+            <img id="rp-photo-img" alt="" hidden><span class="rp-photo-add">Add photo</span></label>
+          <button class="rp-photo-del" id="rp-photo-del" type="button" aria-label="Remove photo" hidden>✕</button>
+        </div>
+        <div class="rp-id">
+          <div class="rp-kicker" id="h-sub"></div>
+          <div class="rp-name" id="h-name"></div>
+          <div class="meta" id="h-club"></div>
+          <div class="reg" id="h-bio"></div>
+          <div class="rp-line" id="h-split"></div>
+          <div class="rp-line" id="h-style" hidden></div>
+          <div class="rp-line" id="h-cmp"></div>
+        </div>
+        <div class="rp-stamp"><span class="pill" id="h-stamp"></span><span class="note" id="h-asof"></span></div>
+      </header>
 
-    <div class="card" id="c-tech">
-      <div class="rp-card-head"><div><h2>Technical</h2><div class="sub" id="t-sub"></div></div>
-        <div class="rp-key" id="t-key"></div></div>
-      <div class="tiles rp-counts" id="t-counts"></div>
-      <div class="note rp-line" id="t-whence"></div>
-      <div class="rp-bars" id="t-bars"></div>
-    </div>
+      <div class="rp-row rp-top">
+        <section class="rp-sec" id="c-verdict"><div id="v-body"></div></section>
+        <section class="rp-sec" id="c-summary"><h2>Summary</h2><div id="n-body"></div></section>
+      </div>
 
-    <div class="row rp-bottom" id="r-bottom">
-      <div class="card" id="c-style"><h2>Playing style</h2><div class="sub" id="s-sub"></div><div id="s-body"></div></div>
-      <div class="card" id="c-phys"><h2>Physical</h2><div class="sub" id="p-sub"></div>
-        <div class="rp-phys"><div id="p-radar"></div>
-          <div class="rp-avail" id="p-avail"></div></div></div>
-    </div>
+      <section class="rp-sec rp-row" id="c-tech">
+        <div class="rp-card-head"><h2>Technical <span class="sub" id="t-sub"></span></h2>
+          <div class="rp-key" id="t-key"></div></div>
+        <div class="rp-counts" id="t-counts"></div>
+        <div class="rp-line" id="t-whence"></div>
+        <div class="rp-bars" id="t-bars"></div>
+      </section>
+
+      <div class="rp-row rp-bottom" id="r-bottom">
+        <div class="rp-col" id="r-left">
+          <section class="rp-sec" id="c-style"><h2>Playing style <span class="sub" id="s-sub"></span></h2><div id="s-body"></div></section>
+          <section class="rp-sec" id="c-scouts" hidden><h2>Scout verdicts <span class="sub">Latest report per scout</span></h2><div id="sc-body"></div></section>
+        </div>
+        <div class="rp-col" id="r-right">
+          <section class="rp-sec" id="c-phys"><h2>Physical <span class="sub" id="p-sub"></span></h2><div id="p-radar"></div></section>
+          <section class="rp-sec" id="c-avail"><h2>Availability</h2><div class="rp-avail" id="p-avail"></div></section>
+        </div>
+      </div>
+    </article>
   </div>
 </section>
 {% endblock %}

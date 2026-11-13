@@ -66,6 +66,19 @@ td.ph-cell{white-space:nowrap}
 #ph-scatter .ph-plot svg{position:absolute;inset:0;max-width:none;margin:0}
 #ph-scatter .ph-plot>.note{position:static}
 .ph-axes .f-find{flex:1 1 180px}
+/* owner 2026-11-13: Find a player lists the plotted players (the Players search list's look) */
+.ph-findbox{position:relative}
+.ph-findbox input.ctl{width:100%}
+.ph-findbox .results{position:absolute;z-index:20;left:0;right:0;top:calc(100% + 4px);min-width:240px;background:#fff;border:1px solid #CDD1D7;border-radius:8px;box-shadow:0 8px 24px rgba(20,22,27,.14);max-height:340px;overflow:auto}
+.ph-findbox .results button{display:block;width:100%;text-align:left;font:inherit;font-size:14px;padding:8px 12px;border:0;border-bottom:1px solid var(--line);background:#fff;cursor:pointer;color:var(--ink)}
+.ph-findbox .results button:hover,.ph-findbox .results button:focus-visible,.ph-findbox .results button.on{background:var(--soft)}
+.ph-findbox .results .cl{color:var(--muted)}
+.ph-findbox .results .none{padding:10px 12px;color:var(--muted);font-size:14px}
+.ph-axes .f-min{flex:1 1 200px;min-width:180px}
+/* owner 2026-11-13: Min minutes is a slider (the Players page's look) */
+.ph-axes .pair{display:flex;align-items:center;gap:10px;min-height:38px}
+.ph-axes input[type=range]{flex:1;min-width:90px;accent-color:var(--ink);width:100%}
+.ph-axes .val{font-weight:600;font-size:14px;min-width:72px;text-align:right;white-space:nowrap}
 .ph-key{display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted);margin:2px 0 8px}
 .ph-key .note{margin-left:auto}
 .ph-med{display:inline-block;width:18px;border-top:2px dashed #8D939C;margin-right:6px;vertical-align:3px}
@@ -91,3 +104,70 @@ td.ph-cell{white-space:nowrap}
 #v-physical #ld-tw td.pcell{min-width:96px}
 #ld-tw .pb{min-width:50px}
 #ld-tw td,#ld-tw th{padding:7px 4px}
+
+/* the squad card's "Physical | Performance" switch and Performance view (owner 2026-11-13) */
+.ph-sq-acts{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+#sq-view button{font:inherit;font-size:13.5px;padding:6px 14px;border:0;background:#fff;color:var(--muted);cursor:pointer;white-space:nowrap}
+#sq-view button+button{border-left:1px solid #CDD1D7}
+#sq-view button.on{background:var(--ink);color:#fff;font-weight:600}
+#sp-tw{margin-top:12px}
+#sp-table{table-layout:fixed;width:100%}
+#sp-table .sp-c-name{width:21%}
+#sp-table .sp-c-min{width:8%}
+#sp-table .sp-c-r{width:9.5%}
+#sp-table th{white-space:nowrap}
+#sp-table td{vertical-align:middle}
+#sp-table td.pcell{min-width:0;overflow-wrap:anywhere}
+#v-physical #ph-squad tr.sp-sec td{background:none;padding:18px 8px 6px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;font-weight:700;color:var(--ink);border-bottom:2px solid #C9CDD4}
+.sp-ml{display:flex;justify-content:space-between;gap:10px;font-size:13px;line-height:1.55;max-width:300px}
+.sp-ml>span:first-child{min-width:0}
+.sp-tag{display:inline-block;font-size:11px;color:var(--muted);border:1px solid #CDD1D7;border-radius:4px;padding:0 4px;margin-left:6px;vertical-align:1px;white-space:nowrap}
+#sp-unrated{margin-top:10px}
+
+/* Two metrics upgrade (owner 2026-11-13, mock-up tab 2): grid + ticks, dashed red medians, the
+   shaded "High on both" quadrant, the top five numbered in red, the list beside the chart
+   (below it when the card is narrow: the 50/50 grid above 1380px) */
+#ph-scatter{container-type:inline-size}
+#ph-scatter .sc-grid{flex:1 1 auto;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto;gap:16px}
+#ph-scatter .sc-chart{display:flex;flex-direction:column;min-width:0;min-height:0}
+#ph-scatter .ph-key{margin:6px 0 0}
+@container (min-width:900px){
+  #ph-scatter .sc-grid{grid-template-columns:minmax(0,1.45fr) minmax(340px,1fr);grid-template-rows:auto;align-items:stretch}
+  #ph-scatter .sc-side{align-self:start}
+}
+.ph-plot .frame{fill:#fff;stroke:var(--line)}
+.ph-plot .quad{fill:#EAF5EE}
+.ph-plot .grid{stroke:#EEF0F2;stroke-width:1}
+.ph-plot .ax{font-size:11px;fill:#8A909A}
+.ph-plot .ql{font-size:11.5px;font-weight:600;fill:#5E8A6C}
+.ph-plot .med{stroke:#C0392B;stroke-width:1.2;stroke-dasharray:5 4}
+.ph-plot .medt{font-size:11px;fill:#C0392B}
+.ph-plot .pt{fill:#B9BFC7;fill-opacity:.85;stroke:#fff;stroke-width:1}
+.ph-plot .pt.orient{fill:var(--orient);fill-opacity:1;stroke-width:1.5}
+.ph-plot .pt.t5{fill:#C8102E;fill-opacity:1;stroke:#fff;stroke-width:2}
+.ph-plot .t5n{font-size:11px;font-weight:700;fill:#fff;pointer-events:none}
+.ph-plot g.t5{cursor:pointer}
+.ph-plot g.t5.dim{opacity:.3}
+.ph-plot .pt.found{fill-opacity:1}
+.ph-plot .pt.found:not(.t5):not(.orient){fill:var(--ink)}
+.ph-plot .ring{fill:none;stroke:var(--ink);stroke-width:2;pointer-events:none}
+.ph-plot a:hover .pt:not(.t5){fill:var(--ink);fill-opacity:1}
+.ph-plot a:hover .pt.t5{stroke:var(--ink)}
+.ph-plot .ptl.orient{fill:var(--orient)}
+.ph-plot .ptl.found{fill:var(--ink);font-size:12.5px;font-weight:700}
+.ph-dot.t5{background:#C8102E}
+.ph-med{border-top-color:#C0392B}
+.sc-side h3{font-size:14.5px;margin:2px 0 8px}
+.sc-side h3 .m{font-weight:400;color:var(--muted);font-size:13px}
+#sc-top{table-layout:fixed;width:100%}
+#sc-top .sc-c-n{width:34px}
+#sc-top .sc-c-v{width:92px}
+#sc-top th{white-space:normal;vertical-align:bottom;line-height:1.25;padding:6px 6px;font-size:12px}
+#sc-top td{padding:6px 6px;font-size:13.5px;vertical-align:middle}
+#v-physical #sc-top td.pcell{min-width:0;overflow-wrap:anywhere}
+#sc-top .pclub{color:var(--muted);font-size:12.5px}
+#sc-top td.n{font-weight:600}
+.t5b{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#C8102E;color:#fff;font-size:11px;font-weight:700}
+#sc-top-note{margin-top:6px}
+.ph-plot .t5l{stroke:#C8102E;stroke-width:1.2}
+.ph-plot .pt.t5s{stroke-width:1}

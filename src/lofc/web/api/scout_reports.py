@@ -4,7 +4,7 @@ Streamlit page uses (`dashboard/tabs/scout_reports.py`); this module turns the U
 and the result into JSON.
 
     GET  /scout-reports?tab=&q=&league=&max_age=&foot=&scout=&verdict=&grade=&position=&club=
-                        &seen=&data=&dvs=&open=                         page shell
+                        &seen=&data=&dvs=&role=&open=                      page shell
     GET  /api/scout-reports?<same>        sync line, tabs, filter options, caption, the tab's rows
     GET  /api/scout-reports/report/{id}   one report in full + the card it opens
     POST /api/scout-reports/sync          "Refresh": reads the scouting sheet (session + header)

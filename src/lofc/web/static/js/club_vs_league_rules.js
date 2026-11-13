@@ -4,6 +4,8 @@
 export const ord = n => n + ({1: 'st', 2: 'nd', 3: 'rd'}[(n % 100 >= 11 && n % 100 <= 13) ? 0 : n % 10] || 'th');
 
 // A percentile is a plain number (100 = best): green 70+, red below 30, neutral otherwise.
+// owner 2026-11-13: Gap closed shows as "94%" ("—" stays)
+export const pctSign = p => p == null ? '<span class="cv-pct none">—</span>' : `<span class="cv-pct">${p}%</span>`;
 export const pct = p => p == null ? '<span class="cv-pct none">—</span>'
   : `<span class="cv-pct${p >= 70 ? ' hi' : p < 30 ? ' lo' : ''}">${p}</span>`;
 

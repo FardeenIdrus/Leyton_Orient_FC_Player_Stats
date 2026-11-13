@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 import time
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 
 def _radar_scroll(s, label):
@@ -413,6 +413,26 @@ def card_other_players(s, w):
                else "a section heading is missing")
 
 
+def card_strengths_no_overlap(s, w):
+    """Owner 2026-11-13: a metric is never in both Strengths and Watch-outs (seen on goalkeeper
+    Nathan Baxter, "Goals saved above average (52)" in both); the Physical page's Performance view
+    uses the same rule."""
+    s.goto("/player/9300/4/319", check=True, desc="card: Baxter strengths / watch-outs")
+    sw = s.page.locator("#r-sw")
+    try:
+        sw.locator("div").first.wait_for(timeout=8000)
+    except Exception:
+        return s.note("card: strengths / watch-outs", skipped="no strengths on this card")
+    lists = s.page.evaluate("""() => [...document.querySelectorAll('#r-sw > div')].map(d =>
+        d.textContent.replace(/^\\s*(Strengths|Watch-outs)\\s*/, '').split(' · ').map(x => x.replace(/ \\(\\d+\\)$/, '').trim()))""")
+    both = set(lists[0]) & set(lists[1]) if len(lists) == 2 else {"lists missing"}
+    s.note("card: no metric in both Strengths and Watch-outs", None if not both else str(both))
+    sw.scroll_into_view_if_needed()
+    path = s.out / "card_baxter_strengths.png"
+    sw.screenshot(path=str(path))
+    s.shots.append(str(path))
+
+
 def card_back_link(s, w):
     """The Players page links with ?back=<its URL>: the card's back link returns there, and only
     to a path on this site."""
@@ -726,9 +746,9 @@ def report_cases(s, w):
             s.note(f"report: {label} draws", "report body never shown: " + s.page.inner_text("#rp-status"))
             continue
         s.shot("case_" + re.sub(r"\W+", "_", label), w, full=True)
-        body = s.page.inner_text("main")
+        body = s.page.inner_text("main").lower()      # section headings are small capitals
         s.note(f"report: {label} has its sections",
-               None if all(t in body for t in ("Composite", "Summary", "Technical", "Physical", "Availability"))
+               None if all(t in body for t in ("composite", "summary", "technical", "physical", "availability"))
                else "a section heading is missing")
         bars = s.page.locator("#t-bars .rp-bar")
         if bars.count():
@@ -772,6 +792,96 @@ def report_search_pick(s, w):
     s.note("report: clear empties the box", None if box.input_value() == "" else box.input_value())
 
 
+REPORT_SCOUTED = "/report?player=52132&competition=3&season=318"     # 3 scouts, 4 reports
+
+
+def report_scout_verdicts(s, w):
+    """Owner 2026-11-13: under Playing style, one line per scout (his latest report: name,
+    verdict pill, date); in the authored download, never in the data-only one; absent for a
+    player nobody has reported on."""
+    s.goto(REPORT_SCOUTED, check=True, desc="report: player with scout reports")
+    if not _report_ready(s):
+        return s.note("report: scouted player draws", "report body never shown")
+    card = s.page.locator("#c-scouts")
+    lines = s.page.locator("#c-scouts .rp-scout")
+    s.note("report: Scout verdicts block shown", None if card.is_visible() else "block hidden")
+    texts = lines.all_inner_texts()
+    scouts = [t.split("\n")[0].strip() for t in texts]
+    s.note("report: one line per scout", None if texts and len(scouts) == len(set(scouts)) else texts)
+    s.note("report: each line has a verdict pill and a date",
+           None if texts and lines.count() == s.page.locator("#c-scouts .rp-scout .pill").count()
+           and all(re.search(r"\d{1,2} [A-Z][a-z]{2} \d{4}", t) for t in texts) else texts)
+    if card.is_visible() and s.page.locator("#c-style").is_visible():
+        a, b = s.page.locator("#c-style").bounding_box(), card.bounding_box()
+        s.note("report: block sits under Playing style",
+               None if b["y"] >= a["y"] + a["height"] - 1 and abs(b["x"] - a["x"]) < 2 else f"{a} / {b}")
+    card.scroll_into_view_if_needed()
+    s.shot("scout_verdicts", w, full=True)
+    name, text = _report_file(s, "#rp-dl", "report: Download report (scouted player)")
+    s.note("report: authored file has the scout verdicts",
+           None if name and 'id="c-scouts"' in text and all(x in text for x in scouts) else f"{name}: missing")
+    name, text = _report_file(s, "#rp-dl-data", "report: Download data-only report (scouted player)")
+    s.note("report: data-only file has no scout verdicts",
+           None if name and 'id="c-scouts"' not in text and "Scout verdicts" not in text
+           else f"{name}: verdicts present")
+    s.goto("/report?player=47357&competition=5&season=319", check=False)    # nobody has reported on him
+    _report_ready(s)
+    s.note("report: no scout reports, no block", None if s.page.locator("#c-scouts").is_hidden() else "block shown")
+
+
+def report_empty_search_lists(s, w):
+    """Owner 2026-11-13: no Position control; the empty box lists EVERY player of the season A-Z
+    (name · position · club · league), drawn as it scrolls; typing filters the same list;
+    picking one opens his report; position= in a URL is dropped."""
+    s.goto(REPORT_BASE, check=False)
+    _report_ready(s)
+    s.note("report: no Position control", None if not s.page.locator("#rp-position").count()
+           and s.control("Position") is None else "Position control still on the page")
+    box = s.page.locator("#rp-search")
+    t0 = time.perf_counter()
+    s.step("report: focus the empty search box", lambda p: box.click(timeout=3000))
+    res = s.page.locator("#rp-results [data-action=pick]")
+    try:
+        res.first.wait_for(timeout=6000)
+    except Exception:
+        return s.note("report: empty box lists players", "no list")
+    secs = time.perf_counter() - t0
+    s.note("report: the list opens fast", None if secs < 3.0 else f"{secs:.2f}s")
+    names = [t.split(" · ")[0] for t in res.all_inner_texts()]
+    s.note("report: empty box lists players (a page at a time)", None if 100 <= len(names) <= 300 else f"{len(names)} rows")
+    import unicodedata
+    plain = lambda n: "".join(c for c in unicodedata.normalize("NFKD", n) if c.isalnum()).casefold()  # noqa: E731
+    s.note("report: list is A-Z", None if [plain(n) for n in names] == sorted(plain(n) for n in names) else names[:6])
+    parts = res.first.inner_text().split(" · ")
+    s.note("report: row reads name · position · club · league", None if len(parts) == 4 else res.first.inner_text())
+    total = s.page.evaluate("async () => (await (await fetch('/api/report/players?season=318')).json()).rows.length")
+    s.note("report: the season's whole list is there", None if total >= 1000 else f"{total} players")
+    before = res.count()
+    s.step("report: scroll the list", lambda p: (p.evaluate("() => { const o = document.querySelector('#rp-results'); o.scrollTop = o.scrollHeight; }"),
+                                                 p.wait_for_timeout(300)))
+    s.note("report: scrolling draws more", None if res.count() > before else f"{before} -> {res.count()}")
+    s.shot("empty_search_list", w)
+    s.step("report: type a winger's name", lambda p: box.fill("Markanday", timeout=3000))
+    try:
+        s.page.wait_for_function("() => { const b = [...document.querySelectorAll('#rp-results [data-action=pick]')];"
+                                 " return b.length && b.every(x => x.textContent.includes('Markanday')); }", timeout=3000)
+        s.note("report: typing filters the list", None)
+    except Exception:
+        s.note("report: typing filters the list", s.page.inner_text("#rp-results")[:120])
+    s.step("report: type a club", lambda p: box.fill("Leyton Orient", timeout=3000))
+    s.note("report: typing matches club too", None if res.count() >= 5 else f"{res.count()} rows")
+    s.step("report: type a name again", lambda p: box.fill("Markanday", timeout=3000))
+    pick = s.page.locator("#rp-results [data-action=pick]", has_text="Markanday").first
+    s.step("report: pick him", lambda p: pick.click(timeout=3000))
+    _report_ready(s)
+    s.page.wait_for_timeout(500)
+    s.note("report: picking opens his report", None if "Markanday" in s.page.inner_text("#h-name")
+           and "player=" in s.page.url else s.page.inner_text("#h-name"))
+    s.goto("/report?position=Goalkeeper", check=False)
+    s.page.wait_for_timeout(500)
+    s.note("report: position= in a URL is dropped", None if "position=" not in s.page.url else s.page.url)
+
+
 def report_form_live(s, w):
     """Write your report: typing changes the stamp and the Summary; a Psychological score
     changes the band; nothing reloads."""
@@ -797,23 +907,307 @@ def report_form_live(s, w):
         s.note("report: medical checks line", None if "Medical checks" in s.page.inner_text("#c-verdict") else "no line")
     s.shot("form_open", w, full=True)
     s.step("report: clear the summary", lambda p: (ta.fill("", timeout=3000), p.wait_for_timeout(400)))
+    _clear_drafts(s)
+
+
+def _clear_drafts(s):
+    """Report drafts live in this browser (owner 2026-11-13); a scenario's own draft must not
+    reopen in the next one."""
+    try:
+        s.page.wait_for_timeout(500)          # a save still queued (300 ms) lands first
+        s.page.evaluate("Object.keys(localStorage).filter(k => k.startsWith('lofc.report.draft.'))"
+                        ".forEach(k => localStorage.removeItem(k))")
+    except Exception:
+        pass
+
+
+def _png(w=40, h=50):
+    """A plain red PNG: the photo the harness chooses (any image the browser can decode)."""
+    import struct
+    import zlib
+    chunk = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))
+    raw = b"".join(b"\x00" + b"\xc8\x10\x2e" * w for _ in range(h))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
+_PHOTO_PNG = _png()
+_REPORT_FILE_IDS = ('id="h-name"', 'id="c-verdict"', 'id="c-summary"', 'id="c-tech"', 'id="c-phys"',
+                    'id="p-avail"')
+
+
+def _report_file(s, button, desc):
+    """Click a download button; (filename, text) of the file, or (None, error)."""
+    try:
+        with s.page.expect_download(timeout=8000) as dl:
+            s.step(desc, lambda p: p.locator(button).click(timeout=3000))
+        d = dl.value
+        return d.suggested_filename, open(d.path(), encoding="utf-8").read()
+    except Exception as e:
+        return None, str(e).splitlines()[0][:100]
+
+
+def _report_file_problems(name, text, suffix):
+    """The file is the on-screen layout, self-contained: no old-template marker, nothing
+    fetched from the site, no form, no scripts."""
+    if name is None:
+        return f"no download: {text}"
+    bad = [] if name.endswith(suffix) and "Markanday" in name else [f"name {name}"]
+    bad += [f"missing {i}" for i in _REPORT_FILE_IDS if i not in text]
+    bad += [f"has {m}" for m in ("Recruitment Report", "/static/", "<script", "<link", 'id="rp-form"', 'class="card',
+                                 "rp-photo-file", "Add photo", "Download") if m in text]
+    if not text.lower().startswith("<!doctype html"):
+        bad.append("not a document")
+    return "; ".join(bad) or None
 
 
 def report_downloads(s, w):
-    """Both downloads come back as the report document, named for the player and season."""
+    """Both downloads are the preview's own layout in one self-contained file; the photo is in
+    both, the writer's availability rows only in the authored one."""
     s.goto(REPORT_BASE, check=False)
     _report_ready(s)
-    href = s.page.locator("#rp-dl-data").get_attribute("href") or ""
-    got = s.page.evaluate("(h) => fetch(h).then(r => r.text().then(t => [r.status, r.headers.get('content-disposition') || '', t.slice(0, 15), t.includes('Data only')]))", href)
-    s.note("report: data-only download", None if got[0] == 200 and "data_only_report.html" in got[1]
-           and got[2].lower().startswith("<!doctype") and got[3] else str(got)[:160])
-    try:
-        with s.page.expect_download(timeout=5000) as dl:
-            s.step("report: Download report", lambda p: p.locator("#rp-dl").click(timeout=3000))
-        name = dl.value.suggested_filename
-        s.note("report: download is named for the player", None if name.endswith("_report.html") and "Markanday" in name else name)
-    except Exception as e:
-        s.note("report: Download report", f"no download: {str(e).splitlines()[0][:100]}")
+    s.note("report: photo box on screen", None if s.page.locator("#rp-photo").is_visible()
+           and "Add photo" in s.page.inner_text("#rp-photo") else "no photo box")
+    name, text = _report_file(s, "#rp-dl-data", "report: Download data-only report (no photo)")
+    s.note("report: data-only file is the preview layout", _report_file_problems(name, text, "_data_only_report.html"))
+    if name:
+        s.note("report: data-only file says Data only, no empty photo box",
+               None if "Data only" in text and 'id="rp-photo"' not in text else "stamp or empty photo box")
+    s.step("report: choose a photo", lambda p: (p.set_input_files(
+        "#rp-photo-file", files=[{"name": "p.png", "mimeType": "image/png", "buffer": _PHOTO_PNG}]),
+        p.wait_for_timeout(500)))
+    src = s.page.locator("#rp-photo-img").get_attribute("src") or ""
+    s.note("report: photo shown, downscaled in the browser",
+           None if src.startswith("data:image/jpeg") and s.page.locator("#rp-photo-img").is_visible() else src[:40])
+    pw = (s.page.locator("#rp-photo-img").bounding_box() or {}).get("width", 0)
+    s.note("report: photo at least 150px wide", None if pw >= 150 else f"{pw:.0f}px")
+    s.step("report: open the form", lambda p: p.locator("#rp-write").click(timeout=3000))
+    s.step("report: add an availability row", lambda p: p.locator("#f-avail-add").click(timeout=3000))
+    row = s.page.locator("#f-avail .rp-avrow").last
+    if not row.count():
+        return s.note("report: availability row", "no row added")
+    s.step("report: fill the row", lambda p: (
+        row.locator("[data-av=dates]").fill("Oct–Dec 2025", timeout=3000),
+        row.locator("[data-av=injury]").fill("Hamstring tear", timeout=3000),
+        row.locator("[data-av=missed]").fill("6", timeout=3000), p.wait_for_timeout(300)))
+    av = s.page.inner_text("#p-avail")
+    s.note("report: row in the availability section", None if "Hamstring tear" in av and "Oct–Dec 2025" in av else av[:120])
+    s.page.evaluate("window.scrollTo(0, 0)")
+    s.shot("photo_and_availability", w, full=True)
+    name, text = _report_file(s, "#rp-dl", "report: Download report")
+    s.note("report: authored file is the preview layout", _report_file_problems(name, text, "_report.html"))
+    if name:
+        s.note("report: authored file has the photo and the row",
+               None if "data:image/jpeg" in text and "Hamstring tear" in text else "photo or row missing")
+        out = s.out / f"{s.cur_page}_downloaded_report.html"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+        fresh = s.page.context.new_page()
+        asked = []
+        fresh.on("request", lambda r: asked.append(r.url) if not r.url.startswith(("data:", "about:")) else None)
+        try:
+            fresh.set_viewport_size({"width": w, "height": 900})
+            fresh.set_content(text, wait_until="load")      # as opened from disk: no site
+            p = s.out / f"{s.cur_page}_downloaded_file_{w}.png"
+            fresh.screenshot(path=str(p), full_page=True)
+            s.shots.append(str(p))
+            s.note("report: file opens without the site", None if not asked else ", ".join(asked)[:120])
+            fresh.emulate_media(media="print")
+            pdf = fresh.pdf(format="A4", print_background=True, prefer_css_page_size=True)
+            pages = pdf.count(b"/Type /Page") - pdf.count(b"/Type /Pages")
+            box = re.search(rb"/MediaBox\s*\[\s*0 0 ([\d.]+) ([\d.]+)", pdf)
+            land = bool(box) and float(box.group(1)) > float(box.group(2))
+            s.note("report: file prints on one landscape A4 page",
+                   None if pages == 1 and land else f"{pages} pages, landscape={land}")
+            # owner 2026-11-13: the sheet fills the printable width (A4 landscape inside 8 mm
+            # margins = 1062 CSS px), not ~2/3 of it
+            m = re.search(r"@media print\{.*?main\{width:(\d+)px[^}]*zoom:([\d.]+)", text, re.S)
+            frac = int(m.group(1)) * float(m.group(2)) / 1062 if m else 0
+            got = fresh.evaluate("() => document.querySelector('main').getBoundingClientRect().width") / 1062
+            s.note("report: printed sheet fills the page width (>= 95%)",
+                   None if frac >= 0.95 and got >= 0.95 else f"{frac:.0%} by its CSS, {got:.0%} measured")
+        except Exception as e:
+            s.note("report: open the downloaded file", str(e).splitlines()[0][:100])
+        finally:
+            fresh.close()
+    name, text = _report_file(s, "#rp-dl-data", "report: Download data-only report (photo)")
+    if name:
+        s.note("report: data-only file has the photo, not the writer's rows",
+               None if "data:image/jpeg" in text and "Hamstring tear" not in text else "photo missing or rows present")
+    s.step("report: remove the photo", lambda p: p.locator("#rp-photo-del").click(timeout=3000))
+    s.note("report: photo removed", None if s.page.locator("#rp-photo-img").is_hidden() else "still shown")
+    _clear_drafts(s)
+
+
+_SHEET_JS = """() => {
+  const sh = [...document.querySelectorAll('#v-report .rp-sheet')];
+  if (sh.length !== 1) return {sheets: sh.length};
+  const S = sh[0], b = S.getBoundingClientRect(), page = getComputedStyle(document.body).backgroundColor;
+  const vis = e => !e.closest('[hidden]') && e.getBoundingClientRect().width > 0;
+  const inner = [...S.querySelectorAll('*')].filter(vis);
+  const rows = [...S.querySelectorAll('.rp-top, .rp-bottom')].map(r => [...r.children].filter(vis)
+    .map(c => { const q = c.getBoundingClientRect(); return [Math.round(q.top), Math.round(q.bottom)]; }));
+  const sc = S.querySelector('.rp-score');
+  const cb = S.querySelector('.rp-cblock'), br = [...S.querySelectorAll('.rp-brow')];
+  const comp = cb && br.length ? [Math.round(cb.getBoundingClientRect().top - br[0].getBoundingClientRect().top),
+    Math.round(cb.getBoundingClientRect().bottom - br[br.length - 1].getBoundingClientRect().bottom)] : null;
+  return {sheets: 1, comp, bordered: getComputedStyle(S).borderLeftStyle !== 'none',
+    grey: inner.filter(e => getComputedStyle(e).backgroundColor === page).map(e => e.id || e.className).slice(0, 4),
+    cards: S.querySelectorAll('.card').length,
+    rows, score: sc ? parseFloat(getComputedStyle(sc).fontSize) : null,
+    over: inner.filter(e => { const q = e.getBoundingClientRect(); return q.right > b.right + 1 || q.left < b.left - 1; })
+      .map(e => e.id || e.className).slice(0, 4),
+    hscroll: document.documentElement.scrollWidth > innerWidth + 1};
+}"""
+
+
+# owner 2026-11-13: Scout verdicts' heading level with Availability's; both blocks end level;
+# Playing style stays at the top
+_VERDICTS_JS = """() => { const r = s => document.querySelector(s) && document.querySelector(s).getBoundingClientRect();
+  const sc = document.querySelector('#c-scouts:not([hidden]) h2');
+  if (!sc || !r('#c-avail h2')) return null;
+  return {head: sc.getBoundingClientRect().top - r('#c-avail h2').top, end: r('#c-scouts').bottom - r('#c-avail').bottom,
+          style: r('#c-style').top - r('#c-phys').top}; }"""
+
+
+def _verdicts_level(s, page, where):
+    m = page.evaluate(_VERDICTS_JS)
+    if m is None:
+        return s.note(f"report: scout verdicts line up ({where})", skipped="no scout verdicts shown")
+    s.note(f"report: scout verdicts line up with Availability ({where})",
+           None if abs(m["head"]) <= 2 and abs(m["end"]) <= 2 and abs(m["style"]) <= 2 else m)
+
+
+def report_one_sheet(s, w):
+    """Owner 2026-11-13: the report is ONE white bordered sheet (the wide layout): no cards and
+    no page grey inside it; the two columns of each row share top and bottom edges; the
+    composite is a large number; nothing overflows, at every width."""
+    for width in s.widths:
+        s.page.set_viewport_size({"width": width, "height": 900})
+        for label, path in (("winger", REPORT_BASE), ("scouted", REPORT_SCOUTED)):
+            s.goto(path, check=True, desc=f"report: sheet {label} @{width}")
+            if not _report_ready(s):
+                s.note(f"report: sheet {label} @{width}", "report body never shown")
+                continue
+            s.page.wait_for_timeout(300)
+            m = s.page.evaluate(_SHEET_JS)
+            if m.get("sheets") != 1:
+                s.note(f"report: one sheet @{width}", f"{m.get('sheets')} sheets")
+                continue
+            s.note(f"report: one bordered sheet, no cards or grey inside ({label} @{width})",
+                   None if m["bordered"] and not m["cards"] and not m["grey"] else m)
+            bad = [r for r in m["rows"] if len(r) == 2 and (abs(r[0][0] - r[1][0]) > 2 or abs(r[0][1] - r[1][1]) > 2)]
+            s.note(f"report: row columns align ({label} @{width})", None if not bad else bad)
+            s.note(f"report: composite is a large number ({label} @{width})",
+                   None if (m["score"] or 0) >= 44 else m["score"])
+            s.note(f"report: composite block level with the four rows ({label} @{width})",
+                   None if m["comp"] and all(abs(d) <= 2 for d in m["comp"]) else m["comp"])
+            s.note(f"report: nothing overflows the sheet ({label} @{width})",
+                   None if not m["over"] and not m["hscroll"] else m)
+            if label == "scouted":
+                _verdicts_level(s, s.page, f"@{width}")
+                if width == 1440:          # the downloaded file, on screen and printed
+                    name, text = _report_file(s, "#rp-dl", "report: download (scouted)")
+                    if not name:
+                        s.note("report: download (scouted)", text)
+                    else:
+                        fresh = s.page.context.new_page()
+                        try:
+                            fresh.set_viewport_size({"width": 1440, "height": 900})
+                            fresh.set_content(text, wait_until="load")
+                            _verdicts_level(s, fresh, "downloaded file")
+                            fresh.emulate_media(media="print")
+                            _verdicts_level(s, fresh, "downloaded file, printed")
+                        finally:
+                            fresh.close()
+        if width == 1440:
+            s.shot("one_sheet", width, full=True)
+    s.page.set_viewport_size({"width": w, "height": 900})
+
+
+_DRAFT_RULES_JS = """async (url) => {
+  const m = await import(url);
+  const mem = {}, big = {getItem: k => mem[k] ?? null, removeItem: k => { delete mem[k]; },
+    setItem: (k, v) => { if (v.includes('data:image')) throw new DOMException('full', 'QuotaExceededError'); mem[k] = v; }};
+  const ids = {player: 1, competition: 2, season: 3};
+  const out = {key: m.draftKey(ids)};
+  out.dropped = m.writeDraft(big, ids, {text: {summary: 'x'}, photo: 'data:image/jpeg;base64,AA'});
+  out.kept = JSON.parse(mem[out.key] || 'null');
+  out.empty = m.writeDraft(big, ids, {text: {summary: '  '}, avail: [], photo: null});
+  out.gone = !(out.key in mem);
+  out.nostore = m.writeDraft(null, ids, {text: {summary: 'x'}});
+  out.read = m.readDraft(null, ids);
+  return out;
+}"""
+
+
+def report_draft(s, w):
+    """Owner 2026-11-13: the writer's draft (text, availability rows, photo) is kept in this
+    browser per player-season and comes back after leaving the page; Clear draft empties it."""
+    s.goto(REPORT_BASE, check=False)
+    if not _report_ready(s):
+        return s.note("report: draft", "report body never shown")
+    _clear_drafts(s)
+    s.goto(REPORT_BASE, check=False)
+    _report_ready(s)
+    src = s.page.evaluate("[...document.scripts].map(x => x.src).find(x => /report\\.js/.test(x)) || ''")
+    if src:
+        r = s.page.evaluate(_DRAFT_RULES_JS, src.replace("report.js", "report_draft.js"))
+        s.note("report: draft key", None if r["key"] == "lofc.report.draft.1-2-3" else r["key"])
+        s.note("report: photo too large: saved without it, with a note",
+               None if r["dropped"] == "Photo not kept — too large to save" and r["kept"]
+               and r["kept"]["photo"] is None and r["kept"]["text"]["summary"] == "x" else r)
+        s.note("report: an empty draft is removed", None if r["empty"] == "" and r["gone"] else r)
+        s.note("report: no storage: page still works", None if r["nostore"] == "unsaved" and r["read"] is None else r)
+    if s.page.locator("#rp-form").is_hidden():
+        s.step("report: open the form", lambda p: p.locator("#rp-write").click(timeout=3000))
+    ta = s.page.locator('#f-text textarea[data-key="summary"]')
+    s.step("report: draft: type a summary", lambda p: ta.fill("Draft kept: sharp in the box.", timeout=3000))
+    s.step("report: draft: add a row", lambda p: p.locator("#f-avail-add").click(timeout=3000))
+    row = s.page.locator("#f-avail .rp-avrow").last
+    s.step("report: draft: fill the row", lambda p: (
+        row.locator("[data-av=dates]").fill("Jan–Feb 2026", timeout=3000),
+        row.locator("[data-av=injury]").fill("Ankle sprain", timeout=3000)))
+    s.step("report: draft: choose a photo", lambda p: (p.set_input_files(
+        "#rp-photo-file", files=[{"name": "p.png", "mimeType": "image/png", "buffer": _PHOTO_PNG}]),
+        p.wait_for_timeout(900)))
+    s.goto("/players", check=False)
+    s.goto(REPORT_BASE, check=False)
+    _report_ready(s)
+    s.page.wait_for_timeout(900)
+    got = {"summary": ta.input_value() if ta.count() else None,
+           "row": s.page.locator("#f-avail [data-av=injury]").first.input_value()
+           if s.page.locator("#f-avail [data-av=injury]").count() else None,
+           "photo": (s.page.locator("#rp-photo-img").get_attribute("src") or "")[:15]}
+    s.note("report: draft restored after leaving the page",
+           None if got["summary"] == "Draft kept: sharp in the box." and got["row"] == "Ankle sprain"
+           and got["photo"].startswith("data:image/jpeg") else got)
+    s.note("report: restored draft is in the preview",
+           None if "sharp in the box" in s.page.inner_text("#c-summary") and "Ankle sprain" in s.page.inner_text("#p-avail")
+           else "preview not redrawn")
+    s.shot("draft_restored", w, full=True)
+    # owner 2026-11-13: Clear draft asks first, inline: "Clear your draft? Yes · No"
+    s.step("report: Clear draft (asks)", lambda p: p.locator("#rp-draft-clear").click(timeout=3000))
+    s.note("report: Clear draft asks inline", None if s.page.locator("#rp-draft-confirm").is_visible()
+           and "Clear your draft?" in s.page.inner_text("#rp-draft-confirm")
+           and s.page.locator("#rp-draft-clear").is_hidden() else "no inline question")
+    s.step("report: No keeps the draft", lambda p: p.locator("#rp-draft-no").click(timeout=3000))
+    s.note("report: No keeps the draft", None if ta.input_value() == "Draft kept: sharp in the box."
+           and s.page.locator("#rp-draft-clear").is_visible() and s.page.locator("#rp-draft-confirm").is_hidden()
+           else ta.input_value())
+    s.step("report: Clear draft (asks again)", lambda p: p.locator("#rp-draft-clear").click(timeout=3000))
+    s.step("report: Yes clears", lambda p: (p.locator("#rp-draft-yes").click(timeout=3000), p.wait_for_timeout(600)))
+    left = s.page.evaluate("Object.keys(localStorage).filter(k => k.startsWith('lofc.report.draft.'))")
+    s.note("report: Clear draft empties the form, rows, photo and storage",
+           None if ta.input_value() == "" and not s.page.locator("#f-avail .rp-avrow").count()
+           and s.page.locator("#rp-photo-img").is_hidden() and not left else left)
+    s.goto(REPORT_BASE, check=False)
+    _report_ready(s)
+    s.page.wait_for_timeout(500)
+    s.note("report: nothing comes back after Clear draft",
+           None if s.page.locator("#rp-form").is_hidden() and s.page.locator("#rp-photo-img").is_hidden()
+           else "draft came back")
+    _clear_drafts(s)
 
 
 def report_season_switch(s, w):
@@ -1019,6 +1413,60 @@ def compare_special_cases(s, w):
         if label == "goalkeepers":
             s.note("compare: goalkeepers have no Physical profile",
                    None if not s.page.locator("#c-phrad").is_visible() else "Physical profile shown")
+
+
+def compare_remembers_players(s, w):
+    """R4a: two players chosen, away to Players, back by the nav link: the same two players."""
+    s.goto("/compare?season=318&position=Winger&a=39154-5&b=150216-5", check=False)
+    heads = _cmp_heads(s)
+    s.step("compare: to Players by the nav", lambda p: p.locator("nav a[href='/players']").click(timeout=3000),
+           expect_nav=True)
+    s.step("compare: back by the nav", lambda p: p.locator("nav a[href='/compare']").click(timeout=3000),
+           expect_nav=True)
+    try:
+        s.page.wait_for_function("() => document.querySelectorAll('#cmp-sum thead a.nm').length >= 2", timeout=8000)
+    except Exception:
+        pass
+    s.note("compare: same players after the nav", None if heads and _cmp_heads(s) == heads
+           else f"{heads} -> {_cmp_heads(s)}")
+    s.note("compare: URL restored", None if "a=39154-5" in s.page.url and "b=150216-5" in s.page.url else s.page.url)
+    s.goto("/compare?season=318&position=Winger&a=47739-5&b=39154-5", check=False)
+    s.note("compare: explicit URL wins", None if "a=47739-5" in s.page.url else s.page.url)
+
+
+def compare_download(s, w):
+    """R4b: one self-contained file of the screen; two players: no Player C, no controls."""
+    s.goto("/compare?season=318&position=Winger&a=39154-5&b=150216-5", check=False)
+    heads = _cmp_heads(s)
+    try:
+        with s.page.expect_download(timeout=8000) as dl:
+            s.step("compare: Download", lambda p: p.locator("#cmp-dl").click(timeout=3000))
+        d = dl.value
+        name, text = d.suggested_filename, open(d.path(), encoding="utf-8").read()
+        import shutil
+        s.out.mkdir(parents=True, exist_ok=True)
+        shutil.copy(d.path(), s.out / name)
+    except Exception as e:
+        return s.note("compare: download", f"no download: {str(e).splitlines()[0][:100]}")
+    bad = [] if re.fullmatch(r"Compare_[A-Za-z0-9_]+_v_[A-Za-z0-9_]+_2025_26\.html", name) else [f"name {name}"]
+    bad += [f"has {m!r}" for m in ("Player C", "/static/", "<script", "<link", "<select", "<input",
+                                   "<button", 'id="filters"', "href=") if m in text]
+    bad += [f"missing {m!r}" for m in ('id="cmp-sum"', "<svg", "Performance profile", "Packing zones")
+            if m not in text]
+    bad += [f"missing {h!r}" for h in heads if h not in text]
+    if not text.lower().startswith("<!doctype html"):
+        bad.append("not a document")
+    s.note("compare: download is the screen, two players, no controls", "; ".join(bad) or None)
+    if text and name:
+        page = s.page.context.new_page()
+        try:
+            page.set_viewport_size({"width": w, "height": 900})
+            page.set_content(text)
+            page.screenshot(path=str(s.out / "compare_download.png"), full_page=True)
+            cols = page.evaluate("() => document.querySelectorAll('#cmp-sum thead th').length")
+            s.note("compare: file has two player columns", None if cols == 3 else f"{cols - 1} columns")
+        finally:
+            page.close()
 
 
 def compare_more_filters(s, w):
@@ -1349,6 +1797,45 @@ def scout_filters_url(s, w):
     s.note("scout reports: shared URL keeps the filter",
            None if s.page.locator("#f-verdict").input_value() == "Sign" and _sr_rows(s).count() == after
            else f"{s.page.locator('#f-verdict').input_value()} / {_sr_rows(s).count()}")
+
+
+def scout_squad_role(s, w):
+    """Squad role (owner 2026-11-13): the sheet's values, narrows the list with the caption's
+    count, goes in the URL, All restores, combines with another filter."""
+    s.goto(SR_PATH, check=False)
+    sel = _need(s, "Squad role")
+    if sel is None:
+        return
+    opts = sel.locator("option").all_inner_texts()
+    want = ["All", "Core (>70% of Minutes)", "Support (21-69% of Minutes)", "Fringe (<20% of Minutes)",
+            "Emerging Talent (Ready in Next 12-18 Months)", "Below the Required Standard for LOFC"]
+    s.note("scout reports: Squad role options", None if opts == want else opts)
+    before = _sr_rows(s).count()
+    cap = lambda: s.page.inner_text("#sr-cap")
+    s.step("scout reports: Squad role = Core", lambda p: (sel.select_option(value="Core (>70% of Minutes)", timeout=3000),
+                                                           p.wait_for_timeout(600)))
+    after = _sr_rows(s).count()
+    s.note("scout reports: squad role narrows", None if 0 < after < before else f"{before} -> {after}")
+    s.note("scout reports: caption counts the filtered rows",
+           None if cap().startswith(f"{after:,} of ") else cap())
+    s.note("scout reports: squad role in the URL", None if "role=Core" in s.page.url else s.page.url)
+    s.shot("squad_role_core", w)
+    v = _need(s, "Verdict")
+    if v is not None:
+        s.step("scout reports: plus Verdict = Sign", lambda p: (v.select_option(value="Sign", timeout=3000),
+                                                                 p.wait_for_timeout(600)))
+        both = _sr_rows(s).count()
+        s.note("scout reports: squad role combines with Verdict", None if both <= after and "role=Core" in s.page.url
+               and "verdict=Sign" in s.page.url else f"{both} rows / {s.page.url}")
+        s.step("scout reports: Verdict = All", lambda p: (v.select_option(value="All", timeout=3000),
+                                                           p.wait_for_timeout(600)))
+    s.step("scout reports: Squad role = All", lambda p: (sel.select_option(value="All", timeout=3000),
+                                                          p.wait_for_timeout(600)))
+    s.note("scout reports: All restores every row", None if _sr_rows(s).count() == before and "role=" not in s.page.url
+           else f"{_sr_rows(s).count()} rows / {s.page.url}")
+    s.goto(SR_PATH + "?role=Fringe%20(%3C20%25%20of%20Minutes)", check=True, desc="scout reports: squad role URL")
+    s.note("scout reports: URL opens the squad role", None if sel.input_value() == "Fringe (<20% of Minutes)"
+           and 0 < _sr_rows(s).count() < before else sel.input_value())
 
 
 def scout_search_and_age(s, w):
@@ -1717,13 +2204,14 @@ def club_vs_league(s, w):
     s.page.wait_for_timeout(400)
     s.note("club vs league: position in the URL", None if "group=Centre" in s.page.url else s.page.url)
     rows = s.page.locator("#cv-rec-t tbody tr")
-    s.note("club vs league: at most 15 per league", None if 0 < rows.count() <= 15 else f"{rows.count()} rows")
+    cnt = re.match(r"^(\d+) ", s.page.inner_text("#cv-count"))
+    s.note("club vs league: every player listed (no cap)", None if cnt and rows.count() == int(cnt.group(1)) > 0 else f"{rows.count()} rows / {s.page.inner_text('#cv-count')}")
     # Leagues picker: default three, a checklist of every league, remembered on this computer
     btn = s.page.locator("#cv-leagues")
     s.note("club vs league: default leagues", None if btn.inner_text().startswith("3 selected: League One, Championship, League Two") else btn.inner_text())
     s.note("club vs league: one tab per selected league", None if s.page.locator("#cv-tabs button[data-l]").count() == 3 else "not 3 tabs")
     cap = s.page.inner_text("#cv-count")
-    s.note("club vs league: caption names the league", None if re.match(r"^League One · top \d+ of \d+ centre backs above our level$", cap) else cap)
+    s.note("club vs league: caption names the league", None if re.match(r"^\d+ centre backs above .+ · ranked within League One$", cap) else cap)
     hh = s.page.evaluate("() => [document.querySelector('#cv-leagues'), document.querySelector('#cv-contract')].map(e => { const r = e.getBoundingClientRect(); return [r.top, r.bottom]; })")
     s.note("club vs league: Leagues lines up with the other filters", None if abs(hh[0][0] - hh[1][0]) <= 2 and abs(hh[0][1] - hh[1][1]) <= 2 else str(hh))
     s.step("club vs league: open Leagues", lambda p: btn.click(timeout=3000))
@@ -1753,18 +2241,19 @@ def club_vs_league(s, w):
     s.step("club vs league: strong off", lambda p: s.page.locator("#cv-strong").click(timeout=3000))
     # owner 2026-11-09: three weakness columns (sortable), "vs our best", Top-6 level only
     heads = s.page.locator("#cv-rec-t th.cv-sort")
-    s.note("club vs league: Overall, vs our best and 3 weakness columns sortable",
-           None if heads.count() == 5 else f"{heads.count()} sortable headings")
+    nw = s.page.locator("#cv-rec-t th[data-sort^='w']").count()
+    s.note("club vs league: every heading sortable (owner 2026-11-13)",
+           None if heads.count() == 9 + nw else f"{heads.count()} sortable headings, {nw} metric columns")
     s.note("club vs league: no tag column", None if "Strong where we are weak" not in s.page.inner_text("#cv-rec-t") else "old column")
     col = s.page.locator("#cv-rec-t th[data-sort='w0']")
     if col.count():
         s.step("club vs league: sort by first weakness", lambda p: col.click(timeout=3000))
-        vals = s.page.locator("#cv-rec-t tbody tr td:nth-child(10)").all_inner_texts()
+        vals = s.page.locator("#cv-rec-t tbody tr td:nth-child(11)").all_inner_texts()
         s.note("club vs league: weakness columns are plain numbers", None if all(re.match(r"^(\d+|—)$", v.strip()) for v in vals) else str(vals[:5]))
         nums = [int(re.sub(r"\D", "", v)) for v in vals if re.search(r"\d", v)]
         s.note("club vs league: weakness sort is best first", None if nums == sorted(nums, reverse=True) else str(nums))
         s.note("club vs league: sort in the URL", None if "sort=w0" in s.page.url else s.page.url)
-        s.step("club vs league: back to Overall", lambda p: s.page.locator("#cv-rec-t th[data-sort='']").click(timeout=3000))
+        s.step("club vs league: back to Overall", lambda p: s.page.locator("#cv-rec-t th[data-sort='ov']").click(timeout=3000))
     s.step("club vs league: Top-6 level only", lambda p: s.page.locator("#cv-top6only").click(timeout=3000))
     s.page.wait_for_timeout(300)
     s.note("club vs league: top6 filter in the URL", None if "top6=1" in s.page.url else s.page.url)
@@ -1794,6 +2283,295 @@ def club_vs_league(s, w):
            None if ("contract=" in s.page.url and "strong=1" in s.page.url) else f"{before} -> {s.page.url}")
     s.note("club vs league: lands on the players section", None if s.page.evaluate(
         "() => { const r = document.getElementById('cv-rec').getBoundingClientRect(); return r.top < innerHeight && r.bottom > 0; }") else "not scrolled to it")
+
+
+def _cv_gc(s):
+    """The Gap closed cells of the shown list: ints, or None for "—"."""
+    vals = [v.strip().rstrip("%") for v in s.page.locator("#cv-rec-t tbody td.cv-gc").all_inner_texts()]
+    return vals, [None if v == "—" else int(v) for v in vals if re.fullmatch(r"\d+|—", v)]
+
+
+def _cv_cols(s):
+    return [t.replace("▼", "").replace("▲", "").strip()
+            for t in s.page.locator("#cv-rec-t th[data-sort^='w']").all_inner_texts()]
+
+
+def club_vs_league_gap_closed(s, w):
+    """Owner 2026-11-13: the Gap closed column (0-100 or —), Rank by Gap closed, the Metric
+    columns picker (add / remove / reset, kept in the URL) and the way back from a player."""
+    s.page.evaluate("() => { try { localStorage.removeItem('lofc.cvl.leagues'); } catch (e) {} }")
+    s.goto("/club-vs-league?group=Full%20Back", check=True, desc="club vs league: Full Back")
+    s.page.wait_for_selector("#cv-rec-t tbody tr", timeout=15000)
+    th = s.page.locator("#cv-rec-t th[data-sort='gc']")
+    s.note("club vs league: Gap closed % column", None if th.count() == 1 and th.inner_text().replace("▼", "").replace("▲", "").strip() == "Gap closed %" else th.inner_text() if th.count() else "missing")
+    order = s.page.evaluate("() => [...document.querySelectorAll('#cv-rec-t thead th')].map(t => t.dataset.sort ?? t.textContent.trim())")
+    s.note("club vs league: Gap closed after vs our best", None if "gc" in order and order.index("gc") == order.index("vb") + 1 else str(order))
+    tip = th.get_attribute("data-tip") or ""
+    s.note("club vs league: Gap closed help", None if "How much of our player's shortfall vs the top 6 he would make up. 100% = all of it." in tip else tip)
+    cells = [v.strip() for v in s.page.locator("#cv-rec-t tbody td.cv-gc").all_inner_texts()]
+    s.note("club vs league: Gap closed cells show %", None if cells and all(re.fullmatch(r"\d+%|—", v) for v in cells) else str(cells[:6]))
+    raw, gc = _cv_gc(s)
+    s.note("club vs league: Gap closed is 0-100 or —", None if raw and len(gc) == len(raw)
+           and all(v is None or 0 <= v <= 100 for v in gc) else str(raw[:6]))
+    s.step("club vs league: rank by Gap closed", lambda p: s.page.locator("#cv-rank button[data-r='gap']").click(timeout=3000))
+    s.page.wait_for_timeout(800)
+    s.note("club vs league: rank in the URL", None if "rank=gap" in s.page.url else s.page.url)
+    raw, gc = _cv_gc(s)
+    nums = [v for v in gc if v is not None]
+    tail_ok = all(v is None for v in gc[len(nums):])
+    s.note("club vs league: ranked by Gap closed, highest first", None if nums == sorted(nums, reverse=True) and tail_ok else str(raw))
+    s.note("club vs league: Rank by switch shows Gap closed", None if s.page.locator("#cv-rank button.on").inner_text() == "Gap closed" else "not marked")
+    s.page.evaluate("() => window.scrollTo(0, document.querySelector('#cv-rec').getBoundingClientRect().top + scrollY - 10)")
+    s.shot("gap_closed_ranked", w)
+    # the metric columns picker
+    before = _cv_cols(s)
+    chips = s.page.locator("#cv-cols .fchip")
+    s.note("club vs league: one chip per metric column", None if chips.count() == len(before) else f"{chips.count()} chips, {len(before)} columns")
+    s.note("club vs league: reset hidden by default", None if s.page.locator("#cv-reset").is_hidden() else "shown")
+    if s.page.locator("#cv-add option").count() < 2:
+        return s.note("club vs league: metric picker", skipped="no metric to add")
+    added = s.page.locator("#cv-add option").nth(1).inner_text().strip()
+    s.step("club vs league: add a metric column", lambda p: s.page.select_option("#cv-add", index=1, timeout=3000))
+    s.page.wait_for_timeout(800)
+    after = _cv_cols(s)
+    s.note("club vs league: added column shown", None if after == before + [added] else f"{before} -> {after}")
+    s.note("club vs league: columns in the URL", None if "cols=" in s.page.url else s.page.url)
+    s.note("club vs league: reset shown after a change", None if s.page.locator("#cv-reset").is_visible() else "hidden")
+    raw, gc = _cv_gc(s)
+    note = s.page.locator("#cv-cols-note")
+    s.note("club vs league: Gap closed with chosen columns is 0-100 or —", None if raw and len(gc) == len(raw)
+           and all(v is None or 0 <= v <= 100 for v in gc) and (any(v is not None for v in gc) or note.is_visible()) else str(raw[:6]))
+    if before:
+        s.step("club vs league: remove the first column", lambda p: s.page.locator("#cv-cols .fchip button").first.click(timeout=3000))
+        s.page.wait_for_timeout(800)
+        now = _cv_cols(s)
+        s.note("club vs league: removed column gone", None if now == after[1:] else f"{after} -> {now}")
+        s.note("club vs league: URL follows the columns", None if "cols=" in s.page.url else s.page.url)
+    s.page.evaluate("() => window.scrollTo(0, document.querySelector('#cv-rec').getBoundingClientRect().top + scrollY - 10)")
+    s.shot("metric_picker_changed", w)
+    url = s.page.url
+    names = s.page.locator("#cv-rec-t a.pname")
+    if names.count():
+        _go_card(s, "club vs league: open a player (chosen columns)", lambda: names.first.click(timeout=3000))
+        s.page.wait_for_selector("#back", timeout=8000)
+        s.goto(s.page.locator("#back").get_attribute("href"), check=True, desc="club vs league: back with chosen columns")
+        s.page.wait_for_selector("#cv-rec-t tbody tr", timeout=15000)
+        s.page.wait_for_timeout(500)
+        s.note("club vs league: columns and rank kept after coming back",
+               None if ("cols=" in s.page.url and "rank=gap" in s.page.url and _cv_cols(s) == (after[1:] if before else after))
+               else f"{url} -> {s.page.url}")
+    s.step("club vs league: reset the columns", lambda p: s.page.locator("#cv-reset").click(timeout=3000))
+    s.page.wait_for_timeout(800)
+    s.note("club vs league: reset restores our biggest shortfalls", None if _cv_cols(s) == before and "cols=" not in s.page.url
+           else f"{_cv_cols(s)} / {s.page.url}")
+    s.step("club vs league: rank by Overall", lambda p: s.page.locator("#cv-rank button[data-r='']").click(timeout=3000))
+    s.page.wait_for_timeout(800)
+    s.note("club vs league: rank cleared", None if "rank=" not in s.page.url else s.page.url)
+
+
+def _cv_over(s):
+    """Elements in the gap map / players card wider than their box, and either card's sideways scroll."""
+    return s.page.evaluate("""() => {
+      const cards = ['#cv-gap', '#cv-rec'].map(q => document.querySelector(q));
+      const wide = cards.filter(c => c.scrollWidth - c.clientWidth > 1).map(c => c.id);
+      const cut = [...document.querySelectorAll('#cv-gap-t td, #cv-gap-t .cv-pick, #cv-gap-t .cv-back, #cv-level div, #cv-rec-t th')]
+        .filter(e => e.offsetParent && e.scrollWidth > e.clientWidth + 1).map(e => e.innerText.trim().slice(0, 30));
+      return wide.concat(cut).join(' | '); }""")
+
+
+def club_vs_league_pick_player(s, w):
+    """Owner 2026-11-13 (mock-up tab 4): in the open Full Back detail, pick our second rated full
+    back -- vs in the URL, the gap, the level strip, the list caption and the "vs" heading all
+    follow him; "Back to our best" restores; nothing overflows at 1280 / 1440."""
+    s.page.evaluate("() => { try { localStorage.removeItem('lofc.cvl.leagues'); } catch (e) {} }")
+    s.goto("/club-vs-league?group=Full%20Back", check=True, desc="club vs league: Full Back (pick a player)")
+    s.page.wait_for_selector("#cv-rec-t tbody tr", timeout=15000)
+    fb = s.page.locator("#cv-gap-t tr.pos[data-g='Full Back']")
+    det = s.page.locator("#cv-gap-t tr.cv-det[data-d='Full Back']")
+    if not fb.count():
+        return s.note("club vs league: pick a player", skipped="no Full Back row")
+    if not det.is_visible():
+        s.step("club vs league: open Full Back detail", lambda p: fb.click(timeout=3000))
+    picks = det.locator("button.cv-pick")
+    if picks.count() < 2:
+        return s.note("club vs league: pick a player", skipped=f"{picks.count()} rated full backs")
+    s.note("club vs league: our best marked and highlighted",
+           None if picks.first.evaluate("b => b.classList.contains('on')") and "our best" in det.inner_text() else "not marked")
+    gap0 = fb.locator(".cv-gapv").inner_text().strip()
+    vs0 = s.page.locator("#cv-rec-t th[data-sort='vb']").inner_text()
+    second = picks.nth(1)
+    name, pid = second.inner_text().strip(), second.get_attribute("data-vs")
+    s.step("club vs league: pick the second full back", lambda p: second.click(timeout=3000))
+    s.page.wait_for_function(f"() => location.search.includes('vs={pid}') && document.querySelector('#cv-level').innerText.includes('Comparing')", timeout=15000)
+    s.page.wait_for_timeout(400)
+    s.note("club vs league: vs in the URL", None if f"vs={pid}" in s.page.url else s.page.url)
+    fb = s.page.locator("#cv-gap-t tr.pos[data-g='Full Back']")
+    det = s.page.locator("#cv-gap-t tr.cv-det[data-d='Full Back']")
+    gap1 = fb.locator(".cv-gapv").inner_text().strip()
+    s.note("club vs league: gap follows him", None if gap1 != gap0 else f"still {gap0}")
+    s.note("club vs league: summary row names him", None if name in fb.locator(".cv-who").inner_text() else fb.inner_text())
+    strip = s.page.inner_text("#cv-level")
+    s.note("club vs league: strip says Comparing <him>", None if "Comparing" in strip and name in strip and gap1.replace("−", "") in strip else strip)
+    s.note("club vs league: detail still open, him highlighted",
+           None if det.is_visible() and det.locator("button.cv-pick.on").inner_text().strip() == name else "not")
+    cap, sub = s.page.inner_text("#cv-count"), s.page.inner_text("#cv-rec-sub")
+    s.note("club vs league: list caption names him", None if f"above {name} · ranked within " in cap and name in sub else f"{cap} / {sub}")
+    vs1 = s.page.locator("#cv-rec-t th[data-sort='vb']")
+    s.note("club vs league: vs heading changes", None if vs1.inner_text().startswith("vs him") and vs0.startswith("vs our best")
+           and name in (vs1.get_attribute("data-tip") or "") else f"{vs0} -> {vs1.inner_text()}")
+    ov = [float(v) for v in s.page.locator("#cv-rec-t tbody td:nth-child(6)").all_inner_texts() if re.fullmatch(r"\d\.\d\d", v.strip())]
+    his = float(re.search(r"\d\.\d\d", strip).group(0))
+    s.note("club vs league: every listed player above him", None if ov and all(v > his for v in ov) else f"{his}: {ov[:5]}")
+    for width in (1280, 1440):
+        s.page.set_viewport_size({"width": width, "height": 900})
+        s.page.wait_for_timeout(300)
+        bad = _cv_over(s)
+        s.note(f"club vs league: nothing overflowing with him picked @{width}", bad or None)
+        s.page.evaluate("() => { document.querySelector(\"#cv-gap-t tr.pos[data-g='Full Back']\").scrollIntoView({block: 'start'}); window.scrollBy(0, -130); }")
+        s.shot("pick_gap", width)
+        s.page.evaluate("() => window.scrollTo(0, document.querySelector('#cv-rec').getBoundingClientRect().top + scrollY - 10)")
+        s.shot("pick_list", width)
+    s.page.set_viewport_size({"width": w, "height": 900})
+    s.step("club vs league: Back to our best", lambda p: s.page.locator("#cv-gap-t button.cv-back").click(timeout=3000))
+    s.page.wait_for_function("() => !location.search.includes('vs=') && !document.querySelector('#cv-level').innerText.includes('Comparing')", timeout=15000)
+    s.page.wait_for_timeout(300)
+    fb = s.page.locator("#cv-gap-t tr.pos[data-g='Full Back']")
+    s.note("club vs league: back to our best restores", None if fb.locator(".cv-gapv").inner_text().strip() == gap0
+           and s.page.locator("#cv-rec-t th[data-sort='vb']").inner_text().startswith("vs our best")
+           and s.page.locator("#cv-gap-t button.cv-back").count() == 0 else s.page.url)
+    # changing position drops vs
+    s.goto(f"/club-vs-league?group=Full%20Back&vs={pid}", check=True, desc="club vs league: Full Back vs him")
+    s.page.wait_for_selector("#cv-rec-t tbody tr", timeout=15000)
+    s.step("club vs league: change position", lambda p: s.page.select_option("#cv-group", "Centre Back", timeout=3000))
+    s.page.wait_for_timeout(800)
+    s.note("club vs league: a new position drops vs", None if "vs=" not in s.page.url else s.page.url)
+
+
+def club_vs_league_phase_and_example(s, w):
+    """Owner 2026-11-13: Big picture's Physical section switches All phases / In possession / Out
+    of possession (phase in the URL; top speed "—" in a split; ratings unchanged), and "How this
+    is worked out" shows Gap closed as a live mini table for the selected position."""
+    s.page.evaluate("() => { try { localStorage.removeItem('lofc.cvl.leagues'); } catch (e) {} }")
+    s.goto("/club-vs-league?group=Full%20Back", check=True, desc="club vs league: Full Back (phase, example)")
+    s.page.wait_for_selector("#cv-rec-t tbody tr", timeout=15000)
+    seg = s.page.locator("#cv-phase button")
+    s.note("club vs league: phase switch on Physical", None if seg.all_inner_texts() == ["All phases", "In possession", "Out of possession"] else str(seg.all_inner_texts()))
+    if seg.count() != 3:
+        return
+    s.note("club vs league: All phases by default", None if s.page.locator("#cv-phase button.on").inner_text() == "All phases" else "not")
+    # [section, row text] for every Big picture row (section headings are upper-cased by CSS)
+    grab = r"""() => { let sec = ''; return [...document.querySelectorAll('#cv-big-l tbody tr, #cv-big-r tbody tr')].flatMap(r => {
+      if (r.classList.contains('sec')) { sec = r.firstElementChild.firstChild.textContent.trim(); return []; }
+      return [[sec, r.innerText.replace(/\s+/g, ' ').trim()]]; }); }"""
+    before = s.page.evaluate(grab)
+    s.step("club vs league: In possession", lambda p: seg.nth(1).click(timeout=3000))
+    s.page.wait_for_timeout(300)
+    after = s.page.evaluate(grab)
+    s.note("club vs league: phase in the URL", None if "phase=tip" in s.page.url else s.page.url)
+    phys = lambda rows: [t for sec, t in rows if sec == "Physical"]
+    rest = lambda rows: [(sec, t) for sec, t in rows if sec != "Physical"]
+    s.note("club vs league: physical ranks change", None if phys(before) and phys(after) != phys(before) else str(phys(after)[:3]))
+    s.note("club vs league: only the Physical section changes", None if rest(after) == rest(before) else "changed")
+    after = phys(after)
+    speed = [r for r in after if r.startswith(("Top speed", "Average match top speed"))]
+    s.note("club vs league: top speed has no split", None if speed and all(r.endswith("— —") for r in speed) else str(speed))
+    s.page.evaluate("() => document.querySelector('#cv-big').scrollIntoView({block: 'start'})")
+    s.shot("big_in_possession", w)
+    s.page.reload(); s.page.wait_for_selector("#cv-phase", timeout=15000)
+    s.note("club vs league: phase kept on reload", None if s.page.locator("#cv-phase button.on").inner_text() == "In possession" else "lost")
+    s.step("club vs league: Out of possession", lambda p: s.page.locator("#cv-phase button").nth(2).click(timeout=3000))
+    s.page.wait_for_timeout(300)
+    s.note("club vs league: out of possession", None if "phase=otip" in s.page.url and phys(s.page.evaluate(grab)) not in (after, phys(before)) else s.page.url)
+    s.step("club vs league: All phases", lambda p: s.page.locator("#cv-phase button").nth(0).click(timeout=3000))
+    s.page.wait_for_timeout(300)
+    s.note("club vs league: back to all phases", None if "phase=" not in s.page.url and s.page.evaluate(grab) == before else s.page.url)
+    # the live Gap closed mini table
+    s.step("club vs league: open How this is worked out", lambda p: s.page.locator("#cv-how summary").click(timeout=3000))
+    gc = s.page.locator("#cv-how-gc")
+    fb = gc.inner_text()
+    who = s.page.locator("#cv-gap-t tr.pos[data-g='Full Back'] .cv-who").inner_text().split("\n")[0].strip()
+    heads = gc.locator("table.cv-gx th").all_inner_texts()
+    want = ["Measure", f"Ours ({who.split()[-1]})", "Top 6", "Gap (Top 6 − Ours)", "Target − Ours", "Counted"]
+    s.note("club vs league: Full Back mini table", None if fb.startswith("Gap closed: how much of our player's shortfall a target would make up.")
+           and len(heads) == 7 and [h for i, h in enumerate(heads) if i != 4] == want and heads[4].startswith("Target (")
+           and 1 <= gc.locator("table.cv-gx tbody tr:not(.cv-gx-more)").count() <= 3
+           and all(r.is_visible() for r in gc.locator("table.cv-gx tbody tr").all())
+           and "Measures that count more in the Full Back rating count more." in fb
+           and "Why: it ranks players by how much they fix our weaknesses" in fb else fb[:300])
+    # the % is the list's figure for the active tab's first player by Gap closed
+    pct = re.search(r"= (\d+)%", fb)
+    best = max([v for v in _cv_gc(s)[1] if v is not None], default=None)
+    s.note("club vs league: example's % is the list's top Gap closed", None if pct and best is not None and int(pct.group(1)) == best else f"{pct and pct.group(1)} vs {best}")
+    s.page.evaluate("() => document.querySelector('#cv-how').scrollIntoView({block: 'start'})")
+    s.shot("how_full_back", w)
+    s.step("club vs league: change position", lambda p: s.page.select_option("#cv-group", "Centre Back", timeout=3000))
+    s.page.wait_for_function("() => document.querySelector('#cv-how-gc').innerText.includes('Centre Back rating') || !document.querySelector('#cv-how-gc table')", timeout=15000)
+    cb = gc.inner_text()
+    s.note("club vs league: mini table follows the position", None if cb != fb and "Centre Back rating" in cb else cb[:200])
+    s.page.evaluate("() => document.querySelector('#cv-how').scrollIntoView({block: 'start'})")
+    s.shot("how_centre_back", w)
+    # no top-15 cap: the biggest list of any position and league still draws fast
+    big = s.page.evaluate("""async () => { let best = null;
+      for (const g of ['Goalkeeper', 'Centre Back', 'Full Back', 'Midfield', 'Winger', 'Centre Forward']) {
+        const d = await (await fetch('/api/club-vs-league?group=' + encodeURIComponent(g))).json();
+        for (const l of d.recommendations.leagues) if (!best || l.count > best.n) best = {g, id: l.competition_id, n: l.count, league: l.league};
+      } return best; }""")
+    if not big:
+        return s.note("club vs league: biggest list", skipped="no lists")
+    from urllib.parse import quote
+    s.goto(f"/club-vs-league?group={quote(big['g'])}&league={big['id']}", check=True,
+           desc=f"club vs league: biggest list ({big['league']}, {big['g']}, {big['n']})")
+    s.page.wait_for_selector("#cv-rec-t tbody tr", timeout=15000)
+    rows = s.page.locator("#cv-rec-t tbody tr").count()
+    s.note(f"club vs league: all {big['n']} rows listed", None if rows == big["n"] else f"{rows} rows")
+    ms = s.page.evaluate("""() => { const th = document.querySelector("#cv-rec-t th[data-sort='gc']"), t0 = performance.now();
+      th.click(); return performance.now() - t0; }""")
+    s.note(f"club vs league: sorting {big['n']} rows under 150 ms", None if ms < 150 else f"{ms:.0f} ms")
+    s.page.evaluate("() => window.scrollTo(0, document.querySelector('#cv-rec').getBoundingClientRect().top + scrollY - 10)")
+    s.shot("biggest_list", w)
+
+
+def _cv_col(s, nth):
+    """The shown list's numbers in column `nth` (1-based); None for "—"."""
+    out = []
+    for v in s.page.locator(f"#cv-rec-t tbody tr td:nth-child({nth})").all_inner_texts():
+        v = v.strip().replace(",", "").replace("−", "-").replace("+", "")
+        out.append(None if v in ("—", "") else float(v))
+    return out
+
+
+def club_vs_league_sort_every_column(s, w):
+    """Owner 2026-11-13: every numeric heading of "Players who could close the gap" sorts (first
+    click highest first, again lowest first; arrow on it; sort= in the URL); Player and Club A-Z."""
+    s.goto("/club-vs-league?group=Full%20Back", check=True, desc="club vs league: Full Back (sort every column)")
+    s.page.wait_for_selector("#cv-rec-t tbody tr", timeout=15000)
+    heads = s.page.locator("#cv-rec-t th.cv-sort").all_inner_texts()
+    need = ["Player", "Club", "Age", "Minutes", "Overall", "Gap closed", "Performance", "Physical"]
+    s.note("club vs league: every heading sortable", None if all(any(h.startswith(n) for h in heads) for n in need)
+           and any(h.startswith("vs ") for h in heads) else str(heads))
+    for key, nth, name in (("age", 4, "Age"), ("min", 5, "Minutes"), ("perf", 9, "Performance")):
+        th = s.page.locator(f"#cv-rec-t th[data-sort='{key}']")
+        if not th.count():
+            s.note(f"club vs league: sort by {name}", "no heading"); continue
+        s.step(f"club vs league: sort by {name}", lambda p: th.click(timeout=3000))
+        s.page.wait_for_timeout(300)
+        v = [x for x in _cv_col(s, nth) if x is not None]
+        tail = _cv_col(s, nth)[len(v):]
+        s.note(f"club vs league: {name} highest first", None if v and v == sorted(v, reverse=True) and all(x is None for x in tail)
+               and f"sort={key}" in s.page.url and "▼" in th.inner_text() else f"{v[:6]} {s.page.url}")
+        s.step(f"club vs league: {name} again", lambda p: th.click(timeout=3000))
+        s.page.wait_for_timeout(300)
+        v = [x for x in _cv_col(s, nth) if x is not None]
+        s.note(f"club vs league: {name} lowest first", None if v and v == sorted(v) and f"sort=-{key}" in s.page.url
+               and "▲" in th.inner_text() else f"{v[:6]} {s.page.url}")
+    th = s.page.locator("#cv-rec-t th[data-sort='name']")
+    if th.count():
+        s.step("club vs league: sort by Player", lambda p: th.click(timeout=3000))
+        s.page.wait_for_timeout(300)
+        names = [n.strip() for n in s.page.locator("#cv-rec-t tbody a.pname").all_inner_texts()]
+        s.note("club vs league: Player A-Z", None if names == sorted(names, key=str.casefold) else str(names[:5]))
+    s.page.evaluate("() => window.scrollTo(0, document.querySelector('#cv-rec').getBoundingClientRect().top + scrollY - 10)")
+    s.shot("sorted_by_name", w)
 
 
 def users_first_view(s, w):
@@ -1842,10 +2620,316 @@ def physical_additions(s, w):
         s.step("physical: find a player on the chart", lambda p: s.page.locator("#f-find").fill(name.split()[-1], timeout=3000))
         s.note("physical: found player highlighted", None if s.page.locator("#sc-plot circle.found").count() >= 1
                else "no highlighted dot")
-    box = s.page.locator("#sc-plot").bounding_box()
-    card = s.page.locator("#ph-scatter").bounding_box()
-    s.note("physical: chart fills its box", None if box and card and (card["y"] + card["height"]) - (box["y"] + box["height"]) < 60
-           else "space below the chart")
+    box = s.page.locator("#ph-scatter .sc-chart").bounding_box()
+    grid = s.page.locator("#ph-scatter .sc-grid").bounding_box()
+    side = s.page.locator("#sc-side").bounding_box()
+    # the chart column fills the grid: down to its bottom beside the list, or down to the list below it
+    gap = ((side["y"] - (box["y"] + box["height"])) if box and side and side["y"] > box["y"] + 10
+           else (grid["y"] + grid["height"]) - (box["y"] + box["height"])) if box and grid else 999
+    s.note("physical: chart fills its box", None if gap < 60 else f"space below the chart ({gap:.0f}px)")
+
+
+def physical_two_metrics(s, w):
+    """Owner 2026-11-13 (mock-up tab 2): dashed red medians on both axes, the shaded "High on
+    both" quadrant with its corner labels, grid + tick values, Orient dots blue and named, the
+    top five red and numbered 1-5 = rows 1-5 of the "High on both" list (8 rows at most), list
+    links carry back=, find-a-player rings and names him; nothing cut off at 1280 / 1440."""
+    s.goto(PH_PATH + "?season=319&league=4&position=Centre+Back", check=True, desc="physical: two metrics")
+    if not _ph_ready(s):
+        return s.note("physical: two metrics", "page did not draw")
+    plot = s.page.locator("#sc-plot")
+    s.note("physical: two dashed red median lines",
+           None if plot.locator("line.med").count() == 2 and plot.locator("line.med").first.evaluate(
+               "e => getComputedStyle(e).stroke === 'rgb(192, 57, 43)' && getComputedStyle(e).strokeDasharray !== 'none'")
+           else "medians missing or not dashed red")
+    s.note("physical: shaded quadrant + corner labels",
+           None if plot.locator("rect.quad").count() == 1
+           and plot.locator("text.ql").all_text_contents() == ["Better on both", "Worse on both"] else "quadrant missing")
+    ticks = plot.locator("text.ax").all_text_contents()
+    s.note("physical: grid lines with tick values", None if plot.locator("line.grid").count() >= 6
+           and len(ticks) >= 6 and all(re.fullmatch(r"-?\d+(\.\d+)?", t) for t in ticks) else str(ticks[:6]))
+    s.note("physical: axis titles", None if plot.locator("text.axl").count() == 2 else "no axis titles")
+    rows = s.page.locator("#sc-top-body tr")
+    names = [n.strip() for n in s.page.locator("#sc-top-body .pname").all_inner_texts()]
+    s.note("physical: Better on both list, at most 8", None if 1 <= rows.count() <= 8 else f"{rows.count()} rows")
+    marks = s.page.evaluate("""() => [...document.querySelectorAll('#sc-plot g.t5')].map(g =>
+        [+g.dataset.rank, g.closest('a') ? g.closest('a').getAttribute('aria-label') : g.dataset.tip.split('\\n')[0],
+         getComputedStyle(g.querySelector('circle.pt')).fill, g.querySelector('text').textContent])""")
+    want = min(5, len(names))
+    s.note("physical: top 5 red, numbered 1-5",
+           None if len(marks) == want and sorted(m[0] for m in marks) == list(range(1, want + 1))
+           and all(m[2] == "rgb(200, 16, 46)" and m[3] == str(m[0]) for m in marks) else str(marks))
+    by_rank = {m[0]: m[1] for m in marks}
+    s.note("physical: numbered dots = list rows 1-5",
+           None if [by_rank.get(k) for k in range(1, want + 1)] == names[:want] else f"{by_rank} vs {names[:want]}")
+    badges = s.page.locator("#sc-top-body .t5b").all_inner_texts()
+    s.note("physical: list rows 1-5 carry the red badge", None if badges == [str(k) for k in range(1, want + 1)] else str(badges))
+    links = s.page.locator("#sc-top-body a.plink")
+    href = links.first.get_attribute("href") if links.count() else ""
+    s.note("physical: list links carry back= with the page state",
+           None if href and "back=%2Fphysical%3F" in href and "position%3DCentre" in href else href)
+    orient = plot.locator("circle.pt.orient")
+    if orient.count():
+        fill = orient.first.evaluate("e => getComputedStyle(e).fill")
+        s.note("physical: Orient dots blue", None if fill == "rgb(31, 95, 168)" else fill)
+        s.note("physical: Orient surnames on the chart", None if plot.locator("text.ptl.orient").count() >= 1 else "no names")
+    other = plot.locator("circle.pt:not(.orient):not(.t5)").first.evaluate("e => getComputedStyle(e).fill")
+    s.note("physical: other players light grey", None if other == "rgb(185, 191, 199)" else other)
+    s.note("physical: no browser title tooltips", None if s.page.locator("main svg title, #ph-scatter [title]").count() == 0 else "title present")
+    # find a player: someone outside the five
+    target = s.page.evaluate("""() => { const a = [...document.querySelectorAll('#sc-plot a')].filter(a => !a.querySelector('g.t5'));
+        return a.length ? a[Math.floor(a.length / 2)].getAttribute('aria-label') : ''; }""")
+    if target:
+        s.step("physical: find a player", lambda p: s.page.locator("#f-find").fill(target, timeout=3000))
+        s.note("physical: found player ringed and named",
+               None if plot.locator("circle.ring").count() >= 1 and target in plot.locator("text.ptl.found").all_text_contents()
+               else f"no ring/name for {target!r}")
+        s.step("physical: clear find", lambda p: s.page.locator("#f-find").fill("", timeout=3000))
+        s.note("physical: ring gone after clearing", None if plot.locator("circle.ring").count() == 0 else "ring left")
+        # the focused empty box lists the players over the chart (owner 2026-11-13): Escape shuts it
+        s.step("physical: close the find list", lambda p: s.page.locator("#f-find").press("Escape", timeout=3000))
+    # hover a numbered dot: the page's own tooltip with name, club and both values
+    if marks:
+        s.page.locator("#sc-plot g.t5[data-rank='1']").hover()
+        s.page.wait_for_timeout(250)
+        tip = s.page.evaluate("() => { const t = [...document.querySelectorAll('.tip')].find(e => !e.hidden); return t ? t.innerText : ''; }")
+        s.note("physical: hover shows name, club and both values",
+               None if names[0] in tip and tip.count("\n") >= 3 else repr(tip[:80]))
+    for width in (1280, 1440):
+        s.page.set_viewport_size({"width": width, "height": 900})
+        s.page.wait_for_timeout(400)
+        ov = s.page.evaluate("""() => { const c = document.getElementById('ph-scatter'), out = [];
+          const cr = c.getBoundingClientRect();
+          if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) out.push('page scrolls sideways');
+          for (const e of c.querySelectorAll('svg, #sc-top, .sc-side, .ph-key')) { const r = e.getBoundingClientRect();
+            if (r.right > cr.right + 1 || r.left < cr.left - 1) out.push(e.id || e.className.baseVal || e.className); }
+          const tw = c.querySelector('.sc-side .tw'); if (tw && tw.scrollWidth > tw.clientWidth + 1) out.push('list scrolls');
+          const svg = c.querySelector('#sc-plot svg'); if (svg) { const sr = svg.getBoundingClientRect();
+            for (const t of svg.querySelectorAll('text')) { const r = t.getBoundingClientRect();
+              if (r.width && (r.left < sr.left - 1 || r.right > sr.right + 1 || r.top < sr.top - 1 || r.bottom > sr.bottom + 1)) out.push('cut: ' + t.textContent); } }
+          return out; }""")
+        s.note(f"physical: Two metrics fits, nothing cut off @{width}", None if not ov else str(ov[:4]))
+        s.page.evaluate("() => scrollTo(0, document.getElementById('ph-scatter').getBoundingClientRect().top + scrollY - 140)")
+        path = s.out / f"physical_two_metrics_{width}.png"
+        s.page.locator("#ph-scatter").screenshot(path=str(path))
+        s.shots.append(str(path))
+    s.page.set_viewport_size({"width": w, "height": 900})
+
+
+def _ph_api(s):
+    """The page's own /api/physical answer for the current URL."""
+    return s.page.evaluate("() => fetch('/api/physical' + location.search).then(r => r.json())")
+
+
+def physical_reversed_axis(s, w):
+    """Owner 2026-11-13: a lower-is-better axis (Time to sprint) runs high -> low, its title says
+    "(lower is better)", and the "Better on both" list = quicker AND faster than both medians."""
+    s.goto(PH_PATH + "?season=319&league=4&position=Centre+Back&x=time_to_sprint&y=top5_psv99_kmh",
+           check=True, desc="physical: reversed axis")
+    if not _ph_ready(s):
+        return s.note("physical: reversed axis", "page did not draw")
+    plot = s.page.locator("#sc-plot")
+    titles = plot.locator("text.axl").all_text_contents()
+    s.note("physical: reversed axis title says lower is better",
+           None if len(titles) == 2 and titles[0].endswith("(lower is better)") and "lower" not in titles[1] else str(titles))
+    xt = s.page.evaluate("""() => [...document.querySelectorAll('#sc-plot text.ax[text-anchor=middle]')]
+        .map(t => [+t.getAttribute('x'), +t.textContent]).sort((a, b) => a[0] - b[0]).map(p => p[1])""")
+    s.note("physical: reversed axis ticks run high to low",
+           None if len(xt) >= 3 and all(a > b for a, b in zip(xt, xt[1:])) else str(xt))
+    d = _ph_api(s)
+    sc, pl = d["scatter"], d["pool"]["players"]
+    s.note("physical: API marks the axis reversed", None if sc["rev"] == {"x": True, "y": False} else str(sc["rev"]))
+    bad = [pl[i]["name"] for i in sc["top"] if not (pl[i]["v"]["time_to_sprint"] < sc["median"]["x"]
+                                                     and pl[i]["v"]["top5_psv99_kmh"] > sc["median"]["y"])]
+    s.note("physical: Better on both = quicker and faster than the medians", None if not bad else str(bad))
+    names = [n.strip() for n in s.page.locator("#sc-top-body .pname").all_inner_texts()]
+    s.note("physical: list is the API's order", None if names == [pl[i]["name"] for i in sc["top"]] else str(names[:3]))
+    vals = s.page.locator("#sc-top-body tr td:nth-child(3)").all_inner_texts()
+    # owner 2026-11-13: timing measures (lower is better) show two decimals on this chart and list
+    s.note("physical: list shows real times to two decimals", None if vals and all(
+        v.strip() == f'{pl[i]["v"]["time_to_sprint"]:.2f}' for v, i in zip(vals, sc["top"])) else str(vals[:3]))
+    if sc["top"]:
+        pos = s.page.evaluate("""() => { const g = document.querySelector('#sc-plot g.t5[data-rank="1"]');
+            const m = [...document.querySelectorAll('#sc-plot line.med')];
+            const c = g.querySelector('circle.t5s') || g.querySelector('circle.pt');
+            return [+c.getAttribute('cx'), +c.getAttribute('cy'), +m[0].getAttribute('x1'), +m[1].getAttribute('y1')]; }""")
+        s.note("physical: number 1 sits top right", None if pos[0] > pos[2] and pos[1] < pos[3] else str(pos))
+    s.page.evaluate("() => scrollTo(0, document.getElementById('ph-scatter').getBoundingClientRect().top + scrollY - 140)")
+    path = s.out / "physical_reversed_axis.png"
+    s.page.locator("#ph-scatter").screenshot(path=str(path))
+    s.shots.append(str(path))
+
+
+def physical_min_minutes(s, w):
+    """Owner 2026-11-13: "Min minutes" is a slider on Two metrics (450 up to the plotted pool's
+    most minutes rounded up to 90, step 90, "900+ min" label): set on release, in the URL, the
+    chart and list follow it, back restores; under 10 players: no ranking, the note says why."""
+    s.goto(PH_PATH + "?season=319&league=4&position=Centre+Back", check=True, desc="physical: min minutes")
+    if not _ph_ready(s):
+        return s.note("physical: min minutes", "page did not draw")
+    sel = s.page.locator("#f-min")
+    rng = sel.evaluate("e => [e.type, +e.min, +e.max, +e.step, e.value]")
+    d0 = _ph_api(s)
+    most = max((d0["pool"]["players"][i]["mins"] for i in d0["scatter"]["idx"]), default=0)
+    s.note("physical: Min minutes slider 450 to the pool's most minutes (x90), step 90",
+           None if rng[0] == "range" and rng[1] == 450 and rng[3] == 90 and rng[4] == "450"
+           and rng[2] % 90 == 0 and rng[2] - 90 < most <= rng[2] else f"{rng} most={most}")
+    s.note("physical: slider label", None if s.page.inner_text("#min-out").strip() == "450+ min" else s.page.inner_text("#min-out"))
+    before = s.page.locator("#sc-plot circle[data-tip], #sc-plot g.t5").count()
+    url0 = s.page.url
+    # dragging (input events) only moves the label; releasing (change) redraws
+    sel.evaluate("e => { e.value = 900; e.dispatchEvent(new Event('input', {bubbles: true})); }")
+    s.page.wait_for_timeout(300)
+    s.note("physical: dragging moves the label only", None if s.page.inner_text("#min-out").strip() == "900+ min"
+           and s.page.url == url0 else f"{s.page.inner_text('#min-out')} {s.page.url}")
+    s.step("physical: Min minutes 900", lambda p: sel.evaluate("e => e.dispatchEvent(new Event('change', {bubbles: true}))"))
+    s.page.wait_for_function("() => document.getElementById('sc-sub').textContent.endsWith('900+ minutes')", timeout=8000)
+    s.note("physical: min in the URL", None if "min=900" in s.page.url else s.page.url)
+    tips = s.page.evaluate("() => [...document.querySelectorAll('#sc-plot [data-tip]')].map(e => e.dataset.tip.split('\\n')[1])")
+    mins = [int(re.search(r"([\d,]+) min", t).group(1).replace(",", "")) for t in tips if re.search(r"([\d,]+) min", t)]
+    s.note("physical: every plotted player has 900+ minutes", None if mins and min(mins) >= 900 else str(mins[:5]))
+    after = s.page.locator("#sc-plot circle[data-tip], #sc-plot g.t5").count()
+    s.note("physical: fewer or as many dots", None if after <= before else f"{before} -> {after}")
+    d = _ph_api(s)
+    s.note("physical: list follows the minimum", None if all(d["pool"]["players"][i]["mins"] >= 900 for i in d["scatter"]["top"]) else "list not filtered")
+    s.page.evaluate("() => scrollTo(0, document.getElementById('ph-scatter').getBoundingClientRect().top + scrollY - 140)")
+    path = s.out / "physical_min_minutes_900.png"
+    s.page.locator("#ph-scatter").screenshot(path=str(path))
+    s.shots.append(str(path))
+    s.step("physical: back", lambda p: p.go_back())
+    s.page.wait_for_function("() => document.getElementById('sc-sub').textContent.endsWith('450+ minutes')", timeout=8000)
+    s.note("physical: back restores 450", None if "min=" not in s.page.url and sel.input_value() == "450"
+           and s.page.inner_text("#min-out").strip() == "450+ min" else s.page.url)
+    # a small pool at 1,800: under 10 plotted players = no ranking, the thin note
+    s.goto(PH_PATH + "?season=319&league=4&position=Centre+Back&age=u21&min=1800", check=True, desc="physical: min minutes thin")
+    if _ph_ready(s):
+        d = _ph_api(s)
+        n = len(d["scatter"]["idx"])
+        note = s.page.locator("#sc-top-note")
+        if n < 10:
+            s.note("physical: under 10 players, no ranking and the note",
+                   None if s.page.locator("#sc-top-body tr").count() == 0 and (n == 0 or (note.is_visible()
+                   and note.inner_text().strip() == f"Not rated: only {n} comparable players (needs 10)")) else note.inner_text())
+        else:
+            s.note("physical: thin pool at 1,800", skipped=f"{n} players")
+
+
+def physical_goalkeeper_row(s, w):
+    """Owner 2026-11-13: no metric in both Strongest 3 and Weakest 3 (seen on Nathan Baxter);
+    the line under the table names the season shown."""
+    s.goto(PH_PATH + "?season=319&view=perf", check=False)
+    if not _ph_ready(s):
+        return s.note("physical: goalkeeper row", "page did not draw")
+    both = s.page.evaluate("""() => [...document.querySelectorAll('#sp-body tr:not(.sp-sec)')].map(tr => {
+        const l = [...tr.querySelectorAll('td.sp-list')].map(td => [...td.querySelectorAll('.sp-ml span:first-child')].map(e => e.textContent));
+        return [tr.querySelector('.pname').textContent, (l[0] || []).filter(m => (l[1] || []).includes(m))]; }).filter(x => x[1].length)""")
+    s.note("physical: no metric in both Strongest 3 and Weakest 3", None if not both else str(both[:3]))
+    line = s.page.locator("#sp-unrated")
+    if line.is_visible():
+        s.note("physical: unrated line names the season",
+               None if re.fullmatch(r"\d+ squad players? not rated in 2026/27 \(under 450 minutes or too few peers\)",
+                                    line.inner_text().strip()) else line.inner_text())
+    gk = s.page.locator("#sp-body tr:not(.sp-sec)").filter(has_text="Baxter")
+    if gk.count():
+        gk.first.scroll_into_view_if_needed()
+        path = s.out / "physical_goalkeeper_row.png"
+        gk.first.screenshot(path=str(path))
+        s.shots.append(str(path))
+
+
+def physical_squad_download(s, w):
+    """R5: the squad card's Excel button returns our squad as an .xlsx for the page's season."""
+    s.goto(PH_PATH, check=False)
+    if not _ph_ready(s):
+        return s.note("physical: squad download", "page did not draw")
+    href = s.page.locator("#sq-xlsx").get_attribute("href") or ""
+    s.note("physical: Excel link carries the season", None if "season=319" in href else href)
+    got = s.page.evaluate("(h) => fetch(h).then(r => r.arrayBuffer().then(b => [r.status, "
+                          "r.headers.get('content-type'), r.headers.get('content-disposition'), "
+                          "String.fromCharCode(...new Uint8Array(b).slice(0, 2))]))", href)
+    s.note("physical: squad .xlsx", None if got[0] == 200 and "spreadsheetml" in (got[1] or "")
+           and ".xlsx" in (got[2] or "") and got[3] == "PK" else str(got))
+
+
+def physical_performance_view(s, w):
+    """Owner 2026-11-13: the squad card's "Physical | Performance" switch. Performance = rated
+    squad players grouped by position (section rows), strongest / weakest 3 as plain coloured
+    percentiles, links carry back=, the view is in the URL; Physical stays as it was; nothing
+    wider than its card at 1280 / 1440."""
+    s.goto(PH_PATH, check=False)
+    if not _ph_ready(s):
+        return s.note("physical: performance view", "page did not draw")
+    phys_rows = s.page.locator("#sq-body tr").count()
+    s.note("physical: Physical is the default view",
+           None if s.page.locator("#sq-view button.on").inner_text() == "Physical"
+           and s.page.locator("#sq-tw:not([hidden])").count() == 1 else "Physical not on")
+    s.step("physical: switch to Performance",
+           lambda p: s.page.locator("#sq-view button[data-view=perf]").click(timeout=3000))
+    s.note("physical: view in the URL", None if "view=perf" in s.page.url else s.page.url)
+    s.note("physical: Physical table hidden", None if s.page.locator("#sq-tw[hidden]").count() == 1 else "still shown")
+    secs = s.page.locator("#sp-body tr.sp-sec").all_inner_texts()
+    order = ["GOALKEEPER", "CENTRE BACK", "FULL BACK", "MIDFIELD", "WINGER", "CENTRE FORWARD"]
+    up = [t.strip().upper() for t in secs]
+    s.note("physical: rows grouped by position, in order",
+           None if up and up == [g for g in order if g in up] else str(secs))
+    sec_style = s.page.locator("#sp-body tr.sp-sec td").first.evaluate(
+        "e => [getComputedStyle(e).textTransform, getComputedStyle(e).fontWeight, parseFloat(getComputedStyle(e).paddingTop)]")
+    s.note("physical: section rows bold uppercase with space above",
+           None if sec_style[0] == "uppercase" and int(sec_style[1]) >= 600 and sec_style[2] >= 12 else str(sec_style))
+    rows = s.page.locator("#sp-body tr:not(.sp-sec)")
+    s.note("physical: rated players listed", None if rows.count() >= 3 else f"{rows.count()} rows")
+    s.note("physical: seven columns", None if s.page.locator("#sp-table thead th").all_inner_texts() == [
+        "Player", "Minutes", "Overall", "Performance", "Physical", "Strongest 3", "Weakest 3"]
+        else str(s.page.locator("#sp-table thead th").all_inner_texts()))
+    first = rows.first
+    s.note("physical: strongest and weakest 3 listed",
+           None if first.locator("td.sp-list").nth(0).locator(".sp-ml").count() >= 2
+           and first.locator("td.sp-list").nth(1).locator(".sp-ml").count() >= 2 else "lists missing")
+    s.note("physical: percentiles are plain coloured numbers (no bars or pills)",
+           None if s.page.locator("#sp-body .pctn").count() > 0
+           and s.page.locator("#sp-body .pb, #sp-body .ph-pp").count() == 0 else "not plain numbers")
+    hues = s.page.locator("#sp-body .pctn").evaluate_all(
+        "es => es.map(e => [parseInt(e.textContent), e.classList.contains('hi'), e.classList.contains('lo')])")
+    bad = [h for h in hues if (h[0] >= 70) != h[1] or (h[0] < 30) != h[2]]
+    s.note("physical: green 70+, red under 30", None if not bad else str(bad[:3]))
+    href = first.locator("a.plink").get_attribute("href") or ""
+    s.note("physical: player link carries back= with the view",
+           None if "back=" in href and "view%3Dperf" in href else href)
+    s.note("physical: Excel button in both views",
+           None if s.page.locator("#sq-xlsx").is_visible() else "button hidden")
+    s.note("physical: no browser title tooltips", None if s.page.locator("#ph-squad [title]").count() == 0
+           else "title attribute present")
+    for width in (1280, 1440):
+        s.page.set_viewport_size({"width": width, "height": 900})
+        s.page.wait_for_timeout(300)
+        ov = s.page.evaluate("""() => { const tw = document.getElementById('sp-tw'), c = document.getElementById('ph-squad');
+          const out = [];
+          if (tw.scrollWidth > tw.clientWidth + 1) out.push('table ' + tw.scrollWidth + ' > ' + tw.clientWidth);
+          for (const e of c.querySelectorAll('#sp-body td, .sp-ml span')) if (e.scrollWidth > e.clientWidth + 1) out.push((e.textContent || '').slice(0, 40));
+          return out; }""")
+        s.note(f"physical: Performance view fits @{width}", None if not ov else str(ov[:4]))
+        s.page.locator("#ph-squad").scroll_into_view_if_needed()
+        s.page.locator("#ph-squad").screenshot(path=str(s.out / f"physical_perf_view_{width}.png"))
+        s.shots.append(str(s.out / f"physical_perf_view_{width}.png"))
+    s.page.set_viewport_size({"width": w, "height": 900})
+    s.page.go_back()
+    s.page.wait_for_timeout(500)
+    s.note("physical: back restores the Physical view",
+           None if s.page.locator("#sq-tw:not([hidden])").count() == 1 and "view=" not in s.page.url
+           and s.page.locator("#sq-body tr").count() == phys_rows else s.page.url)
+    s.goto(PH_PATH + "?view=perf", check=True, desc="physical: performance view from the URL")
+    _ph_ready(s)
+    s.note("physical: ?view=perf opens on Performance",
+           None if s.page.locator("#sq-perf:not([hidden])").count() == 1 else "not Performance")
+
+
+def info_bar_dates(s, w):
+    """R6: the info bar ends with the last Impect and SkillCorner pull dates."""
+    text = s.page.inner_text("#infobar")
+    s.note("info bar: pull dates", None if re.search(
+        r"Impect (\d{1,2} [A-Z][a-z]{2}|—) · SkillCorner (\d{1,2} [A-Z][a-z]{2}|—)$", text.strip())
+        else repr(text))
+    s.shot("infobar", w)
 
 
 def physical_first_view(s, w):
@@ -2007,6 +3091,217 @@ def physical_layout_widths(s, w):
     s.page.set_viewport_size({"width": w, "height": 900})
 
 
+# -- Remembered settings (owner 2026-11-13) ----------------------------------------------------
+# Every list page reopens its last settings when reached by the nav (a bare URL); a URL that says
+# anything wins and becomes the remembered one. s.goto() forgets them first (web_check.Session),
+# so only these scenarios see a remembered page.
+
+def _nav_round_trip(s, label, path, away="/glossary"):
+    s.step(f"{label}: away by the nav", lambda p: p.locator(f"nav a[href='{away}']").click(timeout=3000), expect_nav=True)
+    s.step(f"{label}: back by the nav", lambda p: p.locator(f"nav a[href='{path}']").click(timeout=3000), expect_nav=True)
+
+
+def _wait_js(s, js, arg=None, timeout=8000):
+    try:
+        s.page.wait_for_function(js, arg=arg, timeout=timeout)
+        return True
+    except Exception:
+        return False
+
+
+_VALUE_IS = "([sel, want]) => document.querySelector(sel) && document.querySelector(sel).value === want"
+
+
+def _other_option(s, sel):
+    """First option of a select that is neither the current one nor 'All'."""
+    return s.page.evaluate("""sel => { const e = document.querySelector(sel);
+        return [...e.options].map(o => o.value).find(v => v !== e.value && v !== 'All' && v !== '') || null; }""", sel)
+
+
+def _remembers_select(s, label, path, sel, want, explicit_want, *, ready, gone=(), param="position"):
+    """Set `sel` to `want` on `path`, away and back by the nav: restored (the URL too, without
+    any `gone` param). Then `?<param>=<explicit_want>` wins and becomes the remembered one."""
+    ok = _wait_js(s, _VALUE_IS, [sel, want])
+    s.note(f"{label}: choice restored after the nav", None if ok else
+           f"{sel} = {s.page.locator(sel).input_value()!r}, want {want!r}")
+    left = [g for g in gone if g in s.page.url]
+    s.note(f"{label}: one-off params not restored", None if not left else s.page.url)
+    s.goto(path + "?" + urlencode({param: explicit_want}), check=False)
+    ready()
+    ok = _wait_js(s, _VALUE_IS, [sel, explicit_want])
+    s.note(f"{label}: explicit URL wins", None if ok else f"{sel} = {s.page.locator(sel).input_value()!r}")
+    _nav_round_trip(s, label, path)
+    ok = _wait_js(s, _VALUE_IS, [sel, explicit_want])
+    s.note(f"{label}: explicit URL becomes the remembered one", None if ok else
+           f"{sel} = {s.page.locator(sel).input_value()!r}")
+
+
+def players_remembers(s, w):
+    s.goto("/players", check=False)
+    if not _wait_js(s, "() => document.querySelectorAll('#f-position option').length > 1"):
+        return s.note("players: remembered", skipped="no positions")
+    s.step("players: position = Winger", lambda p: p.locator("#f-position").select_option(value="Winger", timeout=3000))
+    _nav_round_trip(s, "players", "/players")
+    s.note("players: URL restored", None if "position=Winger" in s.page.url else s.page.url)
+    _remembers_select(s, "players", "/players", "#f-position", "Winger", "Full Back",
+                      ready=lambda: _wait_js(s, "() => document.querySelectorAll('#f-position option').length > 1"))
+
+
+def physical_remembers(s, w):
+    s.goto(PH_PATH, check=False)
+    if not _ph_ready(s):
+        return s.note("physical: remembered", skipped="page did not draw")
+    s.step("physical: position = Winger", lambda p: p.locator("#f-position").select_option(value="Winger", timeout=3000))
+    s.step("physical: Performance view", lambda p: p.locator("#sq-view button[data-view=perf]").click(timeout=3000))
+    _nav_round_trip(s, "physical", PH_PATH)
+    _ph_ready(s)
+    s.note("physical: URL restored", None if "position=Winger" in s.page.url and "view=perf" in s.page.url else s.page.url)
+    s.note("physical: view restored", None if _wait_js(s, "() => !document.querySelector('#sq-perf').hidden") else "Physical view shown")
+    _remembers_select(s, "physical", PH_PATH, "#f-position", "Winger", "Centre Back", ready=lambda: _ph_ready(s))
+    s.note("physical: explicit URL drops the old view", None if "view=perf" not in s.page.url else s.page.url)
+
+
+def squads_remembers(s, w):
+    s.goto("/squads", check=False)
+    if not _wait_js(s, "() => document.querySelectorAll('#f-position option').length > 2"):
+        return s.note("squads: remembered", skipped="no positions")
+    want = _other_option(s, "#f-position")
+    s.step(f"squads: position = {want}", lambda p: p.locator("#f-position").select_option(value=want, timeout=3000))
+    _wait_js(s, "w => new URLSearchParams(location.search).get('position') === w", want)
+    _nav_round_trip(s, "squads", "/squads")
+    other = s.page.evaluate("""w => [...document.querySelectorAll('#f-position option')].map(o => o.value)
+        .find(v => v !== w && v !== 'All') || null""", want)
+    _remembers_select(s, "squads", "/squads", "#f-position", want, other,
+                      ready=lambda: _wait_js(s, "() => document.querySelectorAll('#f-position option').length > 2"))
+
+
+def scout_remembers(s, w):
+    s.goto(SR_PATH, check=False)
+    if not _sr_ready(s):
+        return s.note("scout reports: remembered", skipped="page did not draw")
+    s.step("scout reports: Verdict = Sign", lambda p: p.locator("#f-verdict").select_option(value="Sign", timeout=3000))
+    row = _sr_rows(s).first
+    if row.count():
+        s.step("scout reports: open a report", lambda p: row.locator("td").nth(0).click(timeout=3000))
+    _nav_round_trip(s, "scout reports", SR_PATH)
+    _sr_ready(s)
+    s.note("scout reports: URL restored", None if "verdict=Sign" in s.page.url else s.page.url)
+    other = _wait_js(s, "() => document.querySelectorAll('#f-verdict option').length > 2") and \
+        s.page.evaluate("() => [...document.querySelectorAll('#f-verdict option')].map(o => o.value).find(v => v !== 'Sign' && v !== 'All')")
+    _remembers_select(s, "scout reports", SR_PATH, "#f-verdict", "Sign", other or "Sign", ready=lambda: _sr_ready(s),
+                      gone=("open=",), param="verdict")
+
+
+def watchlist_remembers(s, w):
+    s.goto(WL_PATH, check=False)
+    if not _wl_ready(s):
+        return s.note("watchlist: remembered", skipped="watchlist empty")
+    first = "() => { const b = document.querySelector('#wl-status input'); return b && !b.checked; }"
+    s.step("watchlist: untick a status", lambda p: p.locator("#wl-status input").first.click(timeout=3000))
+    row = _wl_rows(s).first
+    if row.count():
+        s.step("watchlist: open a row", lambda p: row.locator("td").nth(0).click(timeout=3000))
+    url = s.page.url
+    _nav_round_trip(s, "watchlist", WL_PATH)
+    s.note("watchlist: status restored", None if _wait_js(s, first) and "status=" in s.page.url else f"{url} -> {s.page.url}")
+    s.note("watchlist: open row not restored", None if "open=" not in s.page.url else s.page.url)
+    s.goto(WL_PATH + "?money=1", check=False)
+    _wl_ready(s)
+    s.note("watchlist: explicit URL wins", None if "status=" not in s.page.url and
+           _wait_js(s, "() => document.querySelector('#wl-status input')?.checked") else s.page.url)
+    _nav_round_trip(s, "watchlist", WL_PATH)
+    s.note("watchlist: explicit URL becomes the remembered one",
+           None if "money=1" in s.page.url and "status=" not in s.page.url else s.page.url)
+
+
+def report_remembers(s, w):
+    """The season is remembered (not the player)."""
+    s.goto(REPORT_BASE, check=False)
+    _report_ready(s)
+    s.step("report: season = 2026/27", lambda p: p.locator("#rp-season").select_option(value="319", timeout=3000))
+    _nav_round_trip(s, "report", "/report")
+    s.note("report: season restored, not the player",
+           None if "season=319" in s.page.url and "player=" not in s.page.url else s.page.url)
+    _remembers_select(s, "report", "/report", "#rp-season", "319", "318",
+                      ready=lambda: _wait_js(s, "() => document.querySelectorAll('#rp-season option').length > 1"),
+                      gone=("player=", "position="), param="season")
+
+
+def club_vs_league_remembers(s, w):
+    s.goto("/club-vs-league", check=False)
+    ready = lambda: _wait_js(s, "() => document.querySelectorAll('#cv-group option').length > 1")
+    if not ready():
+        return s.note("club vs league: remembered", skipped="no positions")
+    want = _other_option(s, "#cv-group")
+    s.step(f"club vs league: position = {want}", lambda p: p.locator("#cv-group").select_option(value=want, timeout=3000))
+    _nav_round_trip(s, "club vs league", "/club-vs-league")
+    s.note("club vs league: URL restored", None if "group=" in s.page.url else s.page.url)
+    other = s.page.evaluate("""w => [...document.querySelectorAll('#cv-group option')].map(o => o.value)
+        .find(v => v !== w && v !== '') || null""", want)
+    _remembers_select(s, "club vs league", "/club-vs-league", "#cv-group", want, other, ready=ready,
+                      gone=("back=",), param="group")
+
+
+def club_vs_league_gc_one_decimal(s, w):
+    """Owner 2026-11-13: the Gap closed mini table shows one decimal and every row adds up on the
+    numbers shown (Gap = Top 6 - Ours, Target - Ours, Counted); the total keeps the whole %."""
+    s.goto("/club-vs-league?group=Full+Back", check=False)
+    if not _wait_js(s, "() => document.querySelector('#cv-how-gc table.cv-gx')", timeout=15000):
+        return s.note("club vs league: one-decimal mini table", skipped="no example for Full Back")
+    s.step("club vs league: open How this is worked out", lambda p: p.locator("#cv-how summary").click(timeout=3000))
+    rows = s.page.evaluate("""() => [...document.querySelectorAll('#cv-how-gc table.cv-gx tbody tr:not(.cv-gx-more)')]
+        .map(tr => [...tr.querySelectorAll('td.n')].map(td => td.innerText.trim()))""")
+    bad = []
+    num = lambda t: float(t.split()[0].replace("−", "-"))      # noqa: E731
+    for r in rows:
+        if len(r) != 6 or not all(re.fullmatch(r"−?\d+\.\d", c.split()[0]) for c in r):
+            bad.append(r)
+            continue
+        o, t6, g, tg, d, c = map(num, r)
+        if abs(g - (t6 - o)) > 0.1 or abs(d - (tg - o)) > 0.1 or abs(c - min(max(d, 0), g)) > 0.1:
+            bad.append(r)
+    s.note("club vs league: mini table one decimal, rows add up", None if rows and not bad else str(bad or rows)[:200])
+    total = s.page.locator("#cv-how-gc").inner_text()
+    s.note("club vs league: total keeps the whole %", None if re.search(r"= \d+%", total) else total[-200:])
+
+
+# -- Physical: Find a player lists the plotted players (owner 2026-11-13) ----------------------
+
+def physical_find_lists_players(s, w):
+    """Clicking the empty box lists the plotted players (name · club, A-Z); typing narrows it;
+    picking one rings and names him on the chart."""
+    s.goto(PH_PATH + "?season=319&league=4&position=Centre+Back", check=False)
+    if not _ph_ready(s):
+        return s.note("physical: find list", skipped="page did not draw")
+    items = s.page.locator("#find-results button")
+    s.step("physical: click the empty find box", lambda p: p.locator("#f-find").click(timeout=3000))
+    s.note("physical: empty box lists players", None if s.page.locator("#find-results:not([hidden])").count()
+           and items.count() >= 5 else f"{items.count()} listed")
+    names = [t.split(" · ")[0].strip() for t in items.all_inner_texts()]
+    s.note("physical: list sorted by name", None if names == sorted(names, key=str.lower) else str(names[:5]))
+    plotted = s.page.locator("#sc-plot .pt:not(.t5s)").count()
+    s.note("physical: one row per plotted player", None if items.count() == plotted else f"{items.count()} vs {plotted} dots")
+    s.note("physical: list scrolls", None if s.page.locator("#find-results").evaluate(
+        "e => getComputedStyle(e).overflowY") in ("auto", "scroll") else "no scroll")
+    if items.count() < 3:
+        return
+    target = names[2]
+    probe = target[:3]
+    s.step("physical: type to narrow", lambda p: p.locator("#f-find").fill(probe, timeout=3000))
+    left = [t.split(" · ")[0] for t in items.all_inner_texts()]
+    s.note("physical: typing filters the list", None if left and all(probe.lower() in n.lower() for n in left)
+           and len(left) <= len(names) else str(left[:5]))
+    s.step("physical: clear", lambda p: p.locator("#f-find").fill("", timeout=3000))
+    s.step("physical: click the box again", lambda p: p.locator("#f-find").click(timeout=3000))
+    s.step("physical: pick a player", lambda p: items.nth(2).click(timeout=3000))
+    s.note("physical: box holds his name", None if s.page.locator("#f-find").input_value() == target
+           else s.page.locator("#f-find").input_value())
+    s.note("physical: list closes", None if s.page.locator("#find-results[hidden]").count() else "still open")
+    found = s.page.locator("#sc-plot text.ptl.found").all_text_contents()
+    s.note("physical: picked player ringed and named", None if s.page.locator("#sc-plot circle.ring").count() >= 1
+           and target in found else f"found labels {found}")
+
+
 _COMMON = {"exercise": True, "scenarios": []}
 
 PAGES = {
@@ -2015,36 +3310,44 @@ PAGES = {
         players_first_view, players_layout_widths, players_exercise_controls, players_position_season_open_back,
         players_filter_open_back, players_leagues, players_chip_remove,
         players_search_other_position, players_clear_search, players_sort, players_money,
-        players_metric_filters, players_assessed, players_download, players_history_and_url]},
+        players_metric_filters, players_assessed, players_download, players_history_and_url, players_remembers]},
     "card": {"path": "/player/39154/5/318", "exercise": True, "scenarios": [
         card_back_link, card_money_switch, card_rank_as, card_zones, card_squad_season,
-        card_watchlist, card_radars, card_rated_tables, card_extra_tables, card_other_players]},
+        card_watchlist, card_radars, card_rated_tables, card_extra_tables, card_strengths_no_overlap,
+        card_other_players]},
     "compare": {"path": "/compare?season=318&position=Winger", "exercise": True, "scenarios": [
         compare_three_players_every_width, compare_defaults_fill_the_url,
         compare_position_season_back_forward, compare_pick_from_pool_list,
         compare_search_this_position_only, compare_none_in_c, compare_name_opens_card,
-        compare_zones_and_money, compare_special_cases, compare_more_filters, compare_radars]},
+        compare_zones_and_money, compare_special_cases, compare_more_filters, compare_radars,
+        compare_remembers_players, compare_download]},
     "report": {"path": REPORT_BASE, "exercise": True, "scenarios": [
-        report_empty_state, report_cases, report_search_pick, report_form_live, report_downloads,
-        report_season_switch, report_history_and_url, report_layout_widths, report_radar]},
+        report_empty_state, report_cases, report_search_pick, report_scout_verdicts,
+        report_empty_search_lists, report_form_live, report_downloads,
+        report_season_switch, report_history_and_url, report_layout_widths, report_radar,
+        report_one_sheet, report_draft, report_remembers]},
     "squads": {"path": "/squads", "exercise": False, "scenarios": [
         squads_first_view, squads_layout_widths, squads_exercise_controls,
         squads_league_club_open_back, squads_show, squads_more_filters, squads_row_message,
         squads_thin_and_sort, squads_search, squads_download, squads_history_and_url,
-        squads_scroll_draws_more]},
+        squads_scroll_draws_more, squads_remembers]},
     "scout-reports": {"path": "/scout-reports", "exercise": True, "scenarios": [
-        scout_first_view, scout_filters_url, scout_search_and_age, scout_tabs, scout_open_report,
-        scout_name_opens_card, scout_sort]},
+        scout_first_view, scout_filters_url, scout_squad_role, scout_search_and_age, scout_tabs, scout_open_report,
+        scout_name_opens_card, scout_sort, scout_remembers]},
     "watchlist": {"path": "/watchlist", "exercise": True, "scenarios": [
         watchlist_first_view, watchlist_status_filter, watchlist_money, watchlist_editor,
-        watchlist_name_opens_card, watchlist_download, watchlist_sort]},
+        watchlist_name_opens_card, watchlist_download, watchlist_sort, watchlist_remembers]},
     "assess": {"path": "/assess", "scenarios": []},
     "signoff": {"path": "/signoff", "scenarios": []},
     "physical": {"path": "/physical", "exercise": False, "scenarios": [
         physical_first_view, physical_exercise_controls, physical_layout_widths, physical_filters_back_forward,
         physical_no_data_season, physical_thin_pool, physical_show_all_and_orient,
-        physical_scatter_axes, physical_squad_sort, physical_name_opens_card, physical_additions]},
-    "club-vs-league": {"path": "/club-vs-league", "exercise": True, "scenarios": [club_vs_league]},
+        physical_scatter_axes, physical_squad_sort, physical_name_opens_card, physical_additions,
+        physical_squad_download, physical_performance_view, physical_two_metrics,
+        physical_reversed_axis, physical_min_minutes, physical_goalkeeper_row, physical_remembers,
+        physical_find_lists_players, info_bar_dates]},
+    "club-vs-league": {"path": "/club-vs-league", "exercise": True, "scenarios": [club_vs_league, club_vs_league_gap_closed, club_vs_league_pick_player, club_vs_league_phase_and_example, club_vs_league_sort_every_column, club_vs_league_remembers,
+        club_vs_league_gc_one_decimal]},
     "rating-reference": {"path": "/rating-reference", "exercise": True, "scenarios": [reference_rating]},
     "playing-styles": {"path": "/playing-styles", "exercise": True, "scenarios": [reference_styles]},
     "glossary": {"path": "/glossary", "exercise": True, "scenarios": [reference_glossary]},

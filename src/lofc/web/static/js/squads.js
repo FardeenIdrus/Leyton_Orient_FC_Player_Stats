@@ -2,7 +2,7 @@
 // row (every row, tile, option list and cell text comes from the API, which calls the same
 // Python as the Streamlit page). The URL query string is the whole page state: shareable,
 // back/forward restore it.
-import {api, esc, chip} from './common.js';
+import {api, esc, chip, rememberState, restoreState} from './common.js';
 
 const $ = id => document.getElementById(id);
 const DASH = '—';
@@ -171,6 +171,7 @@ async function load() {
                      sort: p.state.sort || '', dir: p.state.dir});
   const qs = toQuery(st);
   if (qs !== location.search) history.replaceState({}, '', location.pathname + qs);
+  rememberState('squads');      // owner 2026-11-13: the nav link reopens these settings
   draw();
 }
 
@@ -244,6 +245,7 @@ function bind() {
 }
 
 (function init() {
+  restoreState('squads');       // a bare /squads (the nav link) takes the last settings
   st = fromUrl();
   bind();
   load().then(() => {

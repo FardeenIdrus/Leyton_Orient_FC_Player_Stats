@@ -28,6 +28,11 @@ FILTER_KEYS = {"q": "search", "league": "league", "max_age": "max_age", "foot": 
                "club": "club", "seen": "observation", "data": "in_our_data",
                "dvs": "data_vs_scout"}
 MAX_AGE_MIN, MAX_AGE_MAX = 16, 40          # the Streamlit number input; 40 = no filter
+# Web only (owner, 2026-11-13): Squad role, ?role=. The scouting form's own values, in its
+# order; a value the form gains later is listed after them (the list is built from the data).
+SQUAD_ROLE_ORDER = ("Core (>70% of Minutes)", "Support (21-69% of Minutes)",
+                    "Fringe (<20% of Minutes)", "Emerging Talent (Ready in Next 12-18 Months)",
+                    "Below the Required Standard for LOFC")
 
 
 def _sr():
@@ -148,7 +153,16 @@ def filter_options(frame: pd.DataFrame) -> dict[str, list[str]]:
         "Seen": sr._options(frame, "observation"),
         "Our data": ["All", "In our data", "Not in our data"],
         "Data vs scout": list(sr.DATA_VS_SCOUT_GROUPS),
+        "Squad role": squad_role_options(frame),
     }
+
+
+def squad_role_options(frame: pd.DataFrame) -> list[str]:
+    """"All" + the squad roles present, in the form's order (unknown ones after, A-Z)."""
+    have = ({str(v) for v in frame["squad_role"].dropna() if str(v).strip()}
+            if "squad_role" in frame.columns else set())
+    known = [r for r in SQUAD_ROLE_ORDER if r in have]
+    return ["All"] + known + sorted(have - set(known))
 
 
 def parse_max_age(value) -> int | None:
@@ -168,7 +182,11 @@ def apply_filters(frame: pd.DataFrame, query: dict) -> pd.DataFrame:
     sr = _sr()
     kw = {arg: (query.get(key) or None) for key, arg in FILTER_KEYS.items()}
     kw["max_age"] = parse_max_age(query.get("max_age"))
-    return sr.filter_reports(frame, **kw)
+    out = sr.filter_reports(frame, **kw)
+    role = query.get("role")
+    if role and role != "All" and "squad_role" in out.columns:
+        out = out[out["squad_role"] == role]
+    return out
 
 
 def display_table(view: pd.DataFrame, names: dict) -> pd.DataFrame:

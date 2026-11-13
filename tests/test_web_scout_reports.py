@@ -219,3 +219,20 @@ def test_sync_clears_the_web_caches(monkeypatch, fake):
     monkeypatch.setattr(api, "_after_sync", lambda: calls.append(1))
     _client().post("/api/scout-reports/sync", headers=H)
     assert calls == [1]
+
+
+def test_squad_role_filter_and_options(monkeypatch):
+    raw = _raw()
+    raw["squad_role"] = ["Core (>70% of Minutes)", "Fringe (<20% of Minutes)",
+                         "Core (>70% of Minutes)", None]
+    bundle = api.build_bundle(raw, 318, 319, {4: "League One", 903: "Scottish Championship"},
+                              _scorecards(), _rated_rows())
+    monkeypatch.setattr(api, "_bundle", lambda: bundle)
+    monkeypatch.setattr(api, "_synced_at", lambda: None)
+    c = _client()
+    d = c.get("/api/scout-reports").json()
+    assert d["options"]["Squad role"] == ["All", "Core (>70% of Minutes)", "Fringe (<20% of Minutes)"]
+    d = c.get("/api/scout-reports?role=Core%20(%3E70%25%20of%20Minutes)").json()
+    assert [r["id"] for r in d["rows"]] == ["s1", "s3"]
+    assert d["caption"].startswith("2 of 4 reports")
+    assert "f-role" in c.get("/scout-reports").text

@@ -47,3 +47,35 @@ def latest_season_id(engine) -> int | None:
     """The season the Players page opens on (`seasons.default_season_id` = the newest held)."""
     value = pd.read_sql("SELECT MAX(season_id) AS s FROM player_metrics_neutral", engine)["s"][0]
     return int(value) if pd.notna(value) else None
+
+
+# The main per-league pull steps (`ingest.impect` / `ingest.skillcorner_api` record one row per
+# league). The pipeline's whole-step rows ("Pull Impect player data", "Pull SkillCorner physical
+# data (platform)") end with "partial" when any league failed, so they would hide a pull that did
+# land for most leagues.
+PULL_STEPS = {"Impect": "Pull Impect", "SkillCorner": "Pull SkillCorner"}
+
+
+def pull_dates(engine) -> dict:
+    """Provider -> date of the latest SUCCESSFUL main pull (None if never, or no table)."""
+    out = {k: None for k in PULL_STEPS}
+    try:
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            rows = conn.execute(text(
+                "SELECT step, MAX(finished_at) FROM pipeline_runs WHERE status = 'success' "
+                "AND step IN ('Pull Impect', 'Pull SkillCorner') GROUP BY step")).fetchall()
+    except Exception:                                           # noqa: BLE001 (not migrated)
+        return out
+    by_step = {s: w for s, w in rows}
+    for name, step in PULL_STEPS.items():
+        when = by_step.get(step)
+        if when is not None:
+            out[name] = pd.Timestamp(when).date()
+    return out
+
+
+def pull_date_items(dates: dict) -> list[str]:
+    """["Impect <b>13 Nov</b>", "SkillCorner <b>13 Nov</b>"]; "—" for a provider never pulled."""
+    return [f"{name} <b>{'—' if d is None else f'{d.day} {d:%b}'}</b>"
+            for name, d in ((k, dates.get(k)) for k in PULL_STEPS)]

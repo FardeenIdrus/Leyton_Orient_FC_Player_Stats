@@ -564,3 +564,44 @@ export function onStateChange(fn) {
   window.addEventListener('popstate', h);
   return () => window.removeEventListener('popstate', h);
 }
+
+// ---- remembered page settings (owner 2026-11-13) --------------------------------------------
+// Each list page saves its query string in this browser ('lofc.<page>.last'). A bare page URL
+// (the nav link) reopens it; a URL that says anything wins and becomes the saved one. Storage
+// may be off or throw: then nothing is remembered and every page works as before.
+export const lastKey = page => `lofc.${page}.last`;
+const _store = s => { if (s !== undefined) return s; try { return window.localStorage; } catch (e) { return null; } };
+
+/** `search` without one-off params: `back` and `drop` removed, or only `keep` kept. */
+export function stateToKeep(search, {drop = [], keep = null} = {}) {
+  const q = new URLSearchParams(search || ''), out = new URLSearchParams();
+  for (const [k, v] of q) if (k !== 'back' && !drop.includes(k) && (!keep || keep.includes(k))) out.append(k, v);
+  const t = out.toString();
+  return t ? '?' + t : '';
+}
+
+/** Save the page's settings ('' = its defaults). */
+export function rememberState(page, {drop, keep, search, store} = {}) {
+  const s = _store(store);
+  if (!s) return;
+  try { s.setItem(lastKey(page), stateToKeep(search ?? window.location.search, {drop, keep})); }
+  catch (e) { /* storage off: not remembered */ }
+}
+
+/** The saved query string, or ''. */
+export function recallState(page, {store} = {}) {
+  const s = _store(store);
+  if (!s) return '';
+  try { const v = s.getItem(lastKey(page)); return typeof v === 'string' && v.startsWith('?') ? v : ''; }
+  catch (e) { return ''; }
+}
+
+/** A bare URL takes the saved settings (no extra history entry). True when it did. */
+export function restoreState(page, {store, loc, hist} = {}) {
+  const L = loc || window.location, H = hist || window.history;
+  if (L.search) return false;
+  const v = recallState(page, {store});
+  if (!v) return false;
+  H.replaceState(H.state ?? {}, '', L.pathname + v + (L.hash || ''));
+  return true;
+}

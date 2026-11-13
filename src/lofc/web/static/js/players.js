@@ -1,7 +1,7 @@
 // Players page. Fetches JSON from /api/players* and renders it; computes no football number
 // (every figure, caption and ordering comes from the API, which calls the same Python as
 // Streamlit). The URL query string is the whole page state: shareable, back/forward restore.
-import {api, esc, dash, fmtInt} from './common.js';
+import {api, esc, dash, fmtInt, rememberState, restoreState} from './common.js';
 
 const $ = id => document.getElementById(id);
 const md = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
@@ -72,6 +72,7 @@ function commit({replace = false} = {}) {
   const qs = toQuery(st);
   if (qs !== location.search)
     history[replace ? 'replaceState' : 'pushState']({}, '', location.pathname + qs);
+  rememberState('players');
   refresh();
 }
 
@@ -218,6 +219,7 @@ async function refresh() {
   if (mine !== seq) return;
   lastPayload = payload;
   render(payload);
+  rememberState('players');     // owner 2026-11-13: the nav link reopens these settings
 }
 
 function fail(mine, e) {
@@ -523,6 +525,7 @@ function pickPlayer(r) {
 (async function init() {
   // The three first-load requests run side by side (the server validates the query itself);
   // the answers are used as long as the URL was already in its normal form.
+  restoreState('players');      // a bare /players (the nav link) takes the last settings
   const first = location.search;
   const optsP = api('/api/players/options');
   prefetch = {qs: first, spec: api('/api/players/metrics' + first), list: api('/api/players' + first)};

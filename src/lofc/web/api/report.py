@@ -1,25 +1,32 @@
 """The Report page: page shell + JSON endpoints. Every figure comes from `lofc.core.report_page`
-(the view of `report.data.build`, the function Streamlit's Report page calls); the downloads are
-`report.render.to_html`, the same document Streamlit downloads. Nothing here is stored.
+(the view of `report.data.build`, the function Streamlit's Report page calls). Nothing here is
+stored. Both downloads are built in the browser from the page's own preview (owner, 2026-11-13:
+the file is what the user sees, and the photo never leaves the browser), so there is no
+download route here; Streamlit keeps its own document.
 
     GET  /report?player=&competition=&season=           page shell
     GET  /api/report/{p}/{c}/{s}                        the report + the form's criteria
                                                         ({"error": {kind, text}} when none)
+                                                        + "scouts": each scout's latest verdict
+    GET  /api/report/{p}/{c}/{s}?variant=data_only      the data-only report (no form, no scouts)
     POST /api/report/{p}/{c}/{s}           {form}       the report with the author's input
-    GET  /api/report/{p}/{c}/{s}/download?variant=data_only|full   the document (HTML)
-    POST /api/report/{p}/{c}/{s}/download  {form}       the document with the author's input
 
-Player search is the Players page's `/api/players/search?season=&q=` (the same season-wide
-index Streamlit's Report page searches). POSTs need the session and the X-LOFC-Request header
+    GET  /api/report/players?season=                    every player of the season, A-Z
+
+Player search (owner 2026-11-13): the empty box lists every player of the season A-Z (the
+season-wide index Streamlit's Report page and `/api/players/search` use); typing filters the
+same list in the browser on the index's own search key. POSTs need the session and the X-LOFC-Request header
 (`write_user`) although they write nothing: the form's text never goes in a URL or a log.
 """
 from __future__ import annotations
 
+import functools
+import json
 import logging
 import threading
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
@@ -82,16 +89,48 @@ def _page_answer(build) -> JSONResponse:
     return JSONResponse(data)
 
 
+@functools.lru_cache(maxsize=4)
+def _players_json(version: str, season_id: int) -> bytes:
+    from lofc.core import players_pool as pp
+    return json.dumps({"season": season_id, "rows": pp.season_players(season_id)},
+                      ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def _data_version() -> str:
+    from lofc.dashboard import loaders as L
+    return L.data_version(with_scorecards=True)
+
+
+@router.get("/api/report/players")
+async def season_players(request: Request, user: WebUser = Depends(current_user)):
+    """Every player of the season A-Z (owner 2026-11-13: the empty search box lists them all;
+    typing filters the same list in the browser). Built once per data version and season."""
+    try:
+        season = int(request.query_params.get("season", ""))
+    except ValueError:
+        return JSONResponse({"error": "season must be a number"}, status_code=400)
+    body = await run_in_threadpool(lambda: _players_json(_data_version(), season))
+    return Response(body, media_type="application/json")
+
+
 @router.get("/api/report/{player_id}/{competition_id}/{season_id}")
-async def report_json(player_id: int, competition_id: int, season_id: int,
+async def report_json(player_id: int, competition_id: int, season_id: int, request: Request,
                       user: WebUser = Depends(current_user)):
+    data_only = request.query_params.get("variant") == "data_only"
+
     def build():
         base = _base(player_id, competition_id, season_id)
         if base is None:
             return None
         core = _core()
+        if data_only:     # numbers only (owner): no scout verdicts
+            from lofc.report.data import as_data_only
+            out = core.view(as_data_only(base), _ids(player_id, competition_id, season_id))
+            out["scouts"] = []
+            return out
         out = core.view(base, _ids(player_id, competition_id, season_id))
         out["form"] = core.form_spec(base.position)
+        out["scouts"] = core.player_scout_verdicts(player_id)
         return out
     return await run_in_threadpool(_page_answer, build)
 
@@ -114,52 +153,10 @@ async def report_preview(player_id: int, competition_id: int, season_id: int, re
             return None
         from lofc.report.data import with_authored
         shown = with_authored(base, authored) if authored else base
-        return _core().view(shown, _ids(player_id, competition_id, season_id))
+        out = _core().view(shown, _ids(player_id, competition_id, season_id))
+        out["scouts"] = _core().player_scout_verdicts(player_id)
+        return out
     return await run_in_threadpool(_page_answer, build)
-
-
-def _document(base, authored, data_only: bool) -> tuple[str, str]:
-    core = _core()
-    note = core.not_rated_note(base)
-    shown, html, data_only_html = core.variants(base, authored, not_rated=note)
-    name = core.safe_filename(shown.player_name, shown.season_label)
-    if data_only:
-        return core.data_only_filename(name), data_only_html
-    return name, html
-
-
-def _download(name: str, html: str) -> Response:
-    from lofc.core.card import csv_disposition
-    return Response(html.encode("utf-8"), media_type="text/html; charset=utf-8",
-                    headers={"Content-Disposition": csv_disposition(name)})
-
-
-@router.get("/api/report/{player_id}/{competition_id}/{season_id}/download")
-async def report_download(player_id: int, competition_id: int, season_id: int, request: Request,
-                          user: WebUser = Depends(current_user)):
-    data_only = request.query_params.get("variant") == "data_only"
-
-    def build():
-        base = _base(player_id, competition_id, season_id)
-        return None if base is None else _document(base, None, data_only)
-    got = await run_in_threadpool(build)
-    if got is None:
-        raise HTTPException(status_code=404, detail="no_such_player_season")
-    return _download(*got)
-
-
-@router.post("/api/report/{player_id}/{competition_id}/{season_id}/download")
-async def report_download_authored(player_id: int, competition_id: int, season_id: int,
-                                   request: Request, user: WebUser = Depends(write_user)):
-    body = await _body(request)
-
-    def build():
-        base, authored = _authored_view(user, player_id, competition_id, season_id, body)
-        return None if base is None else _document(base, authored, False)
-    got = await run_in_threadpool(build)
-    if got is None:
-        raise HTTPException(status_code=404, detail="no_such_player_season")
-    return _download(*got)
 
 
 def warm_report_caches() -> None:

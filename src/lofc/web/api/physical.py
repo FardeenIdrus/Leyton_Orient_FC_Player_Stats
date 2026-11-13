@@ -2,9 +2,11 @@
 `lofc.core.physical_page` over the frames the ratings and the card read (SkillCorner API data,
 refreshed with each pipeline run); this module only turns the URL into a request.
 
-    GET /physical?season=&league=&position=&metric=&x=&y=&sort=&dir=   page shell
-    GET /api/physical?season=&league=&position=     filters, the league-position pool (leaders +
-                                                    scatter) and Leyton Orient's squad
+    GET /physical?season=&league=&position=&metric=&x=&y=&min=&sort=&dir=&view=   page shell
+    GET /api/physical?season=&league=&position=&x=&y=&age=&min=     filters, the league-position pool (leaders +
+                                                    scatter) and Leyton Orient's squad (both
+                                                    views: Physical and Performance)
+    GET /api/physical/squad.xlsx?season=            our current squad as a workbook (owner R5)
 
 `league` is a competition id. Metric, scatter axes and the squad sort are drawn in the browser
 from the one answer (every value and order is in it), so they need no request.
@@ -18,7 +20,7 @@ import types
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from lofc.core import physical_page as core
 from lofc.core import webcache
@@ -39,11 +41,27 @@ def _sources():
     return types.SimpleNamespace(
         seasons=pp.season_options, default_season=pp.default_season,
         candidates=cmp._candidates, values=cmp._metric_values, pcts=cmp._sc_pcts,
+        perf_pcts=cmp._sc_pcts,                 # the card's scorecard percentiles (all metrics)
         squad=squad.squad, rated_rows=squad.rated_rows,
         has_physical=detail_store.league_has_physical,
         league_names=L.competition_name_by_id,
         cards=lambda position, sid: _cards_for(position, sid),
-        match_counts=_match_counts)
+        match_counts=_match_counts,
+        l1_rank=lambda pid, comp, pos, sid: _l1_rank(pid, comp, pos, sid),
+        availability=_availability)
+
+
+def _l1_rank(pid: int, comp: int, position: str, season_id: int) -> tuple:
+    """(rank, n) among rated players of his league and position: the card's `rank_in_pool`."""
+    from lofc.model.scorecard import rank_in_pool
+    return rank_in_pool(_cards_for(position, season_id), int(pid), int(comp), int(season_id),
+                        position)
+
+
+def _availability(pid: int, comp: int, season_id: int, minutes):
+    from lofc.core import card
+    from lofc.dashboard import loaders as L
+    return card.availability_value(L.get_engine(), int(pid), int(comp), int(season_id), minutes)
 
 
 @webcache.versioned(maxsize=4)
@@ -94,6 +112,15 @@ def _squad(season_id: int) -> dict:
     return {"title": "Leyton Orient squad", "columns": core.RATED, "rows": rows}
 
 
+@webcache.versioned(maxsize=4)
+def _perf(season_id: int) -> dict:
+    """The squad card's Performance view (owner 2026-11-13)."""
+    src = _sources()
+    name = next((x["name"] for x in src.seasons() if int(x["id"]) == season_id), str(season_id))
+    return core.performance_rows(src.squad(), src.rated_rows(season_id), src.perf_pcts(season_id),
+                                 season_id, src.league_names(), _href, season_name=name)
+
+
 @webcache.versioned(maxsize=128)
 def _pool(season_id: int, league: int, position: str) -> dict:
     src = _sources()
@@ -115,7 +142,7 @@ def _href(p: int, c: int, s: int) -> str:
 
 
 def clear() -> None:
-    for fn in (_counts, _leagues, _squad, _pool):
+    for fn in (_counts, _leagues, _squad, _perf, _pool):
         fn.clear()
 
 
@@ -127,7 +154,8 @@ def _int(v):
         return None
 
 
-def page_json(season=None, league=None, position=None, x=None, y=None, age=None) -> dict:
+def page_json(season=None, league=None, position=None, x=None, y=None, age=None,
+              min_minutes=None) -> dict:
     src = _sources()
     seasons = src.seasons()
     ids = [int(s["id"]) for s in seasons]
@@ -146,7 +174,11 @@ def page_json(season=None, league=None, position=None, x=None, y=None, age=None)
            "rating": {"key": core.RATING_KEY, "label": "Physical rating",
                       "definition": "The club's Physical rating (1–5) against this league and position."},
            "age_bands": [{"key": k, "label": label} for k, label in core.AGE_BANDS],
-           "scatter": None}
+           "scatter": None, "perf": None}
+    mm = core.min_minutes(min_minutes)
+    # owner 2026-11-13: "Min minutes" is a slider, 450 up to the plotted pool's most minutes
+    out["min_range"] = {"min": core.MIN_MINUTES[0], "max": max(core.MIN_MINUTES[0], mm), "step": core.MINUTES_STEP}
+    out["filters"]["min"] = mm
     bands = {k for k, _ in core.AGE_BANDS}
     out["filters"]["age"] = age if age in bands else ""
     if not leagues:
@@ -165,9 +197,11 @@ def page_json(season=None, league=None, position=None, x=None, y=None, age=None)
     out["pool"] = pool
     xk = x if x in core.KEYS else core.DEFAULT_X
     yk = y if y in core.KEYS else core.DEFAULT_Y
-    out["scatter"] = dict(core.scatter_summary(pool["players"], xk, yk, out["filters"]["age"]),
-                          x=xk, y=yk)
+    out["min_range"]["max"] = max(mm, core.minutes_max(pool["players"], xk, yk, out["filters"]["age"]))
+    out["scatter"] = dict(core.scatter_summary(pool["players"], xk, yk, out["filters"]["age"], mm),
+                          x=xk, y=yk, sub=f"{pool['title']} · {name} · {mm}+ minutes")
     out["squad"] = dict(_squad(sid), sub=f"{name} · percentile vs his league and position")
+    out["perf"] = dict(_perf(sid), sub=f"{name} · rated players · percentile vs his league and position")
     return out
 
 
@@ -180,8 +214,35 @@ def _default_position() -> str:
 async def physical_json(request: Request, user: WebUser = Depends(current_user)):
     q = request.query_params
     data = await run_in_threadpool(page_json, q.get("season"), q.get("league"), q.get("position"),
-                                   q.get("x"), q.get("y"), q.get("age"))
+                                   q.get("x"), q.get("y"), q.get("age"), q.get("min"))
     return JSONResponse(data)
+
+
+def squad_workbook(season=None) -> tuple[bytes, str]:
+    """The "Download squad (Excel)" workbook for the season (the page's default if none) and
+    its file name. Ratings, rank and availability from the frames the page and the card read."""
+    src = _sources()
+    seasons = src.seasons()
+    ids = [int(s["id"]) for s in seasons]
+    sid = _int(season)
+    if sid not in ids:
+        sid = src.default_season(ids)
+    name = next(s["name"] for s in seasons if int(s["id"]) == sid)
+    rows = core.squad_export_rows(
+        src.squad(), src.rated_rows(sid),
+        lambda p, c, pos: src.l1_rank(p, c, pos, sid),
+        lambda p, c, m: src.availability(p, c, sid, m))
+    return core.squad_xlsx(rows), f"Leyton Orient squad {name.replace('/', '-')}.xlsx"
+
+
+@router.get("/api/physical/squad.xlsx")
+async def physical_squad_xlsx(request: Request, user: WebUser = Depends(current_user)):
+    data, filename = await run_in_threadpool(squad_workbook, request.query_params.get("season"))
+    return Response(data, media_type=XLSX,
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 # --- warm-up ----------------------------------------------------------------------------------
@@ -201,6 +262,7 @@ def warm_physical() -> None:
             if not leagues:
                 continue
             _squad(sid)
+            _perf(sid)
             for c in leagues:
                 for p in core.positions():
                     _pool(sid, c, p)

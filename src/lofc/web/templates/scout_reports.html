@@ -24,10 +24,11 @@
         <div class="f f-age"><label for="f-max_age">Max age</label>
           <input class="ctl num" id="f-max_age" name="max_age" type="number" min="16" max="40" step="1" value="40"></div>
         <div class="f f-foot"><label for="f-foot">Foot</label><select class="ctl" id="f-foot" name="foot"></select></div>
+        <div class="f f-role"><label for="f-role">Squad role</label><select class="ctl" id="f-role" name="role" data-label="Squad role"></select></div>
       </div>
       <div class="fl sr-row2">
         {% for key, label in [("scout", "Scout"), ("verdict", "Verdict"), ("grade", "Grade"), ("position", "Position"), ("club", "Club"), ("seen", "Seen"), ("data", "Our data"), ("dvs", "Data vs scout")] %}
-        <div class="f"><label for="f-{{ key }}">{{ label }}</label><select class="ctl" id="f-{{ key }}" name="{{ key }}" data-label="{{ label }}"></select></div>
+        <div class="f f-{{ key }}"><label for="f-{{ key }}">{{ label }}</label><select class="ctl" id="f-{{ key }}" name="{{ key }}" data-label="{{ label }}"></select></div>
         {% endfor %}
       </div>
     </div>

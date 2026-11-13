@@ -249,7 +249,60 @@ def view(d: D.ReportData, ids: dict | None = None) -> dict:
         "psych_caption": (f"Band: {d.authored.psych_band:.2f}" if d.authored
                           and d.authored.psych_band is not None else "Band: —"),
         "filename": safe_filename(d.player_name, d.season_label),
+        "data_only_filename": data_only_filename(safe_filename(d.player_name, d.season_label)),
     }
+
+
+# =============================== scout verdicts (owner, 2026-11-13) ===============================
+_VERDICT_TONES = {"Sign": "positive", "Don't sign": "negative",
+                  "Monitor": "neutral", "Monitor Priority": "neutral"}
+
+
+def _day(v) -> str:
+    """"12 Sep 2026", or "—"."""
+    import pandas as pd
+    if v is None or pd.isna(v):
+        return DASH
+    t = pd.Timestamp(v)
+    return f"{t.day} {t:%b %Y}"
+
+
+def scout_verdicts(rows) -> list[dict]:
+    """Each scout's LATEST report on one player: {scout, verdict, date, tone}, newest first.
+    "Latest" is by fixture date -- the date the Scout reports page sorts by (its "Watched")
+    -- then submission date. Reports withdrawn from the sheet (`missing_since`) are ignored.
+    Tone: Sign positive, Don't sign negative, Monitor / Monitor Priority neutral, else other."""
+    import pandas as pd
+    if rows is None or rows.empty:
+        return []
+    live = rows[rows["missing_since"].isna()] if "missing_since" in rows.columns else rows
+    if live.empty:
+        return []
+    live = live.assign(
+        _fx=pd.to_datetime(live["fixture_date"], errors="coerce"),
+        _sub=pd.to_datetime(live["submitted_at"], errors="coerce"),
+        _scout=live["scout"].fillna(DASH).astype(str))
+    live = live.sort_values(["_fx", "_sub"], ascending=False, na_position="last", kind="stable")
+    out = []
+    for _, r in live.drop_duplicates("_scout", keep="first").iterrows():
+        verdict = r["verdict"] if isinstance(r["verdict"], str) and r["verdict"].strip() else None
+        out.append({"scout": r["_scout"], "verdict": verdict.strip() if verdict else DASH,
+                    "date": _day(r["fixture_date"]),
+                    "tone": _VERDICT_TONES.get(verdict.strip() if verdict else "", "other")})
+    return out
+
+
+def scout_verdicts_from_db(engine, player_id: int) -> list[dict]:
+    """`scout_verdicts` of every report linked to this player in the scout_reports table."""
+    import pandas as pd
+    return scout_verdicts(pd.read_sql(
+        "SELECT scout, verdict, fixture_date, submitted_at, missing_since "
+        "FROM scout_reports WHERE player_id = %(p)s", engine, params={"p": int(player_id)}))
+
+
+def player_scout_verdicts(player_id: int) -> list[dict]:
+    """`scout_verdicts_from_db`, kept until the data version changes (a sheet sync)."""
+    return _cached()["scouts"](int(player_id))
 
 
 # =============================== the "Write your report" form ===============================
@@ -327,7 +380,10 @@ def _cached():
         def base(player_id: int, competition_id: int, season_id: int):
             return D.build(_engine(), player_id, competition_id, season_id,
                            season=season(season_id), resolved=resolved())
-        _CACHES = {"season": season, "resolved": resolved, "base": base}
+        @wc.versioned(maxsize=256)
+        def scouts(player_id: int):
+            return scout_verdicts_from_db(_engine(), player_id)
+        _CACHES = {"season": season, "resolved": resolved, "base": base, "scouts": scouts}
     return _CACHES
 
 

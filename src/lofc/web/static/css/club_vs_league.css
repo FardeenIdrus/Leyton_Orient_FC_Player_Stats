@@ -101,3 +101,38 @@ tr.open .cv-chev{transform:rotate(90deg)}
 .cv-t6{display:inline-block;font-size:11px;font-weight:700;color:#fff;background:var(--hi);border-radius:4px;padding:1px 6px;margin-left:6px;vertical-align:1px;cursor:help}
 @media (max-width:1100px){.cv-two{grid-template-columns:minmax(0,1fr)}}
 .cv-rec-head .f-leagues label{display:block}
+/* Metric columns picker + Rank by (owner 2026-11-13) */
+.cv-tools{display:flex;flex-direction:column-reverse;align-items:flex-start;gap:10px;margin:0 0 12px}
+.cv-cols{display:flex;align-items:center;gap:6px 8px;flex-wrap:wrap;min-width:0}
+.cv-tl{font-size:13px;font-weight:600;color:var(--muted);margin-right:2px;white-space:nowrap}
+#cv-cols{display:contents}
+.cv-cols .fchip{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.cv-cols .fchip button{font:inherit;border:0;background:none;cursor:pointer;color:var(--muted);padding:0 2px;font-size:13px;line-height:1}
+.cv-cols .fchip button:hover:not(:disabled){color:var(--red)}
+.cv-cols .fchip button:disabled{opacity:.35;cursor:default}
+.cv-add{width:auto;max-width:240px;height:30px;padding-top:0;padding-bottom:0;font-size:13px}
+.cv-reset{font:inherit;font-size:13px;background:none;border:0;padding:0;color:var(--muted);text-decoration:underline;cursor:pointer;white-space:nowrap}
+.cv-reset:hover{color:var(--ink)}
+.cv-rankby{display:flex;align-items:center;gap:8px}
+.cv-seg{display:inline-flex;border:1px solid #CDD1D7;border-radius:8px;overflow:hidden}
+.cv-seg button{font:inherit;font-size:13.5px;background:#fff;border:0;padding:5px 12px;cursor:pointer;color:var(--ink)}
+.cv-seg button+button{border-left:1px solid #CDD1D7}
+.cv-seg button.on{background:var(--ink);color:#fff}
+.cv-cols-note{font-size:13px;color:#8A6410;margin:-4px 0 10px}
+/* Pick any of our rated players to measure a position against (owner 2026-11-13) */
+.cv-pick{font:inherit;font-size:13px;background:none;border:0;padding:0;margin:0;color:var(--ink);text-align:left;cursor:pointer;text-decoration:underline dotted #9AA0A8;text-underline-offset:3px}
+.cv-pick:hover{color:var(--orient);text-decoration-style:solid}
+.cv-pick.on{font-weight:700;color:var(--orient);text-decoration:none;box-shadow:inset 0 -2px 0 var(--orient)}
+.cv-pick:focus-visible,.cv-back:focus-visible{outline:2px solid var(--orient);outline-offset:2px}
+.cv-ob{display:inline-block;font-size:11px;color:var(--muted);margin-left:6px;white-space:nowrap}
+.cv-back{display:block;font:inherit;font-size:12px;font-weight:400;background:none;border:0;padding:0;margin-top:2px;color:var(--muted);text-decoration:underline;cursor:pointer;white-space:nowrap}
+.cv-back:hover{color:var(--ink)}
+/* owner 2026-11-13: Physical by phase (Big picture) */
+.cv-big tr.sec td .cv-phase{float:right;margin-top:-4px;text-transform:none;letter-spacing:0;font-weight:400}
+.cv-phase button{font-size:12px;padding:3px 9px}
+/* owner 2026-11-13: Gap closed, a live mini table in "How this is worked out" */
+.cv-gx-s{margin:2px 0 6px}
+.cv-gx{width:auto;margin:4px 0 8px;font-size:13.5px}
+.cv-gx th,.cv-gx td{padding:4px 10px;line-height:1.3}
+.cv-gx th.n,.cv-gx td.n{text-align:right;white-space:nowrap}
+.cv-gx tr.cv-gx-more td{font-style:italic}

@@ -389,17 +389,29 @@ def advisory_flags(row, show_money: bool) -> list[str]:
 ADVISORY_TITLE = "Advisory — informational only, the player is not excluded."
 
 
-def strengths_watchouts(pcts, metrics: list[str], label_for) -> dict | None:
-    """Top-3 and bottom-3 percentiles among the metrics that build his rating; None with
-    fewer than two. `pcts` is his scorecard-percentile row -- the same numbers as the
-    scorecard table, so the card never shows two percentiles for one metric."""
+def split_strong_weak(pcts, metrics: list[str]) -> tuple[list, list]:
+    """THE rule for "strongest / weakest" (the card's Strengths / Watch-outs and the Physical
+    page's Performance view, owner 2026-11-13): over his metrics with a percentile, strongest =
+    the top ceil(n/2), at most 3, highest first; weakest = the rest, lowest first, at most 3.
+    A metric is never in both. Ties keep the order of `metrics`. Under two: ([], [])."""
     if pcts is None:
-        return None
+        return [], []
     pairs = [(m, float(pcts[m])) for m in metrics if m in pcts.index and pd.notna(pcts[m])]
     if len(pairs) < 2:
+        return [], []
+    high = sorted(pairs, key=lambda x: x[1], reverse=True)[:min(3, (len(pairs) + 1) // 2)]
+    taken = {m for m, _ in high}
+    low = sorted([pv for pv in pairs if pv[0] not in taken], key=lambda x: x[1])[:3]
+    return high, low
+
+
+def strengths_watchouts(pcts, metrics: list[str], label_for) -> dict | None:
+    """Strengths and watch-outs among the metrics that build his rating (`split_strong_weak`);
+    None with fewer than two. `pcts` is his scorecard-percentile row -- the same numbers as the
+    scorecard table, so the card never shows two percentiles for one metric."""
+    high, low = split_strong_weak(pcts, metrics)
+    if not high:
         return None
-    high = sorted(pairs, key=lambda x: x[1], reverse=True)[:3]
-    low = sorted(pairs, key=lambda x: x[1])[:3]
     item = lambda m, v: {"metric": label_for(m), "pct": round(v)}
     return {"strengths": [item(m, v) for m, v in high], "watch_outs": [item(m, v) for m, v in low]}
 
@@ -800,10 +812,27 @@ def _scout_reports_block(engine, player_id: int) -> dict:
             "empty": None if len(reports) else "No scout reports for this player."}
 
 
-def _availability_block(engine, row) -> dict:
-    from lofc.dashboard import evidence
+def availability_evidence(injuries, cid: int, sid: int, minutes):
+    """(matches missed, evidence) for the season's window: the card's availability figure is
+    `evidence.value`. Shared with the Physical page's squad workbook."""
     from lofc.model.medical import (AVAILABILITY_SEASONS, availability_with_evidence,
                                     games_missed_in_window)
+    missed = games_missed_in_window(injuries, sid)
+    return missed, availability_with_evidence(injuries, missed, cid, minutes,
+                                              seasons=AVAILABILITY_SEASONS, minutes_seasons=1)
+
+
+def availability_value(engine, pid: int, cid: int, sid: int, minutes) -> float | None:
+    """The figure the card's first availability tile shows (0-1), or None (no window, unknown)."""
+    from lofc.dashboard import evidence
+    if evidence.resolve_window(sid) is None:
+        return None
+    minutes = int(minutes) if minutes is not None and pd.notna(minutes) else None   # as the card
+    return availability_evidence(evidence.load_for_player(engine, pid), cid, sid, minutes)[1].value
+
+
+def _availability_block(engine, row) -> dict:
+    from lofc.dashboard import evidence
     pid, cid, sid = int(row["player_id"]), int(row["competition_id"]), int(row["season_id"])
     minutes = int(row["minutes"]) if pd.notna(row.get("minutes")) else None
     injuries = evidence.load_for_player(engine, pid)
@@ -816,9 +845,7 @@ def _availability_block(engine, row) -> dict:
         # figure, no crash, and still show whatever injury history exists.
         out["warning"] = "**No availability window for this season yet**: injury record only."
     else:
-        missed = games_missed_in_window(injuries, sid)
-        ev = availability_with_evidence(injuries, missed, cid, minutes,
-                                        seasons=AVAILABILITY_SEASONS, minutes_seasons=1)
+        missed, ev = availability_evidence(injuries, cid, sid, minutes)
         out["tiles"] = [
             {"label": availability_label(window),
              "value": DASH if ev.value is None else f"{ev.value:.0%}"},

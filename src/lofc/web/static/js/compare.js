@@ -1,7 +1,7 @@
 // Compare page (mockup v5 v-compare). Draws what /api/compare sends; computes no football number
 // (every value, percentile text, colour class and caption comes from the API, which calls the
 // same Python as the Streamlit page). The URL query string is the whole page state.
-import {api, esc, dash, chip, pcol, radar, orientSeries} from './common.js';
+import {api, esc, dash, chip, pcol, radar, orientSeries, rememberState, restoreState} from './common.js';
 
 const $ = id => document.getElementById(id);
 const PCOL = ['#15171C', '#D9822B', '#2A9D8F'];
@@ -57,6 +57,11 @@ function toQuery(s, {slots = true} = {}) {
   const t = q.toString();
   return t ? '?' + t : '';
 }
+
+// ---- remembered comparison (owner R4a) ---------------------------------------------------
+// The last comparison's query string, in this browser only ('lofc.compare.last', common.js).
+// /compare with no query (the nav link) reopens it; a URL that says anything wins.
+const remember = () => rememberState('compare');
 
 function commit() {
   const qs = toQuery(st);
@@ -131,6 +136,7 @@ async function refresh() {
   const qs = toQuery(st);
   if (qs !== location.search) history.replaceState({}, '', location.pathname + qs);
   render(d);
+  if (!d.message) remember();
 }
 
 // ---- rendering ---------------------------------------------------------------------------
@@ -293,6 +299,64 @@ function renderZones(d) {
     + '<span>↑ Attacking</span>';
 }
 
+// ---- download (owner R4b) ----------------------------------------------------------------
+// One self-contained .html file of what is on screen: the page's own styles inlined, the radars'
+// SVG as drawn (hidden legend lines left out), no controls and no links.
+function pageCss() {
+  let css = '';
+  for (const sh of document.styleSheets) {
+    try { for (const r of sh.cssRules) css += r.cssText + '\n'; } catch (e) { /* other origin */ }
+  }
+  return css;
+}
+
+const fileSafe = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+
+function downloadFile() {
+  if (!last || !last.players || !last.players.length) return;
+  const season = (opts.seasons.find(x => x.id === st.season) || {}).name || '';
+  const root = $('v-compare').cloneNode(true);
+  root.querySelectorAll('#filters, #cmp-msg, .cmp-tools, .rdr-tools, [hidden]').forEach(n => n.remove());
+  // the measure picker becomes its label
+  const m = root.querySelector('#pz-m');
+  if (m) { const lab = m.closest('label'); if (lab) lab.outerHTML = `<div class="sub">${esc($('pz-m').selectedOptions[0] ? $('pz-m').selectedOptions[0].textContent : '')}</div>`; }
+  // radars: drop hidden lines and their legend keys; keys are labels, not buttons; no zoom
+  root.querySelectorAll('.rdr').forEach(fig => {
+    const off = new Set((fig.dataset.off || '').split(',').filter(Boolean));
+    fig.querySelectorAll('.rdr-s, .rdr-hit').forEach(g => { if (off.has(g.dataset.s)) g.remove(); });
+    if (off.has('0')) fig.querySelectorAll('.rdr-v').forEach(v => v.remove());
+    fig.querySelectorAll('.rdr-hit').forEach(g => g.remove());
+    fig.querySelectorAll('.rdr-key').forEach(k => {
+      if (off.has(k.dataset.s)) { k.remove(); return; }
+      const span = document.createElement('span'); span.className = 'rdr-key'; span.innerHTML = k.innerHTML; k.replaceWith(span);
+    });
+    const svg = fig.querySelector('.rdr-svg');
+    if (svg && svg.dataset.vb) svg.setAttribute('viewBox', svg.dataset.vb);
+    fig.classList.remove('zoomed');
+  });
+  root.querySelectorAll('a').forEach(a => { const s = document.createElement('span'); s.className = a.className; s.innerHTML = a.innerHTML; a.replaceWith(s); });
+  root.querySelectorAll('[data-tip]').forEach(n => n.removeAttribute('data-tip'));
+  root.querySelectorAll('button, select, input').forEach(n => n.remove());
+  const meta = root.querySelector('#cmp-meta');
+  // the title already names the position and season
+  if (meta) { if (last.lens) meta.textContent = `Ranked as ${last.lens}`; else meta.remove(); }
+  const title = `Compare · ${last.title}`;
+  const html = '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+    + '<meta name="viewport" content="width=device-width, initial-scale=1">'
+    + `<title>${esc(title)}</title><style>${pageCss()}\n`
+    + 'html,body{background:#F1F2F4;margin:0}.dl-page{max-width:1400px;margin:0 auto;padding:24px}'
+    + '.rdr-svg{max-width:100%;height:auto}'
+    + '@media print{html,body{background:#fff}.dl-page{padding:0}.card{break-inside:avoid}details>*{display:block}}'
+    + `</style></head><body><div class="dl-page">${root.outerHTML}</div></body></html>`;
+  const names = last.players.map(p => fileSafe(p.header_name)).filter(Boolean);
+  const file = `Compare_${names.join('_v_')}_${fileSafe(season)}.html`;
+  const url = URL.createObjectURL(new Blob([html], {type: 'text/html'}));
+  const a = document.createElement('a');
+  a.href = url; a.download = file; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 // ---- slot pickers ------------------------------------------------------------------------
 let searchSeq = 0;
 const timers = {};
@@ -430,6 +494,7 @@ function bind() {
     st.leagues = on.length === opts.leagues.length ? [] : on; commit();
   });
   $('pz-m').addEventListener('change', () => { if (last) renderZones(last); });
+  $('cmp-dl').addEventListener('click', downloadFile);
   bindMore();
 
   bindSlots();
@@ -439,6 +504,7 @@ function bind() {
 }
 
 (async function init() {
+  restoreState('compare');
   const first = location.search;
   const optsP = api('/api/players/options');
   const pre = api('/api/compare' + first); pre.catch(() => {});
@@ -465,6 +531,7 @@ function bind() {
         const qs = toQuery(st);
         if (qs !== location.search) history.replaceState({}, '', location.pathname + qs);
         render(d);
+        if (!d.message) remember();
       }
       return;
     } catch (e) { /* fall through to a normal load */ }

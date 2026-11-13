@@ -136,3 +136,29 @@ def test_streamlit_main_calls_the_lifted_function():
     src = (Path(__file__).parents[1] / "src/lofc/dashboard/app.py").read_text()
     assert "build_pool(" in src
     assert "apply_gates(" not in src and "with_peer_counts(" not in src
+
+
+# --- owner 2026-11-13: the Report's empty search box lists every player of the season A-Z ------
+def test_season_players_every_player_a_to_z_with_the_search_key(monkeypatch):
+    import pandas as pd
+    from lofc.core import players_pool as pp
+    from lofc.dashboard.search import build_search_index, filter_labels, fold
+    cands = pd.DataFrame({
+        "player_id": [3, 1, 2, 4, 5], "competition_id": [5, 4, 4, 9, 4], "season_id": 318,
+        "player_name": ["Zak Young", "Nathaniel Méndez-Laing", "Aaron Ball", "Ole Ørsted", "AJ Bridge"],
+        "team_name": ["Club Z", "Club M", None, "Club O", "Club B"],
+        "position_group": ["Winger", "Winger", "Centre Back", "Full Back", "Winger"],
+        "league": ["League Two", "League One", "League One", None, "League One"]})
+    idx = build_search_index(cands)
+    monkeypatch.setattr(pp, "_search_index_for", lambda version, season: idx)
+    monkeypatch.setattr(pp.L, "data_version", lambda **k: "v")
+    rows = pp.season_players(318)
+    # A-Z as a reader sorts: case and accents ignored ("Aaron" before "AJ")
+    assert [r[2] for r in rows] == ["Aaron Ball", "AJ Bridge", "Nathaniel Méndez-Laing", "Ole Ørsted", "Zak Young"]
+    assert rows[0][:6] == [2, 4, "Aaron Ball", "Centre Back", "Unknown club", "League One"]
+    assert rows[3][5] is None                                     # no league: shown as "—"
+    # the key is the server's own fold of the search label: same matches as /api/players/search
+    for q in ("mendez", "Méndez", "orsted", "club z", "winger", "league one"):
+        want = {l.split(" — ")[0] for l in filter_labels(idx["label"].tolist(), q)}
+        got = {r[2] for r in rows if fold(q) in r[6]}
+        assert {w.split(" (")[0] for w in want} == got, q

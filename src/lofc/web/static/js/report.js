@@ -1,14 +1,24 @@
 // Report page (mockup v5 v-report). Draws what /api/report/... sends; it computes no number.
 // Every provider or user string goes through esc() or textContent.
-import {esc, chip, pcol, radar, orientSeries, api, readState, writeState, onStateChange} from './common.js';
+import {esc, chip, pcol, radar, orientSeries, api, readState, writeState, onStateChange, rememberState, restoreState} from './common.js';
+import {readDraft, writeDraft, clearDraft, hasWork} from './report_draft.js';
+import {PAGE, filterRows, rowText} from './report_search.js';
 
-const $ = id => document.getElementById(id);
+// While a download copy is painted, `scope` is that copy and $ looks inside it.
+let scope = null;
+const $ = id => scope ? scope.querySelector('#' + id) : document.getElementById(id);
 const root = $('v-report');
 const INK = '#15171C', ORIENT = '#1F5FA8';
 
 let cur = null;          // {player, competition, season} of the open report
 let view = null;         // last view drawn
 let spec = null;         // the form's criteria for the open player
+let photo = null;        // the chosen photo as a JPEG data URI: kept in the draft, never sent
+const store = (() => { try { return window.localStorage; } catch (e) { return null; } })();
+// owner 2026-11-13: the nav link (a bare /report) reopens the last season (the player is not
+// kept; his draft has its own storage)
+const remember = () => rememberState('report', {keep: ['season']});
+const setState = (patch, o) => { writeState(patch, o); remember(); };
 let loadSeq = 0, previewSeq = 0, searchSeq = 0;
 const timers = {};
 const debounce = (key, fn, ms) => { clearTimeout(timers[key]); timers[key] = setTimeout(fn, ms); };
@@ -20,7 +30,7 @@ const status = (text, cls = 'note') => {
 };
 const base = ids => `/api/report/${ids.player}/${ids.competition}/${ids.season}`;
 const seasonName = id => {
-  const o = [...$('rp-season').options].find(x => x.value === String(id));
+  const o = [...document.getElementById('rp-season').options].find(x => x.value === String(id));
   return o ? o.text : String(id);
 };
 const tip = t => t ? ` title="${esc(t)}"` : '';
@@ -40,15 +50,18 @@ function drawHead(v) {
   st.textContent = v.stamp;
   st.className = 'pill ' + (v.authored ? 'strong' : v.stamp === 'Data only' ? 'grey' : 'verdict-pos');
   $('h-asof').textContent = v.data_as_at;
-  $('rp-dl-data').href = base(cur) + '/download?variant=data_only';
 }
 
 function drawVerdict(v) {
   const V = v.verdict;
-  $('v-rank').textContent = V.rank || '';
-  $('v-rank').hidden = !V.rank;
-  const left = V.not_rated ? `<div class="warn rp-notrated">${esc(V.not_rated)}</div>`
-    : `<div class="rp-composite">${V.composite == null ? '<span class="chip c0">—</span>' : chip(V.value)}</div>`;
+  // Left: the composite as one large number on its band's tint (the chips' rule), its rank under
+  // it; the block is as tall as the four dimension rows beside it (owner 2026-11-13).
+  const band = V.not_rated ? 'nr' : V.composite == null ? 'c0' : (chip(V.value).match(/chip (c\d)/) || [])[1] || 'c0';
+  const left = `<div class="rp-cleft"><div class="rp-cblock ${band}"><div class="rp-clabel">Composite</div>`
+    + (V.not_rated ? `<div class="rp-notrated">${esc(V.not_rated)}</div>`
+      : `<div class="rp-composite"><div class="rp-score">${esc(V.composite ?? '—')}</div>`
+        + (V.rank ? `<div class="rp-rank">${esc(V.rank)}</div>` : '') + '</div>')
+    + '</div></div>';
   const rows = V.bands.map(b =>
     `<div class="rp-brow"><span>${esc(b.name)}${b.author ? ' <span class="note">(your view)</span>' : ''}</span>`
     + `${b.value == null ? `<span class="rp-absent">${esc(b.text)}</span>` : chip(b.value)}</div>`).join('');
@@ -67,7 +80,7 @@ function drawSummary(v) {
   if (N.why_sign.length) h += `<h3>Why sign</h3><ul>${N.why_sign.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
   if (N.considerations.length) h += `<h3>Considerations</h3><ul>${N.considerations.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
   if (N.byline) h += `<p class="note rp-byline">${esc(N.byline)}</p>`;
-  if (!N.summary.length && $('rp-form').hidden) h += '<button class="btn small rp-write2" type="button" data-action="write">✎ Write your report</button>';
+  if (!scope && !N.summary.length && $('rp-form').hidden) h += '<button class="btn small rp-write2" type="button" data-action="write">✎ Write your report</button>';
   $('n-body').innerHTML = h;
 }
 
@@ -92,8 +105,11 @@ function drawStyle(v) {
   const S = v.style;
   const rows = S ? S.groups.reduce((n, g) => n + g.rows.length, 0) : 0;
   // No style rows (goalkeeper, too few minutes): no empty card; the label goes in the header.
+  // The left column also holds the scout verdicts, so it stays when they are there.
+  const scouts = (v.scouts || []).length;
   $('c-style').hidden = !rows;
-  $('r-bottom').classList.toggle('solo', !rows);
+  $('r-left').hidden = !rows && !scouts;
+  $('r-bottom').classList.toggle('solo', !rows && !scouts);
   $('h-style').hidden = !S || !!rows;
   if (S && !rows) $('h-style').innerHTML = `Playing style: <b>${esc(S.label)}</b>`;
   if (!rows) return;
@@ -107,9 +123,21 @@ function drawStyle(v) {
       + `<div class="sig">${esc(r.signals)}</div></div>`).join('')).join('');
 }
 
-function drawPhysical(v) {
-  const P = v.physical, A = v.availability;
+/** Each scout's latest verdict (owner 2026-11-13); none: no card. Not in the data-only view. */
+const VTONE = {positive: 'verdict-pos', negative: 'verdict-neg', neutral: 'verdict-mid'};
+function drawScouts(v) {
+  const S = v.scouts || [];
+  $('c-scouts').hidden = !S.length;
+  $('sc-body').innerHTML = S.map(x =>
+    `<div class="rp-scout"><b>${esc(x.scout)}</b><span class="pill ${VTONE[x.tone] || 'grey'}">${esc(x.verdict)}</span>`
+    + `<span class="note">${esc(x.date)}</span></div>`).join('');
+}
+
+function drawPhysical(v, withRadar = true, rows = availRows()) {
+  const P = v.physical;
   $('p-sub').textContent = `Percentile vs ${P.vs}`;
+  drawAvail(v, rows);
+  if (!withRadar) return;
   $('p-radar').classList.toggle('empty', !P.has_data);
   if (!P.has_data) {
     $('p-radar').innerHTML = '<p class="note">No physical data for this player-season.</p>';
@@ -119,13 +147,71 @@ function drawPhysical(v) {
     if (full) series.push(orientSeries(P.orient, P.orient_label));
     $('p-radar').innerHTML = radar(P.axes, series);
   }
-  $('p-avail').innerHTML = `<div class="k">Availability</div><div class="v">${esc(A.figure)}</div><div class="note">${esc(A.note)}</div>`;
+}
+
+/** Our figure and note, then the writer's own rows (kept in the draft; never sent). */
+function drawAvail(v, rows) {
+  const A = v.availability;
+  $('p-avail').innerHTML = `<div class="v">${esc(A.figure)}</div><div class="note">${esc(A.note)}</div>`
+    + (rows.length ? '<table class="rp-avtab"><thead><tr><th>Dates</th><th>Injury</th><th>Matches missed</th></tr></thead><tbody>'
+      + rows.map(r => `<tr><td>${esc(r.dates)}</td><td>${esc(r.injury)}</td><td>${esc(r.missed)}</td></tr>`).join('')
+      + '</tbody></table>' : '');
+}
+
+function paint(v, {withRadar = true, rows = availRows()} = {}) {
+  drawHead(v); drawVerdict(v); drawSummary(v); drawTechnical(v); drawStyle(v); drawScouts(v);
+  drawPhysical(v, withRadar, rows);
+  if (!scope) $('f-psych-band').textContent = v.psych_caption;
 }
 
 function draw(v) {
   view = v;
-  drawHead(v); drawVerdict(v); drawSummary(v); drawTechnical(v); drawStyle(v); drawPhysical(v);
-  $('f-psych-band').textContent = v.psych_caption;
+  paint(v);
+}
+
+// ---- the writer's availability rows (in this page only) -----------------------------------
+const AV_FIELDS = [['dates', 'Dates (from–to)', 'text'], ['injury', 'Injury', 'text'],
+                   ['missed', 'Matches missed', 'number']];
+function availRows() {
+  return [...document.querySelectorAll('#f-avail .rp-avrow')].map(r =>
+    Object.fromEntries(AV_FIELDS.map(([k]) => [k, r.querySelector(`[data-av=${k}]`).value.trim()])))
+    .filter(r => r.dates || r.injury || r.missed);
+}
+function addAvailRow(values = null) {
+  const row = document.createElement('div');
+  row.className = 'rp-avrow';
+  row.innerHTML = AV_FIELDS.map(([k, label, type]) =>
+    `<input class="ctl" type="${type}"${type === 'number' ? ' min="0"' : ''} data-av="${k}" placeholder="${label}" aria-label="${label}">`).join('')
+    + '<button class="btn small" type="button" data-action="av-del" aria-label="Remove row">✕</button>';
+  $('f-avail').appendChild(row);
+  if (values) AV_FIELDS.forEach(([k]) => { row.querySelector(`[data-av=${k}]`).value = values[k] ?? ''; });
+  else row.querySelector('input').focus();
+}
+
+// ---- the photo (read and downscaled in the browser; never uploaded) ------------------------
+function showPhoto() {
+  const img = $('rp-photo-img');
+  img.hidden = !photo;
+  if (photo) img.src = photo; else img.removeAttribute('src');
+  $('rp-photo-del').hidden = !photo;
+  $('rp-photo').classList.toggle('has', !!photo);
+}
+async function pickPhoto(file) {
+  if (!file) return;
+  try {
+    const bmp = await createImageBitmap(file);
+    const W = 300, H = 380, c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const k = Math.max(W / bmp.width, H / bmp.height), w = bmp.width * k, h = bmp.height * k;
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+    g.drawImage(bmp, (W - w) / 2, (H - h) / 2, w, h);
+    photo = c.toDataURL('image/jpeg', 0.85);
+    showPhoto();
+    saveDraftSoon();
+  } catch {
+    status('That image could not be read.', 'warn');
+  }
 }
 
 // ---- the form ---------------------------------------------------------------------------
@@ -173,24 +259,115 @@ async function preview() {
   }
 }
 
-// ---- downloads ----------------------------------------------------------------------------
-async function downloadReport() {
-  if (!cur) return;
-  const btn = $('rp-dl');
+// ---- downloads: the preview sheet itself, saved by the browser ---------------------------
+const A4L = {w: 1062, h: 733};    // landscape A4 inside 8 mm margins, CSS px
+const PRINT_W = 1600;             // the sheet is printed laid out at this width, then scaled
+// Printed only: the same sections, denser, so one landscape page holds them at a readable size.
+const PRINT_CSS = '.rp-sheet{box-shadow:none}.rp-head{padding:12px 0}.rp-row{padding:12px 0}'
+  + '.rp-bars{grid-template-columns:repeat(3,minmax(0,1fr));margin-top:8px}.rp-bar{padding:4px 0}'
+  + '.rp-counts .tile{padding:6px 14px}.rp-srow{padding:4px 0}.rp-srow .sig{font-size:12.5px}'
+  + '#c-style h3{margin:8px 0 2px}.rp-scout{padding:4px 0}.rp-brow{padding:5px 0}'
+  + '.rp-col>.rp-sec+.rp-sec:not([hidden]){margin-top:10px;padding-top:10px}';
+
+/** app.css + report.css as text. Width rules apply on screen only, so print keeps the wide
+ *  layout; fonts are left to the system. */
+function pageCss() {
+  const out = [];
+  for (const sh of document.styleSheets) {
+    if (!sh.href || !/\/css\/(app|report)\.css/.test(sh.href)) continue;
+    let rules;
+    try { rules = sh.cssRules; } catch { continue; }
+    for (const r of rules) {
+      if (r.type === CSSRule.FONT_FACE_RULE || r.type === CSSRule.IMPORT_RULE) continue;
+      if (r.type === CSSRule.MEDIA_RULE && !/print/.test(r.conditionText))
+        out.push(`@media screen and ${r.conditionText}{${[...r.cssRules].map(x => x.cssText).join('')}}`);
+      else out.push(r.cssText);
+    }
+  }
+  return out.join('\n');
+}
+
+const FILE_CSS = `html,body{margin:0}
+body{background:var(--page)}
+main{max-width:1500px;margin:0 auto;padding:24px}
+.rp-photo-pick{cursor:default}
+.rdr-key{cursor:default}
+@page{size:A4 landscape;margin:8mm}`;
+
+function fileHtml(v, body, fit) {
+  // fit null: the print layout itself, on screen, to be measured; else {width, scale}
+  const print = fit == null ? `main{width:${PRINT_W}px;max-width:none;padding:0;margin:0}${PRINT_CSS}`
+    : fit ? `@media print{body{background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}`
+    + `main{width:${fit.width}px;max-width:none;padding:0;margin:0;zoom:${fit.scale}}${PRINT_CSS}}` : '';
+  return `<!doctype html>\n<html lang="en"><head><meta charset="utf-8">`
+    + `<meta name="viewport" content="width=device-width,initial-scale=1">`
+    + `<title>${esc(v.name)} · Player report</title><style>${pageCss()}\n${FILE_CSS}\n${print}</style></head>`
+    + `<body><main id="v-report">${body}</main></body></html>`;
+}
+
+/** The layout width and scale that fill one landscape A4 page's width (owner 2026-11-13: the
+ *  sheet used ~2/3 of it): the narrowest layout from PRINT_W up that is no taller than the page
+ *  once scaled to its full width; if none is, the old fit (whole sheet, height-bound). */
+async function printScale(v, body) {
+  const f = document.createElement('iframe');
+  f.setAttribute('aria-hidden', 'true');
+  f.style.cssText = 'position:fixed;left:-30000px;top:0;width:1720px;height:900px;border:0;visibility:hidden';
+  const loaded = new Promise(r => f.addEventListener('load', r, {once: true}));
+  f.srcdoc = fileHtml(v, body, null);
+  document.body.appendChild(f);
+  try {
+    await loaded;
+    const main = f.contentDocument.querySelector('main');
+    let h = 1, width = PRINT_W;
+    for (width = PRINT_W; width <= PRINT_W * 2; width += 50) {
+      main.style.width = width + 'px';
+      h = Math.max(main.getBoundingClientRect().height, 1);
+      if (h * A4L.w / width <= A4L.h * 0.98) return {width, scale: +(A4L.w / width * 0.99).toFixed(4)};
+    }
+    width = PRINT_W * 2;
+    return {width, scale: +(Math.min(A4L.w / width, A4L.h / h) * 0.97).toFixed(4)};
+  } finally {
+    f.remove();
+  }
+}
+
+/** The on-screen sheet as one self-contained file: a copy painted with `v`, without the
+ *  page's controls (photo picker, buttons, empty photo box). */
+async function reportFile(v, authored) {
+  const copy = $('rp-sheet').cloneNode(true);
+  scope = copy;
+  try { paint(v, {withRadar: false, rows: authored ? availRows() : []}); } finally { scope = null; }
+  copy.querySelectorAll('.rp-write2, .rdr-tools, #rp-photo-file, .rp-photo-add, #rp-photo-del')
+    .forEach(e => e.remove());
+  if (!photo) copy.querySelector('#rp-photo').remove();
+  copy.querySelectorAll('#c-scouts[hidden], #r-left[hidden], #h-style[hidden], #c-style[hidden]').forEach(e => e.remove());
+  copy.querySelectorAll('.rdr-svg[data-vb]').forEach(svg => svg.setAttribute('viewBox', svg.dataset.vb));
+  copy.querySelectorAll('button').forEach(b => {     // radar key: a key, not a control
+    const sp = document.createElement('span');
+    sp.className = b.className; sp.innerHTML = b.innerHTML;
+    b.replaceWith(sp);
+  });
+  const body = copy.outerHTML;
+  return fileHtml(v, body, await printScale(v, body));
+}
+
+function save(html, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([html], {type: 'text/html;charset=utf-8'}));
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+async function download(dataOnly) {
+  if (!cur || !view) return;
+  const btn = $(dataOnly ? 'rp-dl-data' : 'rp-dl'), ids = {...cur};
   btn.disabled = true;
   try {
-    const res = await fetch(base(cur) + '/download', {
-      method: 'POST', credentials: 'same-origin',
-      headers: {'Content-Type': 'application/json', 'X-LOFC-Request': '1'},
-      body: JSON.stringify(formBody())});
-    if (res.status === 401) { window.location.href = '/login'; return; }
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const blob = await res.blob();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = view ? view.filename : 'report.html';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    const v = dataOnly ? await api(base(ids) + '?variant=data_only') : await api(base(ids), {json: formBody()});
+    if (!same(ids, cur)) return;
+    if (v.error) throw new Error(v.error.text);
+    save(await reportFile(v, !dataOnly), dataOnly ? v.data_only_filename : v.filename);
   } catch {
     status('The report could not be downloaded.', 'warn');
   } finally {
@@ -198,17 +375,86 @@ async function downloadReport() {
   }
 }
 
+// ---- the draft: the writer's work, kept in this browser per player-season ------------------
+let formGen = 0;         // bumped whenever the form is rebuilt; a save queued for an older form is dropped
+
+function draftNow() {
+  const text = {}, psych = {}, med = {};
+  document.querySelectorAll('#f-text textarea').forEach(t => { if (t.value) text[t.dataset.key] = t.value; });
+  document.querySelectorAll('#f-psych select').forEach(s => {
+    if (s.value) psych[spec.psychological[+s.dataset.psych].text] = s.value;
+  });
+  document.querySelectorAll('#f-med input:checked').forEach(r => {
+    if (r.value) med[spec.medical[+r.dataset.med].text] = r.value;
+  });
+  const mb = document.getElementById('f-mband');
+  return {text, psych, med, mband: mb && mb.value ? mb.value : null, avail: availRows(), photo};
+}
+
+function saveDraft(ids = cur) {
+  clearTimeout(timers.draft); timers.draft = null;
+  if (!ids || !spec) return;
+  const msg = writeDraft(store, ids, draftNow());
+  $('rp-draft-note').textContent = msg === 'unsaved' ? '' : msg;
+}
+/** Save shortly after the last change, for the form that is on screen now. */
+function saveDraftSoon() {
+  if (!cur || !spec) return;
+  const ids = {...cur}, gen = formGen;
+  clearTimeout(timers.draft);
+  timers.draft = setTimeout(() => { if (gen === formGen && same(ids, cur)) saveDraft(ids); }, 300);
+}
+/** A change still waiting to be saved is saved now (before the form goes, or the page). */
+function flushDraft() { if (timers.draft) saveDraft(); }
+
+/** Put a stored draft back into the freshly built form. True when there was one. */
+function restoreDraft(ids) {
+  const d = readDraft(store, ids);
+  if (!hasWork(d)) return false;
+  const T = d.text || {}, P = d.psych || {}, M = d.med || {};
+  document.querySelectorAll('#f-text textarea').forEach(t => { t.value = T[t.dataset.key] ?? ''; });
+  document.querySelectorAll('#f-psych select').forEach(s => {
+    const x = P[spec.psychological[+s.dataset.psych].text];
+    if (x != null && [...s.options].some(o => o.value === String(x))) s.value = String(x);
+  });
+  document.querySelectorAll('#f-med input[type=radio]').forEach(r => {
+    const x = M[spec.medical[+r.dataset.med].text];
+    if (x != null && r.value === x) r.checked = true;
+  });
+  const mb = document.getElementById('f-mband');
+  if (mb && d.mband != null && [...mb.options].some(o => o.value === String(d.mband))) mb.value = String(d.mband);
+  (Array.isArray(d.avail) ? d.avail : []).forEach(r => addAvailRow(r));
+  if (d.photo) { photo = d.photo; showPhoto(); }
+  return true;
+}
+
+function resetDraft() {
+  if (!cur || !spec) return;
+  clearTimeout(timers.draft); timers.draft = null;
+  clearDraft(store, cur);
+  formGen++;
+  buildForm(spec);
+  $('f-avail').innerHTML = '';
+  photo = null; showPhoto();
+  $('rp-draft-note').textContent = '';
+  preview();
+}
+
 // ---- loading ------------------------------------------------------------------------------
 /** No report on screen: the body and the form's fields go (a fresh load of the URL has none). */
 function clearReport() {
   $('rp-body').hidden = true;
-  ['f-text', 'f-psych', 'f-med'].forEach(id => { $(id).innerHTML = ''; });
+  ['f-text', 'f-psych', 'f-med', 'f-avail'].forEach(id => { $(id).innerHTML = ''; });
+  photo = null; showPhoto();
   spec = null; view = null;
+  formGen++;
 }
 const same = (a, b) => a && b && a.player === b.player && a.competition === b.competition && a.season === b.season;
 
-async function load(ids) {
+async function load(ids, {follow = false} = {}) {
   const mine = ++loadSeq;
+  flushDraft();
+  if (!ids || !cur || ids.player !== cur.player) { photo = null; showPhoto(); }   // his photo, from his draft only
   cur = ids;
   if (!ids) {
     clearReport();
@@ -225,10 +471,19 @@ async function load(ids) {
         : v.error.text, v.error.kind === 'missing' ? 'info' : 'warn');
       return;
     }
-    buildForm(v.form);   // a new player-season starts a blank form, as on Streamlit
+    buildForm(v.form);   // a new player-season starts a blank form, then his stored draft if any
+    formGen++;
+    $('f-avail').innerHTML = '';
+    $('rp-draft-note').textContent = '';
     status('');
     $('rp-body').hidden = false;
     draw(v);
+    if (restoreDraft(ids)) {
+      $('rp-draft-note').textContent = 'Draft restored';
+      toggleForm(true);
+      drawAvail(v, availRows());
+      preview();
+    }
   } catch (e) {
     if (mine !== loadSeq) return;
     clearReport();
@@ -247,65 +502,118 @@ function applyState(s) {
   const def = +root.dataset.defaultSeason;
   const season = (s.season && [...$('rp-season').options].some(o => o.value === s.season)) ? +s.season : def;
   $('rp-season').value = String(season);
+  if (s.position != null) setState({position: null}, {replace: true});   // owner 2026-11-13: no Position
   const ids = idsFromState({...s, season: String(season)});
   if (!same(ids, cur)) load(ids);
 }
 
 // ---- search -------------------------------------------------------------------------------
+// owner 2026-11-13: one list, every player of the season A-Z (name · position · club · league),
+// loaded once per season; the empty box shows it all, typing filters it in place. Drawn PAGE
+// rows at a time, more as it scrolls (about 10,000 rows).
+const seasonRows = {};
+function rowsFor(season) {
+  if (!seasonRows[season]) {
+    seasonRows[season] = api('/api/report/players?' + new URLSearchParams({season}))
+      .then(d => d.rows || []);
+    seasonRows[season].catch(() => { delete seasonRows[season]; });
+  }
+  return seasonRows[season];
+}
+
 function wireSearch() {
   const box = $('rp-search'), out = $('rp-results'), clear = $('rp-clear');
+  let shown = [], drawn = 0;
+  const more = () => {
+    const next = shown.slice(drawn, drawn + PAGE);
+    out.insertAdjacentHTML('beforeend', next.map((r, k) =>
+      `<button type="button" data-action="pick" data-i="${drawn + k}">${esc(rowText(r))}</button>`).join(''));
+    drawn += next.length;
+  };
   const run = async () => {
-    const q = box.value.trim(), mine = ++searchSeq;
-    if (!q) { out.hidden = true; return; }
-    let r;
-    try { r = await api('/api/players/search?' + new URLSearchParams({season: $('rp-season').value, q})); }
-    catch { r = {results: []}; }
-    if (mine !== searchSeq) return;
-    out._results = r.results;
-    out.innerHTML = r.results.length
-      ? r.results.map((x, i) => `<button type="button" data-action="pick" data-i="${i}">${esc(x.label)}</button>`).join('')
-      : '<div class="none">No player matches that name in the selected season.</div>';
+    const mine = ++searchSeq, season = $('rp-season').value;
+    if (document.activeElement !== box && !box.value.trim()) { out.hidden = true; return; }
+    let rows;
+    try { rows = await rowsFor(season); } catch { rows = []; }
+    if (mine !== searchSeq) return;                          // the box moved on meanwhile
+    shown = filterRows(rows, box.value); drawn = 0;
+    out._season = +season;
+    out.innerHTML = shown.length ? '' : `<div class="none">${esc(rows.length
+      ? 'No player matches that name in the selected season.' : 'No players in the selected season.')}</div>`;
+    out.scrollTop = 0;
+    more();
     out.hidden = false;
   };
-  box.addEventListener('input', () => { clear.disabled = !box.value; debounce('search', run, 200); });
+  out.addEventListener('scroll', () => {
+    if (drawn < shown.length && out.scrollTop + out.clientHeight >= out.scrollHeight - 400) more();
+  });
+  box.addEventListener('focus', () => run());
+  box.addEventListener('click', () => { if (out.hidden) run(); });
+  box.addEventListener('input', () => { clear.disabled = !box.value; debounce('search', run, 60); });
   box.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(timers.search); run(); } });
   clear.addEventListener('click', () => { box.value = ''; clear.disabled = true; out.hidden = true; ++searchSeq; });
   out.addEventListener('click', e => {
     const b = e.target.closest('button[data-action="pick"]');
     if (!b) return;
-    const x = out._results[+b.dataset.i];
+    const r = shown[+b.dataset.i];
     out.hidden = true;
-    const ids = {player: x.player_id, competition: x.competition_id, season: x.season_id};
-    writeState({player: ids.player, competition: ids.competition, season: ids.season});
-    load(ids);
+    const ids = {player: r[0], competition: r[1], season: out._season};
+    setState({player: ids.player, competition: ids.competition, season: ids.season});
+    load(ids, {follow: true});
   });
   document.addEventListener('click', e => { if (!e.target.closest('.searchbox')) out.hidden = true; });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') out.hidden = true; });
 }
 
 // ---- wiring -------------------------------------------------------------------------------
+function toggleForm(force) {
+  const open = force ?? $('rp-form').hidden;
+  $('rp-form').hidden = !open;
+  $('rp-write').setAttribute('aria-expanded', String(open));
+  const b2 = document.querySelector('.rp-write2');
+  if (b2) b2.hidden = open;
+  if (open) $('rp-form').scrollIntoView({block: 'nearest'});
+}
+
 function wire() {
   wireSearch();
   $('rp-season').addEventListener('change', () => {
     const season = +$('rp-season').value;
-    writeState({season});
+    setState({season});
     if ($('rp-search').value.trim()) $('rp-search').dispatchEvent(new Event('input'));
     if (cur) load({...cur, season});
   });
-  const toggleForm = force => {
-    const open = force ?? $('rp-form').hidden;
-    $('rp-form').hidden = !open;
-    $('rp-write').setAttribute('aria-expanded', String(open));
-    const b2 = document.querySelector('.rp-write2');
-    if (b2) b2.hidden = open;
-    if (open) $('rp-form').scrollIntoView({block: 'nearest'});
-  };
   $('rp-write').addEventListener('click', () => toggleForm());
   $('n-body').addEventListener('click', e => { if (e.target.closest('[data-action=write]')) toggleForm(true); });
-  $('rp-form').addEventListener('input', () => debounce('preview', preview, 250));
-  $('rp-form').addEventListener('change', () => debounce('preview', preview, 50));
-  $('rp-dl').addEventListener('click', downloadReport);
-  onStateChange(applyState);
+  $('rp-form').addEventListener('input', () => { debounce('preview', preview, 250); saveDraftSoon(); });
+  $('rp-form').addEventListener('change', () => { debounce('preview', preview, 50); saveDraftSoon(); });
+  // owner 2026-11-13: Clear draft asks first, inline (no browser dialog)
+  const draftConfirm = on => {
+    $('rp-draft-clear').hidden = on; $('rp-draft-confirm').hidden = !on;
+    (on ? $('rp-draft-no') : $('rp-draft-clear')).focus();
+  };
+  $('rp-draft-clear').addEventListener('click', () => draftConfirm(true));
+  $('rp-draft-no').addEventListener('click', () => draftConfirm(false));
+  $('rp-draft-yes').addEventListener('click', () => { draftConfirm(false); resetDraft(); });
+  $('rp-draft-confirm').addEventListener('keydown', e => { if (e.key === 'Escape') draftConfirm(false); });
+  window.addEventListener('pagehide', flushDraft);
+  $('rp-dl').addEventListener('click', () => download(false));
+  $('rp-dl-data').addEventListener('click', () => download(true));
+  // availability rows: drawn at once, never posted (stopPropagation keeps them out of preview())
+  const avail = $('f-avail');
+  const redrawAvail = () => { if (view) drawAvail(view, availRows()); saveDraftSoon(); };
+  avail.addEventListener('input', e => { e.stopPropagation(); redrawAvail(); });
+  avail.addEventListener('change', e => e.stopPropagation());
+  avail.addEventListener('click', e => {
+    const b = e.target.closest('[data-action=av-del]');
+    if (b) { b.closest('.rp-avrow').remove(); redrawAvail(); }
+  });
+  $('f-avail-add').addEventListener('click', () => addAvailRow());
+  $('rp-photo-file').addEventListener('change', e => { pickPhoto(e.target.files[0]); e.target.value = ''; });
+  $('rp-photo-del').addEventListener('click', () => { photo = null; showPhoto(); saveDraftSoon(); });
+  onStateChange(s => { remember(); applyState(s); });
+  restoreState('report');
+  remember();
   applyState(readState());
 }
 

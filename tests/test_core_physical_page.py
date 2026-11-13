@@ -289,24 +289,148 @@ def _players(vals):
             for n, x, px, y, py, age in vals]
 
 
-def test_scatter_summary_median_of_the_plotted_pool_and_top_five():
-    rows = _players([("A", 1.0, 10, 5.0, 50, 25), ("B", 2.0, 20, 6.0, 60, 25),
-                     ("C", 3.0, 30, 7.0, 70, 25), ("D", 4.0, 40, 8.0, 80, 31),
-                     ("E", 5.0, 50, None, None, 25), ("F", 6.0, 90, 9.0, 95, 20),
-                     ("G", 7.0, 95, 1.0, 5, 25)])
-    s = pp.scatter_summary(rows, "a", "b", "")
-    assert s["idx"] == [0, 1, 2, 3, 5, 6]                     # E has no y: not plotted
-    assert s["median"]["x"] == 3.5 and s["median"]["y"] == 6.5
-    assert s["median"]["x_t"] == "3.5" and s["median"]["y_t"] == "6.5"
-    assert [rows[i]["name"] for i in s["top"]] == ["F", "D", "C", "G", "B"]   # px+py, best first; a tie by name
-    u23 = pp.scatter_summary(rows, "a", "b", "u23")
-    assert u23["idx"] == [5] and u23["median"]["x"] == 6.0 and u23["top"] == [5]
+def _xy(vals):
+    """[(name, x, y, age)] -> rows with values only (the "High on both" rule needs no percentile)."""
+    return _players([(n, x, None, y, None, age) for n, x, y, age in vals])
 
 
-def test_scatter_summary_without_percentiles_labels_nobody():
-    rows = _players([(f"P{i}", float(i), None, float(i), None, 25) for i in range(6)])
+# A..L: x median 6.5, y median 5.5; above both: K, B, C, A, D (L is high on x only, J on neither)
+_HOB = [("A", 10.0, 10.0, 25), ("B", 9.0, 12.0, 25), ("C", 12.0, 9.0, 25), ("D", 8.0, 8.0, 25),
+        ("E", 1.0, 1.0, 25), ("F", 2.0, 2.0, 25), ("G", 3.0, 3.0, 25), ("H", 4.0, 4.0, 25),
+        ("I", 5.0, 5.0, 25), ("J", 6.0, 6.0, 25), ("K", 7.0, 20.0, 20), ("L", 20.0, 1.0, 25)]
+
+
+def test_scatter_summary_median_of_the_plotted_pool():
+    rows = _xy(_HOB + [("M", 5.0, None, 25)])
     s = pp.scatter_summary(rows, "a", "b", "")
-    assert s["top"] == [] and s["median"]["x"] == 2.5
+    assert s["idx"] == list(range(12))                        # M has no y: not plotted
+    assert s["median"]["x"] == 6.5 and s["median"]["y"] == 5.5
+    assert s["median"]["x_t"] == "6.5" and s["median"]["y_t"] == "5.5"
+
+
+def test_high_on_both_ranked_by_value_over_median():
+    """Owner 2026-11-13: above BOTH medians, best first by x/median_x + y/median_y."""
+    rows = _xy(_HOB)
+    s = pp.scatter_summary(rows, "a", "b", "")
+    # K 7/6.5+20/5.5=4.71, B 3.57, C 3.48, A 3.36, D 2.69
+    assert [rows[i]["name"] for i in s["top"]] == ["K", "B", "C", "A", "D"]
+    assert s["top_marked"] == pp.TOP_MARKED == 5
+
+
+def test_high_on_both_lists_at_most_eight_ties_by_name():
+    rows = _xy([(f"P{i:02d}", float(i), float(i), 25) for i in range(1, 21)]
+               + [("Z", 20.0, 20.0, 25), ("AA", 20.0, 20.0, 25)])
+    s = pp.scatter_summary(rows, "a", "b", "")
+    names = [rows[i]["name"] for i in s["top"]]
+    assert len(names) == pp.TOP_SHOWN == 8
+    assert names[:3] == ["AA", "P20", "Z"] and names[3:] == ["P19", "P18", "P17", "P16", "P15"]
+
+
+def test_high_on_both_follows_the_age_band():
+    rows = _xy(_HOB + [(f"Y{i}", float(i), float(i), 20) for i in range(1, 10)])
+    u21 = pp.scatter_summary(rows, "a", "b", "u21")
+    assert [rows[i]["name"] for i in u21["idx"]] == ["K"] + [f"Y{i}" for i in range(1, 10)]
+    assert u21["median"]["x"] == 5.5 and u21["median"]["y"] == 5.5
+    assert [rows[i]["name"] for i in u21["top"]] == ["K", "Y9", "Y8", "Y7", "Y6"]
+
+
+def test_high_on_both_withheld_below_the_peer_floor():
+    """Fewer plotted players than MIN_PEERS_FOR_RANKING: medians drawn, nobody ranked."""
+    rows = _xy(_HOB[:9])
+    s = pp.scatter_summary(rows, "a", "b", "")
+    assert len(s["idx"]) == 9 and s["median"]["x"] is not None and s["top"] == []
+    assert s["top_note"] == "Not rated: only 9 comparable players (needs 10)"
+    assert pp.scatter_summary(_xy(_HOB), "a", "b", "")["top_note"] is None
+
+
+def test_high_on_both_says_when_nobody_is_above_both():
+    rows = _xy([(f"P{i}", float(i), float(12 - i), 25) for i in range(12)])
+    s = pp.scatter_summary(rows, "a", "b", "")
+    assert s["top"] == [] and s["top_note"] == "Nobody better on both."
+
+
+def test_high_on_both_needs_positive_medians():
+    rows = _xy([(f"P{i}", 0.0 if i < 8 else 1.0, float(i), 25) for i in range(12)])
+    s = pp.scatter_summary(rows, "a", "b", "")
+    assert s["median"]["x"] == 0.0 and s["top"] == []
+
+
+# --- lower-is-better axes (owner 2026-11-13): top right always means better on both ----------
+def test_lower_is_better_metrics_are_the_timing_tests():
+    from lofc.model import club_framework as cf
+    lower = {m["key"] for m in pp.metric_list() if m["lower"]}
+    assert lower == {k for k in pp.KEYS if k in cf.LOWER_IS_BETTER}
+    assert {"time_to_sprint", "time_to_hsr", "agility_505_90", "agility_505_180"} <= lower
+    assert "top5_psv99_kmh" not in lower and "sprint_count_p90" not in lower
+
+
+# y = "b" is a time (lower is better). x median 6.5, y median 4.5.
+# Better on both = x > 6.5 and y < 4.5: A, B, C, D, K (L: x 20 but y 10, slow).
+_REV = [("A", 10.0, 2.0, 25), ("B", 9.0, 1.5, 25), ("C", 12.0, 3.0, 25), ("D", 8.0, 2.5, 25),
+        ("E", 1.0, 9.0, 25), ("F", 2.0, 8.0, 25), ("G", 3.0, 7.0, 25), ("H", 4.0, 6.0, 25),
+        ("I", 5.0, 5.0, 25), ("J", 6.0, 4.0, 25), ("K", 7.0, 1.0, 25), ("L", 20.0, 10.0, 25)]
+
+
+def test_better_on_both_with_a_lower_is_better_axis():
+    """Score = x / median_x + median_y / y on the reversed axis:
+    K 7/6.5 + 4.5/1 = 5.58, B 1.38 + 3.00 = 4.38, A 1.54 + 2.25 = 3.79,
+    C 1.85 + 1.50 = 3.35, D 1.23 + 1.80 = 3.03."""
+    rows = _xy(_REV)
+    s = pp.scatter_summary(rows, "a", "b", "", lower={"b"})
+    assert s["median"]["x"] == 6.5 and s["median"]["y"] == 4.5
+    assert [rows[i]["name"] for i in s["top"]] == ["K", "B", "A", "C", "D"]
+    assert s["rev"] == {"x": False, "y": True}
+
+
+def test_both_axes_lower_is_better():
+    rows = _xy([(n, y, x, a) for n, x, y, a in _REV])      # swap: x is the time now
+    s = pp.scatter_summary(rows, "a", "b", "", lower={"a", "b"})
+    assert s["rev"] == {"x": True, "y": True}
+    # better on both = a < 4.5 and b < 6.5: J (4, 6) only
+    assert [rows[i]["name"] for i in s["top"]] == ["J"]
+
+
+def test_no_reversed_axis_by_default_for_ordinary_metrics():
+    s = pp.scatter_summary(_xy(_HOB), "a", "b", "")
+    assert s["rev"] == {"x": False, "y": False}
+
+
+# --- minimum minutes (owner 2026-11-13) ----------------------------------------------------------
+def _with_mins(rows, mins):
+    for r, m in zip(rows, mins):
+        r["mins"] = m
+    return rows
+
+
+def test_min_minutes_slider_values_and_default():
+    """Owner 2026-11-13: a slider from 450 in steps of 90; anything else is the default."""
+    assert pp.MIN_MINUTES[0] == 450 and pp.MINUTES_STEP == 90
+    assert pp.min_minutes(None) == 450 and pp.min_minutes("bad") == 450
+    assert pp.min_minutes("900") == 900 and pp.min_minutes("1350") == 1350 and pp.min_minutes("2970") == 2970
+    assert pp.min_minutes("1000") == 450 and pp.min_minutes("360") == 450 and pp.min_minutes("-90") == 450
+
+
+def test_min_minutes_slider_top_is_the_pools_most_minutes_rounded_up_to_90():
+    rows = _with_mins(_xy(_HOB), [1000.0] * 11 + [2001.0])
+    assert pp.minutes_max(rows, "a", "b", "") == 2070                 # 2001 -> 23 x 90
+    rows[11]["v"]["a"] = None                                          # not plotted: not counted
+    assert pp.minutes_max(rows, "a", "b", "") == 1080
+    assert pp.minutes_max([], "a", "b", "") == 450
+
+
+def test_min_minutes_narrows_the_plotted_pool():
+    rows = _with_mins(_xy(_HOB), [1000.0] * 11 + [500.0])       # L has 500
+    s = pp.scatter_summary(rows, "a", "b", "", min_minutes=900)
+    assert len(s["idx"]) == 11 and 11 not in s["idx"]
+    assert s["median"]["x"] == 6.0                               # A..K: x median 6
+    assert pp.scatter_summary(rows, "a", "b", "")["median"]["x"] == 6.5
+
+
+def test_min_minutes_below_the_peer_floor_ranks_nobody():
+    rows = _with_mins(_xy(_HOB), [2000.0] * 9 + [500.0] * 3)
+    s = pp.scatter_summary(rows, "a", "b", "", min_minutes=1800)
+    assert len(s["idx"]) == 9 and s["top"] == []
+    assert s["top_note"] == "Not rated: only 9 comparable players (needs 10)"
 
 
 def test_pool_and_squad_rows_carry_tracked_matches():

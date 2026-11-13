@@ -2,7 +2,7 @@
 // label comes from the API (the Streamlit page's own functions). The URL holds the assessment
 // status filter, the Market value switch, the sort and the open row. Notes are free text: they
 // only reach the page through esc() or .value / textContent.
-import {api, esc, dash} from './common.js';
+import {api, esc, dash, rememberState, restoreState} from './common.js';
 
 const $ = id => document.getElementById(id);
 let seq = 0, last = null;
@@ -29,6 +29,7 @@ function toQuery(s, {forApi = false} = {}) {
 function commit(s, {replace = false} = {}) {
   const url = location.pathname + toQuery(s);
   if (url !== location.pathname + location.search) history[replace ? 'replaceState' : 'pushState']({}, '', url);
+  remember();
 }
 const backQ = () => '?back=' + encodeURIComponent('/watchlist' + location.search);
 
@@ -145,13 +146,18 @@ async function load() {
   const s = state(), mine = ++seq;
   try {
     const d = await api('/api/watchlist' + toQuery(s, {forApi: true}));
-    if (mine === seq) { $('wl-count').textContent = ''; draw(d, s); }
+    if (mine === seq) { $('wl-count').textContent = ''; draw(d, s); remember(); }
   } catch (e) {
     if (mine === seq) { $('wl-empty').hidden = false; $('wl-empty').textContent = `Could not load the watchlist (${e.message}).`; }
   }
 }
 
+// owner 2026-11-13: the nav link (a bare URL) reopens the last filters and sort; the open row
+// is a one-off and is not kept
+const remember = () => rememberState('watchlist', {drop: ['open']});
+
 function init() {
+  restoreState('watchlist');
   $('wl-status').onchange = () => {
     const s = state();
     const picked = [...document.querySelectorAll('#wl-status input:checked')].map(i => i.value);

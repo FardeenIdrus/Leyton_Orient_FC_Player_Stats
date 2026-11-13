@@ -135,15 +135,44 @@ def test_below_minimum_composite_flag_wording():
     assert C.advisory_flags(row, False) == ["composite below the club's 3.00 minimum standard"]
 
 
-def test_strengths_watchouts_needs_two_and_takes_three_each():
+def test_strengths_watchouts_needs_two_and_never_lists_a_metric_twice():
+    """Owner 2026-11-13: strengths = the top ceil(n/2) (max 3), watch-outs = the rest, lowest
+    first (max 3); the Physical page's Performance view uses the same rule (split_strong_weak)."""
     p = pd.Series({"a": 90.0, "b": 10.0, "c": 50.0, "d": 70.0, "e": 30.0, "f": np.nan})
     got = C.strengths_watchouts(p, list("abcdef"), str.upper)
     assert got["strengths"] == [{"metric": "A", "pct": 90}, {"metric": "D", "pct": 70},
                                 {"metric": "C", "pct": 50}]
-    assert got["watch_outs"] == [{"metric": "B", "pct": 10}, {"metric": "E", "pct": 30},
-                                 {"metric": "C", "pct": 50}]
+    assert got["watch_outs"] == [{"metric": "B", "pct": 10}, {"metric": "E", "pct": 30}]
     assert C.strengths_watchouts(pd.Series({"a": 1.0}), ["a"], str) is None
     assert C.strengths_watchouts(None, ["a"], str) is None
+
+
+def test_strengths_watchouts_goalkeeper_with_tied_percentiles():
+    """Nathan Baxter 2026/27 (five figures, two tied at 52): the card listed "Goals saved above
+    average 52" in both lists. Ties keep the position's metric order."""
+    p = pd.Series({"gsaa": 52.0, "catch": 59.0, "touch": 73.0, "pack": 2.0, "pxt": 5.0, "stop": 52.0})
+    got = C.strengths_watchouts(p, ["gsaa", "catch", "touch", "pack", "pxt", "stop"], str)
+    assert got["strengths"] == [{"metric": "touch", "pct": 73}, {"metric": "catch", "pct": 59},
+                                {"metric": "gsaa", "pct": 52}]
+    assert got["watch_outs"] == [{"metric": "pack", "pct": 2}, {"metric": "pxt", "pct": 5},
+                                 {"metric": "stop", "pct": 52}]
+    two = C.strengths_watchouts(pd.Series({"a": 52.0, "b": 52.0}), ["a", "b"], str)
+    assert two == {"strengths": [{"metric": "a", "pct": 52}], "watch_outs": [{"metric": "b", "pct": 52}]}
+
+
+def test_card_and_physical_performance_view_share_one_rule():
+    from lofc.core import physical_page as pp
+    rng = np.random.default_rng(7)
+    for n in range(1, 10):
+        ms = [f"m{i}" for i in range(n)]
+        row = pd.Series({m: float(v) for m, v in zip(ms, rng.integers(0, 6, n) * 20)})
+        card = C.strengths_watchouts(row, ms, str)
+        view = pp.strong_weak(row, ms, str)
+        if card is None:
+            assert view == {"strong": [], "weak": []}
+            continue
+        assert [(x["metric"], x["pct"]) for x in card["strengths"]] == [(x["label"], x["pct"]) for x in view["strong"]]
+        assert [(x["metric"], x["pct"]) for x in card["watch_outs"]] == [(x["label"], x["pct"]) for x in view["weak"]]
 
 
 def test_underlying_rates_only_for_midfielders_and_attackers():

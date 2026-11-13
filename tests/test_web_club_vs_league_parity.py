@@ -76,7 +76,7 @@ def test_recommendations_are_per_league_above_our_level_and_never_ours(page, sto
     sel = next(g for g in page["gaps"] if g["group"] == page["selected"])
     level = sel["level"]["rating"] if sel["level"] else None
     for lg in rec["leagues"]:
-        assert len(lg["rows"]) <= 15 and lg["count"] >= len(lg["rows"])
+        assert len(lg["rows"]) == lg["count"]                     # owner 2026-11-13: no top-15 cap
         ov = [r["overall"] for r in lg["rows"]]
         assert ov == sorted(ov, reverse=True)
         assert all(level is None or o > level for o in ov)
@@ -133,3 +133,122 @@ def test_top6_performance_physical_and_orients_row(page, engine, stored):
         every = {s["metric"]: s["short"] for s in g["all_shortfalls"]}
         for s in g["shortfalls"]:
             assert isinstance(s["short"], int) and every.get(s["metric"], s["short"]) == s["short"]
+
+
+def test_gap_closed_matches_a_plain_recomputation(engine):
+    """Owner 2026-11-13: Gap closed for Centre Back, recomputed here from the stored season
+    figures: percentiles, the top-6 medians, the Overall weights (Performance 40 : Physical 30,
+    the club's per-metric Performance weights, Physical equal) and the capped, weighted share."""
+    from lofc.model import club_framework as cf
+    from lofc.model.performance_weights import WEIGHTS
+    from lofc.model.scorecard import metric_percentiles
+    from lofc.web.api import club_vs_league as api
+    api.clear()
+    page = api.page_json(group="Centre Back")
+    row = next(g for g in page["gaps"] if g["group"] == "Centre Back")
+    if row["level"] is None or not row["bar"]["players"]:
+        pytest.skip("no Centre Back level or bar")
+    pcts = {}
+
+    def pct(pid, comp, season, pos):
+        if season not in pcts:
+            n = pd.read_sql(text("SELECT * FROM player_metrics_neutral WHERE season_id = :s"), engine,
+                            params={"s": season})
+            pcts[season] = metric_percentiles(n)
+        key = (pid, comp, season, pos)
+        return pcts[season].loc[key] if key in pcts[season].index else None
+    L = row["level"]
+    ours = pct(L["player_id"], L["competition_id"], L["season_id"], L["position"])
+    bar = [pct(p["player_id"], p["competition_id"], p["season_id"], p["position"]) for p in row["bar"]["players"]]
+    perf = {m: float(w) for m, (_t, w) in WEIGHTS[("Centre Back", "All Metrics")].items()}
+    phys = cf.PHYSICAL_METRICS["Centre Back"]
+    weight = {m: w * 0.40 / 0.70 for m, w in perf.items()} | {m: 0.30 / 0.70 / len(phys) for m in phys}
+    gaps = {}
+    for m in weight:
+        mine = ours.get(m)
+        theirs = [b.get(m) for b in bar if b is not None and pd.notna(b.get(m))]
+        if pd.notna(mine) and theirs and float(pd.Series(theirs).median()) > float(mine):
+            gaps[m] = (float(mine), float(pd.Series(theirs).median()))
+    assert set(gaps) == {s["metric"] for s in row["all_shortfalls"]}
+    checked = 0
+    for lg in page["recommendations"]["leagues"]:
+        for r in lg["rows"]:
+            p, c, s = r["ids"]
+            cand = pct(p, c, s, r["position"])
+            if cand is None or not gaps:
+                assert r["gap_closed"] is None
+                continue
+            num = sum(weight[m] * min(max((0.0 if pd.isna(cand.get(m)) else float(cand.get(m))) - o, 0.0), b - o)
+                      for m, (o, b) in gaps.items())
+            den = sum(weight[m] * (b - o) for m, (o, b) in gaps.items())
+            assert abs(r["gap_closed"] - 100 * num / den) <= 0.5 + 1e-6, (r["name"], r["gap_closed"], 100 * num / den)
+            checked += 1
+    assert checked > 0
+
+
+def test_full_back_against_our_second_rated_full_back(engine):
+    """Owner 2026-11-13: pick our second-best rated full back -- gap = bar - his Overall, the list
+    holds only players rated above him, and "vs him" is measured from him."""
+    from lofc.web.api import club_vs_league as api
+    api.clear()
+    base = api.page_json(group="Full Back")
+    row = next(g for g in base["gaps"] if g["group"] == "Full Back")
+    rated = sorted([p for p in row["players"] if p["counts"]], key=lambda p: -p["rating"])
+    if len(rated) < 2 or row["bar"]["median"] is None:
+        pytest.skip("fewer than two rated full backs")
+    him = rated[1]
+    d = api.page_json(group="Full Back", vs=str(him["player_id"]))
+    sel = next(g for g in d["gaps"] if g["group"] == "Full Back")
+    assert d["filters"]["vs"] == him["player_id"] and d["compare"]["name"] == him["name"]
+    assert sel["level"]["player_id"] == him["player_id"] and sel["best"]["player_id"] == rated[0]["player_id"]
+    assert sel["gap"] == pytest.approx(row["bar"]["median"] - him["rating"])
+    assert d["recommendations"]["level"] == pytest.approx(him["rating"])
+    rows = [r for lg in d["recommendations"]["leagues"] for r in lg["rows"]]
+    assert rows and all(r["overall"] > him["rating"] for r in rows)
+    assert all(abs(r["vs_best"] - (r["overall"] - him["rating"])) <= 0.005 + 1e-9 for r in rows)
+    assert [w["metric"] for w in d["recommendations"]["weak_metrics"]] == [s["metric"] for s in sel["shortfalls"]]
+    # his own percentiles, straight from the stored figures
+    from lofc.dashboard import loaders as L
+    p = L.load_scorecard_percentiles(sel["level"]["season_id"])
+    mine = p[(p.player_id == him["player_id"]) & (p.competition_id == him["competition_id"])
+             & (p.position_group == him["position"])].iloc[0]
+    for s in sel["all_shortfalls"]:
+        assert s["ours"] == round(float(mine[s["metric"]]))
+
+
+def test_big_picture_in_possession_distance_rank(page, engine, stored):
+    """Owner 2026-11-13: Orient's In-possession Distance rank among League One clubs, recomputed
+    with plain SQL: minutes-weighted club average of SkillCorner's phys_tip.distance_p90."""
+    cur, _ = stored
+    df = pd.read_sql(text(
+        "SELECT n.team_name, SUM(d.value_p90 * n.minutes) / SUM(n.minutes) AS v "
+        "FROM player_detail_metrics d JOIN player_metrics_neutral n "
+        "USING (player_id, competition_id, season_id) WHERE d.metric = 'phys_tip.distance_p90' "
+        "AND d.competition_id = 4 AND d.season_id = :s AND d.value_p90 IS NOT NULL AND n.minutes > 0 "
+        "GROUP BY n.team_name"), engine, params={"s": cur})
+    if df.empty:
+        pytest.skip("no in-possession data this season")
+    rank = df.set_index("team_name")["v"].rank(ascending=False, method="min")
+    orient = [c for c in rank.index if c.lower().startswith("leyton orient")][0]
+    row = next(b for b in page["big_picture"] if b["measure"] == "distance_p90")
+    tip = row["phases"]["tip"]["now"]
+    assert (tip["rank"], tip["of"]) == (int(rank[orient]), len(rank))
+    for m in ("psv99_kmh", "top5_psv99_kmh"):                       # no split: "—"
+        r = next(b for b in page["big_picture"] if b["measure"] == m)
+        assert r["phases"]["tip"]["now"] is None and r["phases"]["otip"]["now"] is None
+
+
+def test_gap_closed_example_is_the_lists_first_player_by_gap_closed(engine):
+    """Owner 2026-11-13: the fold-out's example names each league's first player by Gap closed
+    and his figure is the list's."""
+    from lofc.web.api import club_vs_league as api
+    for group in ("Full Back", "Centre Back"):
+        d = api.page_json(group=group, rank="gap")
+        for lg in d["recommendations"]["leagues"]:
+            ex, top = lg["example"], lg["rows"][0] if lg["rows"] else None
+            if ex is None:
+                continue
+            assert ex["candidate"] == {"name": top["name"], "club": top["club"]}
+            assert f"= {top['gap_closed']}%." in ex["total"] and f"in the {group} rating" in ex["total"]
+            assert ex["columns"][4] == f"Target ({top['name'].split()[-1]})"
+            assert 1 <= len(ex["rows"]) <= 3
