@@ -130,6 +130,8 @@ def build_pool(f: PoolFilters, with_search_index: bool = True) -> PoolResult:
     all_round = scorecards(f.season_id, f.position, cf.DEFAULT_ARCHETYPE)[
         KEYS3 + ["objective_composite"]].rename(columns={"objective_composite": "allround_composite"})
     ranking = scorecards(f.season_id, f.position, f.archetype)
+    # which pool he was rated in (the midfield fallback tag); absent on an unmigrated table
+    sc_cols = sc_cols + [c for c in ("peer_pool",) if c in ranking.columns]
     pool = pool.merge(ranking[sc_cols], on=KEYS3, how="left").merge(all_round, on=KEYS3, how="left")
     # Loan status joined on player_id only: a loan is a fact about the player TODAY, not about
     # the season being ranked.
@@ -593,7 +595,11 @@ def row_dicts(lr: ListResult) -> list[dict]:
     cols = {c: [(_rating_text(v) if c in RATING_COLUMNS else _clean(v)) for v in t[c].tolist()]
             for c in lr.columns}
     ids = zip(t["player_id"].tolist(), t["competition_id"].tolist(), t["season_id"].tolist())
-    return [{"id": [int(a), int(b), int(c)], "cells": {k: cols[k][i] for k in lr.columns}}
+    from lofc.core.card import pool_tag
+    tags = [pool_tag(v) for v in t["peer_pool"].tolist()] if "peer_pool" in t.columns \
+        else [None] * len(t)
+    return [{"id": [int(a), int(b), int(c)], "cells": {k: cols[k][i] for k in lr.columns},
+             "tag": tags[i]}
             for i, (a, b, c) in enumerate(ids)]
 
 

@@ -65,7 +65,7 @@ STORED_COLUMNS = [
     "objective_composite", "objective_weight_covered",
     "full_composite", "full_weight_covered",
     "assessed_composite", "assessed_weight_covered",
-    "veto", "below_min_composite",
+    "veto", "below_min_composite", "peer_pool", "peer_pool_size",
 ]
 
 

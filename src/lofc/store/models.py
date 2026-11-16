@@ -356,6 +356,13 @@ class PlayerScorecard(Base):
     veto: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     below_min_composite: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
+    # The pool his percentiles came from (model/scorecard.pool_assignment): 'position' (his own
+    # league-season position group) or 'midfield' (a thin Defensive / Central / Attacking Mid
+    # group rated against all the league-season's midfielders), and how many players it holds.
+    # NULL only on rows scored before 2026-11-16; readers then count with the same rule.
+    peer_pool: Mapped[str | None] = mapped_column(String, nullable=True)
+    peer_pool_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
 
 class Archetype(Base):
     """A player's playing-style cluster within their position. Phase 5 output.

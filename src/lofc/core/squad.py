@@ -387,7 +387,9 @@ def season_rows(season_id: int) -> pd.DataFrame:
     Indexed by player_id."""
     f = pd.read_sql(
         "SELECT n.player_id, n.competition_id, n.position_group, n.team_name, n.minutes, "
-        "       s.objective_composite, s.performance_band, s.physical_band, pc.peer_count "
+        "       s.objective_composite, s.performance_band, s.physical_band, "
+        # the pool he was rated in when stored (midfield fallback), else his position's count
+        "       COALESCE(s.peer_pool_size, pc.peer_count) AS peer_count "
         "FROM player_metrics_neutral n LEFT JOIN player_scorecards s "
         "  ON s.player_id = n.player_id AND s.competition_id = n.competition_id "
         " AND s.season_id = n.season_id AND s.position_group = n.position_group "

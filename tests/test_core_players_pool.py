@@ -121,7 +121,9 @@ def test_lifted_pool_equals_the_old_inline_result(case):
         budget_eur=case.get("budget_eur", float("inf")),
         wage_multiplier=case.get("wage_multiplier", 1.0))
     new = pp.build_pool(f)
-    pd.testing.assert_frame_equal(new.pool, old["pool"])
+    # peer_pool (2026-11-16, the midfield-fallback tag) is the one column the lifted pool adds
+    pd.testing.assert_frame_equal(new.pool.drop(columns=["peer_pool"], errors="ignore"),
+                                  old["pool"])
     pd.testing.assert_frame_equal(new.withheld, old["withheld"])
     pd.testing.assert_frame_equal(new.candidates, old["candidates"])
     pd.testing.assert_frame_equal(new.search_index, old["search_index"])

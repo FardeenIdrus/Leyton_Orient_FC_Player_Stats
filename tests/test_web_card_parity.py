@@ -474,19 +474,30 @@ def test_a_player_under_450_minutes_cannot_be_opened(engine):
 def test_thin_pool_card_names_the_pool_size(engine):
     from lofc.core import card
     from lofc.model.scorecard import MIN_PEERS_FOR_RANKING
-    d = card.build_card(engine, 2000030124, 901, 319)            # Benjamin Nygren, a thin pool (8 on 2026-11-09, grows in-season)
+    # Harry Gathercole, a Winger in a thin pool (8 on 2026-11-16, grows in-season). Wingers have
+    # no fallback pool; midfielders do (Benjamin Nygren, used here before, is now rated against
+    # all Scottish Premiership midfielders -- test_midfield_pool_real.py).
+    d = card.build_card(engine, 2000159726, 903, 319)
     n = d["meta"]["thin_pool"]
-    assert n is not None and 0 < n < MIN_PEERS_FOR_RANKING
+    if n is None:
+        pytest.skip("the pool has reached the floor")
+    assert 0 < n < MIN_PEERS_FOR_RANKING
     r = d["rating"]
     assert r["overall"]["value"] is None and r["performance"]["value"] is None
     assert r["physical"]["value"] is None and r["overall"]["rank_text"] is None
-    assert r["not_rated"] == f"Not rated: only {n} comparable players (needs {MIN_PEERS_FOR_RANKING})"
     league = d["meta"]["league"]
-    assert d["performance"]["sub"] == f"Percentile vs {n} {league} Attacking Mids · band 1–5"
-    if d["performance"]["profile"]:
-        assert d["performance"]["profile"]["sub"] == f"Percentile vs {n} {league} Attacking Mids"
-    assert d["physical"]["sub"] == f"Percentile vs {n} {league} Attacking Mids · rated physical metrics"
-    assert d["physical"]["table_sub"] == f"SkillCorner · per 90 · percentile vs {n} {league} Attacking Mids"
+    assert r["not_rated"] == (f"Not rated: only {n} Wingers in {league} with 450+ minutes "
+                              f"(needs {MIN_PEERS_FOR_RANKING}).")
+    assert r["pool_tag"] is None and r["strengths"] is None
+    assert d["performance"]["sub"] == f"Percentile vs {n} {league} Wingers · band 1–5"
+    assert d["physical"]["sub"] == f"Percentile vs {n} {league} Wingers · rated physical metrics"
+    assert d["physical"]["table_sub"] == f"SkillCorner · per 90 · percentile vs {n} {league} Wingers"
+    # no percentile or band shown as if real (owner 2026-11-16)
+    t = d["performance"]["table"]
+    for col in ("Percentile", "Band"):
+        i = t["columns"].index(col)
+        assert all(row[i] is None for row in t["rows"])
+    assert d["performance"]["profile"] is None and d["physical"]["radar"] is None
 
 
 def test_a_rated_card_keeps_its_headings(engine):

@@ -239,8 +239,8 @@ He also has modelled money bands (Financial Fit 3.15, Resale Potential 3.62), so
 ## 5. Peer-pool floor: when a rating is not a ranking
 
 A percentile is only as meaningful as the pool behind it. In a pool of three, whoever
-happens to have played decides the order; a player alone in his pool takes the top
-percentile on every metric and scores 4.90.
+happens to have played decides the order; a player alone in his pool takes the 50th
+percentile on every metric (mid-rank) and scores 3.00 on everything.
 
 So a composite is **withheld from the ranked list** when fewer than
 **`MIN_PEERS_FOR_RANKING` = 10** rankable players share its league + season + position pool
@@ -248,6 +248,20 @@ So a composite is **withheld from the ranked list** when fewer than
 how many players were withheld and why; **Squads & loans** lists them with current-season
 facts. The pool size is counted from the whole season's scorecards, so narrowing the
 sidebar never makes a pool look thinner than it is.
+
+**Midfield fallback (owner, 16 Nov 2026).** A Defensive, Central or Attacking Mid pool below
+10 is rated against **all midfielders** of that league + season (every rankable Defensive,
+Central and Attacking Mid). Only his percentiles come from the combined pool; his metrics and
+weights stay his own position's. If the combined pool is also below 10 he stays not rated.
+Pools of 10+ and all other positions are unchanged. The pages tag him "Rated against all
+midfielders" and quote no rank. Stored as `player_scorecards.peer_pool` ('position' /
+'midfield') and `peer_pool_size` (`scorecard.pool_assignment`).
+*Example:* Lyall Cameron, the only rankable Scottish Premiership Central Mid in 2026/27, was
+3.00 on everything (pool of 1). Against all 38 Scottish Premiership midfielders, still on the
+Central Mid metrics: Composite 3.09, Performance 3.20, Physical 2.95.
+
+A player who is not rated shows "—" for every percentile and band, and one line: "Not rated:
+only N <Position>s in <League> with 450+ minutes (needs 10)."
 
 A player's true standing ("8th of 13") is quoted only within his own pool
 (`scorecard.rank_in_pool`). The Players list is sorted by composite across whichever leagues

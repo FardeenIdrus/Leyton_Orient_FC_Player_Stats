@@ -189,6 +189,19 @@ class ReportData:
     # style_label, strong_styles, leans_styles and fit.<style>. {} when it cannot be
     # computed. Measured data, not opinion, so a data-only report keeps it.
     style: dict = field(default_factory=dict)
+    # The pool his percentiles came from (scorecard.pool_assignment): "position" or "midfield"
+    # (the midfield fallback), and its size. pool_size None = not recorded (rows scored before
+    # 2026-11-16): the page then falls back to peer_count, as it always did.
+    pool_scope: str = "position"
+    pool_size: int | None = None
+
+
+def comparison_line(season_label: str, league: str, position: str, n: int, scope) -> str:
+    """"25/26 · League Two only · compared to 70 League Two Wingers over 450 minutes", or
+    "... compared to 38 Scottish Premiership midfielders ..." for the midfield fallback."""
+    from lofc.model.scorecard import POOL_MIDFIELD
+    whom = f"{league} midfielders" if scope == POOL_MIDFIELD else f"{league} {position}s"
+    return f"{season_label} · {league} only · compared to {n} {whom} over {RANKABLE_MINUTES} minutes"
 
 
 def _style_labels(engine, season_id: int) -> pd.DataFrame:
@@ -411,7 +424,7 @@ def build(engine, player_id: int, competition_id: int, season_id: int, *,
     # earlier inline version did.
     ranked = pd.read_sql(
         select(_S.c.player_id, _S.c.competition_id, _S.c.season_id, _S.c.position_group,
-               _S.c.objective_composite)
+               _S.c.objective_composite, _S.c.peer_pool, _S.c.peer_pool_size)
         .where(_S.c.competition_id == competition_id, _S.c.season_id == season_id,
                _S.c.position_group == position, _S.c.archetype == "All Metrics"), engine)
     ranked = ranked.dropna(subset=["objective_composite"])
@@ -443,6 +456,9 @@ def build(engine, player_id: int, competition_id: int, season_id: int, *,
 
     league = league_name(competition_id)
     season_label = season_short(season_id)
+    # the pool his percentiles came from (midfield fallback); "position" when not recorded
+    pool_scope = (str(card["peer_pool"]) if card is not None
+                  and pd.notna(card.get("peer_pool")) else "position")
 
     # --- how his minutes actually split across positions ------------------------------
     # The page names ONE position and scores him against that group's peers. For a
@@ -507,6 +523,9 @@ def build(engine, player_id: int, competition_id: int, season_id: int, *,
         dimension_bands=bands,
         rank=rank,
         peer_count=len(ranked),
+        pool_scope=pool_scope,
+        pool_size=(int(card["peer_pool_size"]) if card is not None
+                   and pd.notna(card.get("peer_pool_size")) else None),
         percentiles=percentiles,
         style=style,
         # The eight SkillCorner percentiles, from the same computation as everything
@@ -533,9 +552,9 @@ def build(engine, player_id: int, competition_id: int, season_id: int, *,
         # players and out of 117 are very different claims, and a reader who cannot query
         # the data has no other way to tell them apart. Central Mid in League One really
         # is 13, because most central midfielders classify as Defensive or Attacking Mid.
-        comparison_text=(f"{season_label} · {league} only · compared to "
-                         f"{len(ranked)} {league} {position}s "
-                         f"over {RANKABLE_MINUTES} minutes"),
+        comparison_text=comparison_line(
+            season_label, league, position,
+            int(card["peer_pool_size"]) if pool_scope == "midfield" else len(ranked), pool_scope),
         flags=flags,
     )
     if data_only:

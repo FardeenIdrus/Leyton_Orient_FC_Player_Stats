@@ -60,7 +60,8 @@ function drawVerdict(v) {
   const left = `<div class="rp-cleft"><div class="rp-cblock ${band}"><div class="rp-clabel">Composite</div>`
     + (V.not_rated ? `<div class="rp-notrated">${esc(V.not_rated)}</div>`
       : `<div class="rp-composite"><div class="rp-score">${esc(V.composite ?? '—')}</div>`
-        + (V.rank ? `<div class="rp-rank">${esc(V.rank)}</div>` : '') + '</div>')
+        + (V.rank ? `<div class="rp-rank">${esc(V.rank)}</div>` : '')
+        + (V.pool_tag ? `<div class="rp-rank">${esc(V.pool_tag)}</div>` : '') + '</div>')
     + '</div></div>';
   const rows = V.bands.map(b =>
     `<div class="rp-brow"><span>${esc(b.name)}${b.author ? ' <span class="note">(your view)</span>' : ''}</span>`
@@ -139,7 +140,9 @@ function drawPhysical(v, withRadar = true, rows = availRows()) {
   drawAvail(v, rows);
   if (!withRadar) return;
   $('p-radar').classList.toggle('empty', !P.has_data);
-  if (!P.has_data) {
+  if (P.withheld) {          // not rated: no percentile shown as if real
+    $('p-radar').innerHTML = '<p class="note">—</p>';
+  } else if (!P.has_data) {
     $('p-radar').innerHTML = '<p class="note">No physical data for this player-season.</p>';
   } else {
     const series = [{values: P.player, name: v.name}];

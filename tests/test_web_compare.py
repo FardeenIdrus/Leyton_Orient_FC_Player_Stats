@@ -268,16 +268,20 @@ def test_thin_pool_player_shows_no_composite_but_keeps_percentiles(client):
     """Owner D1 (new site): a pool under MIN_PEERS_FOR_RANKING is never shown as a rating.
     Streamlit's Compare still shows one (live site unchanged by owner decision)."""
     from lofc.model.scorecard import MIN_PEERS_FOR_RANKING
-    q = [("season", 319), ("position", "Attacking Mid"), ("a", "2000030124-901")]
+    # Harry Gathercole, a Premier League 2 Winger (pool of 8 on 2026-11-16). Nygren, used before,
+    # is now rated against all Scottish Premiership midfielders (the midfield fallback).
+    q = [("season", 319), ("position", "Winger"), ("a", "2000159726-903")]
     d = client.get("/api/compare", params=q).json()
-    if not d.get("players") or d["players"][0]["player_id"] != 2000030124:
-        pytest.skip("Nygren not in this database")
+    if not d.get("players") or d["players"][0]["player_id"] != 2000159726:
+        pytest.skip("Gathercole not in this database")
+    if not d["players"][0]["not_rated"]:
+        pytest.skip("the pool has reached the floor")
     p = d["players"][0]
     assert p["not_rated"] and f"needs {MIN_PEERS_FOR_RANKING}" in p["not_rated"]
     comp = next(r for r in d["summary"]["rows"] if r["attribute"] == "Composite")
     assert comp["cells"][0]["now"] == "—"
     assert any(v is not None for v in d["perf_radar"]["traces"][0]["values"])
-    assert re.search(r"\b\d+ Scottish Premiership Attacking Mids", d["perf_radar"]["sub"])
+    assert re.search(r"\b\d+ Premier League 2 Wingers", d["perf_radar"]["sub"])
 
 
 def test_defaults_come_from_the_pool_and_the_url_slots_are_returned(client):

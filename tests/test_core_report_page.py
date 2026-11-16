@@ -63,7 +63,7 @@ def test_variants_blank_form_is_the_base_report():
 # --- thin pool (owner D1) ---------------------------------------------------------------
 def test_thin_pool_note_only_below_the_minimum_with_a_composite():
     assert rp.not_rated_note(_report(peer_count=8)) == \
-        "Not rated: only 8 comparable players (needs 10)"
+        "Not rated: only 8 Wingers in League Two with 450+ minutes (needs 10)."
     assert rp.not_rated_note(_report(peer_count=10)) is None
     assert rp.not_rated_note(_report(peer_count=3, composite=None)) is None
 
@@ -77,7 +77,7 @@ def test_thin_pool_view_hides_composite_rank_data_bands_and_their_flags():
     v = rp.view(d)
     ver = v["verdict"]
     assert ver["composite"] is None and ver["rank"] is None
-    assert ver["not_rated"] == "Not rated: only 8 comparable players (needs 10)"
+    assert ver["not_rated"] == "Not rated: only 8 Wingers in League Two with 450+ minutes (needs 10)."
     bands = {b["name"]: b for b in ver["bands"]}
     assert bands["Performance"]["value"] is None and bands["Performance"]["text"] == "—"
     assert bands["Psychological"]["text"] == "3.20"

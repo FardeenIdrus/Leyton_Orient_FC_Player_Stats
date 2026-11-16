@@ -99,6 +99,40 @@ def thin_pool_caption(n: int) -> str:
     return f"Not rated: only {n} comparable players (needs {MIN_PEERS_FOR_RANKING})"
 
 
+def not_rated_line(n: int, position: str, league: str) -> str:
+    """The card's and report's one line for a pool below MIN_PEERS_FOR_RANKING (owner
+    2026-11-16): names the position, league and minutes rule behind the count."""
+    from lofc.model.scorecard import MIN_PEERS_FOR_RANKING
+    return (f"Not rated: only {n} {position}s in {league} with 450+ minutes "
+            f"(needs {MIN_PEERS_FOR_RANKING}).")
+
+
+def pool_tag(scope) -> str | None:
+    """"Rated against all midfielders" for the midfield fallback pool, else None."""
+    from lofc.model.scorecard import MIDFIELD_POOL_TAG, POOL_MIDFIELD
+    return MIDFIELD_POOL_TAG if scope == POOL_MIDFIELD else None
+
+
+def pool_vs(league: str, position: str, scope, thin) -> str:
+    """What his percentiles are against: "League Two Wingers", "8 League Two Wingers" (a thin
+    pool) or "Scottish Premiership midfielders" (the midfield fallback)."""
+    from lofc.model.scorecard import POOL_MIDFIELD
+    if scope == POOL_MIDFIELD:
+        return f"{league} midfielders"
+    return f"{thin} {league} {position}s" if thin is not None else f"{league} {position}s"
+
+
+def withhold_percentiles(table: dict | None, columns=("Percentile", "Band")) -> dict | None:
+    """A copy of an `as_table` dict with the Percentile / Band cells blanked (shown as "—"):
+    an unrated player's percentiles come from a pool below the floor -- alone in one, every
+    percentile is 50 and every band 3.00 by construction -- so none is shown as if real."""
+    if table is None:
+        return None
+    idx = [i for i, c in enumerate(table["columns"]) if c in columns]
+    rows = [[None if i in idx else v for i, v in enumerate(r)] for r in table["rows"]]
+    return {**table, "rows": rows}
+
+
 def csv_disposition(name: str) -> str:
     """Content-Disposition for a download whose name may hold any letter ("Baran_Yıldız..."):
     an ASCII-folded `filename` for old clients plus the exact UTF-8 `filename*` (RFC 6266 /
@@ -276,13 +310,17 @@ def minutes_split(shares: pd.DataFrame | None, assigned: str) -> dict | None:
     return {"segments": segs, "goals_line": goals_line}
 
 
-def scored_as_notice(shares: pd.DataFrame | None) -> str | None:
+def scored_as_notice(shares: pd.DataFrame | None, scope=None) -> str | None:
     """The label names ONE position; for about one player in ten it covers under half his
-    season, and every percentile is against that group's peers -- said plainly."""
+    season, and every percentile is against that group's peers -- said plainly. `scope`
+    POOL_MIDFIELD: his percentiles are against all midfielders in his league instead."""
+    from lofc.model.scorecard import POOL_MIDFIELD
     if shares is not None and len(shares) > 1 and shares.iloc[0]["share"] < 0.5:
+        whom = ("all midfielders in his league" if scope == POOL_MIDFIELD
+                else "players in that position")
         return (f"Scored as **{shares.iloc[0]['position_group']}** — his largest position, "
                 f"but only {shares.iloc[0]['share'] * 100:.0f}% of his minutes. Every "
-                f"percentile below compares him with players in that position.")
+                f"percentile below compares him with {whom}.")
     return None
 
 
@@ -675,7 +713,7 @@ def card_row(player_id: int, competition_id: int, season_id: int, archetype: str
     a thin pool is never shown as a rating) or "not_found" (row None)."""
     from lofc.dashboard import loaders as L
     from lofc.dashboard.search_target import KEYS, SCORECARD_COLUMNS
-    from lofc.model.scorecard import MIN_PEERS_FOR_RANKING, peer_pool_sizes
+    from lofc.model.scorecard import MIN_PEERS_FOR_RANKING, peer_pool_scopes, peer_pool_sizes
 
     pid, cid, sid = int(player_id), int(competition_id), int(season_id)
     cand = _season_frame("load_candidates", wage_multiplier, sid)
@@ -697,6 +735,8 @@ def card_row(player_id: int, competition_id: int, season_id: int, archetype: str
         row[flag] = bool(row[flag]) if pd.notna(row[flag]) else False
     pool = peer_pool_sizes(ranking).get((cid, sid, position)) if len(ranking) else None
     row["peer_count"] = pool if pool is not None else float("nan")
+    # which pool his percentiles came from: his position, or all midfielders (the fallback)
+    row["peer_pool"] = peer_pool_scopes(ranking).get((cid, sid, position)) if len(ranking) else None
     rated = (not mine.empty and pd.notna(row["objective_composite"])
              and pool is not None and pool >= MIN_PEERS_FOR_RANKING)
     if not rated:
@@ -1072,7 +1112,7 @@ def build_card(engine, player_id: int, competition_id: int, season_id: int,
         "contract": contract_chip(row.get("contract_until")),
         "loan": loan_chip(loan),
         "minutes_by_position": minutes_split(shares, str(position)),
-        "scored_as": scored_as_notice(shares),
+        "scored_as": scored_as_notice(shares, row.get("peer_pool")),
         "other_leagues": other_league_notes(L.load_other_league_seasons(pid, cid, sid),
                                             lambda c: L.competition_name_by_id().get(c)),
         "transfermarkt_url": (f"https://www.transfermarkt.com/-/profil/spieler/{int(tm_id)}"
@@ -1090,28 +1130,36 @@ def build_card(engine, player_id: int, competition_id: int, season_id: int,
     rank, peers = scorecard_mod.rank_in_pool(cards, pid, cid, sid, position)
     if reason != "ok":
         rank = None                      # not rated: no place in a ranking
-    # Thin peer pool (owner 2026-11-09, web card only): still no rating, but the percentiles
-    # stay and every heading over them says how many players they are against.
+    # Thin peer pool (owner 2026-11-09, web card only): no rating, and every heading says how
+    # many players the pool holds.
     thin = thin_pool_size(reason, row.get("peer_count"), row.get("minutes"))
-    vs = f"{thin} {league} {position}s" if thin is not None else f"{league} {position}s"
+    scope = row.get("peer_pool")
+    vs = pool_vs(league, position, scope, thin)
+    # Not rated on a thin pool (owner 2026-11-16): no percentile or band is shown as if real.
+    # Alone in a pool every percentile is 50 and every band 3.00 by construction.
+    withhold = thin is not None
+    _shown = withhold_percentiles if withhold else (lambda t: t)
     composite, performance, physical = (row.get("objective_composite"), row.get("performance_band"),
                                         row.get("physical_band"))
     from lofc.dashboard.search_target import search_caption
     rating = {
         "heading": f"Composite · {season_name}",
-        "sub": f"Against {league} {position}s · {P.RANKABLE_MINUTES}+ minutes",
+        "sub": f"Against {pool_vs(league, position, scope, None)} · {P.RANKABLE_MINUTES}+ minutes",
+        "pool_tag": pool_tag(scope) if reason == "ok" else None,
         "lens": None if lens == cf.DEFAULT_ARCHETYPE else lens,
         "overall": {"label": "Composite" if lens == cf.DEFAULT_ARCHETYPE else f"Composite ({lens})",
                     "value": composite, "rank_text": rank_text(rank, peers),
                     "help": COMPOSITE_HELP},
         "performance": {"label": "Performance", "value": performance, "help": PERFORMANCE_HELP},
         "physical": {"label": "Physical", "value": physical, "help": PHYSICAL_HELP},
-        "not_rated": (None if reason == "ok" else thin_pool_caption(thin) if thin is not None
+        "not_rated": (None if reason == "ok" else not_rated_line(thin, position, league)
+                      if thin is not None
                       else search_caption("not_rated", True, row.get("minutes"))),
         "money": money_block(row, show_money),
         "advisory": ({"title": ADVISORY_TITLE, "flags": advisory_flags(row, show_money)}
                      if advisory_flags(row, show_money) else None),
-        "strengths": strengths_watchouts(prow, perf_metrics, lambda m: LABELS.get(m, m)),
+        "strengths": (None if withhold else
+                      strengths_watchouts(prow, perf_metrics, lambda m: LABELS.get(m, m))),
     }
 
     # --- season by season + current form ---
@@ -1149,10 +1197,10 @@ def build_card(engine, player_id: int, competition_id: int, season_id: int,
     full = P._full_stats_table(row, sc_pcts, metric_values)
     orient, n_orient = squad.orient_median(position, sid, exclude_player_id=pid)
     chart_metrics = [m for m in perf_metrics if prow is not None and m in prow.index
-                     and pd.notna(prow[m])]
+                     and pd.notna(prow[m])] if not withhold else []
     performance = {
         "sub": f"Percentile vs {vs} · band 1–5",
-        "table": None if grand.empty else as_table(grand.drop(columns=["Dimension"])),
+        "table": None if grand.empty else _shown(as_table(grand.drop(columns=["Dimension"]))),
         # one entry per table row (rows follow `perf_metrics`): weight group + gap to our median
         "tiers": None if grand.empty else weight_tiers(perf_metrics, position, lens),
         "vs_ours": None if grand.empty or not n_orient
@@ -1160,7 +1208,7 @@ def build_card(engine, player_id: int, competition_id: int, season_id: int,
         "vs_ours_help": vs_ours_help(position, n_orient),
         "scored_on_lens": None if lens == cf.DEFAULT_ARCHETYPE else lens,
         "all_tracked": None if full is None or full.empty else {
-            **as_table(full),
+            **_shown(as_table(full)),
             "vs_ours": vs_ours_column(keys_by_label(full["Metric"], LABELS), prow, orient, thin)
             if n_orient else None,
             "vs_ours_help": vs_ours_help(position, n_orient)},
@@ -1175,6 +1223,13 @@ def build_card(engine, player_id: int, competition_id: int, season_id: int,
 
     physical_block = _physical_block(row, mv_df.iloc[0] if not mv_df.empty else None, prow,
                                      position, orient, n_orient)
+    if withhold:
+        physical_block["radar"] = None
+        for part in ("in_rating", "other"):
+            if physical_block[part] is not None:
+                keys = physical_block[part]["metrics"]
+                physical_block[part] = {**withhold_percentiles(physical_block[part]),
+                                        "metrics": keys}
     for part in ("in_rating", "other"):
         if physical_block[part] is not None:
             keys = physical_block[part].pop("metrics")
@@ -1217,10 +1272,12 @@ def scorecard_csv(engine, player_id: int, competition_id: int, season_id: int,
     nothing to download."""
     from lofc.dashboard import loaders as L
     from lofc.dashboard.tabs import players as P
-    row, lens, _ = card_row(player_id, competition_id, season_id, rank_as)
+    row, lens, reason = card_row(player_id, competition_id, season_id, rank_as)
     if row is None:
         return None
     sid = int(row["season_id"])
+    # as on screen: an unrated thin pool's percentiles and bands are withheld
+    withhold = thin_pool_size(reason, row.get("peer_count"), row.get("minutes")) is not None
     sc_pcts, metric_values = L.load_scorecard_percentiles(sid), L.load_metric_values(sid)
     base = f"{str(row['player_name']).replace(' ', '_')}_{sid}"
     if kind == "scorecard":
@@ -1231,4 +1288,6 @@ def scorecard_csv(engine, player_id: int, competition_id: int, season_id: int,
         name = f"{base}_metrics.csv"
     if table is None or table.empty:
         return None
+    if withhold:
+        table = table.assign(**{c: None for c in ("Percentile", "Band") if c in table.columns})
     return name, table.to_csv(index=False)

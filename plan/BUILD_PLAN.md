@@ -1366,6 +1366,21 @@ with "no sideways scrolling" in the same sentence — ask what he means. Not bui
 
 ---
 
+### 2026-11-16 — midfield fallback pool; unrated players show "—" (built locally, not deployed)
+
+Owner-approved rule: a Defensive / Central / Attacking Mid pool under `MIN_PEERS_FOR_RANKING`
+in a league-season is rated against all that league-season's midfielders (percentiles only;
+metrics and weights stay his position's). Combined under 10 → still not rated. Pools of 10+
+and every other position are untouched (Mac re-score: 38,119 rows, 0 cells changed; 307
+player-seasons gain a rating, none left unrated). Why: Lyall Cameron was the only rankable
+Scottish Premiership Central Mid in 26/27 — alone in a pool, 50.0 on every metric, 3.00 on
+everything. Now 3.09 / 3.20 / 2.95 against 38 midfielders. Stored as
+`player_scorecards.peer_pool` / `peer_pool_size` (migration a1d4f6b8c902); no rank is quoted
+for these players (own pool < 10; cross-position order would mix metric sets). Not-rated
+card/report: percentiles and bands "—", line "Not rated: only N <Position>s in <League> with
+450+ minutes (needs 10)." Side finding: League Two (8) and Championship (6–9) Central Mid
+pools are thin too — most central midfielders classify as Defensive or Attacking Mid.
+
 ### 2026-11-08 — Live-bug round 2.28–2.31 (built locally, not yet deployed)
 
 Full detail per item in `plan/TASKS.md` (1.6, 2.28–2.31).

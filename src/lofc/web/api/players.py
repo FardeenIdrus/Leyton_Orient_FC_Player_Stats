@@ -188,7 +188,8 @@ def list_payload(q: Query) -> tuple[dict, pp.ListResult]:
     about.append("**Rank as** (Full Back / Winger only) reranks on that archetype's Performance "
                  "metrics; the all-round composite stays alongside.")
     about.append(f"Ranked players need **450+ minutes** and at least **{MIN_PEERS_FOR_RANKING} "
-                 "peers** in their league and position. The minutes floor never goes below 450.")
+                 "peers** in their league and position (midfielders: all midfielders if fewer). "
+                 "The minutes floor never goes below 450.")
     withheld = pp.withheld_rows(res)
     mi = q.money_inputs
     payload = {

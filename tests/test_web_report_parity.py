@@ -77,14 +77,16 @@ def test_view_figures_are_the_reports(pairs, label):
     from lofc.report import render
     plain, _ = pairs[label]
     v = rp.view(plain)
-    thin = plain.composite is not None and plain.peer_count < MIN_PEERS_FOR_RANKING
+    pool = plain.pool_size if plain.pool_size is not None else plain.peer_count
+    thin = plain.composite is not None and pool < MIN_PEERS_FOR_RANKING
     ver = v["verdict"]
     if thin:
-        assert ver["composite"] is None and ver["not_rated"].startswith(
-            f"Not rated: only {plain.peer_count} comparable players")
+        assert ver["composite"] is None and ver["not_rated"] == (
+            f"Not rated: only {pool} {plain.position}s in {plain.league} with 450+ minutes "
+            f"(needs {MIN_PEERS_FOR_RANKING}).")
     elif plain.composite is not None:
         assert ver["value"] == plain.composite and ver["composite"] == f"{plain.composite:.2f}"
-        if plain.rank:
+        if plain.rank and plain.pool_scope != "midfield":
             assert ver["rank"].startswith(f"{plain.rank}") and f"of {plain.peer_count} " in ver["rank"]
     for b in ver["bands"]:
         band = plain.dimension_bands[b["name"]]
@@ -98,9 +100,11 @@ def test_view_figures_are_the_reports(pairs, label):
     assert counts["Goals"] == half_up(plain.goals)
     assert counts["Assists"] == half_up(plain.assists)
     bars = render.bar_inputs(plain)
-    assert [b["value"] for b in v["technical"]["bars"]] == [b["shown"] for b in bars]
+    assert [b["value"] for b in v["technical"]["bars"]] == [None if thin else b["shown"]
+                                                           for b in bars]
     assert [b["orient"] for b in v["technical"]["bars"]] == [b["orient"] for b in bars]
-    assert v["physical"]["player"] == [plain.physical.get(k) for k, _ in render._PHYSICAL_AXES]
+    assert v["physical"]["player"] == [None if thin else plain.physical.get(k)
+                                       for k, _ in render._PHYSICAL_AXES]
     assert v["technical"]["orient"] == (
         {"n": plain.benchmark_n, "label": f"Leyton Orient median (n={plain.benchmark_n})"}
         if plain.benchmark_n else None)

@@ -10,9 +10,12 @@ Two halves:
     criteria. The report itself is `report.data.build` -- called, never copied -- and the
     document is `report.render.to_html`.
 
-Honesty rule (owner D1, 2026-11-09): a peer pool below MIN_PEERS_FOR_RANKING shows no
-composite, rank or Performance / Physical band; the percentiles stay, with the pool size in
-each heading, and the note "Not rated: only N comparable players (needs 10)".
+Honesty rule (owner D1, 2026-11-09; percentiles 2026-11-16): a peer pool below
+MIN_PEERS_FOR_RANKING shows no composite, rank, Performance / Physical band or percentile
+("—": alone in a pool every percentile is 50 by construction), and the one line "Not rated:
+only N <Position>s in <League> with 450+ minutes (needs 10)." A player rated against all
+midfielders (the midfield fallback) is tagged so, his percentiles headed "vs <League>
+midfielders", with no rank.
 """
 from __future__ import annotations
 
@@ -73,14 +76,20 @@ def variants(base: D.ReportData, authored: D.Authored | None, not_rated: str | N
 
 
 # =============================== the web view ===============================
+def _pool_size(d: D.ReportData) -> int:
+    """The size of the pool he was rated in (stored), else his position's count."""
+    return d.pool_size if d.pool_size is not None else d.peer_count
+
+
 def not_rated_note(d: D.ReportData) -> str | None:
-    """The thin-pool note when his composite rests on fewer than MIN_PEERS_FOR_RANKING rated
-    peers (his league, season and position), else None. The card's own wording."""
-    from lofc.core.card import thin_pool_caption
+    """The thin-pool line when his composite rests on fewer than MIN_PEERS_FOR_RANKING rated
+    peers (the pool he was rated in), else None. The card's own wording."""
+    from lofc.core.card import not_rated_line
     from lofc.model.scorecard import MIN_PEERS_FOR_RANKING
-    if d.composite is None or d.peer_count >= MIN_PEERS_FOR_RANKING:
+    n = _pool_size(d)
+    if d.composite is None or n >= MIN_PEERS_FOR_RANKING:
         return None
-    return thin_pool_caption(d.peer_count)
+    return not_rated_line(n, d.position, d.league)
 
 
 def _txt(v, fmt: str = "{}") -> str:
@@ -124,12 +133,14 @@ def _verdict(d: D.ReportData, note: str | None) -> dict:
     screening = ([{"ok": a == "Meets", "text": t} for t, a in d.authored.screening.items()]
                  if d.authored and d.authored.screening else [])
     rated = note is None and d.composite is not None
+    from lofc.core.card import pool_tag
     return {
         "composite": f"{d.composite:.2f}" if rated else None,
         "value": float(d.composite) if rated else None,
         "not_rated": note,
         "rank": (f"{d.rank}{R.ordinal(d.rank)} of {d.peer_count} {d.league} {d.position}s"
-                 if d.rank and note is None else None),
+                 if d.rank and note is None and pool_tag(d.pool_scope) is None else None),
+        "pool_tag": pool_tag(d.pool_scope) if rated else None,
         "bands": bands, "screening": screening, "flags": flags}
 
 
@@ -156,15 +167,17 @@ def _narrative(d: D.ReportData) -> dict:
 
 
 def _vs(d: D.ReportData, note: str | None) -> str:
-    """"League Two Wingers", or "8 League Two Wingers" for a thin pool (the card's heading)."""
-    base = f"{d.league} {d.position}s"
-    return f"{d.peer_count} {base}" if note else base
+    """"League Two Wingers", "8 League Two Wingers" for a thin pool, or "Scottish Premiership
+    midfielders" for the midfield fallback (the card's heading)."""
+    from lofc.core.card import pool_vs
+    return pool_vs(d.league, d.position, d.pool_scope, _pool_size(d) if note else None)
 
 
-def _technical(d: D.ReportData, vs: str) -> dict:
+def _technical(d: D.ReportData, vs: str, withheld: bool = False) -> dict:
     count = lambda v: DASH if v is None else f"{R.half_up(v):,}"
-    bars = [{"label": b["label"], "value": b["shown"],
-             "text": None if b["shown"] is None else f"{b['shown']:.1f}", "orient": b["orient"]}
+    bars = [{"label": b["label"], "value": None if withheld else b["shown"],
+             "text": DASH if withheld else None if b["shown"] is None else f"{b['shown']:.1f}",
+             "orient": b["orient"]}
             for b in R.bar_inputs(d)]
     cross = (d.benchmark_n and d.benchmark_league and d.benchmark_league != d.league)
     whence = R.goals_by_position(d.position_shares)
@@ -199,10 +212,10 @@ def _style(d: D.ReportData, vs: str) -> dict | None:
                        for g in sv["groups"]]}
 
 
-def _physical(d: D.ReportData, vs: str) -> dict:
+def _physical(d: D.ReportData, vs: str, withheld: bool = False) -> dict:
     from lofc.dashboard.glossary_data import PHYSICAL
     keys = [k for k, _label in R._PHYSICAL_AXES]
-    player = [d.physical.get(k) for k in keys]
+    player = [None if withheld else d.physical.get(k) for k in keys]
     orient = [d.benchmark.get(k) for k in keys] if d.benchmark_n else None
     if orient is not None and not any(v is not None for v in orient):
         orient = None
@@ -210,7 +223,7 @@ def _physical(d: D.ReportData, vs: str) -> dict:
                                for k, lab in R._PHYSICAL_AXES],
             "player": player, "orient": orient,
             "orient_label": f"Leyton Orient median (n={d.benchmark_n})" if orient else None,
-            "has_data": any(v is not None for v in player)}
+            "has_data": any(v is not None for v in player), "withheld": withheld}
 
 
 def _availability(d: D.ReportData) -> dict:
@@ -239,9 +252,9 @@ def view(d: D.ReportData, ids: dict | None = None) -> dict:
         "bio": _bio(d),
         "verdict": _verdict(d, note),
         "narrative": _narrative(d),
-        "technical": _technical(d, vs),
+        "technical": _technical(d, vs, withheld=note is not None),
         "style": _style(d, vs),
-        "physical": _physical(d, vs),
+        "physical": _physical(d, vs, withheld=note is not None),
         "availability": _availability(d),
         "author_note": (f"Psychological, Medical and medical checks are "
                         f"{d.authored.author_name}'s assessment and do not change any rating."

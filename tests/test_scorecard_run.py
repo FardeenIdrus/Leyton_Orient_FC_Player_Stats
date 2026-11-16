@@ -188,3 +188,22 @@ def test_reconcile_assessed_ignores_drafts():
                       band=4.0, notes=None, criterion_scores={}, criterion_passes={},
                       screening_failed=False, status="draft")
     assert reconcile_assessed(engine) == 0
+
+
+def test_the_pool_each_player_was_rated_in_is_stored():
+    """Midfield fallback (2026-11-16): the stored row says which pool his percentiles came from,
+    so the card, Players page and report can tag him without recounting."""
+    assert {"peer_pool", "peer_pool_size"} <= set(STORED_COLUMNS)
+    assert {"peer_pool", "peer_pool_size"} <= set(PlayerScorecard.__table__.columns.keys())
+    mids = pd.DataFrame(
+        [{"player_id": 300 + i, "competition_id": 4, "season_id": 318,
+          "position_group": "Defensive Mid", "rankable": True, "ball_wins_p90": float(i)}
+         for i in range(8)]
+        + [{"player_id": 400 + i, "competition_id": 4, "season_id": 318,
+            "position_group": "Central Mid", "rankable": True, "ball_wins_p90": float(i)}
+           for i in range(3)])
+    frame = build_all(pd.concat([_neutral(), mids], ignore_index=True), financial_resale=None)
+    row = frame[(frame["player_id"] == 400) & (frame["archetype"] == cf.DEFAULT_ARCHETYPE)].iloc[0]
+    assert (row["peer_pool"], row["peer_pool_size"]) == (scorecard.POOL_MIDFIELD, 11)
+    fb = frame[(frame["player_id"] == 0) & (frame["archetype"] == cf.DEFAULT_ARCHETYPE)].iloc[0]
+    assert (fb["peer_pool"], fb["peer_pool_size"]) == (scorecard.POOL_POSITION, 6)

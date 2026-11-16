@@ -150,7 +150,9 @@ function renderRating(R) {
   $('r-notrated').innerHTML = R.not_rated ? `<div class="notice">${esc(R.not_rated)}</div>` : '';
   $('r-tiles').innerHTML = [R.overall, R.performance, R.physical].map((t, i) =>
     `<div class="score${i === 0 ? ' main' : ''}"${t.help ? ` title="${esc(t.help)}"` : ''}><div class="k">${esc(t.label)}</div>`
-    + `<div class="v">${chip(t.value)}</div>${t.rank_text ? `<div class="x">${esc(t.rank_text)}</div>` : ''}</div>`).join('');
+    + `<div class="v">${chip(t.value)}</div>${t.rank_text ? `<div class="x">${esc(t.rank_text)}</div>` : ''}`
+    // rated against all midfielders: the tag sits where his rank would (he has none)
+    + `${i === 0 && R.pool_tag ? `<div class="x"><span class="pill grey">${esc(R.pool_tag)}</span></div>` : ''}</div>`).join('');
   const M = R.money;
   show('r-money', !!(M && M.tiles.length));
   $('r-money').innerHTML = M ? M.tiles.map(t => tile(t.label, esc(t.value))).join('') : '';

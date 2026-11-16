@@ -53,18 +53,73 @@ KEY = ["player_id", "competition_id", "season_id", "position_group"]
 # in the platform; do not "complete" this list later.
 ASSESSED_DIMENSIONS = [cf.PERFORMANCE, cf.PHYSICAL] + cf.SCOUT_DIMENSIONS
 
+# --- the midfield fallback pool (owner-approved 2026-11-16) -------------------------------
+# A Defensive / Central / Attacking Mid whose own league-season pool is below
+# MIN_PEERS_FOR_RANKING is rated against every rankable midfielder of that league-season
+# combined: his PERCENTILES come from the combined pool, his metrics and weights stay his own
+# position's. Why: early in a season many midfield pools are thin (on 2026-11-16 Lyall
+# Cameron was the only rankable Scottish Premiership Central Mid -- alone in a pool, every
+# percentile is 50.0 by construction, so every band 3.00). If the
+# combined pool is also below the floor he stays not rated. Every pool already at the floor,
+# and every non-midfield pool, is untouched.
+MIDFIELD_POSITIONS = ("Defensive Mid", "Central Mid", "Attacking Mid")
+POOL_POSITION = "position"          # rated within his own position group (the normal case)
+POOL_MIDFIELD = "midfield"          # rated within all midfielders of his league-season
+MIDFIELD_POOL_TAG = "Rated against all midfielders"
+
+
+def pool_assignment(counts: dict) -> dict:
+    """{(competition_id, season_id, position_group): own pool size} -> {same key: (scope,
+    size of the pool he is rated in)}. A thin midfield group moves to the combined midfield
+    pool of its league-season when that pool reaches MIN_PEERS_FOR_RANKING; nothing else
+    moves."""
+    combined: dict = {}
+    for (comp, season, pos), n in counts.items():
+        if pos in MIDFIELD_POSITIONS:
+            combined[(comp, season)] = combined.get((comp, season), 0) + int(n)
+    out = {}
+    for key, n in counts.items():
+        comp, season, pos = key
+        both = combined.get((comp, season), 0)
+        if (pos in MIDFIELD_POSITIONS and int(n) < MIN_PEERS_FOR_RANKING
+                and both >= MIN_PEERS_FOR_RANKING):
+            out[key] = (POOL_MIDFIELD, both)
+        else:
+            out[key] = (POOL_POSITION, int(n))
+    return out
+
+
+def _rankable(neutral: pd.DataFrame) -> pd.DataFrame:
+    return neutral[neutral["rankable"]].copy() if "rankable" in neutral.columns else neutral.copy()
+
+
+def _group_counts(df: pd.DataFrame) -> dict:
+    if len(df) == 0:
+        return {}
+    return df.groupby(["competition_id", "season_id", "position_group"]).size().to_dict()
+
 
 def metric_percentiles(neutral: pd.DataFrame) -> pd.DataFrame:
     """Direction-aware percentile (0-100) per metric, within competition + season + position
     group, over rankable players only. Lower-is-better metrics are inverted so a high percentile
     always means 'good'. Returns one row per player keyed by KEY, one column per metric.
 
+    Midfield fallback: a thin Defensive / Central / Attacking Mid group takes its percentiles
+    from the combined midfield pool of its league-season (`pool_assignment`); every other row
+    is exactly the per-position computation.
+
     Season is part of the grouping so a call on an unfiltered two-season frame still ranks each
     player within his own season (the live path pre-filters to one season, so this is a guard)."""
-    df = neutral[neutral["rankable"]].copy() if "rankable" in neutral.columns else neutral.copy()
+    df = _rankable(neutral)
     metric_cols = [c for c in df.columns if c not in set(KEY) | {"rankable", "minutes", "name",
                                                                   "team_name", "player_name", "id"}]
     group = df.groupby(["competition_id", "season_id", "position_group"])
+    pools = pool_assignment(_group_counts(df))
+    keys = list(zip(df["competition_id"], df["season_id"], df["position_group"]))
+    fallback = pd.Series([pools[k][0] == POOL_MIDFIELD for k in keys], index=df.index,
+                         dtype=bool)
+    mids = df[df["position_group"].isin(MIDFIELD_POSITIONS)]
+    mid_group = mids.groupby(["competition_id", "season_id"]) if fallback.any() else None
     out = df[KEY].copy()
     for m in metric_cols:
         # MID-RANK, not rank/n. pandas' `rank(pct=True)` returns rank / n with ranks
@@ -87,6 +142,11 @@ def metric_percentiles(neutral: pd.DataFrame) -> pd.DataFrame:
         # the ordinary case: dividing by the pool size would rank four players inside a pool
         # of ten at 5/15/25/35 instead of 12.5/37.5/62.5/87.5 -- a band of 1.0 for all four.
         pct = (group[m].rank() - 0.5).div(group[m].transform("count")) * 100.0
+        if mid_group is not None:
+            # Same formula over the combined midfield pool, taken ONLY for the thin groups'
+            # rows: a full pool's percentiles are never touched.
+            both = (mid_group[m].rank() - 0.5).div(mid_group[m].transform("count")) * 100.0
+            pct = pct.where(~fallback, both.reindex(df.index))
         if m in cf.LOWER_IS_BETTER:
             pct = 100.0 - pct
         out[m] = pct
@@ -140,6 +200,7 @@ def build_scorecards(neutral: pd.DataFrame,
     composite only when BOTH are present -- one dimension alone is not a partial assessment.
     """
     pcts = metric_percentiles(neutral)
+    pools = pool_assignment(_group_counts(pcts.reset_index()[KEY]))
     fr = None
     if financial_resale is not None and not financial_resale.empty:
         fr = financial_resale.set_index(["player_id", "competition_id", "season_id"])
@@ -220,6 +281,10 @@ def build_scorecards(neutral: pd.DataFrame,
             # Advisory only -- surfaced for transparency, never used to exclude a player.
             "veto": any(b < cf.VETO_BAND for b in dim_bands.values()),
             "below_min_composite": objective is not None and objective < cf.MIN_COMPOSITE,
+            # The pool his percentiles came from: POOL_POSITION (his own position group) or
+            # POOL_MIDFIELD (the midfield fallback), and how many players it holds.
+            "peer_pool": pools[(competition_id, season_id, position)][0],
+            "peer_pool_size": pools[(competition_id, season_id, position)][1],
         }
         records.append(record)
 
@@ -249,13 +314,34 @@ def _composite(dim_bands: dict[str, float], weights: dict[str, float],
 MIN_PEERS_FOR_RANKING = 10
 
 
-def peer_pool_sizes(scorecards):
-    """(competition_id, season_id, position_group) -> how many players share that pool."""
+def _pool_table(scorecards) -> dict:
+    """(competition_id, season_id, position_group) -> (scope, size) of the pool each group was
+    RATED in. The stored `peer_pool` / `peer_pool_size` (written by the scoring run) win, so a
+    frame holding one position only still knows a combined midfield pool; rows without them
+    (scored before the columns existed) are counted with the same rule (`pool_assignment`)."""
     if scorecards is None or len(scorecards) == 0:
         return {}
-    counts = (scorecards.groupby(["competition_id", "season_id", "position_group"])
-                        .size().to_dict())
-    return counts
+    out = pool_assignment(_group_counts(scorecards))
+    if {"peer_pool", "peer_pool_size"} <= set(scorecards.columns):
+        stored = scorecards.dropna(subset=["peer_pool", "peer_pool_size"])
+        if len(stored):
+            first = (stored.groupby(["competition_id", "season_id", "position_group"])
+                           [["peer_pool", "peer_pool_size"]].first())
+            for key, r in first.iterrows():
+                out[key] = (str(r["peer_pool"]), int(r["peer_pool_size"]))
+    return out
+
+
+def peer_pool_sizes(scorecards):
+    """(competition_id, season_id, position_group) -> how many players are in the pool that
+    group was rated in: its own size, or the combined midfield pool's for a thin midfield
+    group (`pool_assignment`)."""
+    return {k: size for k, (_scope, size) in _pool_table(scorecards).items()}
+
+
+def peer_pool_scopes(scorecards):
+    """(competition_id, season_id, position_group) -> POOL_POSITION or POOL_MIDFIELD."""
+    return {k: scope for k, (scope, _size) in _pool_table(scorecards).items()}
 
 
 def pool_is_thin(pool_size) -> bool:
@@ -305,9 +391,21 @@ def rank_in_pool(scorecards, player_id: int, competition_id: int, season_id: int
 
     Returns `(None, n)` for a player with no scored row in that pool: the pool size is still
     a fact worth reporting, and None is not zero.
+
+    MIDFIELD FALLBACK: a player rated against all midfielders (`POOL_MIDFIELD`) gets
+    `(None, n)` too. His own position holds fewer than MIN_PEERS_FOR_RANKING, so a rank among
+    them would be a ranking from a thin pool; and a rank among all midfielders would order
+    players scored on different metrics and weights.
     """
     if scorecards is None or len(scorecards) == 0:
         return None, 0
+    if position_group in MIDFIELD_POSITIONS:
+        league = scorecards[(scorecards["competition_id"] == competition_id)
+                            & (scorecards["season_id"] == season_id)]
+        if peer_pool_scopes(league).get(
+                (competition_id, season_id, position_group)) == POOL_MIDFIELD:
+            own = league[league["position_group"] == position_group]
+            return None, int(own[column].notna().sum())
     pool = scorecards[(scorecards["competition_id"] == competition_id)
                       & (scorecards["season_id"] == season_id)
                       & (scorecards["position_group"] == position_group)]

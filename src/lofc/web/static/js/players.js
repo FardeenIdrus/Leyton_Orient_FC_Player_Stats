@@ -241,7 +241,7 @@ const stylePills = arr => {
 };
 const scoutPill = v => !v ? '' : `<span class="pill ${v === 'High priority' ? 'verdict-pos' : v === 'Not recommended' ? 'verdict-neg' : 'verdict-mid'}">${esc(v)}</span>`;
 
-function cell(col, v) {
+function cell(col, v, tag) {
   switch (col.kind) {
     case 'rating': return `<td class="rating">${ratingChip(v)}</td>`;
     case 'style': return `<td class="sty">${stylePills(v)}</td>`;
@@ -250,7 +250,8 @@ function cell(col, v) {
     case 'num': return `<td class="n">${col.key === 'Mins' ? fmtInt(v) : esc(dash(v))}</td>`;
     // long club / league names are cut with an ellipsis (full text on hover) so every rating
     // column stays on screen at 1440 wide
-    default: return col.key === 'Player' ? `<td><div class="pname cut">${esc(dash(v))}</div></td>`
+    // tag: "Rated against all midfielders" (the midfield fallback pool), under the name
+    default: return col.key === 'Player' ? `<td><div class="pname cut">${esc(dash(v))}</div>${tag ? `<span class="pill grey pool-tag">${esc(tag)}</span>` : ''}</td>`
       : `<td><div class="cut" title="${esc(dash(v))}">${esc(dash(v))}</div></td>`;
   }
 }
@@ -293,7 +294,7 @@ function render(p) {
   const back = encodeURIComponent('/players' + location.search);
   $('pl-body').innerHTML = p.rows.map(r =>
     `<tr class="click" tabindex="0" data-href="/player/${r.id[0]}/${r.id[1]}/${r.id[2]}?back=${back}">` +
-    cols.map(c => cell(c, r.cells[c.key])).join('') + '</tr>').join('')
+    cols.map(c => cell(c, r.cells[c.key], r.tag)).join('') + '</tr>').join('')
     || `<tr><td colspan="${cols.length}" class="note">No ${esc(p.title)} match these filters.</td></tr>`;
 
   $('nr-sub').textContent = p.not_ranked.sub;

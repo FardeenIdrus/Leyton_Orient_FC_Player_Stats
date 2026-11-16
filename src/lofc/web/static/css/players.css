@@ -105,3 +105,4 @@ input[type=range]{accent-color:var(--ink);width:100%}
 @media (max-width:1380px){#v-players #tw td:last-child{max-width:92px}#v-players td.sty{max-width:108px}}
 @media (max-width:1380px){#v-players #tw td:last-child{max-width:104px}#v-players td.sty{max-width:100px}#v-players .cut{max-width:94px}}
 @media (min-width:1501px){#v-players #tw th button{max-width:116px}}
+#v-players .pool-tag{display:block;width:max-content;font-size:11px;padding:0 6px;margin:2px 0 0;font-weight:600}
