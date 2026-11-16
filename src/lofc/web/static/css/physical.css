@@ -171,3 +171,5 @@ td.ph-cell{white-space:nowrap}
 #sc-top-note{margin-top:6px}
 .ph-plot .t5l{stroke:#C8102E;stroke-width:1.2}
 .ph-plot .pt.t5s{stroke-width:1}
+#v-physical .pool-tag{display:block;width:max-content;font-size:11px;padding:0 6px;margin-top:2px;font-weight:600}
+#ld-tag{margin:6px 0}

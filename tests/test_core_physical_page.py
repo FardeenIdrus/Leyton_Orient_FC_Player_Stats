@@ -111,7 +111,9 @@ def test_thin_pool_has_no_ranking_and_says_why():
     pool = pp.pool_frame(c, v, _pcts(c, v), 4, "Winger")
     out = pp.leaders(pool, "sprint_count_p90")
     assert out["n"] == n
-    assert out["thin"] == f"Not rated: only {n} comparable players (needs {MIN_PEERS_FOR_RANKING})"
+    assert out["n"] == n                          # no league/position given: count-only wording
+    out = pp.leaders(pool, "sprint_count_p90", "Winger", "League Two")
+    assert out["thin"] == f"Not rated: only {n} Wingers in League Two with 450+ minutes (needs 10)."
     assert all(r is None for _i, r in out["order"])
     names = [pool.iloc[i]["player_name"] for i, _r in out["order"]]
     assert names == sorted(names)                               # by name, not by value
@@ -183,7 +185,7 @@ def test_squad_thin_pool_hides_rating_and_percentiles():
                         lambda *a: None)
     b = out[0]
     assert b["phys"] is None
-    assert b["note"] == f"Not rated: only 6 comparable players (needs {MIN_PEERS_FOR_RANKING})"
+    assert b["note"] == "Not rated: only 6 Wingers in League One with 450+ minutes (needs 10)."
     assert b["cells"]["sprint_count_p90"]["t"] == "2.0"
     assert all(x["p"] is None for x in b["cells"].values())
 
@@ -340,6 +342,8 @@ def test_high_on_both_withheld_below_the_peer_floor():
     s = pp.scatter_summary(rows, "a", "b", "")
     assert len(s["idx"]) == 9 and s["median"]["x"] is not None and s["top"] == []
     assert s["top_note"] == "Not rated: only 9 comparable players (needs 10)"
+    s = pp.scatter_summary(rows, "a", "b", "", position="Winger", league="League Two")
+    assert s["top_note"] == "Not rated: only 9 Wingers in League Two with 450+ minutes (needs 10)."
     assert pp.scatter_summary(_xy(_HOB), "a", "b", "")["top_note"] is None
 
 
@@ -430,6 +434,9 @@ def test_min_minutes_below_the_peer_floor_ranks_nobody():
     rows = _with_mins(_xy(_HOB), [2000.0] * 9 + [500.0] * 3)
     s = pp.scatter_summary(rows, "a", "b", "", min_minutes=1800)
     assert len(s["idx"]) == 9 and s["top"] == []
+    # narrowed by minutes: 9 is not the pool, so the count-only wording
+    s = pp.scatter_summary(rows, "a", "b", "", min_minutes=1800, position="Winger",
+                           league="League Two")
     assert s["top_note"] == "Not rated: only 9 comparable players (needs 10)"
 
 

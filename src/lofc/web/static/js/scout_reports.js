@@ -87,7 +87,11 @@ function drawTable(d, s) {
       return `<td class="cut pcell">${r.href ? `<a href="${esc(r.href + backQ())}" class="plink">${name}</a>` : name}</td>`;
     }
     if (c.key === 'Verdict') return `<td>${v === '—' ? '—' : `<span class="pill ${TONE[r.tone] || 'verdict-mid'}">${esc(v)}</span>`}</td>`;
-    if (c.key === 'Rating' || c.key === 'This season') return `<td class="c">${chipFor(v)}</td>`;
+    if (c.key === 'Rating' || c.key === 'This season') {
+      // a rating from the midfield fallback pool: the card's tag on hover
+      const tag = (r.tags || {})[c.key];
+      return `<td class="c">${chipFor(v)}${tag && v !== '—' ? `<span class="hlp" title="${esc(tag)}" aria-label="${esc(tag)}">ⓘ</span>` : ''}</td>`;
+    }
     if (c.key === 'Club' || c.key === 'Fixture') return `<td class="cut" title="${esc(v)}">${esc(v)}</td>`;
     if (c.key === 'Data vs scout') return `<td class="dvs">${esc(v)}</td>`;
     return `<td>${esc(v)}</td>`;

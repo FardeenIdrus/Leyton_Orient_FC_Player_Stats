@@ -144,7 +144,9 @@ def test_rows_tiles_and_columns(fake):
 def test_thin_pool_shows_no_rating_and_the_note(fake):
     bo = _client().get("/api/watchlist").json()["rows"][1]
     assert bo["cells"]["Composite"] == "—" and bo["ratings"]["Composite"] is None
-    assert bo["not_rated"] == "Not rated: only 2 comparable players (needs 10)"
+    assert bo["not_rated"] == ("Not rated: only 2 Attacking Mids in Scottish Premiership with "
+                               "450+ minutes (needs 10).")
+    assert bo["pool_tag"] is None
     assert bo["href"] is None                                   # no card for him
 
 

@@ -96,8 +96,10 @@ def _targets(cur: int, prev: int) -> dict:
     return S.profile_targets(S.all_rated_rows(), ids)
 
 
-def _thin(view: pd.DataFrame, cur: int, prev: int) -> dict:
-    return S.thin_pools(view, _cards(cur), _cards(prev), cur, prev)
+def _thin(view: pd.DataFrame, cur: int, prev: int) -> tuple[dict, dict]:
+    """(not-rated lines, midfield-pool tags) by (row, column): `S.pool_notes`."""
+    from lofc.dashboard import loaders as L
+    return S.pool_notes(view, _cards(cur), _cards(prev), cur, prev, L.competition_name_by_id())
 
 
 # --- the request -----------------------------------------------------------------------------
@@ -212,8 +214,8 @@ def _all_rows(frame: pd.DataFrame, cur: int, prev: int):
     if full.empty:
         full = S.ensure_display_columns(full)
     table = S.squad_display(full[S.DISPLAY_COLUMNS])
-    thin = _thin(full, cur, prev)
-    cells = S.web_cells(full, table, thin)
+    thin, tags = _thin(full, cur, prev)
+    cells = S.web_cells(full, table, thin, tags)
     links, messages = S.row_links(full, _targets(cur, prev))
     pids = ([None if pd.isna(p) else int(p) for p in full["player_id"]]
             if "player_id" in full.columns else [None] * len(full))

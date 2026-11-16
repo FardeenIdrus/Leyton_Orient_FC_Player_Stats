@@ -85,9 +85,28 @@ def _num(v) -> float | None:
     return None if _missing(v) else float(v)
 
 
-def thin_caption(n: int) -> str:
-    from lofc.core.card import thin_pool_caption
+def thin_caption(n: int, position: str | None = None, league: str | None = None) -> str:
+    """The card's not-rated line, "Not rated: only N <Position>s in <League> with 450+ minutes
+    (needs 10)." (`card.not_rated_line`); without a position and league (a list narrowed by
+    age or minutes, where N is not the pool) the older count-only caption."""
+    from lofc.core.card import not_rated_line, thin_pool_caption
+    if position and league:
+        return not_rated_line(int(n), position, league)
     return thin_pool_caption(int(n))
+
+
+def _short_caption(n: int, pool_n: int | None, position, league) -> str:
+    """Why a list of `n` is not ranked: the card's not-rated line when the rated pool
+    (`pool_n`, default `n`) is below the floor, else the count-only caption."""
+    pool = n if pool_n is None else int(pool_n)
+    if pool < MIN_PEERS_FOR_RANKING:
+        return thin_caption(pool, position, league)
+    return thin_caption(n)
+
+
+def _tag(scope) -> str | None:
+    from lofc.core.card import pool_tag
+    return pool_tag(scope)
 
 
 # --- age bands (TASKS 2.36) --------------------------------------------------------------------
@@ -116,38 +135,50 @@ RATING_KEY = "physical_rating"
 
 def physical_ranks(cards: pd.DataFrame, competition_id: int, season_id: int,
                    position: str) -> dict:
-    """player_id -> {"band", "rank", "n", "text"}: the Physical rating and its "7th of 45" in
-    that league, season and position, by `scorecard.rank_in_pool(..., column="physical_band")`
-    on the scorecards (`cards`: the "All Metrics" rows). A pool under MIN_PEERS_FOR_RANKING is
-    not a rating: no band, no rank, "—"."""
+    """player_id -> {"band", "rank", "n", "pool", "tag", "text"}: the Physical rating and its
+    "7th of 45" in that league, season and position, by `scorecard.rank_in_pool(...,
+    column="physical_band")` on the scorecards (`cards`: the "All Metrics" rows). The pool is
+    the one he was RATED in (`scorecard.peer_pool_sizes`: stored, so a thin midfield group
+    knows its combined midfield pool). Under MIN_PEERS_FOR_RANKING it is not a rating: no
+    band, no rank, "—". Rated against all midfielders (the midfield fallback): the band, no
+    rank (his own position is below the floor, as the card), tagged."""
     from lofc.dashboard.detail_section import ordinal
-    from lofc.model.scorecard import rank_in_pool
+    from lofc.model.scorecard import peer_pool_scopes, peer_pool_sizes, rank_in_pool
     if cards is None or not len(cards):
         return {}
     pool = cards[(cards["competition_id"] == competition_id) & (cards["season_id"] == season_id)
                  & (cards["position_group"] == position) & cards["physical_band"].notna()]
     n = int(len(pool))
-    thin = n < MIN_PEERS_FOR_RANKING
+    key = (competition_id, season_id, position)
+    size = peer_pool_sizes(cards).get(key, n)
+    tag = _tag(peer_pool_scopes(cards).get(key))
+    thin = size < MIN_PEERS_FOR_RANKING
     out = {}
     for pid, band in zip(pool["player_id"], pool["physical_band"]):
-        rank = None if thin else rank_in_pool(pool, int(pid), competition_id, season_id, position,
-                                               column="physical_band")[0]
+        rank = None if thin or tag else rank_in_pool(pool, int(pid), competition_id, season_id,
+                                                     position, column="physical_band")[0]
         out[int(pid)] = {"band": None if thin else float(band), "rank": rank, "n": n,
+                         "pool": int(size), "tag": None if thin else tag,
                          "text": DASH if rank is None else f"{ordinal(rank)} of {n}"}
     return out
 
 
-def rating_leaders(pool: pd.DataFrame, ranks: dict) -> dict:
+def rating_leaders(pool: pd.DataFrame, ranks: dict, position: str | None = None,
+                   league: str | None = None) -> dict:
     """The leaders list for "Physical rating": best band first, ties share a rank (the ranks of
-    `physical_ranks`). A thin pool is listed by name, unranked, and says why."""
+    `physical_ranks`). A thin pool is listed by name, unranked, and says why (the card's line).
+    Rated against all midfielders: best band first, unranked, tagged."""
     ids = [int(p) for p in pool["player_id"]]
     has = [i for i, p in enumerate(ids) if p in ranks]
-    n = next(iter(ranks.values()))["n"] if ranks else 0
-    if n < MIN_PEERS_FOR_RANKING:
+    first = next(iter(ranks.values())) if ranks else {}
+    n, size, tag = first.get("n", 0), first.get("pool", first.get("n", 0)), first.get("tag")
+    if size < MIN_PEERS_FOR_RANKING:
         order = sorted(has, key=lambda i: str(pool.iloc[i]["player_name"]))
-        return {"n": n, "thin": thin_caption(n) if n else None, "order": [[i, None] for i in order]}
+        return {"n": n, "thin": thin_caption(size, position, league) if size else None,
+                "tag": None, "order": [[i, None] for i in order]}
     order = sorted(has, key=lambda i: (-ranks[ids[i]]["band"], str(pool.iloc[i]["player_name"])))
-    return {"n": n, "thin": None, "order": [[i, ranks[ids[i]]["rank"]] for i in order]}
+    return {"n": n, "thin": None, "tag": tag,
+            "order": [[i, None if tag else ranks[ids[i]]["rank"]] for i in order]}
 
 
 TOP_SHOWN, TOP_MARKED = 8, 5        # "Better on both": rows listed / dots numbered in red
@@ -199,11 +230,14 @@ def better_on_both(players: list[dict], idx: list[int], x: str, y: str, mx, my,
 
 
 def scatter_summary(players: list[dict], x: str, y: str, band: str,
-                    min_minutes: int = MIN_MINUTES[0], lower=None) -> dict:
+                    min_minutes: int = MIN_MINUTES[0], lower=None, position: str | None = None,
+                    league: str | None = None, pool_n: int | None = None) -> dict:
     """The two-metric chart's plotted pool (rows with both values, in the age band, with at
     least `min_minutes`), the median of each axis over that pool, which axes are reversed
     (`rev`: lower is better, `lower` defaults to cf.LOWER_IS_BETTER) and the "Better on both"
-    list (`better_on_both`); the browser numbers the first `top_marked` of `top` in red."""
+    list (`better_on_both`); the browser numbers the first `top_marked` of `top` in red. Below
+    the floor the note is the card's not-rated line when nothing narrows the plotted pool (no
+    age band, 450 minutes), else the count-only caption (N is then not the pool)."""
     lower = cf.LOWER_IS_BETTER if lower is None else lower
     mm = min_minutes
 
@@ -217,8 +251,11 @@ def scatter_summary(players: list[dict], x: str, y: str, band: str,
     my = float(pd.Series([players[i]["v"][y] for i in idx]).median()) if idx else None
     rev = {"x": x in lower, "y": y in lower}
     top = better_on_both(players, idx, x, y, mx, my, rev["x"], rev["y"])
-    note = (None if top or not idx else thin_caption(len(idx)) if len(idx) < MIN_PEERS_FOR_RANKING
-            else NOBODY_BETTER_ON_BOTH)
+    whole = not band and mm <= MIN_MINUTES[0]
+    note = (None if top or not idx
+            else (_short_caption(len(idx), pool_n, position, league) if whole
+                  else thin_caption(len(idx)))
+            if len(idx) < MIN_PEERS_FOR_RANKING else NOBODY_BETTER_ON_BOTH)
     return {"idx": idx, "top": top, "top_marked": TOP_MARKED, "top_note": note, "rev": rev,
             "median": {"x": mx, "y": my, "x_t": value_text(mx), "y_t": value_text(my)}}
 
@@ -236,6 +273,17 @@ def count_for(counts: pd.DataFrame, competition_id: int, position: str, metric: 
     if key not in counts.index or metric not in counts.columns:
         return 0
     return int(counts.at[key, metric])
+
+
+def metric_count(counts: pd.DataFrame, competition_id: int, position: str, metric: str,
+                 scope=None) -> int:
+    """The divisor of his percentile for `metric`: players with it in the pool he was rated in
+    -- his position (`count_for`), or every midfielder of the league for the midfield fallback
+    (`scope` POOL_MIDFIELD), as `scorecard.metric_percentiles` computed it."""
+    from lofc.model.scorecard import MIDFIELD_POSITIONS, POOL_MIDFIELD
+    if scope == POOL_MIDFIELD:
+        return sum(count_for(counts, competition_id, p, metric) for p in MIDFIELD_POSITIONS)
+    return count_for(counts, competition_id, position, metric)
 
 
 def pool_frame(cands: pd.DataFrame, values: pd.DataFrame, pcts: pd.DataFrame,
@@ -259,21 +307,30 @@ def pool_frame(cands: pd.DataFrame, values: pd.DataFrame, pcts: pd.DataFrame,
     return out.reset_index(drop=True)
 
 
-def leaders(pool: pd.DataFrame, metric: str) -> dict:
-    """The ranked list for one metric: {"n", "thin", "order": [[row, rank], ...]}. Ranked by
-    percentile (so lower-is-better metrics put the quickest first), ties share the best rank.
-    A pool below MIN_PEERS_FOR_RANKING is listed by name with no rank, and says why."""
+def leaders(pool: pd.DataFrame, metric: str, position: str | None = None,
+            league: str | None = None, scope=None, metric_n: int | None = None,
+            pool_n: int | None = None) -> dict:
+    """The ranked list for one metric: {"n", "thin", "tag", "order": [[row, rank], ...]}. Ranked
+    by percentile (so lower-is-better metrics put the quickest first), ties share the best rank.
+    A pool below MIN_PEERS_FOR_RANKING is listed by name with no rank, and says why (the card's
+    line). Rated against all midfielders (`scope` POOL_MIDFIELD, `metric_n` = players with the
+    metric in that pool at the floor): by percentile, no rank (as the card), tagged. The line
+    counts the rated pool (`pool_n`, default the listed players); a pool at the floor with fewer
+    players tracked for the metric is a coverage gap: the count-only caption."""
     has = pool[pool[metric].notna()]
     n = int(len(has))
-    if n < MIN_PEERS_FOR_RANKING:
-        order = has.sort_values("player_name", kind="stable").index
-        return {"n": n, "thin": thin_caption(n) if n else None,
-                "order": [[int(i), None] for i in order]}
     pct = has[f"{metric}__pct"]
-    ranks = pct.rank(ascending=False, method="min")
     order = has.assign(_p=pct).sort_values(["_p", "player_name"], ascending=[False, True],
                                            kind="stable").index
-    return {"n": n, "thin": None,
+    tag = _tag(scope)
+    if tag and n and (metric_n or 0) >= MIN_PEERS_FOR_RANKING:
+        return {"n": n, "thin": None, "tag": tag, "order": [[int(i), None] for i in order]}
+    if n < MIN_PEERS_FOR_RANKING:
+        order = has.sort_values("player_name", kind="stable").index
+        return {"n": n, "thin": _short_caption(n, pool_n, position, league) if n else None,
+                "tag": None, "order": [[int(i), None] for i in order]}
+    ranks = pct.rank(ascending=False, method="min")
+    return {"n": n, "thin": None, "tag": None,
             "order": [[int(i), None if pd.isna(ranks[i]) else int(ranks[i])] for i in order]}
 
 
@@ -309,7 +366,9 @@ def squad_rows(squad: pd.DataFrame, rows: pd.DataFrame, values: pd.DataFrame,
     """Every current Orient outfielder for the season. `squad` = `core.squad.squad()`; `rows` =
     `core.squad.rated_rows(season)` (his most-minutes row, the peer floor applied); the
     percentile is against that row's league and position. No rating and no percentiles from a
-    thin peer pool; a metric whose own pool is thin has no percentile."""
+    thin peer pool (the card's not-rated line); a metric whose own pool is thin has no
+    percentile. The pool is the one he was rated in (`peer_count`, `peer_pool`: the midfield
+    fallback counts every midfielder of the league, and is tagged)."""
     order = {p: i for i, p in enumerate(positions())}
     val = values.set_index(["player_id", "competition_id"])
     pct = pcts.set_index(["player_id", "competition_id", "position_group"])
@@ -322,12 +381,16 @@ def squad_rows(squad: pd.DataFrame, rows: pd.DataFrame, values: pd.DataFrame,
             continue                                  # goalkeepers: no tracking data
         cells = {k: {"t": DASH, "v": None, "p": None} for k in RATED}
         row = {"name": str(s.player_name), "pos": pos, "league": None, "mins": None, "mins_t": DASH,
-               "phys": None, "phys_t": DASH, "matches": None, "note": None, "href": None,
+               "phys": None, "phys_t": DASH, "matches": None, "note": None, "tag": None,
+               "href": None,
                "cells": cells,
                "_o": (order.get(pos, 99), )}
         if r is not None:
             comp = int(r["competition_id"])
             thin = bool(r["thin"])
+            scope = r.get("peer_pool")
+            scope = None if _missing(scope) else scope
+            row["tag"] = None if thin else _tag(scope)
             row["matches"] = (matches or {}).get((pid, comp))
             row.update(league=league_names.get(comp), mins=_num(r["minutes"]),
                        mins_t=minutes_text(r["minutes"]),
@@ -335,7 +398,8 @@ def squad_rows(squad: pd.DataFrame, rows: pd.DataFrame, values: pd.DataFrame,
             if rank_of is not None and not thin:
                 row["phys_t"] = rank_of(pid, comp, pos)
             if thin and not _missing(r["peer_count"]):
-                row["note"] = thin_caption(int(r["peer_count"]))
+                row["note"] = thin_caption(int(r["peer_count"]), pos,
+                                           league_names.get(comp, f"League {comp}"))
             sid = int(pcts["season_id"].iloc[0]) if len(pcts) else None
             vr = val.loc[(pid, comp)] if (pid, comp) in val.index else None
             pr = pct.loc[(pid, comp, pos)] if (pid, comp, pos) in pct.index else None
@@ -346,7 +410,7 @@ def squad_rows(squad: pd.DataFrame, rows: pd.DataFrame, values: pd.DataFrame,
             for k in RATED:
                 v = None if vr is None else vr.get(k)
                 ok = (not thin and pr is not None
-                      and count_for(counts, comp, pos, k) >= MIN_PEERS_FOR_RANKING)
+                      and metric_count(counts, comp, pos, k, scope) >= MIN_PEERS_FOR_RANKING)
                 cells[k] = {"t": value_text(v), "v": _num(v),
                             "p": pct_value(pr.get(k)) if ok else None}
             if pr is not None and sid is not None:
@@ -425,11 +489,15 @@ def performance_rows(squad: pd.DataFrame, rows: pd.DataFrame, pcts: pd.DataFrame
         prow = sc.loc[(pid, comp)] if (pid, comp) in sc.index else None
         sw = strong_weak(prow, _resolved_performance(pos), label)
         league = None if comp == LEAGUE_ONE else league_names.get(comp, f"League {comp}")
+        scope = r.get("peer_pool")
+        tag = _tag(None if _missing(scope) else scope)
+        whom = "midfielders" if tag else f"{pos}s"
         group = group_of(pos)
         groups.setdefault(group, []).append({
             "name": str(s.player_name), "href": href(pid, comp, season_id), "pos": pos,
             "pos_tag": pos if group != pos else None,
-            "league": league, "league_tip": None if league is None else f"Percentiles vs {league} {pos}s",
+            "league": league, "league_tip": None if league is None else f"Percentiles vs {league} {whom}",
+            "pool_tag": tag,
             "mins": _num(r["minutes"]), "mins_t": minutes_text(r["minutes"]),
             "overall": _num(r["objective_composite"]), "perf": _num(r.get("performance_band")),
             "phys": _num(r.get("physical_band")),

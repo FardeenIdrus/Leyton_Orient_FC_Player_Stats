@@ -18,7 +18,10 @@ from lofc.model.scorecard import MIN_PEERS_FOR_RANKING
 POOLS = [("League One CF 2026/27", 319, 4, "Centre Forward", 4),
          ("League Two Winger 2025/26", 318, 5, "Winger", 3),
          ("Championship CB 2025/26", 318, 3, "Centre Back", 2),
-         ("thin: Premier League 2 CM 2026/27", 319, 903, "Central Mid", 1)]
+         # Premier League 2 Wingers 2026/27: a pool of 8 (not rated). PL2 Central Mids are
+         # rated against all PL2 midfielders (the midfield fallback, owner 2026-11-16).
+         ("thin: Premier League 2 Winger 2026/27", 319, 903, "Winger", 1),
+         ("midfield pool: Premier League 2 CM 2026/27", 319, 903, "Central Mid", 1)]
 
 
 @pytest.fixture(scope="module")
@@ -90,9 +93,15 @@ def test_pool_numbers_equal_the_card(engine, api, label, season, league, positio
     for key, L in pool["leaders"].items():
         if key == "physical_rating":     # ranked on the band, not a percentile (own test below)
             continue
+        ranks = [r for _i, r in L["order"]]
+        if L.get("tag"):                 # the midfield fallback: percentiles, no rank
+            assert L["tag"] == "Rated against all midfielders" and L["thin"] is None
+            assert all(r is None for r in ranks)
+            pct = [pool["players"][i]["p"][key] for i, _ in L["order"]]
+            assert pct == sorted(pct, reverse=True)
+            continue
         thin = L["n"] < MIN_PEERS_FOR_RANKING
         assert (L["thin"] is not None) == (thin and L["n"] > 0)
-        ranks = [r for _i, r in L["order"]]
         if thin:
             assert all(r is None for r in ranks)
             assert all(pool["players"][i]["p"][key] is None for i, _ in L["order"])

@@ -708,13 +708,14 @@ def home_first_view(s, w):
 
 
 # -- Report ---------------------------------------------------------------------------------
-# Real local database. A winger, a thin peer pool (8 Scottish Premiership attacking mids in
-# 2026/27: no composite, "Not rated: only 8 ..."), a goalkeeper (no playing style), a Leyton
+# Real local database. A winger, a thin peer pool (Harry Gathercole, 8 Premier League 2 wingers in
+# 2026/27: no composite, "Not rated: only 8 ..."; the old Scottish attacking-mid case is now
+# rated against all midfielders, 2026-11-16), a goalkeeper (no playing style), a Leyton
 # Orient player (Orient median line), a 2026/27 centre forward.
 REPORT_BASE = "/report?player=39154&competition=5&season=318"
 REPORT_CASES = [
     ("winger", REPORT_BASE),
-    ("thin pool", "/report?player=2000030124&competition=901&season=319"),
+    ("thin pool", "/report?player=2000159726&competition=903&season=319"),
     ("goalkeeper", "/report?player=44875&competition=3&season=318"),
     ("Leyton Orient player", "/report?player=24835&competition=4&season=318"),
     ("2026/27 centre forward", "/report?player=47357&competition=5&season=319"),
@@ -1501,7 +1502,10 @@ def compare_special_cases(s, w):
     for label, path, want in (
         ("goalkeepers", "/compare?season=318&position=Goalkeeper&a=66767-3&b=6423-4", "Performance profile"),
         ("2024/25", "/compare?season=317&position=Winger&a=142372-903&b=36385-901", "Performance profile"),
-        ("thin pool", "/compare?season=319&position=Attacking%20Mid&a=2000030124-901", "Not rated: only"),
+        # Harry Gathercole, PL2 Winger 2026/27 (pool of 8); Lyall Cameron, the midfield fallback
+        ("thin pool", "/compare?season=319&position=Winger&a=2000159726-903", "Not rated: only"),
+        ("midfield pool", "/compare?season=319&position=Central%20Mid&a=2000169232-901",
+         "Rated against all midfielders"),
         ("league filter", "/compare?season=318&position=Centre%20Back&leagues=Championship&leagues=National%20League",
          "Performance profile")):
         s.goto(path, check=True, desc=f"compare: {label}")
@@ -1777,7 +1781,7 @@ def squads_thin_and_sort(s, w):
         s.page.locator("#tw").evaluate("e => { e.scrollTop = e.scrollHeight; }")
         s.page.wait_for_timeout(150)
     s.note("squads: thin-pool composite withheld with the note",
-           None if thin.count() and re.fullmatch(r"Not rated: only \d+ comparable players \(needs 10\)",
+           None if thin.count() and re.fullmatch(r"Not rated: only \d+ [A-Za-z ]+s in .+ with 450\+ minutes \(needs 10\)\.",
                                                  thin.first.get_attribute("data-tip")) else "no withheld composite found")
     head = s.page.locator("#sq-head [data-sort='Minutes']")
     s.step("squads: sort by Minutes (asc)", lambda p: head.click(timeout=3000))
@@ -1943,8 +1947,11 @@ def scout_search_and_age(s, w):
     s.step("scout reports: search", lambda p: (box.fill("Samba", timeout=3000), box.press("Enter")))
     names = s.page.locator("#sr-body .pname").all_inner_texts()
     s.note("scout reports: search matches names", None if names and all("samba" in n.lower() for n in names) else names[:5])
-    s.note("scout reports: thin pool rating withheld",
-           None if "Not rated: only" in s.page.inner_text("#sr-body") else "no 'Not rated: only' note")
+    # Floyd Samba's 2025/26 pool was thin until the midfield fallback (2026-11-16): now rated
+    # against all midfielders, tagged on hover
+    s.note("scout reports: midfield-pool rating tagged",
+           None if s.page.locator("#sr-body [data-tip='Rated against all midfielders']").count()
+           else "no 'Rated against all midfielders' tag")
     age = s.page.locator("#f-max_age")
     s.step("scout reports: max age 24", lambda p: (age.fill("24"), age.press("Enter"), age.blur()))
     s.note("scout reports: max age in the URL", None if "max_age=24" in s.page.url else s.page.url)
@@ -3104,8 +3111,18 @@ def physical_no_data_season(s, w):
 
 
 def physical_thin_pool(s, w):
-    """A league-position pool below 10: listed by name, no rank or percentile, the note says why."""
-    s.goto(PH_PATH + "?season=319&league=903&position=Central+Mid", check=True, desc="physical: thin pool")
+    """A league-position pool below 10: listed by name, no rank or percentile, the note says why
+    (PL2 Wingers 2026/27, 8). PL2 Central Mids: rated against all midfielders -- tagged,
+    percentiles, no rank."""
+    s.goto(PH_PATH + "?season=319&league=903&position=Central+Mid", check=True, desc="physical: midfield pool")
+    if _ph_ready(s):
+        tag = s.page.locator("#ld-tag")
+        s.note("physical: midfield-pool tag", None if tag.is_visible()
+               and tag.inner_text() == "Rated against all midfielders" else "no tag")
+        s.note("physical: midfield pool shows percentiles, no rank",
+               None if "Percentile" in s.page.inner_text("#ld-head") and s.page.locator("#ld-tiles").is_hidden()
+               else s.page.inner_text("#ld-head"))
+    s.goto(PH_PATH + "?season=319&league=903&position=Winger", check=True, desc="physical: thin pool")
     if not _ph_ready(s):
         return s.note("physical: thin pool", skipped="page did not draw")
     t = s.page.locator("#ld-thin")

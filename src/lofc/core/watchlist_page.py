@@ -145,6 +145,36 @@ def thin_sizes(df: pd.DataFrame, scorecards_for) -> pd.Series:
     return out
 
 
+def pool_notes(df: pd.DataFrame, scorecards_for, names: dict) -> pd.DataFrame:
+    """Per watched row with a composite: `not_rated` -- the card's line when his pool is below
+    MIN_PEERS_FOR_RANKING ("Not rated: only N <Position>s in <League> with 450+ minutes (needs
+    10).") -- and `pool_tag` -- "Rated against all midfielders" when he was rated in the
+    midfield fallback pool; None otherwise. Pools as `thin_sizes` (the pool he was rated in)."""
+    from lofc.core.card import not_rated_line, pool_tag
+    from lofc.model.scorecard import peer_pool_scopes, peer_pool_sizes, pool_is_thin
+    out = pd.DataFrame({"not_rated": [None] * len(df), "pool_tag": [None] * len(df)},
+                       index=df.index, dtype=object)
+    for sid in sorted(int(s) for s in df["season_id"].dropna().unique().tolist()):
+        sc = scorecards_for(sid)
+        sizes, scopes = peer_pool_sizes(sc), peer_pool_scopes(sc)
+        pos = {(int(p), int(c)): g for p, c, g in zip(sc["player_id"], sc["competition_id"],
+                                                        sc["position_group"])}
+        for i in df.index[df["season_id"] == sid]:
+            if pd.isna(df.at[i, "objective_composite"]):
+                continue
+            comp = int(df.at[i, "competition_id"])
+            group = pos.get((int(df.at[i, "player_id"]), comp))
+            if group is None:
+                continue
+            n = sizes.get((comp, sid, group))
+            if n is not None and pool_is_thin(n):
+                out.at[i, "not_rated"] = not_rated_line(int(n), group,
+                                                        names.get(comp, f"League {comp}"))
+            else:
+                out.at[i, "pool_tag"] = pool_tag(scopes.get((comp, sid, group)))
+    return out
+
+
 def apply_pool_floor(df: pd.DataFrame, thin: pd.Series) -> pd.DataFrame:
     """A copy with the three ratings blanked where `thin` holds a pool size."""
     out = df.copy()

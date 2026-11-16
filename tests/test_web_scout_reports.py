@@ -113,7 +113,9 @@ def test_thin_last_season_rating_is_withheld_with_the_note(fake):
     d = _client().get("/api/scout-reports").json()
     bo = next(r for r in d["rows"] if r["id"] == "s2")
     assert bo["cells"]["Rating"] == "—"
-    assert bo["cells"]["Data vs scout"] == "Not rated: only 8 comparable players (needs 10)"
+    assert bo["cells"]["Data vs scout"] == ("Not rated: only 8 Right Backs in Scottish "
+                                            "Championship with 450+ minutes (needs 10).")
+    assert bo["tags"] == {}
 
 
 def test_no_blank_reaches_the_page(fake):

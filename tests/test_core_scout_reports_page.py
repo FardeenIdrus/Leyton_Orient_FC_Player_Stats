@@ -127,17 +127,19 @@ def test_report_card_is_what_the_html_card_draws():
 def test_pool_floor_blanks_a_thin_last_season_rating_and_says_why():
     rows = [dict(ROWS[1]), dict(ROWS[0])]
     rows[0]["composite"] = 3.07                     # thin pool, no live rating
-    sizes = pd.Series([8.0, float("nan")])
-    out = sp.prepare(_frame(rows), "2025/26", "2026/27", NAMES, thin=sizes)
+    line = "Not rated: only 8 Right Backs in Scottish Championship with 450+ minutes (needs 10)."
+    out = sp.prepare(_frame(rows), "2025/26", "2026/27", NAMES,
+                     thin=pd.Series([line, float("nan")], dtype=object))
     assert pd.isna(out.iloc[0]["composite"])
-    assert out.iloc[0][sr.MODEL_VIEW] == "Not rated: only 8 comparable players (needs 10)"
+    assert out.iloc[0][sr.MODEL_VIEW] == line
     assert sr.data_vs_scout_group(out.iloc[0][sr.MODEL_VIEW]) == "No rating"
     assert out.iloc[1]["composite"] == 2.5
 
 
 def test_pool_floor_keeps_the_live_rating_comparison():
     row = dict(ROWS[1]); row["composite_live"] = 4.1
-    out = sp.prepare(_frame([row]), "2025/26", "2026/27", NAMES, thin=pd.Series([8.0]))
+    out = sp.prepare(_frame([row]), "2025/26", "2026/27", NAMES,
+                     thin=pd.Series(["Not rated: only 8 ..."], dtype=object))
     assert pd.isna(out.iloc[0]["composite"])
     assert out.iloc[0][sr.MODEL_VIEW] == "Data disagrees — rated 3.5+ (26/27)"
 

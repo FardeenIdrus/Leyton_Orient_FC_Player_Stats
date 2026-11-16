@@ -9,6 +9,7 @@ from test_core_squads import _prepared
 from web_fakes import FakeStore, login, make
 
 DASH = "—"
+LINE6 = "Not rated: only 6 Wingers in Scottish Premiership with 450+ minutes (needs 10)."
 
 
 def _client():
@@ -29,8 +30,8 @@ def fake(monkeypatch):
                     leagues_all=["Championship", "League One", "League Two"])
     monkeypatch.setattr(api, "_data", lambda: data)
     monkeypatch.setattr(api, "_loans", lambda cur, prev: loans)
-    monkeypatch.setattr(api, "_thin", lambda view, cur, prev: {(0, "Also rated"): 6}
-                        if len(view) and view.iloc[0]["Player"] == "Ann Ab" else {})
+    monkeypatch.setattr(api, "_thin", lambda view, cur, prev: ({(0, "Also rated"): LINE6}, {})
+                        if len(view) and view.iloc[0]["Player"] == "Ann Ab" else ({}, {}))
     monkeypatch.setattr(api, "_targets", lambda cur, prev: {1: (4, 318)})
     api._answers.clear()
     api._row_cache.clear()
@@ -74,7 +75,7 @@ def test_payload_shape_and_texts(fake):
                           {"label": "Expiring < 12 months", "value": "1"}]
     assert p["links"] == ["/player/1/4/318", None, None]
     assert p["messages"][0] is None and "no rating" in p["messages"][1]
-    assert p["rows"][0][8] == {"t": DASH, "note": "Not rated: only 6 comparable players (needs 10)"}
+    assert p["rows"][0][8] == {"t": DASH, "note": LINE6}
     assert p["options"]["league"] == ["All", "League One", "League Two"]
     assert p["options"]["leagues"] == ["Championship", "League One", "League Two"]
     assert [o["label"] for o in p["options"]["show"]] == [

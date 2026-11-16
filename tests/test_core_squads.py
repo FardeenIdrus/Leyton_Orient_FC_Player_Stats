@@ -164,9 +164,10 @@ def test_web_cells_withhold_a_thin_composite_with_the_note():
     from lofc.core.squads import DISPLAY_COLUMNS, squad_display, web_cells
     f = _prepared()
     table = squad_display(f[DISPLAY_COLUMNS].reset_index(drop=True))
-    rows = web_cells(f, table, {(0, "Also rated"): 6})
+    line = "Not rated: only 6 Wingers in Scottish Premiership with 450+ minutes (needs 10)."
+    rows = web_cells(f, table, {(0, "Also rated"): line})
     cell = rows[0][DISPLAY_COLUMNS.index("Also rated")]
-    assert cell == {"t": DASH, "note": "Not rated: only 6 comparable players (needs 10)"}
+    assert cell == {"t": DASH, "note": line}
     assert rows[0][DISPLAY_COLUMNS.index("Last season")] == "3.42"
 
 

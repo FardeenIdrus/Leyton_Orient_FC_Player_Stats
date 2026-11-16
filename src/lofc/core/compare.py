@@ -116,21 +116,35 @@ def pick_row(key: tuple[int, int, int], pool: pd.DataFrame, candidates_fn, score
     return row, reason
 
 
-def not_rated_caption(reason: str, peer_count, minutes) -> str | None:
-    """The card's one line for a player without a rating (same words as the card)."""
+def not_rated_caption(reason: str, peer_count, minutes, position: str = "",
+                      league: str = "") -> str | None:
+    """The card's one line for a player without a rating (same words as the card): a thin pool
+    is "Not rated: only N <Position>s in <League> with 450+ minutes (needs 10)."."""
     if reason == "ok":
         return None
-    from lofc.core.card import thin_pool_caption, thin_pool_size
+    from lofc.core.card import not_rated_line, thin_pool_size
     from lofc.dashboard.search_target import search_caption
     n = thin_pool_size(reason, peer_count, minutes)
-    return thin_pool_caption(n) if n is not None else search_caption("not_rated", True, minutes)
+    return (not_rated_line(n, position, league) if n is not None
+            else search_caption("not_rated", True, minutes))
 
 
-def vs_text(position: str, league, thin: int | None) -> str:
-    """Who the percentiles are against: "League Two Wingers", or "8 Celtic League Wingers"
-    for a thin pool (owner D1: the count goes in the heading)."""
-    base = f"{league} {position}s"
-    return f"{thin} {base}" if thin is not None else base
+def vs_text(position: str, league, thin: int | None, scope=None) -> str:
+    """Who the percentiles are against: "League Two Wingers", "8 Celtic League Wingers" for a
+    thin pool (owner D1: the count goes in the heading), or "Scottish Premiership midfielders"
+    for the midfield fallback pool (the card's heading, `card.pool_vs`)."""
+    from lofc.core.card import pool_vs
+    return pool_vs(league, position, scope, thin)
+
+
+def withhold(pcts: dict, names: list[str], withheld) -> dict:
+    """A copy of {name: percentile Series} with the players at `withheld` (indices into `names`)
+    set to None: a not-rated player's percentiles come from a pool below the floor -- alone in
+    one, every percentile is 50 by construction -- so none is shown (owner 2026-11-16)."""
+    out = dict(pcts)
+    for i in withheld:
+        out[names[i]] = None
+    return out
 
 
 def vs_sub(named: list[tuple[str, str]]) -> str:
@@ -378,15 +392,19 @@ def display_names(recs: list) -> list[str]:
 
 def compare_view(recs: list, position: str, archetype: str, show_money: bool,
                  metric_values: pd.DataFrame | None, sc_pcts: pd.DataFrame,
-                 prev: pd.DataFrame | None, ctx: dict) -> dict:
+                 prev: pd.DataFrame | None, ctx: dict, withheld=()) -> dict:
     """Everything below the slot pickers, for 2-3 resolved player rows of one position.
     Percentiles come from the scorecard (position + league + season), the same source the
-    player profile and the composite use, so Compare agrees with the rest of the platform."""
+    player profile and the composite use, so Compare agrees with the rest of the platform.
+    `withheld` (web): indices of not-rated players whose percentiles are not shown (`withhold`);
+    they are left off the radars without a "no percentiles" caption (their line says why)."""
     from lofc.dashboard.seasons import season_name_for
     from lofc.dashboard.tabs.players import _sc_pct_series
     names = display_names(recs)
     pcts = {n: _sc_pct_series(sc_pcts, int(r["player_id"]), int(r["competition_id"]),
                               int(r["season_id"])) for n, r in zip(names, recs)}
+    pcts = withhold(pcts, names, withheld)
+    quiet = {names[i] for i in withheld}
     values = {n: mv_series(metric_values, r) for n, r in zip(names, recs)}
     rows = [{**compare_row(r, prev, show_money), **summary_extras(r, ctx)} for r in recs]
     lens = archetype != cf.DEFAULT_ARCHETYPE
@@ -407,8 +425,9 @@ def compare_view(recs: list, position: str, archetype: str, show_money: bool,
         "lens": lens, "has_physical": has_physical,
         "different_leagues": len({int(r["competition_id"]) for r in recs}) > 1,
         "perf_heading": "Performance" + (f" · {archetype}" if lens else ""),
-        "radar": {"axes": axes, "traces": traces, "no_data": no_data},
-        "phys_radar": {"axes": phys_keys, "traces": phys_traces, "no_data": no_phys},
+        "radar": {"axes": axes, "traces": traces, "no_data": [n for n in no_data if n not in quiet]},
+        "phys_radar": {"axes": phys_keys, "traces": phys_traces,
+                       "no_data": [n for n in no_phys if n not in quiet]},
         "perf_rows": ct.build_rows([m for m, _ in rated], tiers, names, values, pcts),
         "other_rows": ct.build_rows(other, {}, names, values, pcts, drop_empty=True),
         "phys_rows": phys_rows,

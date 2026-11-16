@@ -264,12 +264,11 @@ def test_zones_equal_streamlits_for_every_measure(client):
                 assert n[code]["pct"] == (None if pct is None or pct != pct else round(float(pct)))
 
 
-def test_thin_pool_player_shows_no_composite_but_keeps_percentiles(client):
-    """Owner D1 (new site): a pool under MIN_PEERS_FOR_RANKING is never shown as a rating.
-    Streamlit's Compare still shows one (live site unchanged by owner decision)."""
-    from lofc.model.scorecard import MIN_PEERS_FOR_RANKING
-    # Harry Gathercole, a Premier League 2 Winger (pool of 8 on 2026-11-16). Nygren, used before,
-    # is now rated against all Scottish Premiership midfielders (the midfield fallback).
+def test_thin_pool_player_shows_no_composite_and_no_percentiles(client):
+    """Owner D1 (new site): a pool under MIN_PEERS_FOR_RANKING is never shown as a rating, and
+    (owner 2026-11-16) no percentile either: "—" in the tables, off the radars, and the card's
+    line. Streamlit's Compare still shows one (live site unchanged by owner decision)."""
+    # Harry Gathercole, a Premier League 2 Winger (pool of 8 on 2026-11-16).
     q = [("season", 319), ("position", "Winger"), ("a", "2000159726-903")]
     d = client.get("/api/compare", params=q).json()
     if not d.get("players") or d["players"][0]["player_id"] != 2000159726:
@@ -277,11 +276,34 @@ def test_thin_pool_player_shows_no_composite_but_keeps_percentiles(client):
     if not d["players"][0]["not_rated"]:
         pytest.skip("the pool has reached the floor")
     p = d["players"][0]
-    assert p["not_rated"] and f"needs {MIN_PEERS_FOR_RANKING}" in p["not_rated"]
+    assert re.fullmatch(r"Not rated: only \d+ Wingers in Premier League 2 with 450\+ minutes "
+                        r"\(needs 10\)\.", p["not_rated"])
+    assert p["pool_tag"] is None
     comp = next(r for r in d["summary"]["rows"] if r["attribute"] == "Composite")
     assert comp["cells"][0]["now"] == "—"
-    assert any(v is not None for v in d["perf_radar"]["traces"][0]["values"])
+    assert p["name"] not in [t["name"] for t in d["perf_radar"]["traces"]]
+    assert not d["perf_radar"]["no_data"] or p["name"] not in d["perf_radar"]["no_data"]
+    cells = [r["cells"][0] for r in d["perf_table"]["rows"] if r["cells"][0]["text"] != "—"]
+    assert cells and all(c["pct"] is None and c["pct_text"] == "—" for c in cells)
+    other = [r["cells"][1] for r in d["perf_table"]["rows"]]
+    assert any(c["pct_text"] and c["pct_text"].startswith("P") for c in other)
     assert re.search(r"\b\d+ Premier League 2 Wingers", d["perf_radar"]["sub"])
+
+
+def test_midfield_pool_player_is_tagged_and_keeps_percentiles(client):
+    """Lyall Cameron, the only rankable Scottish Premiership Central Mid in 2026/27: rated
+    against all Scottish Premiership midfielders (the midfield fallback), tagged so."""
+    q = [("season", 319), ("position", "Central Mid"), ("a", "2000169232-901")]
+    d = client.get("/api/compare", params=q).json()
+    if not d.get("players") or d["players"][0]["player_id"] != 2000169232:
+        pytest.skip("Cameron not in this database")
+    p = d["players"][0]
+    if p["not_rated"]:
+        pytest.skip("not rated in this database")
+    assert p["pool_tag"] == "Rated against all midfielders"
+    assert p["vs"] == "Scottish Premiership midfielders"
+    assert any(v is not None for t in d["perf_radar"]["traces"] if t["name"] == p["header_name"]
+               for v in t["values"])
 
 
 def test_defaults_come_from_the_pool_and_the_url_slots_are_returned(client):

@@ -127,14 +127,23 @@ def _pool(season_id: int, league: int, position: str) -> dict:
     frame = core.pool_frame(src.candidates(season_id), src.values(season_id),
                             src.pcts(season_id), league, position)
     counts = _counts(season_id)
-    per_metric = {k: core.count_for(counts, league, position, k) for k in core.KEYS}
+    # the pool this league and position was rated in: its own, or all midfielders of the league
+    # (the midfield fallback) -- each percentile's divisor is that pool's (owner 2026-11-16)
+    from lofc.model.scorecard import peer_pool_scopes, peer_pool_sizes
+    cards = src.cards(position, season_id)
+    has = cards is not None and len(cards)
+    scope = peer_pool_scopes(cards).get((league, season_id, position)) if has else None
+    size = peer_pool_sizes(cards).get((league, season_id, position)) if has else None
+    per_metric = {k: core.metric_count(counts, league, position, k, scope) for k in core.KEYS}
     orient = {int(p) for p in src.squad()["player_id"]}
-    ranks = core.physical_ranks(src.cards(position, season_id), league, season_id, position)
-    leaders = {k: core.leaders(frame, k) for k in core.KEYS}
-    leaders[core.RATING_KEY] = core.rating_leaders(frame, ranks)
+    ranks = core.physical_ranks(cards, league, season_id, position)
+    name = src.league_names().get(league, f"League {league}")
+    leaders = {k: core.leaders(frame, k, position, name, scope, per_metric[k], size)
+               for k in core.KEYS}
+    leaders[core.RATING_KEY] = core.rating_leaders(frame, ranks, position, name)
     return {"players": core.pool_players(frame, per_metric, orient, _href, ranks,
                                          src.match_counts(season_id)),
-            "leaders": leaders}
+            "leaders": leaders, "pool_n": size}
 
 
 def _href(p: int, c: int, s: int) -> str:
@@ -198,7 +207,9 @@ def page_json(season=None, league=None, position=None, x=None, y=None, age=None,
     xk = x if x in core.KEYS else core.DEFAULT_X
     yk = y if y in core.KEYS else core.DEFAULT_Y
     out["min_range"]["max"] = max(mm, core.minutes_max(pool["players"], xk, yk, out["filters"]["age"]))
-    out["scatter"] = dict(core.scatter_summary(pool["players"], xk, yk, out["filters"]["age"], mm),
+    out["scatter"] = dict(core.scatter_summary(pool["players"], xk, yk, out["filters"]["age"], mm,
+                                               position=pos, league=names.get(cid, f"League {cid}"),
+                                               pool_n=pool.pop("pool_n", None)),
                           x=xk, y=yk, sub=f"{pool['title']} · {name} · {mm}+ minutes")
     out["squad"] = dict(_squad(sid), sub=f"{name} · percentile vs his league and position")
     out["perf"] = dict(_perf(sid), sub=f"{name} · rated players · percentile vs his league and position")

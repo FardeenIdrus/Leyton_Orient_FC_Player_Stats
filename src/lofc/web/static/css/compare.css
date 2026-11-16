@@ -24,6 +24,7 @@
 #cmp-sum .nm:hover{text-decoration:underline}
 #cmp-sum .sm{display:block;font-size:13px;color:var(--muted);font-weight:400;margin-top:3px}
 #cmp-sum .nr{display:block;font-size:13px;color:#8E0B20;font-weight:600;margin-top:4px}
+#cmp-sum .pool-tag{display:block;width:max-content;font-size:11px;padding:0 6px;margin-top:4px;font-weight:600}
 #cmp-sum td{vertical-align:middle;padding:10px}
 #cmp-sum .big{font-size:18px;font-weight:600}
 #cmp-sum .chip{font-size:18px;padding:4px 10px;min-width:64px}

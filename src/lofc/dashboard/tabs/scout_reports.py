@@ -521,7 +521,7 @@ def reports_query(rating_season_id: int, live_season_id: int) -> pd.DataFrame:
         """
         WITH rated AS (
             SELECT DISTINCT ON (s.player_id) s.player_id, s.objective_composite,
-                   s.competition_id
+                   s.competition_id, s.peer_pool
             FROM player_scorecards s
             JOIN player_metrics_neutral m ON m.player_id = s.player_id
              AND m.competition_id = s.competition_id AND m.season_id = s.season_id
@@ -534,13 +534,17 @@ def reports_query(rating_season_id: int, live_season_id: int) -> pd.DataFrame:
         -- appear here after being withheld there.
         live_cards AS (
             SELECT s.player_id, s.competition_id, s.position_group, s.objective_composite,
-                   COUNT(*) OVER (PARTITION BY s.competition_id, s.position_group) AS pool
+                   s.peer_pool,
+                   -- the pool he was rated in when stored (the midfield fallback: all
+                   -- midfielders of the league), else his position's count
+                   COALESCE(s.peer_pool_size,
+                            COUNT(*) OVER (PARTITION BY s.competition_id, s.position_group)) AS pool
             FROM player_scorecards s
             WHERE s.season_id = %(live)s AND s.archetype = 'All Metrics'
               AND s.objective_composite IS NOT NULL
         ),
         rated_live AS (
-            SELECT DISTINCT ON (c.player_id) c.player_id, c.objective_composite
+            SELECT DISTINCT ON (c.player_id) c.player_id, c.objective_composite, c.peer_pool
             FROM live_cards c
             JOIN player_metrics_neutral m ON m.player_id = c.player_id
              AND m.competition_id = c.competition_id AND m.season_id = %(live)s
@@ -556,6 +560,9 @@ def reports_query(rating_season_id: int, live_season_id: int) -> pd.DataFrame:
                CASE WHEN %(live)s <> %(prev)s THEN bl.objective_composite END
                                      AS composite_live,
                b.competition_id      AS rated_in,
+               -- which pool each rating came from ("midfield": the midfield fallback, tagged)
+               b.peer_pool           AS pool_scope,
+               CASE WHEN %(live)s <> %(prev)s THEN bl.peer_pool END AS pool_scope_live,
                p.birth_date,
                -- The page's League filter: where he plays THIS season, else last season.
                COALESCE(live.competition_id, prev.competition_id) AS league_id,

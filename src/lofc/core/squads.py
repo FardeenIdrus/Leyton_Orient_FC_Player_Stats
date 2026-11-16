@@ -22,7 +22,7 @@ from lofc.dashboard.loaders import competition_name_by_id, get_engine
 from lofc.dashboard.search import fold
 from lofc.dashboard.seasons import calendar_months_left
 from lofc.dashboard.sidebar_filters import SidebarFilters, apply_sidebar_filters
-from lofc.model.scorecard import peer_pool_sizes, pool_is_thin
+from lofc.model.scorecard import peer_pool_scopes, peer_pool_sizes, pool_is_thin
 from lofc.store import squads as store_squads
 
 
@@ -173,7 +173,9 @@ def season_scorecards(season_id: int) -> pd.DataFrame:
     """The live season's All-Metrics scorecards, for the "This season" column and its
     peer-pool gate. 300s, matching the other loaders on this page."""
     return pd.read_sql(
-        "SELECT player_id, competition_id, season_id, position_group, objective_composite "
+        # peer_pool / peer_pool_size: the pool each was rated in (the midfield fallback)
+        "SELECT player_id, competition_id, season_id, position_group, objective_composite, "
+        "       peer_pool, peer_pool_size "
         "FROM player_scorecards WHERE season_id = %(s)s AND archetype = 'All Metrics' "
         "AND objective_composite IS NOT NULL",
         get_engine(), params={"s": season_id})
@@ -942,17 +944,16 @@ def _half_up(value) -> str:
     return f"{int(float(value) + 0.5):,}"
 
 
-def thin_note(n: int) -> str:
-    from lofc.core.card import thin_pool_caption
-    return thin_pool_caption(n)
-
-
-def web_cells(view: pd.DataFrame, table: pd.DataFrame, thin: dict) -> list[list]:
+def web_cells(view: pd.DataFrame, table: pd.DataFrame, thin: dict,
+              tags: dict | None = None) -> list[list]:
     """The rows as the web page draws them: `table` is `squad_display(view[DISPLAY_COLUMNS])`
     (Streamlit's text), with what Streamlit leaves typed made text here -- Minutes a whole
     number rounded half-up (owner rule), Months left a whole number, the two dates "Mon YYYY"
-    -- and every blank "—". A composite from a thin pool ({(row, column): pool size}) is
-    withheld: {"t": "—", "note": "Not rated: only N comparable players (needs 10)"}."""
+    -- and every blank "—". A composite from a thin pool ({(row, column): the card's not-rated
+    line}, `pool_notes`) is withheld: {"t": "—", "note": "Not rated: only N <Position>s in
+    <League> with 450+ minutes (needs 10)."}; one rated against all midfielders ({(row, column):
+    tag}) is {"t": "3.42", "tag": "Rated against all midfielders"}."""
+    tags = tags or {}
     view = view.reset_index(drop=True)
     typed = ("Minutes", "Months left", "Contract to", "Loan ends")
     # column lists, not .at lookups (60,000 cells on the full list)
@@ -963,7 +964,9 @@ def web_cells(view: pd.DataFrame, table: pd.DataFrame, thin: dict) -> list[list]
         for col, values in columns:
             v = values[i]
             if (i, col) in thin:
-                row.append({"t": "\u2014", "note": thin_note(thin[(i, col)])})
+                row.append({"t": "\u2014", "note": thin[(i, col)]})
+            elif (i, col) in tags and not (v is None or (not isinstance(v, str) and pd.isna(v))):
+                row.append({"t": str(v), "tag": tags[(i, col)]})
             elif v is None or (not isinstance(v, str) and pd.isna(v)):
                 row.append("\u2014")
             elif col == "Minutes":
@@ -978,19 +981,19 @@ def web_cells(view: pd.DataFrame, table: pd.DataFrame, thin: dict) -> list[list]
     return out
 
 
-def thin_pools(view: pd.DataFrame, live_cards: pd.DataFrame, prev_cards: pd.DataFrame,
-               season_id: int, rating_season_id: int) -> dict:
-    """{(row, column): pool size} for every composite on the page that comes from a peer pool
-    under MIN_PEERS_FOR_RANKING. Each is looked up in ITS pool: "This season" in (squad
-    league, live season), "Last season" in (Rated in league, last season), "Also rated" in
-    (Also in league, last season); the pool is the player's scorecard's position group."""
+def _pools(view: pd.DataFrame, live_cards: pd.DataFrame, prev_cards: pd.DataFrame,
+           season_id: int, rating_season_id: int):
+    """(row, column, competition_id, position, scope, pool size) for every composite on the
+    page with a scorecard. Each is looked up in ITS pool: "This season" in (squad league, live
+    season), "Last season" in (Rated in league, last season), "Also rated" in (Also in league,
+    last season); the pool is the one his scorecard's position group was rated in (his
+    position's, or all midfielders of the league: `scorecard.peer_pool_sizes`)."""
     view = view.reset_index(drop=True)
-    out: dict = {}
 
     def scan(cards, column, comp_col, season):
         if cards is None or cards.empty or comp_col not in view.columns or view.empty:
             return
-        sizes = peer_pool_sizes(cards)
+        sizes, scopes = peer_pool_sizes(cards), peer_pool_scopes(cards)
         one = cards.drop_duplicates(["player_id", "competition_id", "season_id"])
         group = {(int(p), int(c)): g for p, c, g in
                  zip(one["player_id"], one["competition_id"], one["position_group"])}
@@ -1000,14 +1003,37 @@ def thin_pools(view: pd.DataFrame, live_cards: pd.DataFrame, prev_cards: pd.Data
             pos = group.get((int(pid), int(comp)))
             if pos is None:
                 continue
-            n = sizes.get((int(comp), int(season), pos))
-            if pool_is_thin(n) and n is not None:
-                out[(i, column)] = int(n)
+            key = (int(comp), int(season), pos)
+            yield i, column, int(comp), pos, scopes.get(key), sizes.get(key)
 
-    scan(live_cards, "This season", "competition_id", season_id)
-    scan(prev_cards, "Last season", "rating_competition_id", rating_season_id)
-    scan(prev_cards, "Also rated", "alt_competition_id", rating_season_id)
-    return out
+    yield from scan(live_cards, "This season", "competition_id", season_id)
+    yield from scan(prev_cards, "Last season", "rating_competition_id", rating_season_id)
+    yield from scan(prev_cards, "Also rated", "alt_competition_id", rating_season_id)
+
+
+def thin_pools(view: pd.DataFrame, live_cards: pd.DataFrame, prev_cards: pd.DataFrame,
+               season_id: int, rating_season_id: int) -> dict:
+    """{(row, column): pool size} for every composite on the page that comes from a peer pool
+    under MIN_PEERS_FOR_RANKING (`_pools`)."""
+    return {(i, col): int(n) for i, col, _c, _p, _s, n in
+            _pools(view, live_cards, prev_cards, season_id, rating_season_id)
+            if n is not None and pool_is_thin(n)}
+
+
+def pool_notes(view: pd.DataFrame, live_cards: pd.DataFrame, prev_cards: pd.DataFrame,
+               season_id: int, rating_season_id: int, names: dict) -> tuple[dict, dict]:
+    """({(row, column): the card's not-rated line} for every composite from a pool under
+    MIN_PEERS_FOR_RANKING, {(row, column): "Rated against all midfielders"} for every rated
+    composite from the midfield fallback pool). `names`: competition id -> league name."""
+    from lofc.core.card import not_rated_line, pool_tag
+    thin, tags = {}, {}
+    for i, col, comp, pos, scope, n in _pools(view, live_cards, prev_cards, season_id,
+                                              rating_season_id):
+        if n is not None and pool_is_thin(n):
+            thin[(i, col)] = not_rated_line(int(n), pos, names.get(comp, f"League {comp}"))
+        elif pool_tag(scope):
+            tags[(i, col)] = pool_tag(scope)
+    return thin, tags
 
 
 def all_rated_rows() -> pd.DataFrame:

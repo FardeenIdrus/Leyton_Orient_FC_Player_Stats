@@ -88,6 +88,8 @@ function setControls() {
 }
 
 function cell(c, v) {
+  if (v && typeof v === 'object' && v.tag)   // rated against all midfielders: the tag on hover
+    return `<td class="c">${chip(v.t)}<span class="hlp" title="${esc(v.tag)}" aria-label="${esc(v.tag)}">ⓘ</span></td>`;
   if (v && typeof v === 'object')            // a thin pool's composite: withheld, with the note
     return `<td class="c"><span class="chip c0" title="${esc(v.note)}" aria-label="${esc(v.note)}">${esc(v.t)}</span><span class="hlp" title="${esc(v.note)}">ⓘ</span></td>`;
   if (c.kind === 'rating') return `<td class="c">${v === DASH ? `<span class="chip c0">${DASH}</span>` : chip(v)}</td>`;

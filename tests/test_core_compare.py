@@ -94,7 +94,8 @@ def test_pick_row_prefers_the_pool_then_the_season_and_can_blank_a_thin_pool():
 
 
 def test_not_rated_caption_names_the_pool_size():
-    assert C.not_rated_caption("not_rated", 8, 900) == "Not rated: only 8 comparable players (needs 10)"
+    assert C.not_rated_caption("not_rated", 8, 900, "Winger", "League Two") == \
+        "Not rated: only 8 Wingers in League Two with 450+ minutes (needs 10)."
     assert C.not_rated_caption("not_rated", float("nan"), 900) == \
         "Not rated: too few peers in his league and position"
     assert C.not_rated_caption("ok", 30, 900) is None

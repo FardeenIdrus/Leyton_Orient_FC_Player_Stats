@@ -102,15 +102,17 @@ def build(chosen: list[str], money: bool):
         return "none", src, df, None, header, None
     # Honesty rule (D1): no rating from a pool below MIN_PEERS_FOR_RANKING.
     thin = wp.thin_sizes(df, src.scorecards_for)
+    notes = wp.pool_notes(df, src.scorecards_for, src.names)
     df = wp.apply_pool_floor(df, thin)
     df["thin_n"] = thin
     frame = wp.display_frame(df, header, money, src.names, valuations=src.valuations)
+    # after the display frame: the not-rated line and the midfield-pool tag are not columns
+    df["not_rated_line"], df["pool_tag"] = notes["not_rated"], notes["pool_tag"]
     return "ok", src, df, frame, header, wp.alerts(df)
 
 
 def page_json(chosen: list[str], money: bool) -> dict:
     from lofc.core import watchlist_page as wp
-    from lofc.core.card import thin_pool_caption
     from lofc.model import assessment_status as AS
     state, src, df, frame, header, alerts = build(chosen, money)
     out = {"empty": state == "empty", "statuses": list(AS.STATUSES), "chosen": chosen,
@@ -147,7 +149,8 @@ def page_json(chosen: list[str], money: bool) -> dict:
             "cells": cells, "note": note, "status": str(r["status"]),
             "ratings": {k: (None if pd.isna(r[_RATING_SRC[k]]) else float(r[_RATING_SRC[k]]))
                         for k in RATINGS},
-            "not_rated": (thin_pool_caption(int(r["thin_n"])) if pd.notna(r["thin_n"]) else None),
+            "not_rated": r["not_rated_line"] if isinstance(r["not_rated_line"], str) else None,
+            "pool_tag": r["pool_tag"] if isinstance(r["pool_tag"], str) else None,
             "href": f"/player/{p}/{c}/{s}" if (p, c, s) in src.openable else None,
             "assess_href": f"/assess?player={p}&competition={c}&season={s}",
             "tm": tm if isinstance(tm, str) and tm.startswith("https://") else None})

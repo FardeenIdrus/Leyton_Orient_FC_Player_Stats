@@ -165,13 +165,17 @@ def _filters(params):
     return _Q(params)
 
 
-def _table(rows: list[dict]) -> list[dict]:
-    """compare_tables.build_rows as JSON; the percentile text is Python's (as `table_html`)."""
+def _table(rows: list[dict], withheld=()) -> list[dict]:
+    """compare_tables.build_rows as JSON; the percentile text is Python's (as `table_html`).
+    A not-rated player's column (`withheld`: indices) shows "—" where a percentile would be."""
+    def pct_text(i, c):
+        if c.get("pct") is not None:
+            return f'P{c["pct"]:.0f}'
+        return C.DASH if i in withheld and c.get("text") not in (None, C.DASH) else None
     return [{"metric": r["metric"], "label": r["label"], "tier": r.get("tier"),
-             "cells": [{"text": c["text"], "pct": c["pct"],
-                        "pct_text": f'P{c["pct"]:.0f}' if c.get("pct") is not None else None,
+             "cells": [{"text": c["text"], "pct": c["pct"], "pct_text": pct_text(i, c),
                         "cls": c["cls"] if c.get("cls") in ("best", "worst") else None}
-                       for c in r["cells"]]}
+                       for i, c in enumerate(r["cells"])]}
             for r in rows]
 
 
@@ -184,8 +188,9 @@ def _orient_line(orient, n: int, keys: list[str], position: str) -> dict | None:
 
 def compare_payload(params) -> dict:
     from lofc.core import players_pool as pp
-    from lofc.core.card import clean, text_or, thin_pool_size
+    from lofc.core.card import clean, pool_tag, text_or, thin_pool_size
     from lofc.dashboard import compare_tables as ct
+    from lofc.model.scorecard import peer_pool_scopes
     from lofc.dashboard import detail_section as ds
     from lofc.dashboard import loaders as L
     from lofc.dashboard import seasons as S
@@ -257,15 +262,23 @@ def compare_payload(params) -> dict:
 
     ctx = C.extras_context(tuple(int(r["player_id"]) for r in recs), sid, _styles, _history,
                            _scouts, L.competition_name_by_id)
+    # Not rated on a thin pool (owner 2026-11-16): no percentile shown as if real -- alone in a
+    # pool every percentile is 50 by construction. The pool each was rated in: his position's,
+    # or all midfielders of his league (the midfield fallback, tagged).
+    thins = [thin_pool_size(reason, r.get("peer_count"), r.get("minutes"))
+             for r, reason in zip(recs, reasons)]
+    withheld = {i for i, n in enumerate(thins) if n is not None}
+    scopes = peer_pool_scopes(scorecards(sid))
     v = C.compare_view(recs, pos, f.archetype, q.money, _metric_values(sid), _sc_pcts(sid),
-                       _prev(sid), ctx)
+                       _prev(sid), ctx, withheld=withheld)
     names = v["names"]
 
     players, named_vs = [], []
     for i, (r, reason) in enumerate(zip(recs, reasons)):
         league = text_or(r.get("league"), C.DASH)
-        thin = thin_pool_size(reason, r.get("peer_count"), r.get("minutes"))
-        vs = C.vs_text(pos, league, thin)
+        thin = thins[i]
+        scope = scopes.get((int(r["competition_id"]), int(r["season_id"]), pos))
+        vs = C.vs_text(pos, league, thin, scope)
         named_vs.append((str(r["player_name"]), vs))
         pid, cid, rsid = int(r["player_id"]), int(r["competition_id"]), int(r["season_id"])
         club = text_or(r.get("team_name"), "")
@@ -274,7 +287,9 @@ def compare_payload(params) -> dict:
             "name": str(r["player_name"]), "header_name": names[i],
             "sub": " · ".join(x for x in (club, str(v["rows"][i].get("League") or "")) if x),
             "href": f"/player/{pid}/{cid}/{rsid}",
-            "not_rated": C.not_rated_caption(reason, r.get("peer_count"), r.get("minutes")),
+            "not_rated": C.not_rated_caption(reason, r.get("peer_count"), r.get("minutes"),
+                                             pos, league),
+            "pool_tag": pool_tag(scope) if reason == "ok" else None,
             "vs": vs})
     out["players"] = players
     vs_line = C.vs_sub(named_vs)
@@ -311,13 +326,13 @@ def compare_payload(params) -> dict:
         "orient": _orient_line(orient, n_orient, ph["axes"], pos)}
     out["perf_table"] = {"heading": v["perf_heading"].replace("Performance", "Performance · in the rating", 1),
                          "sub": f"Value · percentile vs {vs_line} · best green, worst red",
-                         "rows": _table(v["perf_rows"])}
-    out["perf_other"] = {"rows": _table(v["other_rows"])}
+                         "rows": _table(v["perf_rows"], withheld)}
+    out["perf_other"] = {"rows": _table(v["other_rows"], withheld)}
     out["phys_table"] = None if not v["phys_rows"] else {
         "heading": "Physical · in the rating",
         "sub": f"SkillCorner · value · percentile vs {vs_line}",
-        "rows": _table(v["phys_rows"])}
-    out["phys_other"] = {"rows": _table(v["phys_more"])} if v["phys_rows"] else None
+        "rows": _table(v["phys_rows"], withheld)}
+    out["phys_other"] = {"rows": _table(v["phys_more"], withheld)} if v["phys_rows"] else None
 
     zones = C.safe(lambda: C.zone_measures(recs, _zone_slice), {})
     out["zones"] = None if not zones else {

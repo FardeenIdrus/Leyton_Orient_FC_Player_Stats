@@ -85,7 +85,7 @@ def build_bundle(raw: pd.DataFrame, prev: int, live_id, names: dict,
         return None
     rating = season_name_for(prev)
     live = sp.live_label(prev, rating, live_id)
-    frame = sp.prepare(raw, rating, live, names, thin=sp.thin_sizes(raw, scorecards, prev))
+    frame = sp.prepare(raw, rating, live, names, thin=sp.thin_lines(raw, scorecards, prev, names))
     c = sp.counts(frame)
     return {"frame": frame, "names": names, "counts": c, "tabs": sp.tab_labels(c),
             "options": sp.filter_options(frame), "rating_label": rating, "live_label": live,
@@ -126,6 +126,8 @@ def _rows(b: dict, view: pd.DataFrame) -> list[dict]:
         out.append({"id": str(src["submission_id"]),
                     "cells": {c: (str(shown[c]).strip() or "—") for c in COLUMNS if c in table.columns},
                     "tone": verdict_tone(src.get("verdict")),
+                    # a rating from the midfield fallback pool: {"Rating": "Rated against ..."}
+                    "tags": sp.rating_tags(src),
                     "href": _href(b["targets"], src.get("player_id"))})
     return out
 

@@ -79,12 +79,44 @@ def thin_sizes(frame: pd.DataFrame, scorecards: pd.DataFrame, season_id: int) ->
     return pd.Series(out, index=frame.index, dtype="float64")
 
 
+def thin_lines(frame: pd.DataFrame, scorecards: pd.DataFrame, season_id: int,
+               names: dict) -> pd.Series:
+    """Per report: the card's not-rated line ("Not rated: only N <Position>s in <League> with
+    450+ minutes (needs 10).") where `thin_sizes` finds his last-season pool below the floor;
+    NaN otherwise. `names`: competition id -> league name."""
+    from lofc.core.card import not_rated_line
+    sizes = thin_sizes(frame, scorecards, season_id)
+    pos = {(int(p), int(c)): g for p, c, g in zip(scorecards["player_id"],
+                                                    scorecards["competition_id"],
+                                                    scorecards["position_group"])}
+    out = []
+    for pid, cid, n in zip(frame["player_id"], frame["rated_in"], sizes):
+        if pd.isna(n):
+            out.append(float("nan"))
+            continue
+        out.append(not_rated_line(int(n), pos[(int(pid), int(cid))],
+                                  names.get(int(cid), f"League {int(cid)}")))
+    return pd.Series(out, index=frame.index, dtype=object)
+
+
+def rating_tags(row) -> dict:
+    """{column: "Rated against all midfielders"} for each of his two ratings ("Rating", "This
+    season") that came from the midfield fallback pool (`pool_scope`, `pool_scope_live`)."""
+    from lofc.core.card import pool_tag
+    out = {}
+    for col, key in (("Rating", "pool_scope"), ("This season", "pool_scope_live")):
+        tag = pool_tag(row.get(key))
+        if tag:
+            out[col] = tag
+    return out
+
+
 def prepare(frame: pd.DataFrame, rating_label: str, live_label_: str, names: dict,
             thin: pd.Series | None = None) -> pd.DataFrame:
     """The reports with the "Data vs scout" comparison and the League column, as the page shows
-    them. `thin` (web only): per-row thin pool size from `thin_sizes`; such a last-season
-    rating is blanked BEFORE the comparison, and a report left with no rating says why."""
-    from lofc.core.card import thin_pool_caption
+    them. `thin` (web only): per-row not-rated line from `thin_lines` (NaN = rated); such a
+    last-season rating is blanked BEFORE the comparison, and a report left with no rating says
+    why in that line."""
     sr = _sr()
     if thin is not None:
         frame = frame.copy()
@@ -94,7 +126,7 @@ def prepare(frame: pd.DataFrame, rating_label: str, live_label_: str, names: dic
                         live_season=short_label(live_label_))
     if thin is not None:
         why = thin.notna() & out["rating_used"].isna()
-        out.loc[why, sr.MODEL_VIEW] = [thin_pool_caption(int(n)) for n in thin[why]]
+        out.loc[why, sr.MODEL_VIEW] = list(thin[why])
     out["league"] = out["league_id"].map(names)
     return out
 

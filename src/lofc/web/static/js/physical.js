@@ -84,7 +84,9 @@ function drawLeaders() {
   const order = L.order.filter(([i]) => inAge(rows[i]));
   const thin = L.thin || (rows.length ? (order.length ? null : 'No players in this age group.') : pool.none);
   $('ld-thin').hidden = !thin; $('ld-thin').textContent = thin || '';
-  const ranked = !L.thin && order.length > 0;
+  // rated against all midfielders (the midfield fallback): percentiles shown, no rank (as the card)
+  $('ld-tag').hidden = !L.tag; $('ld-tag').textContent = L.tag || '';
+  const ranked = !L.thin && !L.tag && order.length > 0, pcts = (ranked || !!L.tag) && order.length > 0;
   const val = r => isRating ? chip(r.phys) : esc(r.t[metric]);
   // top three, large
   $('ld-tiles').hidden = !ranked;
@@ -98,7 +100,7 @@ function drawLeaders() {
   const inTop = new Set(shown.map(([i]) => i));
   const ours = all ? [] : order.filter(([i]) => rows[i].orient && !inTop.has(i));
   const cols = [...(ranked ? ['#'] : []), 'Player', 'Age', 'Minutes', MT, m.label,
-    ...(ranked && !isRating ? ['Percentile'] : []), ...(isRating ? [] : [P.rating.label])];
+    ...(pcts && !isRating ? ['Percentile'] : []), ...(isRating ? [] : [P.rating.label])];
   const cls = c => c === '#' || c === 'Age' || c === 'Minutes' || c === MT || (c === m.label && !isRating) ? 'n'
     : c === 'Percentile' ? 'ph-pcol' : (c === P.rating.label) ? 'c' : '';
   $('ld-head').innerHTML = '<tr>' + cols.map(c => `<th class="${cls(c)}"${c === MT ? ` title="${esc(MT_HELP)}"` : ''}>${esc(c)}</th>`).join('') + '</tr>';
@@ -107,7 +109,7 @@ function drawLeaders() {
     return `<tr class="${r.orient ? 'me' : ''}">` + (ranked ? `<td class="n">${rank ?? DASH}</td>` : '') +
       nameCell(r, r.club) + `<td class="n">${esc(r.age)}</td><td class="n">${esc(r.mins_t)}</td><td class="n">${r.matches ?? DASH}</td>` +
       (isRating ? `<td class="c">${ratingCell(r)}</td>`
-        : `<td class="n ph-val">${esc(r.t[metric])}</td>` + (ranked ? `<td class="ph-pcol">${bar(r.p[metric])}</td>` : '')
+        : `<td class="n ph-val">${esc(r.t[metric])}</td>` + (pcts ? `<td class="ph-pcol">${bar(r.p[metric])}</td>` : '')
           + `<td class="c">${ratingCell(r)}</td>`) + '</tr>';
   };
   $('ld-body').innerHTML = shown.map(line).join('') +
@@ -346,7 +348,7 @@ function drawPerf() {
   const list = xs => xs.length ? xs.map(x => `<div class="sp-ml"><span>${esc(x.label)}</span>${pctNum(x.pct)}</div>`).join('') : `<span class="note">${DASH}</span>`;
   const tag = (t, tip) => t ? `<span class="sp-tag"${tip ? ` data-tip="${esc(tip)}"` : ''}>${esc(t)}</span>` : '';
   $('sp-body').innerHTML = V.groups.map(g => `<tr class="sp-sec"><td colspan="7">${esc(g.group)}</td></tr>` + g.rows.map(r =>
-    `<tr><td class="pcell"><a class="plink" href="${esc(r.href + backQ())}"><span class="pname">${esc(r.name)}</span></a>${tag(r.pos_tag)}${tag(r.league, r.league_tip)}</td>` +
+    `<tr><td class="pcell"><a class="plink" href="${esc(r.href + backQ())}"><span class="pname">${esc(r.name)}</span></a>${tag(r.pos_tag)}${tag(r.league, r.league_tip)}${tag(r.pool_tag)}</td>` +
     `<td class="n">${esc(r.mins_t)}</td><td class="c">${chip(r.overall)}</td><td class="c">${chip(r.perf)}</td><td class="c">${chip(r.phys)}</td>` +
     `<td class="sp-list">${list(r.strong)}</td><td class="sp-list">${list(r.weak)}</td></tr>`).join('')).join('');
   $('sp-unrated').hidden = !V.unrated_t;
@@ -371,7 +373,9 @@ function drawSquad() {
   }).join('') + '</tr>';
   $('sq-body').innerHTML = squadSorted(S.rows).map(r => {
     const sub = [r.pos, r.league].filter(Boolean).join(' · ');
-    const name = nameCell(r, sub).replace('</td>', r.note ? `<div class="note">${esc(r.note)}</div></td>` : '</td>');
+    const extra = (r.note ? `<div class="note">${esc(r.note)}</div>` : '')
+      + (r.tag ? `<span class="pill grey pool-tag">${esc(r.tag)}</span>` : '');   // the midfield fallback pool
+    const name = nameCell(r, sub).replace('</td>', extra + '</td>');
     const phys = ratingCell(r);
     return `<tr>${name}<td class="n">${esc(r.mins_t)}</td><td class="n">${r.matches ?? DASH}</td><td class="c">${phys}</td>` +
       S.columns.map(k => { const c = r.cells[k]; return `<td class="n ph-cell"><span class="ph-v">${esc(c.t)}</span>${pctPill(c.p)}</td>`; }).join('') + '</tr>';

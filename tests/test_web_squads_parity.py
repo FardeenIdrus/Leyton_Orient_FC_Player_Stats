@@ -183,10 +183,15 @@ def test_api_equals_streamlit(client, label, sidebar, controls):
     for i, (row, (_, want)) in enumerate(zip(p["rows"], rec.table.iterrows())):
         for j, col in enumerate(keys):
             cell, expect = row[j], _streamlit_text(col, want[col])
+            if isinstance(cell, dict) and "tag" in cell:  # rated against all midfielders
+                assert col in ("This season", "Last season", "Also rated"), col
+                assert cell["tag"] == "Rated against all midfielders"
+                assert cell["t"] == expect, (label, i, col, cell, expect)
+                continue
             if isinstance(cell, dict):                   # a thin pool's composite: withheld
                 assert col in ("This season", "Last season", "Also rated"), col
                 assert cell["t"] == DASH and cell["note"].startswith("Not rated: only ")
-                assert cell["note"].endswith("comparable players (needs 10)")
+                assert cell["note"].endswith("with 450+ minutes (needs 10).")
                 gated += expect != DASH          # Streamlit showed a composite here
                 continue
             assert cell == expect, (label, i, col, cell, expect)
@@ -215,9 +220,11 @@ def test_withheld_composites_are_exactly_the_thin_pools(client):
     sizes = {**peer_pool_sizes(S.season_scorecards(cur)), **peer_pool_sizes(S.season_scorecards(prev))}
     thin = {k: v for k, v in sizes.items() if v < MIN_PEERS_FOR_RANKING}
     p = client.get("/api/squads").json()
-    notes = {c["note"] for row in p["rows"] for c in row if isinstance(c, dict)}
+    notes = {c["note"] for row in p["rows"] for c in row if isinstance(c, dict) and "note" in c}
     assert notes, "no thin-pool composite in the squad list (data changed?)"
-    assert notes <= {f"Not rated: only {n} comparable players (needs 10)" for n in thin.values()}
+    names = L.competition_name_by_id()
+    assert notes <= {f"Not rated: only {n} {pos}s in {names.get(c)} with 450+ minutes (needs 10)."
+                     for (c, _s, pos), n in thin.items()}
 
 
 def test_row_links_are_streamlits_click_targets(client):

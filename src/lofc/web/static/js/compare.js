@@ -184,7 +184,9 @@ function renderSummary(d) {
   let h = '<thead><tr><th class="k"></th>' + P.map((p, i) =>
     `<th><a class="nm" href="${esc(p.href + backQ())}">${dot(i)}${esc(p.header_name)}</a>`
     + `<span class="sm">${esc(p.sub)}</span>`
-    + (p.not_rated ? `<span class="nr">${esc(p.not_rated)}</span>` : '') + '</th>').join('') + '</tr></thead><tbody>';
+    + (p.not_rated ? `<span class="nr">${esc(p.not_rated)}</span>` : '')
+    // the midfield fallback pool: rated against all midfielders of his league (the card's tag)
+    + (p.pool_tag ? `<span class="pill grey pool-tag">${esc(p.pool_tag)}</span>` : '') + '</th>').join('') + '</tr></thead><tbody>';
   for (const r of d.summary.rows) {
     h += `<tr><th class="k" scope="row">${esc(r.attribute)}</th>` + r.cells.map(c => {
       if (r.kind === 'text') {
@@ -236,7 +238,7 @@ function renderRadars(d) {
 function metricTable(rows, players) {
   const head = '<thead><tr><th>Metric</th>' + players.map((p, i) => `<th>${dot(i)}${esc(p.header_name)}</th>`).join('') + '</tr></thead>';
   const line = r => `<tr><td class="ml">${esc(r.label)}</td>`
-    + r.cells.map(c => `<td class="${c.cls || ''}"><b>${esc(dash(c.text))}</b>${c.pct_text ? ` <span class="pc" style="color:${pcol(c.pct)}">${esc(c.pct_text)}</span>` : ''}</td>`).join('')
+    + r.cells.map(c => `<td class="${c.cls || ''}"><b>${esc(dash(c.text))}</b>${c.pct_text ? ` <span class="pc"${c.pct == null ? '' : ` style="color:${pcol(c.pct)}"`}>${esc(c.pct_text)}</span>` : ''}</td>`).join('')
     + '</tr>';
   // Rated metrics carry their weight tier: grouped under thin High / Mid / Low headings.
   if (!rows.some(r => r.tier)) return head + '<tbody>' + rows.map(line).join('') + '</tbody>';

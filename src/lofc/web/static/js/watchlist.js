@@ -74,7 +74,8 @@ function drawTable(d, s) {
   $('wl-body').innerHTML = sortRows(d.rows, s).map(r => `<tr data-row="${esc(r.key)}" class="click${r.key === s.open ? ' me' : ''}">` + cols.map(c => {
     if (c === 'Player') {
       const name = `<span class="pname">${esc(dash(r.cells.Player))}</span>`;
-      const nr = r.not_rated ? `<div class="note wl-nr">${esc(r.not_rated)}</div>` : '';
+      const nr = (r.not_rated ? `<div class="note wl-nr">${esc(r.not_rated)}</div>` : '')
+        + (r.pool_tag ? `<span class="pill grey pool-tag">${esc(r.pool_tag)}</span>` : '');
       return `<td class="pcell">${r.href ? `<a class="plink" href="${esc(r.href + backQ())}">${name}</a>` : name}${nr}</td>`;
     }
     if (['Composite', 'Performance', 'Physical'].includes(c)) return `<td class="c">${chipFor(r.cells[c], r.ratings[c])}</td>`;
