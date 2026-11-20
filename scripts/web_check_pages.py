@@ -127,6 +127,27 @@ def players_layout_widths(s, w):
     s.page.set_viewport_size({"width": w, "height": 900})
 
 
+def players_fits_card(s, w):
+    """The old Scouts column is gone (owner 2026-11-16): the default list fits its card with no
+    sideways scroll at 1280 and 1440; the scroll stays only for money on / Rank as < 1380."""
+    for width in (1280, 1440):
+        s.page.set_viewport_size({"width": width, "height": 900})
+        s.goto("/players?season=318&position=Centre%20Forward", check=False)
+        _wait_js(s, "() => document.querySelectorAll('#pl-body tr[data-href]').length > 0")
+        g = s.page.evaluate("""() => { const t = document.querySelector('#tw');
+            return {scroll: t.hasAttribute('data-scroll-x'), over: t.scrollWidth - t.clientWidth,
+                    heads: [...document.querySelectorAll('#pl-head th')].map(h => h.innerText.trim())}; }""")
+        s.note(f"players: no Scouts column @{width}", None if not any(h.startswith("Scouts") for h in g["heads"]) else str(g["heads"]))
+        s.note(f"players: no sideways scroll @{width}", None if not g["scroll"] else "data-scroll-x on")
+        s.note(f"players: list fits its card @{width}", None if g["over"] <= 1 else f"{g['over']}px wider")
+        s.shot("fits_card", width)
+        s.goto("/players?season=318&position=Centre%20Forward&money=1", check=False)
+        _wait_js(s, "() => document.querySelector('#tw')?.hasAttribute('data-scroll-x')")
+        s.note(f"players: money on scrolls sideways @{width}",
+               None if s.page.evaluate("() => document.querySelector('#tw').hasAttribute('data-scroll-x')") else "no scroll")
+    s.page.set_viewport_size({"width": w, "height": 900})
+
+
 def players_position_season_open_back(s, w):
     """change position -> season -> open a player -> browser back keeps both choices."""
     pos, sea = _need(s, "position"), _need(s, "season")
@@ -310,15 +331,71 @@ def players_metric_filters(s, w):
     s.note("players: reset restores the list", None if _rows(s) == n else f"{n} -> {_rows(s)}")
 
 
-def players_assessed(s, w):
-    s.goto("/players?season=318&position=Winger", check=False)
-    sw = s.page.get_by_label("Rank on scout-verified rating")
-    s.step("players: scout-verified ranking on", lambda p: sw.check(timeout=3000))
-    s.note("players: column renamed", None if "Scout-verified rating" in s.page.inner_text("#pl-head") else s.page.inner_text("#pl-head"))
-    signed = s.page.get_by_label("Signed-off assessments only")
-    s.step("players: signed-off only", lambda p: signed.check(timeout=3000))
-    s.step("players: scout-verified ranking off", lambda p: sw.uncheck(timeout=3000))
-    s.note("players: signed-off switch hidden again", None if signed.is_hidden() else "visible")
+def players_scout_verdicts(s, w):
+    """Scout verdicts column (owner 2026-11-16): count pills with each scout's latest verdict on
+    hover; the "Scout verdict" filter narrows the list, sits in the URL and is remembered."""
+    s.goto("/players?season=319&position=Centre%20Forward", check=False)
+    if not _wait_js(s, "() => document.querySelectorAll('#pl-body tr[data-href]').length > 0"):
+        return s.note("players: scout verdicts", skipped="no ranking rows")
+    s.note("players: Scout verdicts column", None if "Scout verdicts" in s.page.inner_text("#pl-head")
+           else s.page.inner_text("#pl-head"))
+    with_pills = s.page.locator("#pl-body td.vd:has(.pill)")
+    s.note("players: a player with reports shows pills",
+           None if with_pills.count() else "no verdict pills on 2026/27 centre forwards")
+    if with_pills.count():
+        tip = with_pills.first.get_attribute("title") or ""
+        pill = with_pills.first.locator(".pill").first.inner_text()
+        s.note("players: verdict pill reads '<n> <verdict>'",
+               None if re.fullmatch(r"\d+ .+", pill.strip()) else repr(pill))
+        s.note("players: tooltip lists each scout's latest verdict and date",
+               None if tip and all(re.fullmatch(r".+: .+ · (\d{1,2} \w{3} \d{4}|—)", ln)
+                                   for ln in tip.splitlines()) else repr(tip))
+        with_pills.first.scroll_into_view_if_needed()
+        s.shot("scout_verdicts", w)
+    n = _rows(s)
+    _fold(s, "more filters")
+    sel = s.page.locator("#f-scout")
+    opts = sel.evaluate("e => [...e.options].map(o => o.value)")
+    s.note("players: Scout verdict choices",
+           None if opts == ["Any", "Has a scout report", "Sign", "Monitor Priority", "Monitor", "Don't sign"]
+           else str(opts))
+    s.step("players: Scout verdict = Has a scout report",
+           lambda p: sel.select_option(value="Has a scout report", timeout=3000))
+    has = _rows(s)
+    s.note("players: filter narrows the list", None if 0 < has < n else f"{n} -> {has}")
+    s.note("players: every row has a scout report",
+           None if s.page.locator("#pl-body td.vd:not(:has(.pill))").count() == 0 else "a row without pills")
+    s.note("players: filter in the URL", None if "scout=Has" in s.page.url else s.page.url)
+    s.step("players: Scout verdict = Sign", lambda p: sel.select_option(value="Sign", timeout=3000))
+    tips = s.page.eval_on_selector_all("#pl-body td.vd", "es => es.map(e => e.title)")
+    s.note("players: Sign = some scout's latest verdict is Sign",
+           None if all(re.search(r": Sign · ", t) for t in tips) else f"{len(tips)} rows, e.g. {tips[:2]}")
+    s.note("players: Sign in the URL", None if "scout=Sign" in s.page.url else s.page.url)
+    s.shot("scout_verdict_filter", w)
+    url = s.page.url
+    s.goto(urlparse(url).path + "?" + urlparse(url).query, check=False)
+    s.note("players: filter reopens from the URL",
+           None if _wait_js(s, _VALUE_IS, ["#f-scout", "Sign"]) else s.page.locator("#f-scout").input_value())
+    _nav_round_trip(s, "players", "/players")
+    s.note("players: Scout verdict remembered",
+           None if _wait_js(s, _VALUE_IS, ["#f-scout", "Sign"]) and "scout=Sign" in s.page.url
+           else f"{s.page.url} / {s.page.locator('#f-scout').input_value()}")
+    _fold(s, "more filters")
+    s.step("players: Scout verdict = Any", lambda p: p.locator("#f-scout").select_option(value="Any", timeout=3000))
+    s.note("players: Any leaves the URL", None if "scout=" not in s.page.url else s.page.url)
+
+
+def nav_no_assess(s, w):
+    """Assess and Sign-off retired (owner 2026-11-16): not in the nav or on Home; old links
+    land on Players."""
+    links = s.page.eval_on_selector_all("nav a", "es => es.map(e => e.textContent.trim())")
+    s.note("nav: no Assess / Sign-off", None if not {"Assess", "Sign-off"} & set(links) else str(links))
+    s.note("home: no Assess / Sign-off link",
+           None if not s.page.locator(".tiles-home a[href^='/assess'], .tiles-home a[href^='/sign-off']").count()
+           else "link shown")
+    for old in ("/assess", "/sign-off", "/signoff", "/assess?player=39154&competition=5&season=318"):
+        s.step(f"open {old}", lambda p, o=old: p.goto(s.base + o), expect_nav=True)
+        s.note(f"{old} redirects to Players", None if urlparse(s.page.url).path == "/players" else s.page.url)
 
 
 def players_download(s, w):
@@ -433,6 +510,16 @@ def card_strengths_no_overlap(s, w):
     s.shots.append(str(path))
 
 
+def card_no_assess(s, w):
+    """Assess retired (owner 2026-11-16): no Assess button, no Scout assessment block; the
+    Scout reports section stays."""
+    s.note("card: no Assess button", None if not s.page.locator("#h-assess").count() else "shown")
+    s.note("card: no Scout assessment block",
+           None if "Scout assessment" not in s.page.inner_text("#c-scout") else "shown")
+    s.note("card: Scout reports kept", None if s.page.locator("#sr-h").inner_text().startswith("Scout reports")
+           else s.page.locator("#sr-h").inner_text())
+
+
 def card_back_link(s, w):
     """The Players page links with ?back=<its URL>: the card's back link returns there, and only
     to a path on this site."""
@@ -453,6 +540,75 @@ def card_back_link(s, w):
            None if s.page.locator("#back").get_attribute("href") == "/club-vs-league?contract=Out&strong=1#cv-rec"
            and s.page.locator("#back").inner_text().strip() == "← Back to Club vs League One"
            else f"{s.page.locator('#back').get_attribute('href')!r} {s.page.locator('#back').inner_text()!r}")
+
+
+def card_similar(s, w):
+    """Find similar players (owner-approved 2026-11-16): "Find similar" scrolls to the section,
+    which loads on its own; Same league / All leagues and Max age change the list without a
+    reload; rows open the player with ?back= to this card; nothing runs past the card."""
+    s.goto("/player/52123/4/319", check=True, desc="card: Wellens (similar players)")
+    btn = s.page.locator("#h-similar")
+    try:
+        btn.wait_for(state="visible", timeout=8000)
+    except Exception:
+        return s.note("card: Find similar button", "not shown")
+    s.step("card: Find similar", lambda p: btn.click(timeout=3000))
+    rows = s.page.locator("#sim table.sim tbody tr")
+    try:
+        rows.first.wait_for(timeout=10000)
+    except Exception as e:
+        return s.note("card: similar players load", f"no rows: {str(e).splitlines()[0][:120]}")
+    s.page.wait_for_timeout(700)                       # the smooth scroll
+    s.note("card: similar players list 10", None if rows.count() == 10 else f"{rows.count()} rows")
+    in_view = s.page.evaluate("""() => { const r = document.getElementById('c-similar').getBoundingClientRect();
+        return r.top < innerHeight && r.bottom > 0; }""")
+    s.note("card: Find similar brings the section into view", None if in_view else "not in view")
+    href = rows.first.locator("a").first.get_attribute("href") or ""
+    s.note("card: similar rows link with back= to this card",
+           None if re.match(r"^/player/\d+/\d+/\d+\?back=%2Fplayer%2F52123%2F4%2F319", href) else href)
+    s.note("card: same league has no League column and no all-leagues line",
+           None if not s.page.locator("#sim th.col-league").count()
+           and "own league" not in s.page.inner_text("#sim-notes") else "shown")
+    for name in ("league", "all"):
+        if name == "all":
+            s.step("card: similar, All leagues",
+                   lambda p: p.locator('#sim-scope button[data-scope="all"]').click(timeout=3000))
+            try:
+                s.page.locator("#sim th.col-league").wait_for(timeout=8000)
+            except Exception:
+                s.note("card: All leagues adds the League column", "no League column")
+            s.note("card: All leagues says measures are within each own league",
+                   None if "Measures are compared within each player's own league." in s.page.inner_text("#sim-notes")
+                   else "line missing")
+            s.note("card: scope is in the URL", None if "sim_scope=all" in s.page.url else s.page.url)
+        size = s.page.viewport_size
+        for width in (1280, 1440):                    # owner: nothing overflowing at 1280 / 1440
+            s.page.set_viewport_size({"width": width, "height": size["height"]})
+            s.page.wait_for_timeout(300)
+            fit = s.page.evaluate("""() => { const c = document.getElementById('c-similar'), t = c.querySelector('table.sim'),
+                wrap = c.querySelector('#sim'); return {card: c.scrollWidth - c.clientWidth,
+                table: t ? t.getBoundingClientRect().width - wrap.clientWidth : 0}; }""")
+            s.note(f"card: similar ({name}) fits its card @{width}",
+                   None if fit["card"] <= 1 and fit["table"] <= 1 else str(fit))
+            sec = s.page.locator("#c-similar")
+            sec.scroll_into_view_if_needed()
+            path = s.out / f"card_similar_{name}_{width}.png"
+            sec.screenshot(path=str(path))
+            s.shots.append(str(path))
+        s.page.set_viewport_size(size)
+    s.step("card: similar, Max age 23", lambda p: p.select_option("#sim-age", "23"))
+    s.page.wait_for_timeout(500)
+    ages = s.page.evaluate("""() => [...document.querySelectorAll('#sim table.sim tbody tr')].map(tr =>
+        parseFloat(tr.children[3].textContent))""")
+    s.note("card: Max age 23 lists only players 23 or under",
+           None if ages and all(a <= 23.999 for a in ages) else str(ages))
+    s.step("card: similar, browser back undoes Max age", lambda p: p.go_back())
+    s.page.wait_for_timeout(500)
+    s.note("card: browser back restores Any age",
+           None if s.page.locator("#sim-age").input_value() == "" and "sim_age" not in s.page.url
+           else f"{s.page.locator('#sim-age').input_value()!r} {s.page.url}")
+    s.step("card: similar, back to Same league",
+           lambda p: p.locator('#sim-scope button[data-scope="league"]').click(timeout=3000))
 
 
 def card_money_switch(s, w):
@@ -1617,24 +1773,17 @@ def compare_more_filters(s, w):
         fresh.close()
 
 
-# -- Squads & loans ------------------------------------------------------------------------
+# -- Squads & loans (rebuilt 2026-11-16) -------------------------------------------------------
 SQ_ORIENT = "/squads?league=League+One&club=Leyton+Orient"
+# the 7 leagues with Transfermarkt squad data; any other league has none
+SQ_TM_LEAGUES = {"Championship", "League One", "League Two", "National League",
+                 "Scottish Premiership", "Scottish Championship", "Premier League 2"}
 
 
 def _sq_rows(s):
     """Rows in the list (the table draws them in pages as it scrolls; the total is on tbody)."""
     t = s.page.locator("#sq-body").get_attribute("data-total")
     return int(t) if t and t.isdigit() else 0
-
-
-def squads_scroll_draws_more(s, w):
-    """The full list draws its first rows, then the next ones as the table scrolls."""
-    s.goto("/squads", check=False)
-    first = s.page.locator("#sq-body tr.click").count()
-    s.step("squads: scroll the table to the end", lambda p: p.locator("#tw").evaluate(
-        "e => { e.scrollTop = e.scrollHeight; }"))
-    after = s.page.locator("#sq-body tr.click").count()
-    s.note("squads: scrolling draws more rows", None if 0 < first < after <= _sq_rows(s) else f"{first} -> {after}")
 
 
 def _sq_tile(s, label):
@@ -1645,187 +1794,292 @@ def _sq_tile(s, label):
     return None
 
 
-def squads_exercise_controls(s, w):
-    """The generic exerciser over every filter control; the ~3,800 rows are left to the
-    scenarios below (each click leaves the page for the card)."""
-    g = s.exercise.__globals__
-    orig = g["sample_controls"]
-    g["sample_controls"] = lambda cs, **kw: orig([c for c in cs if c["kind"] != "row"], **kw)
-    try:
-        s.exercise("/squads?league=League+Two")
-    finally:
-        g["sample_controls"] = orig
+def _sq_heads(s):
+    return [h.strip().replace("ⓘ", "").replace(" ▲", "").replace(" ▼", "").strip()
+            for h in s.page.locator("#sq-head th").all_inner_texts()]
+
+
+def _sq_col(s, label):
+    """Every drawn cell of one column, by its header label."""
+    heads = _sq_heads(s)
+    if label not in heads:
+        return []
+    i = heads.index(label)
+    return s.page.locator(f"#sq-body tr.click td:nth-child({i + 1})").all_inner_texts()
+
+
+def _sq_non_tm(s):
+    """(league, club) in a league with no Transfermarkt data, from the page's own lists."""
+    leagues = s.page.locator("#f-league option").all_inner_texts()
+    other = [x for x in leagues if x != "All" and x not in SQ_TM_LEAGUES]
+    if not other:
+        return None, None
+    s.step(f"squads: League = {other[0]}", lambda p: p.locator("#f-league").select_option(value=other[0], timeout=3000))
+    clubs = [x for x in s.page.locator("#f-club option").all_inner_texts() if x != "All"]
+    return other[0], (clubs[0] if clubs else None)
 
 
 def squads_first_view(s, w):
-    """Opens on every squad: tiles = rows, the table is visible without scrolling."""
+    """Opens on Leyton Orient: League + Club in the URL, tiles = rows, the date line names both
+    sources, a stale Transfermarkt date is amber, the first row is in view."""
     s.goto("/squads", check=False)
+    _wait_js(s, "() => /club=/.test(location.search)")
+    s.note("squads: opens on Leyton Orient", None if "club=Leyton+Orient" in s.page.url
+           and "league=League+One" in s.page.url else s.page.url)
     n = _sq_rows(s)
-    s.note("squads: Players tile = rows drawn", None if n and _sq_tile(s, "Players") == n
+    s.note("squads: Players tile = rows", None if n and _sq_tile(s, "Players") == n
            else f"tile {_sq_tile(s, 'Players')} vs {n} rows")
+    line = s.page.inner_text("#sq-asof")
+    s.note("squads: date line names Impect and Transfermarkt",
+           None if re.match(r"Minutes: Impect \d+ \w{3} · Contracts", line) and "(" in line else line)
+    days = [int(x) for x in re.findall(r"\((\d+) days?\)", line)]
+    amber = s.page.locator("#sq-asof .stale").count()
+    s.note("squads: Transfermarkt over 30 days is amber",
+           None if (amber > 0) == any(d > 30 for d in days) else f"{days} / {amber} amber")
+    if any(d > 30 for d in days):
+        s.note("squads: stale contract cells amber",
+               None if s.page.locator("#sq-body td.stale").count() else "no amber cells")
     first = s.page.locator("#sq-body tr.click").first
     box = first.bounding_box() if first.count() else None
     s.note("squads: first row inside the 1440x900 viewport",
            None if box and box["y"] + box["height"] <= 900 else f"first row box {box}")
-    heads = s.page.inner_text("#sq-head")
-    s.note("squads: Composite columns named", None if heads.count("Composite") >= 2 else heads)
+    heads = _sq_heads(s)
+    s.note("squads: columns", None if heads[:4] == ["Player", "Position", "Age", "Minutes"]
+           and heads[4].startswith("Rating") and heads[5:] == ["Contract to", "Loan"] else str(heads))
+
+
+def squads_markers(s, w):
+    """Orient: registered players with no minutes are marked; any 'Not on TM list' and 'Now at'
+    markers read as the owner's wording, the date from the data."""
+    s.goto(SQ_ORIENT, check=False)
+    marks = s.page.locator("#sq-body .mk").all_inner_texts()
+    s.note("squads: 'TM only, no minutes' marked", None if "TM only, no minutes" in marks else str(marks[:5]))
+    bad = [m for m in marks if not (m == "TM only, no minutes"
+                                    or re.fullmatch(r"Not on TM list \(\d{1,2} \w{3}\)", m)
+                                    or re.fullmatch(r"Now at .+", m))]
+    s.note("squads: every marker is one of the three", None if not bad else str(bad[:5]))
+    rows = s.page.locator("#sq-body tr.click").all()
+    zero = [r for r in rows if "TM only, no minutes" in r.inner_text()]
+    i = _sq_heads(s).index("Minutes")
+    s.note("squads: TM-only rows show 0 minutes",
+           None if zero and all(r.locator("td").nth(i).inner_text() == "0" for r in zero) else "minutes not 0")
 
 
 def squads_layout_widths(s, w):
-    """Nothing overflows with More filters open at every width (Orient's squad and all)."""
+    """Orient, a club in a league with no Transfermarkt data, and Loans out, at every width."""
     for width in s.widths:
         s.page.set_viewport_size({"width": width, "height": 900})
-        s.goto("/squads?max_age=30", check=True, desc=f"squads: layout, more filters @{width}")
-        s.shot("filters_open", width)
         s.goto(SQ_ORIENT, check=True, desc=f"squads: Leyton Orient @{width}")
         s.shot("orient", width)
+        s.goto(SQ_ORIENT + "&view=out", check=True, desc=f"squads: Orient loans out @{width}")
+        s.shot("loans_out", width)
+        s.goto(SQ_ORIENT, check=False)
+        league, club = _sq_non_tm(s)
+        if club:
+            s.step(f"squads: Club = {club} @{width}", lambda p: p.locator("#f-club").select_option(value=club, timeout=3000))
+            s.shot("non_tm_club", width)
     s.page.set_viewport_size({"width": w, "height": 900})
 
 
-def squads_league_club_open_back(s, w):
-    """League -> Club -> open a player -> the card's back link and browser back both return
-    to the same filters."""
-    s.goto("/squads", check=False)
-    lg, cl = _need(s, "league"), _need(s, "club")
-    if lg is None or cl is None:
-        return
-    s.step("squads: League = League One", lambda p: lg.select_option(value="League One", timeout=3000))
-    s.step("squads: Club = Leyton Orient", lambda p: cl.select_option(value="Leyton Orient", timeout=3000))
-    s.note("squads: Orient's squad (33 on 7 Sep 2026)", None if _sq_tile(s, "Players") == _sq_rows(s) > 20
-           else f"{_sq_tile(s, 'Players')} players")
+def squads_exercise_controls(s, w):
+    """The generic exerciser over every filter control (rows are left to the scenarios)."""
+    g = s.exercise.__globals__
+    orig = g["sample_controls"]
+    g["sample_controls"] = lambda cs, **kw: orig([c for c in cs if c["kind"] != "row"], **kw)
+    try:
+        s.exercise("/squads?league=League+Two&club=All")
+    finally:
+        g["sample_controls"] = orig
+
+
+def squads_league_club(s, w):
+    """League -> Club in a Transfermarkt league, then in a league without: there the date line
+    says so and the contract and loan columns are gone."""
+    s.goto(SQ_ORIENT, check=False)
+    s.step("squads: League = League Two", lambda p: p.locator("#f-league").select_option(value="League Two", timeout=3000))
+    s.note("squads: club resets to All", None if s.page.locator("#f-club").input_value() == "All" else s.page.url)
+    s.note("squads: Club column with All clubs", None if _sq_heads(s)[0] == "Club" else str(_sq_heads(s)))
+    clubs = [x for x in s.page.locator("#f-club option").all_inner_texts() if x != "All"]
+    s.step(f"squads: Club = {clubs[0]}", lambda p: p.locator("#f-club").select_option(value=clubs[0], timeout=3000))
+    s.note("squads: TM league club has contracts", None if "Contract to" in _sq_heads(s) else str(_sq_heads(s)))
+    league, club = _sq_non_tm(s)
+    if not club:
+        return s.note("squads: league with no Transfermarkt data", skipped="every league has TM data")
+    s.step(f"squads: Club = {club}", lambda p: p.locator("#f-club").select_option(value=club, timeout=3000))
+    s.note(f"squads: {club} lists players", None if _sq_rows(s) > 5 else f"{_sq_rows(s)} rows")
+    s.note("squads: no contract or loan columns", None if "Contract to" not in _sq_heads(s)
+           and "Loan" not in _sq_heads(s) else str(_sq_heads(s)))
+    s.note("squads: date line says no Transfermarkt data",
+           None if "No Transfermarkt data" in s.page.inner_text("#sq-asof") else s.page.inner_text("#sq-asof"))
+    s.note("squads: no Transfermarkt markers", None if not s.page.locator("#sq-body .mk", has_text="TM").count() else "TM marker shown")
+
+
+def squads_open_back(s, w):
+    """Open a player from Orient's squad; the card's back link and browser back return."""
+    s.goto(SQ_ORIENT, check=False)
     snap = s.snapshot()
     row = s.page.locator("#sq-body tr[data-href]").first
     if not row.count():
         return s.note("squads: open a player", skipped="no linked row")
-    _go_card(s, "squads: row opens the player card with a way back", lambda: row.click(timeout=3000))
+    href = row.locator("td.pname a").get_attribute("href") or ""
+    s.note("squads: name links to the card with ?back=", None if "?back=%2Fsquads" in href else href)
+    _go_card(s, "squads: row opens the player card with a way back", lambda: row.locator("td").nth(1).click(timeout=3000))
     back = s.page.locator("#back")
-    s.note("squads: back link names Squads & loans",
-           None if "Squads & loans" in back.inner_text() else back.inner_text())
     s.note("squads: back link keeps the filters",
            None if (back.get_attribute("href") or "").startswith("/squads?") and "Leyton" in back.get_attribute("href")
            else back.get_attribute("href"))
     s.step("squads: browser back", lambda p: p.go_back(), expect_nav=True)
     s.note("squads: back restores filters", None if s.snapshot() == snap else f"before {snap} / after {s.snapshot()}")
-    s.goto(SQ_ORIENT, check=False)
     row = s.page.locator("#sq-body tr[data-href]").first
-    _go_card(s, "squads: open again", lambda: row.click(timeout=3000))
+    _go_card(s, "squads: open again", lambda: row.locator("td").nth(1).click(timeout=3000))
     s.step("squads: click ← Back", lambda p: p.locator("#back").click(timeout=3000), expect_nav=True)
     s.page.wait_for_url(re.compile(r"/squads\?"), timeout=6000)
     s.note("squads: ← Back lands on the same squad", None if "Leyton" in s.page.url and _sq_rows(s) > 20 else s.page.url)
 
 
-def squads_show(s, w):
-    """Show: On loan only (every loan; tiles agree), Contract expiring, back to Everyone."""
-    s.goto("/squads", check=False)
-    everyone = _sq_rows(s)
-    s.step("squads: Show = On loan only", lambda p: p.locator("#f-show [data-show=loan]").click(timeout=3000))
-    n = _sq_rows(s)
-    s.note("squads: loans view, every row on loan", None if n and _sq_tile(s, "On loan") == n == _sq_tile(s, "Players")
-           else f"rows {n}, tiles {_sq_tile(s, 'Players')}/{_sq_tile(s, 'On loan')}")
-    s.note("squads: show=loan in the URL", None if "show=loan" in s.page.url else s.page.url)
-    s.step("squads: Show = Contract expiring", lambda p: p.locator("#f-show [data-show=expiring]").click(timeout=3000))
-    n = _sq_rows(s)
-    s.note("squads: expiring view, every row expiring", None if n and _sq_tile(s, "Expiring < 12 months") == n
-           else f"rows {n}")
-    s.step("squads: Show = Everyone", lambda p: p.locator("#f-show [data-show='']").click(timeout=3000))
-    s.note("squads: Everyone restores the list", None if _sq_rows(s) == everyone else f"{everyone} -> {_sq_rows(s)}")
+def squads_views(s, w):
+    """View: Loans in (every Loan 'From'), Loans out (every Loan 'To', minutes at the loan
+    club); tiles agree; view in the URL; Squad restores the list."""
+    s.goto(SQ_ORIENT, check=False)
+    squad = _sq_rows(s)
+    tiles = {k: _sq_tile(s, k) for k in ("Loans in", "Loans out")}
+    s.step("squads: View = Loans in", lambda p: p.locator("#f-view [data-view=in]").click(timeout=3000))
+    loans = _sq_col(s, "Loan")
+    s.note("squads: loans in, every Loan 'From …'", None if loans and all(x.startswith("From ") for x in loans) else str(loans[:4]))
+    s.note("squads: Loans in tile = rows", None if tiles["Loans in"] == _sq_rows(s) else f"{tiles} / {_sq_rows(s)}")
+    s.note("squads: view=in in the URL", None if "view=in" in s.page.url else s.page.url)
+    s.step("squads: View = Loans out", lambda p: p.locator("#f-view [data-view=out]").click(timeout=3000))
+    loans = _sq_col(s, "Loan")
+    s.note("squads: loans out, every Loan 'To …'", None if loans and all(x.startswith("To ") for x in loans) else str(loans[:4]))
+    s.note("squads: Loans out tile = rows", None if tiles["Loans out"] == _sq_rows(s) else f"{tiles} / {_sq_rows(s)}")
+    s.note("squads: minutes at the loan club", None if "Minutes (loan club)" in _sq_heads(s) else str(_sq_heads(s)))
+    s.step("squads: View = Squad", lambda p: p.locator("#f-view [data-view=squad]").click(timeout=3000))
+    s.note("squads: Squad restores the list", None if _sq_rows(s) == squad else f"{squad} -> {_sq_rows(s)}")
 
 
-def squads_more_filters(s, w):
-    """The sidebar filters on the page: each narrows the list, shows in the URL and in the
-    More filters count; Leagues untick + one league; All leagues resets."""
-    s.goto("/squads", check=False)
-    _fold(s, "more filters")
+def squads_filters_url(s, w):
+    """Each filter narrows the list and is in the URL; the URL reopens identically."""
+    s.goto("/squads?league=League+One&club=All", check=False)
     base = _sq_rows(s)
-    for label, value in (("foot", "Left"), ("contract", "Out of contract summer 2027"), ("loan", "On loan now")):
-        c = _need(s, label)
-        if c is None:
-            continue
-        s.step(f"squads: {label} = {value}", lambda p, c=c, v=value: c.select_option(value=v, timeout=3000))
-        s.note(f"squads: {label} narrows the list", None if 0 < _sq_rows(s) < base else f"{base} -> {_sq_rows(s)}")
-        s.step(f"squads: {label} = Any", lambda p, c=c: c.select_option(value="Any", timeout=3000))
-    age = s.page.locator("#f-age")
-    s.step("squads: Maximum age 21", lambda p: age.evaluate(
+    for sel, value, param in (("#f-contract", "Under 12 months", "contract="),
+                              ("#f-loan", "On loan", "loan=On")):
+        s.step(f"squads: {sel[3:]} = {value}", lambda p, sel=sel, v=value: p.locator(sel).select_option(value=v, timeout=3000))
+        s.note(f"squads: {value} narrows", None if 0 < _sq_rows(s) < base else f"{base} -> {_sq_rows(s)}")
+        s.note(f"squads: {value} in the URL", None if param in s.page.url else s.page.url)
+        s.step(f"squads: {sel[3:]} = Any", lambda p, sel=sel: p.locator(sel).select_option(value="Any", timeout=3000))
+    s.step("squads: Position = Goalkeeper", lambda p: p.locator("#f-position").select_option(value="Goalkeeper", timeout=3000))
+    pos = _sq_col(s, "Position")
+    s.note("squads: every row a goalkeeper", None if pos and all(x.startswith("Goalkeeper") for x in pos) else str(pos[:4]))
+    s.step("squads: Maximum age 21", lambda p: p.locator("#f-age").evaluate(
         "e => { e.value = 21; e.dispatchEvent(new Event('change', {bubbles: true})); }"))
-    s.note("squads: max_age in the URL and the More count", None if "max_age=21" in s.page.url
-           and "(1)" in s.page.inner_text("#more-btn") else f"{s.page.url} / {s.page.inner_text('#more-btn')}")
-    s.step("squads: open Leagues", lambda p: p.locator("#leagues-btn").click(timeout=3000))
-    s.step("squads: untick all leagues", lambda p: p.locator("#leagues-none").click(timeout=3000))
-    s.step("squads: tick League Two", lambda p: p.locator("#leagues-list input[value='League Two']").check(timeout=3000))
-    opts = s.page.locator("#f-league option").all_inner_texts()
-    s.note("squads: League list holds only what the sidebar kept", None if opts == ["All", "League Two"] else str(opts))
-    s.step("squads: All leagues", lambda p: p.locator("#leagues-all").click(timeout=3000))
-    s.note("squads: leagues gone from the URL", None if "leagues=" not in s.page.url else s.page.url)
+    ages = [int(a) for a in _sq_col(s, "Age") if a.isdigit()]
+    s.note("squads: every age 21 or under", None if ages and max(ages) <= 21 else str(ages[:6]))
+    s.step("squads: Contract = Under 6 months", lambda p: p.locator("#f-contract").select_option(value="Under 6 months", timeout=3000))
+    url = s.page.url
+    s.note("squads: every filter in the URL", None if all(x in url for x in ("position=Goalkeeper", "max_age=21", "contract=Under"))
+           else url)
+    want = s.snapshot()
+    other = s.page.context.new_page()
+    try:
+        from web_check import open_fresh
+        got = open_fresh(other, url)
+    finally:
+        other.close()
+    s.note("squads: URL is shareable", None if got == want else f"{url} reopened as {got}")
 
 
-def squads_row_message(s, w):
-    """A squad member with no profile to open: the click says why, in place, no navigation."""
-    s.goto("/squads?league=League+Two", check=False)
-    row = s.page.locator("#sq-body tr[data-row]").first
-    if not row.count():
-        return s.note("squads: no-profile row", skipped="every row has a profile")
-    s.step("squads: click a row with no profile", lambda p: row.click(timeout=3000))
-    msg = s.page.inner_text("#sq-click")
-    s.note("squads: the click says why", None if "no profile to open" in msg else repr(msg))
-
-
-def squads_thin_and_sort(s, w):
-    """A composite from a thin peer pool is withheld with the note; a header click sorts on
-    the server (asc, desc, off)."""
-    s.goto("/squads", check=False)
-    # the note is the instant tooltip (data-tip) since 2.36; a title would be the old browser tip
-    thin = s.page.locator("#sq-body span[data-tip^='Not rated: only']")
-    for _ in range(20):                      # rows are drawn as the table scrolls
-        if thin.count() or not s.page.locator("#sq-body tr.sentinel").count():
-            break
-        s.page.locator("#tw").evaluate("e => { e.scrollTop = e.scrollHeight; }")
-        s.page.wait_for_timeout(150)
-    s.note("squads: thin-pool composite withheld with the note",
-           None if thin.count() and re.fullmatch(r"Not rated: only \d+ [A-Za-z ]+s in .+ with 450\+ minutes \(needs 10\)\.",
-                                                 thin.first.get_attribute("data-tip")) else "no withheld composite found")
+def squads_rating_sort(s, w):
+    """Rating sorts only within one league: not offered across leagues (and refused by the
+    server); offered in one league, and sorts."""
+    s.goto("/squads?league=All&club=All&sort=Rating&dir=desc", check=False)
+    s.note("squads: no Rating sort across leagues", None if not s.page.locator("#sq-head [data-sort='Rating']").count()
+           and "sort=" not in s.page.url else s.page.url)
+    s.goto("/squads?league=League+One&club=All", check=False)
+    head = s.page.locator("#sq-head [data-sort='Rating']")
+    if not head.count():
+        return s.note("squads: Rating sort in one league", "not offered")
+    s.step("squads: sort by Rating (asc)", lambda p: head.click(timeout=3000))
+    s.step("squads: sort by Rating (desc)", lambda p: s.page.locator("#sq-head [data-sort='Rating']").click(timeout=3000))
+    vals = [float(v) for v in _sq_col(s, _sq_heads(s)[[h.startswith("Rating") for h in _sq_heads(s)].index(True)])
+            if re.fullmatch(r"\d\.\d\d", v.strip().replace("ⓘ", ""))]
+    s.note("squads: Rating sorted high to low", None if vals and vals == sorted(vals, reverse=True) else str(vals[:6]))
+    s.note("squads: sort in the URL", None if "sort=Rating" in s.page.url and "dir=desc" in s.page.url else s.page.url)
     head = s.page.locator("#sq-head [data-sort='Minutes']")
     s.step("squads: sort by Minutes (asc)", lambda p: head.click(timeout=3000))
-    s.note("squads: sort in the URL", None if "sort=Minutes" in s.page.url and "dir=asc" in s.page.url else s.page.url)
     s.step("squads: sort by Minutes (desc)", lambda p: s.page.locator("#sq-head [data-sort='Minutes']").click(timeout=3000))
-    first = s.page.locator("#sq-body tr").first.locator("td").nth(4).inner_text()
-    s.note("squads: most minutes first", None if first.replace(",", "").isdigit() and int(first.replace(",", "")) > 500 else first)
+    first = _sq_col(s, "Minutes")[:1]
+    s.note("squads: most minutes first", None if first and int(first[0].replace(",", "")) > 300 else str(first))
     s.step("squads: sort off", lambda p: s.page.locator("#sq-head [data-sort='Minutes']").click(timeout=3000))
     s.note("squads: sort gone from the URL", None if "sort=" not in s.page.url else s.page.url)
 
 
+def squads_thin_note(s, w):
+    """A composite from a thin peer pool is withheld with the not-rated line."""
+    s.goto("/squads?league=League+One&club=All", check=False)
+    thin = s.page.locator("#sq-body span[data-tip^='Not rated: only'], #sq-body span[title^='Not rated: only']")
+    for _ in range(20):
+        if thin.count() or not s.page.locator("#sq-body tr.sentinel").count():
+            break
+        s.page.locator("#tw").evaluate("e => { e.scrollTop = e.scrollHeight; }")
+        s.page.wait_for_timeout(150)
+    if not thin.count():
+        return s.note("squads: thin-pool composite withheld", skipped="no thin pool in League One")
+    tip = thin.first.get_attribute("data-tip") or thin.first.get_attribute("title")
+    s.note("squads: thin-pool composite withheld with the note",
+           None if re.fullmatch(r"Not rated: only \d+ [A-Za-z ]+s in .+ with 450\+ minutes \(needs 10\)\.", tip) else tip)
+
+
+def squads_row_message(s, w):
+    """A squad member with no card: the click says why, in place, no navigation."""
+    s.goto(SQ_ORIENT, check=False)
+    row = s.page.locator("#sq-body tr[data-row]").first
+    if not row.count():
+        return s.note("squads: no-profile row", skipped="every row has a profile")
+    s.step("squads: click a row with no profile", lambda p: row.locator("td").nth(1).click(timeout=3000))
+    msg = s.page.inner_text("#sq-click")
+    s.note("squads: the click says why", None if "no profile to open" in msg else repr(msg))
+
+
 def squads_search(s, w):
     """Player search narrows in place (accent / case-insensitive, on the server)."""
-    s.goto("/squads", check=False)
+    s.goto("/squads?league=All&club=All", check=False)
     box = _need(s, "player", "text")
     if box is None:
         return
     s.step("squads: search 'smith'", lambda p: (box.fill("smith"), box.press("Enter")))
-    names = s.page.locator("#sq-body td.pname").all_inner_texts()
+    names = [n.split("\n")[0] for n in s.page.locator("#sq-body td.pname").all_inner_texts()]
     s.note("squads: every row matches", None if names and all("smith" in n.lower() for n in names) else str(names[:5]))
     s.note("squads: q in the URL", None if "q=smith" in s.page.url else s.page.url)
 
 
+def squads_scroll_draws_more(s, w):
+    """A long list draws its first rows, then the next ones as the table scrolls."""
+    s.goto("/squads?league=All&club=All", check=False)
+    first = s.page.locator("#sq-body tr.click").count()
+    s.step("squads: scroll the table to the end", lambda p: p.locator("#tw").evaluate(
+        "e => { e.scrollTop = e.scrollHeight; }"))
+    after = s.page.locator("#sq-body tr.click").count()
+    s.note("squads: scrolling draws more rows", None if 0 < first < after <= _sq_rows(s) else f"{first} -> {after}")
+
+
 def squads_download(s, w):
-    s.goto(SQ_ORIENT, check=False)
-    link = s.page.locator("#csv")
-    href = link.get_attribute("href") or ""
-    s.note("squads: CSV link carries the filters", None if "club=Leyton" in href else href)
+    s.goto(SQ_ORIENT + "&view=out", check=False)
+    href = s.page.locator("#csv").get_attribute("href") or ""
+    s.note("squads: CSV link carries the filters", None if "club=Leyton" in href and "view=out" in href else href)
     got = s.page.evaluate("(h) => fetch(h).then(r => r.text().then(t => [r.status, t.split('\\n')[0], "
-                          "r.headers.get('content-disposition')]))", href)
-    s.note("squads: CSV is Streamlit's file", None if got[0] == 200 and got[1].startswith("Club,Player,Position,Age")
-           and "lofc_squads_leyton_orient.csv" in (got[2] or "") else str(got))
+                          "t.trim().split('\\n').length - 1, r.headers.get('content-disposition')]))", href)
+    s.note("squads: CSV is the table on screen", None if got[0] == 200
+           and got[1].startswith("Player,Position,Age,Minutes (loan club),Rating") and got[1].endswith(",Note")
+           and got[2] == _sq_rows(s) and "lofc_squads_leyton_orient_loans_out.csv" in (got[3] or "") else str(got))
 
 
 def squads_history_and_url(s, w):
-    """Two changes, back x2, forward x2 restore state; the final URL reopens identically."""
-    s.goto("/squads", check=False)
-    lg = _need(s, "league")
-    if lg is None:
-        return
+    """Two changes, back x2, forward x2 restore state."""
+    s.goto(SQ_ORIENT, check=False)
     states = [s.snapshot()]
-    s.step("squads: history League = League Two", lambda p: lg.select_option(value="League Two", timeout=3000))
+    s.step("squads: history League = League Two", lambda p: p.locator("#f-league").select_option(value="League Two", timeout=3000))
     states.append(s.snapshot())
-    s.step("squads: history Show = On loan only", lambda p: p.locator("#f-show [data-show=loan]").click(timeout=3000))
+    s.step("squads: history View = Loans in", lambda p: p.locator("#f-view [data-view=in]").click(timeout=3000))
     states.append(s.snapshot())
     for i in (1, 0):
         s.step(f"squads: back to state {i}", lambda p: p.go_back())
@@ -1835,14 +2089,6 @@ def squads_history_and_url(s, w):
         s.step(f"squads: forward to state {i}", lambda p: p.go_forward())
         s.note(f"squads: forward restores state {i}", None if s.snapshot() == states[i]
                else f"expected {states[i]}, got {s.snapshot()}")
-    url = s.page.url
-    other = s.page.context.new_page()
-    try:
-        from web_check import open_fresh
-        got = open_fresh(other, url)
-    finally:
-        other.close()
-    s.note("squads: URL is shareable", None if got == states[2] else f"{url} reopened as {got}, expected {states[2]}")
 
 
 # -- Scout reports --------------------------------------------------------------------------
@@ -2051,28 +2297,32 @@ def watchlist_first_view(s, w):
     s.goto(WL_PATH, check=True, desc="watchlist: first view")
     if not _wl_ready(s):
         return s.note("watchlist: rows", skipped="watchlist empty in this database")
-    s.note("watchlist: four tiles", None if s.page.locator("#wl-tiles .tile").count() == 4 else "tiles missing")
+    s.note("watchlist: three tiles", None if s.page.locator("#wl-tiles .tile").count() == 3 else
+           str(s.page.locator("#wl-tiles .tile .k").all_inner_texts()))
     big = s.page.locator("#wl-tiles .tile .v").first.evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
     s.note("watchlist: tile numbers large", None if big >= 22 else f"{big}px")
     s.note("watchlist: rows drawn", None if _wl_rows(s).count() > 0 else "no rows")
     heads = s.page.inner_text("#wl-thead")
-    s.note("watchlist: columns", None if all(h in heads for h in ("Composite", "Injury", "Months left", "Assessed", "Note"))
+    s.note("watchlist: columns", None if all(h in heads for h in ("Composite", "Injury", "Months left", "Note"))
            else heads)
 
 
-def watchlist_status_filter(s, w):
+def watchlist_no_assessment(s, w):
+    """Assessment status retired on the web (owner 2026-11-16): no filter, no Assessed column, no
+    "Not yet assessed" tile; an old ?status= link lists everyone."""
     s.goto(WL_PATH, check=False)
     if not _wl_ready(s):
-        return s.note("watchlist: status filter", skipped="watchlist empty")
-    box = s.page.locator("#wl-status input").first
-    before = _wl_rows(s).count()
-    s.step("watchlist: untick a status", lambda p: box.click(timeout=3000))
-    s.note("watchlist: status in the URL", None if "status=" in s.page.url else s.page.url)
-    after = _wl_rows(s).count()
-    s.note("watchlist: filter applies", None if after <= before and (after or s.page.locator("#wl-none:not([hidden])").count())
-           else f"{before} -> {after}")
-    s.step("watchlist: back", lambda p: p.go_back())
-    s.note("watchlist: back restores", None if _wl_rows(s).count() == before else f"{_wl_rows(s).count()} rows")
+        return s.note("watchlist: no assessment status", skipped="watchlist empty")
+    n = _wl_rows(s).count()
+    body = s.page.inner_text("#v-watchlist")
+    s.note("watchlist: no Assessment status filter",
+           None if not s.page.locator("#wl-status").count() and "Assessment status" not in body else "shown")
+    s.note("watchlist: no Assessed column", None if "Assessed" not in s.page.inner_text("#wl-thead") else "shown")
+    s.note("watchlist: no Not yet assessed tile", None if "Not yet assessed" not in body else "shown")
+    s.shot("no_assessment", w)
+    s.goto(WL_PATH + "?status=Signed%20off", check=False)
+    _wl_ready(s)
+    s.note("watchlist: old status link lists everyone", None if _wl_rows(s).count() == n else f"{n} -> {_wl_rows(s).count()}")
 
 
 def watchlist_money(s, w):
@@ -2089,7 +2339,7 @@ def watchlist_money(s, w):
 
 
 def watchlist_editor(s, w):
-    """A row opens the editor (note, status, Save / Remove / Close, Assess); in the URL; a fresh
+    """A row opens the editor (note, status, Save / Remove / Close); in the URL; a fresh
     load reopens it. Save / Remove write: only with --allow-writes, and the note and status are
     put back as they were."""
     s.goto(WL_PATH, check=False)
@@ -2100,8 +2350,9 @@ def watchlist_editor(s, w):
     s.note("watchlist: editor shown", None if ed.is_visible() else "editor hidden")
     s.note("watchlist: open row in the URL", None if "open=" in s.page.url else s.page.url)
     s.note("watchlist: editor has its controls",
-           None if all(s.page.locator(f"#{i}").is_visible() for i in ("e-note", "e-status", "e-save", "e-remove", "e-close", "e-assess"))
+           None if all(s.page.locator(f"#{i}").is_visible() for i in ("e-note", "e-status", "e-save", "e-remove", "e-close"))
            else "a control is missing")
+    s.note("watchlist: no Assess link (retired)", None if not s.page.locator("#e-assess").count() else "shown")
     url = s.page.url
     for width in (1280, 1440, 1920):
         s.page.set_viewport_size({"width": width, "height": 900})
@@ -2316,6 +2567,16 @@ def club_vs_league(s, w):
     s.note("club vs league: one tab per selected league", None if s.page.locator("#cv-tabs button[data-l]").count() == 3 else "not 3 tabs")
     cap = s.page.inner_text("#cv-count")
     s.note("club vs league: caption names the league", None if re.match(r"^\d+ centre backs above .+ · ranked within League One$", cap) else cap)
+    # owner 2026-11-16: no own-league line on League One; minutes beside our player and the bar players
+    s.note("club vs league: no own-league line on League One", None if not s.page.locator("#cv-own").is_visible() else "shown")
+    lvl = s.page.inner_text("#cv-level")
+    s.note("club vs league: level strip shows our player's minutes", None if re.search(r"· [\d,]+ min", lvl) else lvl)
+    det = s.page.inner_text("#cv-gap-t tr.cv-det:not([hidden])") if s.page.locator("#cv-gap-t tr.cv-det:not([hidden])").count() else ""
+    s.note("club vs league: top-6 bar players show minutes", None if re.search(r"\d\.\d\d\s+[\d,]+ min", det) else det[:200])
+    lows = s.page.evaluate("""() => [...document.querySelectorAll('#cv-level .cv-min, #cv-gap-t .cv-min')].filter(e => {
+        const m = +e.textContent.replace(/[^\\d]/g, ''), low = !!(e.nextElementSibling && e.nextElementSibling.classList.contains('cv-low'));
+        return (m < 900) !== low; }).length""")
+    s.note("club vs league: low-minutes marker exactly under 900", None if not lows else f"{lows} wrong")
     hh = s.page.evaluate("() => [document.querySelector('#cv-leagues'), document.querySelector('#cv-contract')].map(e => { const r = e.getBoundingClientRect(); return [r.top, r.bottom]; })")
     s.note("club vs league: Leagues lines up with the other filters", None if abs(hh[0][0] - hh[1][0]) <= 2 and abs(hh[0][1] - hh[1][1]) <= 2 else str(hh))
     s.step("club vs league: open Leagues", lambda p: btn.click(timeout=3000))
@@ -2339,6 +2600,25 @@ def club_vs_league(s, w):
         s.step("club vs league: second league tab", lambda p: tab.click(timeout=3000))
         s.note("club vs league: active league in the URL", None if f"league={tab.get_attribute('data-l')}" in s.page.url else s.page.url)
         s.note("club vs league: active tab bold + underlined", None if tab.evaluate("b => b.classList.contains('on') && getComputedStyle(b).fontWeight >= 600") else "not marked")
+        own = s.page.locator("#cv-own")
+        s.note("club vs league: own-league line on another league's tab",
+               None if own.is_visible() and own.inner_text() == "Gap closed % is relative to his own league." else own.inner_text() or "hidden")
+        # owner 2026-11-20 (decision A): other leagues have no "vs our best", no Top-6 badge,
+        # and are ranked by Gap closed
+        heads_o = s.page.locator("#cv-rec-t th.cv-sort").all_inner_texts()
+        s.note("club vs league: no 'vs our best' on another league's tab",
+               None if not any(h.startswith("vs ") for h in heads_o) else str(heads_o))
+        s.note("club vs league: no Top-6 badge on another league's tab",
+               None if not s.page.locator("#cv-rec-t tbody tr .cv-t6").count() else "badges shown")
+        gi = s.page.evaluate("() => [...document.querySelectorAll('#cv-rec-t thead th')].findIndex(t => t.innerText.trim().startsWith('Gap closed')) + 1")
+        if gi:
+            gc = [int(re.sub(r"\D", "", v)) for v in
+                  s.page.locator(f"#cv-rec-t tbody tr td:nth-child({gi})").all_inner_texts() if re.search(r"\d", v)]
+            s.note("club vs league: another league's tab ranked by Gap closed",
+                   None if gc and gc == sorted(gc, reverse=True) else str(gc[:8]))
+        first = s.page.locator("#cv-tabs button[data-l]").nth(0)
+        s.step("club vs league: back to the League One tab", lambda p: first.click(timeout=3000))
+        s.page.wait_for_timeout(300)
     s.step("club vs league: strong on 2+ weaknesses", lambda p: s.page.locator("#cv-strong").click(timeout=3000))
     s.page.wait_for_timeout(300)
     s.note("club vs league: strong filter in the URL", None if "strong=1" in s.page.url else s.page.url)
@@ -2352,7 +2632,8 @@ def club_vs_league(s, w):
     col = s.page.locator("#cv-rec-t th[data-sort='w0']")
     if col.count():
         s.step("club vs league: sort by first weakness", lambda p: col.click(timeout=3000))
-        vals = s.page.locator("#cv-rec-t tbody tr td:nth-child(11)").all_inner_texts()
+        idx = s.page.evaluate("() => [...document.querySelectorAll('#cv-rec-t thead th')].findIndex(t => t.dataset.sort === 'w0') + 1")
+        vals = s.page.locator(f"#cv-rec-t tbody tr td:nth-child({idx})").all_inner_texts()
         s.note("club vs league: weakness columns are plain numbers", None if all(re.match(r"^(\d+|—)$", v.strip()) for v in vals) else str(vals[:5]))
         nums = [int(re.sub(r"\D", "", v)) for v in vals if re.search(r"\d", v)]
         s.note("club vs league: weakness sort is best first", None if nums == sorted(nums, reverse=True) else str(nums))
@@ -2593,7 +2874,7 @@ def club_vs_league_phase_and_example(s, w):
     s.step("club vs league: open How this is worked out", lambda p: s.page.locator("#cv-how summary").click(timeout=3000))
     gc = s.page.locator("#cv-how-gc")
     fb = gc.inner_text()
-    who = s.page.locator("#cv-gap-t tr.pos[data-g='Full Back'] .cv-who").inner_text().split("\n")[0].strip()
+    who = re.sub(r"\s*·.*$", "", s.page.locator("#cv-gap-t tr.pos[data-g='Full Back'] .cv-who").inner_text().split("\n")[0]).strip()
     heads = gc.locator("table.cv-gx th").all_inner_texts()
     want = ["Measure", f"Ours ({who.split()[-1]})", "Top 6", "Gap (Top 6 − Ours)", "Target − Ours", "Counted"]
     s.note("club vs league: Full Back mini table", None if fb.startswith("Gap closed: how much of our player's shortfall a target would make up.")
@@ -3310,22 +3591,23 @@ def watchlist_remembers(s, w):
     s.goto(WL_PATH, check=False)
     if not _wl_ready(s):
         return s.note("watchlist: remembered", skipped="watchlist empty")
-    first = "() => { const b = document.querySelector('#wl-status input'); return b && !b.checked; }"
-    s.step("watchlist: untick a status", lambda p: p.locator("#wl-status input").first.click(timeout=3000))
+    s.step("watchlist: Market value on", lambda p: p.locator("#f-money").check(timeout=3000))
     row = _wl_rows(s).first
     if row.count():
-        s.step("watchlist: open a row", lambda p: row.locator("td").nth(0).click(timeout=3000))
+        s.step("watchlist: open a row", lambda p: row.locator("td").nth(1).click(timeout=3000))
     url = s.page.url
     _nav_round_trip(s, "watchlist", WL_PATH)
-    s.note("watchlist: status restored", None if _wait_js(s, first) and "status=" in s.page.url else f"{url} -> {s.page.url}")
+    s.note("watchlist: Market value restored",
+           None if _wait_js(s, "() => document.querySelector('#f-money')?.checked") and "money=1" in s.page.url
+           else f"{url} -> {s.page.url}")
     s.note("watchlist: open row not restored", None if "open=" not in s.page.url else s.page.url)
-    s.goto(WL_PATH + "?money=1", check=False)
+    s.goto(WL_PATH + "?sort=Age", check=False)
     _wl_ready(s)
-    s.note("watchlist: explicit URL wins", None if "status=" not in s.page.url and
-           _wait_js(s, "() => document.querySelector('#wl-status input')?.checked") else s.page.url)
+    s.note("watchlist: explicit URL wins", None if "money=" not in s.page.url and
+           _wait_js(s, "() => !document.querySelector('#f-money')?.checked") else s.page.url)
     _nav_round_trip(s, "watchlist", WL_PATH)
     s.note("watchlist: explicit URL becomes the remembered one",
-           None if "money=1" in s.page.url and "status=" not in s.page.url else s.page.url)
+           None if "sort=Age" in s.page.url and "money=" not in s.page.url else s.page.url)
 
 
 def report_remembers(s, w):
@@ -3418,17 +3700,56 @@ def physical_find_lists_players(s, w):
 
 _COMMON = {"exercise": True, "scenarios": []}
 
+def similar_page(s, w):
+    """Similar players page (owner 2026-11-20): 10 rows, the first selected with its breakdown;
+    another row selects it (URL match=); All leagues shows the League picker; Open in Compare
+    carries both players; no horizontal overflow at 1280 / 1440."""
+    s.goto("/similar/52123/4/319", check=True, desc="similar: Wellens")
+    rows = s.page.locator("#sim-list table.sim tbody tr")
+    try:
+        rows.first.wait_for(timeout=10000)
+        s.page.locator("#sim-break table.sim-b tbody tr").first.wait_for(timeout=8000)
+    except Exception as e:
+        return s.note("similar: list and breakdown load", str(e).splitlines()[0][:120])
+    s.note("similar: lists 10", None if rows.count() == 10 else f"{rows.count()} rows")
+    s.note("similar: first row selected", None if "target" in (rows.first.get_attribute("class") or "") else "not marked")
+    sims = [t.strip() for t in s.page.locator("#sim-list table.sim tbody tr td.n b").all_inner_texts()]
+    nums = [int(x) for x in sims if x.isdigit()]
+    s.note("similar: % between 0 and 100, highest first",
+           None if nums and all(0 <= v <= 100 for v in nums) and nums == sorted(nums, reverse=True) else str(sims))
+    href = s.page.locator("#sim-compare").get_attribute("href") or ""
+    s.note("similar: Open in Compare carries both players",
+           None if re.search(r"^/compare\?.*a=52123-4.*b=\d+-\d+", href) else href)
+    key = rows.nth(1).get_attribute("data-key")
+    s.step("similar: pick the second row", lambda p: rows.nth(1).locator("td.sim-why a").click(timeout=3000))
+    s.page.wait_for_timeout(800)
+    s.note("similar: pick goes in the URL", None if key and f"match={key}" in s.page.url.replace("%2D", "-") else s.page.url)
+    s.step("similar: All leagues",
+           lambda p: p.locator('#sim-scope button[data-scope="all"]').click(timeout=3000))
+    s.page.wait_for_timeout(1200)
+    s.note("similar: League picker shown with All leagues",
+           None if s.page.locator("#sim-league-wrap").is_visible() else "hidden")
+    size = s.page.viewport_size
+    for width in (1280, 1440):
+        s.page.set_viewport_size({"width": width, "height": size["height"] if size else 900})
+        s.page.wait_for_timeout(300)
+        over = s.page.evaluate("() => document.documentElement.scrollWidth - innerWidth")
+        s.note(f"similar: no page overflow @{width}", None if over <= 1 else f"{over}px")
+    if size:
+        s.page.set_viewport_size(size)
+
+
 PAGES = {
-    "home": {"path": "/", "exercise": False, "scenarios": [home_first_view]},
+    "home": {"path": "/", "exercise": False, "scenarios": [home_first_view, nav_no_assess]},
     "players": {"path": "/players", "exercise": False, "scenarios": [
-        players_first_view, players_layout_widths, players_exercise_controls, players_position_season_open_back,
+        players_first_view, players_layout_widths, players_fits_card, players_exercise_controls, players_position_season_open_back,
         players_filter_open_back, players_leagues, players_chip_remove,
         players_search_other_position, players_clear_search, players_sort, players_money,
-        players_metric_filters, players_assessed, players_download, players_history_and_url, players_remembers]},
+        players_metric_filters, players_scout_verdicts, players_download, players_history_and_url, players_remembers]},
     "card": {"path": "/player/39154/5/318", "exercise": True, "scenarios": [
-        card_back_link, card_money_switch, card_rank_as, card_zones, card_squad_season,
+        card_no_assess, card_back_link, card_money_switch, card_rank_as, card_zones, card_squad_season,
         card_watchlist, card_radars, card_rated_tables, card_extra_tables, card_strengths_no_overlap,
-        card_other_players]},
+        card_other_players, card_similar]},
     "compare": {"path": "/compare?season=318&position=Winger", "exercise": True, "scenarios": [
         compare_three_players_every_width, compare_defaults_fill_the_url,
         compare_position_season_back_forward, compare_pick_from_pool_list,
@@ -3441,18 +3762,17 @@ PAGES = {
         report_season_switch, report_history_and_url, report_layout_widths, report_radar,
         report_one_sheet, report_draft, report_remembers]},
     "squads": {"path": "/squads", "exercise": False, "scenarios": [
-        squads_first_view, squads_layout_widths, squads_exercise_controls,
-        squads_league_club_open_back, squads_show, squads_more_filters, squads_row_message,
-        squads_thin_and_sort, squads_search, squads_download, squads_history_and_url,
-        squads_scroll_draws_more, squads_remembers]},
+        squads_first_view, squads_markers, squads_layout_widths, squads_exercise_controls,
+        squads_league_club, squads_open_back, squads_views, squads_filters_url,
+        squads_rating_sort, squads_thin_note, squads_row_message, squads_search,
+        squads_scroll_draws_more, squads_download, squads_history_and_url,
+        squads_remembers]},
     "scout-reports": {"path": "/scout-reports", "exercise": True, "scenarios": [
         scout_first_view, scout_filters_url, scout_squad_role, scout_search_and_age, scout_tabs, scout_open_report,
         scout_name_opens_card, scout_sort, scout_remembers]},
     "watchlist": {"path": "/watchlist", "exercise": True, "scenarios": [
-        watchlist_first_view, watchlist_status_filter, watchlist_money, watchlist_editor,
+        watchlist_first_view, watchlist_no_assessment, watchlist_money, watchlist_editor,
         watchlist_name_opens_card, watchlist_download, watchlist_sort, watchlist_remembers]},
-    "assess": {"path": "/assess", "scenarios": []},
-    "signoff": {"path": "/signoff", "scenarios": []},
     "physical": {"path": "/physical", "exercise": False, "scenarios": [
         physical_first_view, physical_exercise_controls, physical_layout_widths, physical_filters_back_forward,
         physical_no_data_season, physical_thin_pool, physical_show_all_and_orient,
@@ -3462,6 +3782,7 @@ PAGES = {
         physical_find_lists_players, info_bar_dates]},
     "club-vs-league": {"path": "/club-vs-league", "exercise": True, "scenarios": [club_vs_league, club_vs_league_gap_closed, club_vs_league_pick_player, club_vs_league_phase_and_example, club_vs_league_sort_every_column, club_vs_league_remembers,
         club_vs_league_gc_one_decimal]},
+    "similar": {"path": "/similar/52123/4/319", "exercise": True, "scenarios": [similar_page]},
     "rating-reference": {"path": "/rating-reference", "exercise": True, "scenarios": [reference_rating]},
     "playing-styles": {"path": "/playing-styles", "exercise": True, "scenarios": [reference_styles]},
     "glossary": {"path": "/glossary", "exercise": True, "scenarios": [reference_glossary]},

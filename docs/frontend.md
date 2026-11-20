@@ -1,25 +1,27 @@
-# New front end (TASKS 2.36) — how it is built
+# Web front end — how it is built
 
-Owner decision 2026-11-08: replace the Streamlit pages with a web front end that looks and
-behaves like **mockup v5** (`club_docs/design/mockup_v5.html`, local only), page by page.
-Streamlit stays the live site until the owner switches. This file is the single brief every
-builder follows; keep it current.
+> **What this is.** The brief every builder of the web front end follows: layers, shared
+> helpers, rules, testing. **Current state:** live on the main address since 2026-11-10
+> (FastAPI + Jinja + plain JavaScript, design = mockup v5, `club_docs/design/mockup_v5.html`,
+> local only). The old Streamlit site is a fallback until it is retired (`plan/TASKS.md` X1).
+> Assess and Sign-off show "Currently building". Keep this file current.
 
 ## Shape
 
 | Layer | What | Where |
 |---|---|---|
 | Data + ratings | **Unchanged.** The existing Python (`lofc.dashboard.loaders`, `compare_tables`, `report.data`, `model.*`, …) is the only source of numbers | `src/lofc/...` |
-| Shared page logic | Pure functions lifted out of Streamlit page code when the API needs them (e.g. building the Players pool from filters). Streamlit then calls the same function, so both show identical numbers | `src/lofc/core/` |
+| Shared page logic | Pure functions per page (`players_pool`, `card`, `compare`, `report_page`, `squads`, `squad`, `scout_reports_page`, `watchlist_page`, `physical_page`, `club_vs_league`, `infobar`); where Streamlit has the same page it calls the same function, so both show identical numbers | `src/lofc/core/` |
 | API | FastAPI app: JSON endpoints under `/api/`, HTML page shells, login | `src/lofc/web/` |
 | Front end | Plain HTML + CSS + JavaScript (ES modules). **No Node, no build step, no framework download.** Jinja2 templates for the page shell; JS fetches JSON and renders, like the mockup | `src/lofc/web/templates/`, `src/lofc/web/static/` |
 
 Production: `web-blue` / `web-green` in `docker-compose.prod.yml` (no reloader, one worker),
 switched by `scripts/web_switch.sh` once `/readyz` reports the warm-up done; details in DEPLOY.md
-("The new web front end"). Assess and Sign-off show "Currently building".
+("The web front end on the server").
 
 Run locally: the `web` service in `docker-compose.yml` → **http://localhost:8600**
-(`docker compose up -d web`; code reloads on save; CPU capped). Same database as Streamlit.
+(`docker compose up -d db app web`; code reloads on save; capped at 1.5 CPUs). Same database
+as Streamlit. Resync the local database from the server before judging any number (DEPLOY.md).
 
 ## Foundation (built) -- what page builders use
 
@@ -29,9 +31,11 @@ Run locally: the `web` service in `docker-compose.yml` → **http://localhost:86
 | Nav + page registry (`PAGES`, `nav_for`); every route is generated from it. To replace a placeholder, register a real route/template for the same `key` and extend `page.html` | `src/lofc/web/pages.py`, `templates/` |
 | Dependencies: `current_user` (page -> 303 `/login`, `/api/` -> 401; pending password change -> `/change-password` / 403), `write_user` (session AND header `X-LOFC-Request: 1`, else 403) | `src/lofc/web/security.py` |
 | Cookie `lofc_web` (signed, HttpOnly, SameSite=Strict, Secure on https, 12 h absolute); role/active/must-change re-read from the live row each request | `security.py` |
-| Extra routes: `/healthz`, `/login`, `POST /logout`, `/change-password`, `POST /api/change-password` | `app.py` |
-| Info bar counts (shared with Streamlit): `infobar_count_items`, `headline_counts`, `league_count`, `latest_season_id` | `src/lofc/core/infobar.py` |
-| JS (ES module `/static/js/common.js`): `esc`, `num`, `dash`, `roundHalfUp`, `fmtInt`, `chip`, `pcol`, `bar`, `thead`, `pills`, `radar`, `api`, `readState`, `writeState`, `onStateChange` | `static/js/common.js` |
+| Extra routes: `/healthz`, `/readyz`, `/login`, `POST /logout`, `/change-password`, `POST /api/change-password` | `app.py` |
+| Info bar (top bar): counts (`infobar_count_items`, `headline_counts`, `league_count`, `latest_season_id`) and the last successful Impect / SkillCorner pull dates from `pipeline_runs` (`pull_dates`, `pull_date_items`) | `src/lofc/core/infobar.py` |
+| JS (ES module `/static/js/common.js`): `esc`, `num`, `dash`, `roundHalfUp`, `fmtInt`, `chip`, `pcol`, `pctNum`, `bar`, `thead`, `pills`, `radar`, `api`, `readState`, `writeState`, `onStateChange` | `static/js/common.js` |
+| Remembered settings (owner 2026-11-13): `rememberState(page)` saves the page's query string in that browser (`localStorage`, key `lofc.<page>.last`); `restoreState(page)` reopens it when the URL is bare (the nav link). A URL with settings wins. Storage off = nothing remembered, page works as before. Used by Players, Physical, Squads, Scout reports, Watchlist, Compare, Club vs League One, Report | `static/js/common.js` |
+| Report: preview and downloads are the same sheet; the download is built in the browser (`Blob`), authored or data-only; drafts kept in that browser (`lofc.report.draft.*`); the photo is never stored | `static/js/report.js`, `report_draft.js`, `report_search.js` |
 | One stylesheet (mockup v5 tokens + responsive rules); CSP forbids inline scripts, so page code is a module in `static/js/` loaded via `{% block scripts %}` | `static/css/app.css` |
 | Test fakes (no DB, no real passwords): `FakeStore`, `make()`, `login()` | `tests/web_fakes.py` |
 | Web caches: `@webcache.versioned` keeps a value in process until `loaders.web_data_version()` changes (scorecards, detail metrics, scout reports, scout assessments, Transfermarkt squads tracked; the token also rolls over daily); never a TTL, never a pickle copy -- callers must not mutate. Card detail rows: `detail_store.player_rows` (= `detail_section._player_rows`, precomputed per league-season) | `src/lofc/core/webcache.py`, `core/detail_store.py` |
@@ -48,19 +52,23 @@ Run locally: the `web` service in `docker-compose.yml` → **http://localhost:86
 
 ## Rules (non-negotiable)
 
-1. **Never recompute a number in JavaScript or in new Python.** Call the existing function. If
-   the logic is buried in a Streamlit page, lift it into `src/lofc/core/` as a pure function,
-   make the Streamlit page call it, and prove the Streamlit output is unchanged (its tests +
-   `scripts/smoke_test.py`).
-2. **Parity test for every endpoint:** the API's numbers equal what the Streamlit page shows for
-   the same inputs (same function, same filters), on the real database.
-3. **Everything that exists on today's page exists on the new page** (`club_docs/design/inventory.md`
-   lists every element with file:line). Anything changed is logged in TASKS 2.36 as
-   "before → after" for the owner.
+1. **Never recompute a number in JavaScript or in new Python.** Call the existing function. New
+   page logic goes in `src/lofc/core/` as a pure function the API calls; where Streamlit shows
+   the same thing it calls the same function.
+2. **Parity:** where a Streamlit page still exists, the API's numbers equal it for the same
+   inputs (existing parity tests stay green on the real database). Calculations use exact
+   values; rounding is display-only.
+3. **Nothing on a page disappears silently** (`club_docs/design/inventory.md` lists what the
+   Streamlit pages had). Every change is shown to the owner as quoted "before → after" and
+   logged in `plan/TASKS.md`.
 4. Owner rules: blanks show "—" (never None/nan/NaN/undefined), minutes/goals round half-up,
    no StatsBomb in UI text, short labels, provider definitions, no league-weighting caveats,
    `objective_composite` is the ranking and scout input never changes it, thin peer pools
-   (< `MIN_PEERS_FOR_RANKING`) are never shown as a rating.
+   (< `MIN_PEERS_FOR_RANKING`) are never shown as a rating: every percentile and band is "—" and
+   one line says why ("Not rated: only N <Position>s in <League> with 450+ minutes (needs 10)");
+   a midfielder rated in the combined midfield pool is tagged "Rated against all midfielders"
+   and gets no rank. Strengths / Watch-outs: strongest = top ceil(n/2), at most 3; weakest = the
+   rest, at most 3; a metric is never in both (`core/card.split_strong_weak`).
 5. Security: every provider string is escaped when rendered (build DOM with `textContent`, or
    the shared `esc()` helper); session cookie HttpOnly + SameSite=Strict (+ Secure over https);
    every write is a POST that requires the session AND the header `X-LOFC-Request: 1`;
@@ -98,38 +106,52 @@ Minimal text. A number may get a short label or one line. Never several sentence
   back/forward and shareable URLs work (filters + open player in the URL query).
 - Every warm click < 1 s (measured), first load of a page < 3 s warm.
 
-## Pages (mockup v5 view id → today's Streamlit page)
+## Pages (navigation from `web/pages.py`)
 
-Build order: Players + Player card (+ "Against our <position>", TASKS 2.32) → Compare → Report →
-Squads & loans → Scout reports → Watchlist → Assess → Sign-off → Physical → What goes into each
-rating → How playing styles work → Glossary → Users. Not rebuilt: Methodology (hidden), Style lab
-(workstation-only tool).
+| Group | Page | Status | Core / API |
+|---|---|---|---|
+| Find | Players + player card | Live. Card: "vs ours" columns (incl. All tracked and Other physical), Strengths / Watch-outs, "Against our <position>" | `core/players_pool.py`, `core/card.py`, `core/squad.py` · `api/players.py`, `api/card.py` |
+| Find (from the card, not in the nav) | Similar players `/similar/<p>/<c>/<s>` | Live; the card's list + filters, one match broken down, Open in Compare. JSON `/api/similar/<p>/<c>/<s>`; the card section uses `/api/card/<p>/<c>/<s>/similar` | `core/similar.py` · `api/similar.py` |
+| Find | Squads & loans | Live; rebuilt 2026-11-16: League → Club → squad (Impect minutes at the club + Transfermarkt-registered), views Squad / Loans in / Loans out, CSV | `core/squad_lists.py` · `api/squads.py` |
+| Assess a player | Compare | Live; up to 3 players; remembers the last comparison; download | `core/compare.py` · `api/compare.py` |
+| Assess a player | Scout reports | Live; Data vs scout and Squad role filters; Refresh reads the sheet | `core/scout_reports_page.py` · `api/scout_reports.py` |
+| Decide | Watchlist | Live; CSV download (redesign parked) | `core/watchlist_page.py` · `api/watchlist.py` |
+| Decide | Report | Live; one wide sheet; authored / data-only downloads made in the browser; photo; availability rows; scout verdicts; drafts in the browser; search lists every player A–Z | `core/report_page.py` · `api/report.py` |
+| Decide | Assess, Sign-off | **"Currently building"** (`templates/page.html`); still on the Streamlit fallback | — |
+| Analysis | Physical | Live; leaders; Two metrics (medians, "Better on both", top 5, min-minutes slider, find list, lower-is-better axes reversed); Orient squad Physical \| Performance + Excel | `core/physical_page.py` · `api/physical.py` |
+| Analysis | Club vs League One | Live; rules in `docs/methodology.md` | `core/club_vs_league.py` · `api/club_vs_league.py` |
+| Reference | What goes into each rating (Excel download) · How playing styles work · Glossary | Live | `api/reference.py` |
+| Admin | Users | Live (admins only) | `api/users.py` |
 
-"Against our <position>" logic exists, tested, in the set-aside Streamlit work:
-`club_docs/streamlit_v2_archive/src/lofc/dashboard/squad_fit.py` (+ its tests). Move its pure
-functions into `src/lofc/core/squad.py` and reuse them.
+Not rebuilt: Methodology (hidden on Streamlit), Style lab (workstation-only tool).
 
 ## Testing (every page, before it is called done)
 
 | Layer | Tool | Rule |
 |---|---|---|
-| Unit + API | pytest + FastAPI TestClient, in the `app` container | test first |
-| Parity | pytest on the real DB | API numbers = Streamlit's |
+| Unit + API | pytest + FastAPI TestClient, in the `app` container (`nice -n 15`) | test first |
+| Parity | pytest on the real DB | API numbers = Streamlit's where both exist |
+| JS rules | `node --test tests/js/` on the Mac (node is not in the container) | pure helpers (remembered settings, report search) |
 | Browser | `scripts/web_check.py` (Playwright, Python, driving the Mac's installed Chrome — `channel="chrome"`, no browser download) | logs in, clicks every control on every page, fails on any console error, failed request, visible "None/nan/undefined", overflow beyond a card, or a click > 1 s warm; saves screenshots at 1440×900 to `club_docs/design/web_shots/` |
-| Old site | `scripts/smoke_test.py` | must still pass after any `core/` extraction |
+| Old site | `scripts/smoke_test.py` (Streamlit AppTest + SQL checks; does not open the web pages) | must still pass after any `core/` change while Streamlit exists |
 
 ## Resource rules (the owner works on this Mac)
 
-One heavy job at a time (full suite, smoke, browser run). Tests run in the capped `app`
-container with `docker compose exec` (never `docker compose run`). No large downloads beyond the
-`playwright` Python package. Never touch the live server, git commits, or `.env`.
+One heavy job at a time (full suite, smoke, browser run). Docker Desktop 4 CPUs / 6 GB;
+containers `app` 2 CPUs, `web` 1.5, `db` 1.5 (DEPLOY.md → "Working on the Mac"). Tests run in
+the capped `app` container with `docker compose exec` and `nice -n 15` (never `docker compose
+run`); the harness runs on the host under `nice -n 15`. A timing failure on a busy Mac is re-run
+when quiet before it counts. No large downloads beyond the `playwright` Python package. Never
+touch the live server, git commits, or `.env`.
 
 ## Browser harness — how page builders use it
 
 - Setup once (host, not Docker): venv at the session scratchpad `webvenv` with `playwright` +
   `pytest` (no browser download; drives the Mac's Chrome). Run:
-  `<venv>/bin/python scripts/web_check.py --pages <page> --quick` while building, without
-  `--quick` before calling a page done. Exit 1 = a failure; screenshots + `results.json` in
+  `nice -n 15 <venv>/bin/python scripts/web_check.py --pages <page> --quick` while building;
+  `--only <scenario>[,<scenario>]` runs just those scenarios (no layout pass, no exerciser) to
+  iterate on one fix; all pages without `--quick` before calling work done. Other options:
+  `--widths 1280,1440,1920`, `--role`, `--max-actions`, `--base` (localhost only). Exit 1 = a failure; screenshots + `results.json` in
   `club_docs/design/web_shots/`.
 - It logs in with a throwaway `webcheck_<hex>` account it creates and deletes in the LOCAL
   database (never a real password). Write buttons are skipped unless `--allow-writes` (Mac only);

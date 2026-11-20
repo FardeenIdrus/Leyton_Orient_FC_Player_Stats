@@ -35,6 +35,12 @@ ENGLAND = DEFAULT_LEAGUES + [65, 903]
 TOP_N = 6
 MIN_FOR_BAR = 4
 STRENGTH_PCT = 70
+# Owner 2026-11-16: minutes beside our compared player and each named top-6 player; under this
+# many minutes this season a small "low minutes" marker shows (the rating rests on less play).
+LOW_MINUTES = 900
+# Owner 2026-11-16: under the caption on every league tab except League One (Gap closed uses
+# his percentiles within his own league).
+OWN_LEAGUE_NOTE = "Gap closed % is relative to his own league."
 MIDFIELD = ("Defensive Mid", "Central Mid", "Attacking Mid")
 GROUPS = ["Goalkeeper", "Centre Back", "Full Back", "Midfield", "Winger", "Centre Forward"]
 PLURAL = {"Goalkeeper": "goalkeepers", "Centre Back": "centre backs", "Full Back": "full backs",
@@ -58,9 +64,11 @@ TERMS = {
                     "reaches the gap size."),
     # owner 2026-11-13: one plain sentence ("our player" covers a picked one too)
     "Gap closed": "How much of our player's shortfall vs the top 6 he would make up. 100% = all of it.",
+    # owner 2026-11-20 (Decision A): other leagues' ratings are not on our League One scale
     "Players who could close the gap": (
-        "Players rated above our best at this position, ranked by Overall or Gap closed; the metric "
-        "columns show his percentile on each chosen measure."),
+        "League One: players rated above our best, ranked by Overall or Gap closed. Other leagues: "
+        "every rated player, ranked by Gap closed. The metric columns show his percentile on each "
+        "chosen measure."),
 }
 
 
@@ -159,6 +167,7 @@ def bar(rated: pd.DataFrame, season_id: int, clubs: list[str], group: str,
     order = {c: i for i, c in enumerate(clubs)}
     best = best.assign(_o=best["team_name"].map(order)).sort_values("_o")
     players = [{"club": r.team_name, "player": r.player_name, "rating": float(r.objective_composite),
+                "minutes": _num(r.minutes),
                 "position": r.position_group, "player_id": int(r.player_id),
                 "competition_id": int(r.competition_id), "season_id": int(r.season_id)}
                for r in best.itertuples()]
@@ -319,8 +328,8 @@ def gap_detail(ours: pd.Series | None, bar_rows: list[pd.Series], metrics: list[
 def overall_weights(position: str) -> dict[str, float]:
     """metric -> its share of the position's Overall rating (sums to 1), as the scorecard builds
     Overall (model.scorecard.build_scorecards, archetype "All Metrics"): Overall is the
-    Performance and Physical bands averaged with DIMENSION_WEIGHTS (outfield 40:30 -> 4/7 and
-    3/7; goalkeepers Performance only); inside Performance the club's per-metric weights
+    Performance and Physical bands averaged with DIMENSION_WEIGHTS (outfield 65% : 35%, owner
+    2026-11-16; goalkeepers Performance only); inside Performance the club's per-metric weights
     (performance_weights, All Metrics), inside Physical an equal share. A metric's weight is
     its weight inside its dimension x that dimension's share."""
     from lofc.model import club_framework as cf
@@ -341,6 +350,59 @@ def overall_weights(position: str) -> dict[str, float]:
     for m in phys:
         out[m] = out.get(m, 0.0) + d_phys / total / len(phys)
     return out
+
+
+# owner 2026-11-20 (Decision D): measures that move together count once in Gap closed
+CORR_GROUP_R = 0.8
+CORR_MIN_PERIODS = 20
+
+
+def correlated_groups(frame: pd.DataFrame, measures, r: float = CORR_GROUP_R,
+                      min_periods: int = CORR_MIN_PERIODS) -> list[list[str]]:
+    """Groups (2+ members, in `measures` order) of measures linked by |correlation| >= r over
+    at least `min_periods` paired values; linked pairs chain (a~b, b~c -> one group)."""
+    import numpy as np
+    ms = [m for m in dict.fromkeys(measures) if m in frame.columns]
+    if len(ms) < 2:
+        return []
+    corr = frame[ms].apply(pd.to_numeric, errors="coerce").corr(min_periods=min_periods).to_numpy()
+    parent = list(range(len(ms)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    for i in range(len(ms)):
+        for j in range(i + 1, len(ms)):
+            c = corr[i, j]
+            if np.isfinite(c) and abs(c) >= r - 1e-12:
+                parent[find(j)] = find(i)
+    groups: dict[int, list[str]] = {}
+    for i, m in enumerate(ms):
+        groups.setdefault(find(i), []).append(m)
+    return [g for g in groups.values() if len(g) >= 2]
+
+
+def position_groups(pcts: pd.DataFrame, position: str, measures) -> list[list[str]]:
+    """correlated_groups over the season's percentiles of `position`'s pool, every league
+    (`pcts` = the season's metric_percentiles rows, already limited to the pool)."""
+    if pcts is None or pcts.empty or "position_group" not in pcts.columns:
+        return []
+    return correlated_groups(pcts[pcts["position_group"] == position], measures)
+
+
+def grouped_weights(weights: dict, groups: list[list[str]]) -> dict[str, float]:
+    """`weights` with each correlated group's members divided by the group's size (the group
+    counts as one measure), then rescaled to sum to 1 (Gap closed is a ratio, so the rescale
+    changes no score)."""
+    out = {m: float(w) for m, w in weights.items()}
+    for g in groups:
+        for m in g:
+            if m in out:
+                out[m] = out[m] / len(g)
+    total = sum(out.values())
+    return {m: w / total for m, w in out.items()} if total > 0 else out
 
 
 def gap_closed(profile: dict, cand, weights: dict, metrics=None) -> int | None:
@@ -414,10 +476,12 @@ def recommendations(rated: pd.DataFrame, candidates: pd.DataFrame, season_id: in
                     bar: float | None = None, top6_only: bool = False, gap: dict | None = None,
                     weights: dict | None = None, score_metrics=None, strong_metrics=None,
                     rank: str = "") -> dict:
-    """This season's rated players in `group` (not Orient's) with an Overall above our level,
-    ONE LIST PER LEAGUE (ratings compare players within their own league), every one of them
-    (owner 2026-11-13: no top-15 cap; `n` limits it), by Overall in each (`rank="gap"`: by Gap
-    closed, ties by Overall). Age band and contract horizon filter the players first. Each row carries his percentile on each metric column (`tag_metrics`, one
+    """This season's rated players in `group` (not Orient's), ONE LIST PER LEAGUE (ratings
+    compare players within their own league), every one of them (owner 2026-11-13: no top-15
+    cap; `n` limits it). League One: Overall above our level (and at or above the top-6 bar with
+    `top6_only`), by Overall (`rank="gap"`: by Gap closed, ties by Overall). Every other league
+    (owner 2026-11-20, Decision A: his Overall is not on our League One scale): every rated
+    player, always by Gap closed, no `vs_best`; each list's own `rank` says which. Age band and contract horizon filter the players first. Each row carries his percentile on each metric column (`tag_metrics`, one
     column each on the page) and `gap_closed` over `gap` (gap_profile; only `score_metrics`
     when given). "Strong on 2+" uses `strong_metrics` (default: the columns)."""
     from lofc.core.physical_page import in_age_band
@@ -427,10 +491,11 @@ def recommendations(rated: pd.DataFrame, candidates: pd.DataFrame, season_id: in
               & ~rated["player_id"].isin(list(exclude_ids))
               & ~rated["team_name"].map(_is_orient)]
     if level is not None:
-        f = f[f["objective_composite"] > level]
+        f = f[(f["competition_id"] != LEAGUE_ONE) | (f["objective_composite"] > level)]
     if top6_only and bar is not None:
         # owner 2026-11-09: "Top-6 level only" -- at or above the position's top-6 bar
-        f = f[f["objective_composite"] >= bar]
+        # (owner 2026-11-20: League One only; the bar is a League One rating)
+        f = f[(f["competition_id"] != LEAGUE_ONE) | (f["objective_composite"] >= bar)]
     f = f.merge(candidates[keys + ["age", "contract_until"]], on=keys, how="left")
     if age:
         f = f[[in_age_band(a, age) for a in f["age"]]]
@@ -476,20 +541,24 @@ def recommendations(rated: pd.DataFrame, candidates: pd.DataFrame, season_id: in
         # owner 2026-11-13: Gap closed high first, ties by Overall; no figure last
         by_gap = g.assign(_gc=g["gap_closed"].map(lambda v: -1 if v is None or _missing(v) else v))
         by_gap = by_gap.sort_values(["_gc", "objective_composite", "minutes"], ascending=False, kind="stable")
-        if rank == "gap":
+        own = int(comp) == LEAGUE_ONE
+        tab_rank = rank if own else "gap"
+        if tab_rank == "gap":
             g = by_gap
         rows = []
         for r in (g if n is None else g.head(n)).itertuples():
             rows.append({"name": r.player_name, "club": r.team_name, "position": r.position_group,
                          "age": _num(r.age), "minutes": _num(r.minutes),
                          "overall": float(r.objective_composite),
-                         "vs_best": vs_best(r.objective_composite, level), "performance": _num(r.performance_band),
+                         "vs_best": vs_best(r.objective_composite, level) if own else None,
+                         "performance": _num(r.performance_band),
                          "physical": _num(r.physical_band), "weak": r.weak_list,
                          "gap_closed": None if r.gap_closed is None or _missing(r.gap_closed) else int(r.gap_closed),
                          "ids": [int(r.player_id), int(r.competition_id), int(r.season_id)]})
         leagues.append({"competition_id": int(comp),
                         "league": league_names.get(int(comp), f"League {int(comp)}"),
-                        "count": int(len(g)), "rows": rows, "top_gap": _top_gap(by_gap, gap)})
+                        "count": int(len(g)), "rank": tab_rank, "rows": rows,
+                        "top_gap": _top_gap(by_gap, gap)})
     return {"group": group, "level": level, "leagues": leagues, "default_leagues": list(DEFAULT_LEAGUES),
             "weak_metrics": [{"metric": m, "label": label(m)} for m in tag_metrics], "rank": rank}
 
@@ -530,8 +599,12 @@ def _d1(x: float) -> str:
     return f"−{-x:.1f}" if x < 0 else f"{x:.1f}"
 
 
+GX_LINKED = "linked"
+GX_GROUPED = " Measures that move together count once."
+
+
 def gap_example(group: str, player: dict | None, bar_median, profile: dict, top: dict | None,
-                weights: dict, league: str, label=str, metrics=None) -> dict | None:
+                weights: dict, league: str, label=str, metrics=None, groups=None) -> dict | None:
     """"How this is worked out": Gap closed as a mini table from the page's own figures (owner
     2026-11-13). `player` = the one the position is measured against (compared_player),
     `profile` his gap_profile, `top` the active league's first player by Gap closed (_top_gap; his
@@ -539,7 +612,8 @@ def gap_example(group: str, player: dict | None, bar_median, profile: dict, top:
     shortfalls (weight x gap) the target has a figure for, among `metrics` when the recruiter
     chose the columns; "Counted" = Target - Ours kept between 0 and the gap, as gap_closed. None
     (the page then shows the one-line definition) without a player, bar, shortfall, target or a
-    figure to show."""
+    figure to show. `groups` (correlated_groups, owner 2026-11-20): a row whose measure is in one
+    is tagged GX_LINKED with a tip naming the others, and the total says they count once."""
     if player is None or bar_median is None or not profile or top is None or top.get("gap_closed") is None:
         return None
     keep = set(metrics) if metrics is not None else None
@@ -549,6 +623,7 @@ def gap_example(group: str, player: dict | None, bar_median, profile: dict, top:
                     if (keep is None or m in keep) and float(weights.get(m, 0.0)) > 0),
                    key=lambda t: -t[0])
     # owner 2026-11-13: one decimal, worked out from the figures shown so every row adds up exactly
+    linked = {m: g for g in (groups or []) for m in g}
     rows = []
     for _w, m, mine, med in [t for t in short if t[1] in have][:GX_ROWS]:
         o, t6, tg = _r1(mine), _r1(med), _r1(have[m])
@@ -557,6 +632,9 @@ def gap_example(group: str, player: dict | None, bar_median, profile: dict, top:
         rows.append({"label": label(m), "ours": _d1(o), "top6": _d1(t6), "gap": _d1(gap),
                      "target": _d1(tg), "diff": _d1(diff),
                      "counted": f"{_d1(counted)} (capped at the gap)" if diff > gap else _d1(counted)})
+        if m in linked:
+            rows[-1].update(tag=GX_LINKED, tip=f"Moves with {', '.join(label(o) for o in linked[m] if o != m)}: "
+                                               "counted once together.")
     if not rows:
         return None
     n_more = len(short) - len(rows)
@@ -571,7 +649,8 @@ def gap_example(group: str, player: dict | None, bar_median, profile: dict, top:
             "total": (f"Gap closed = total Counted ÷ total Gap = {top['gap_closed']}%"
                       + (" of his remaining shortfalls on these measures"
                          if float(bar_median) <= float(player["rating"]) else "")
-                      + f". Measures that count more in the {group} rating count more.")}
+                      + f". Measures that count more in the {group} rating count more."
+                      + (GX_GROUPED if any(t[1] in linked for t in short) else ""))}
 
 
 # --- big picture ----------------------------------------------------------------------------------

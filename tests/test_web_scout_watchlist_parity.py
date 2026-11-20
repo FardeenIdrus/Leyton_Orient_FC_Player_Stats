@@ -219,17 +219,25 @@ def _streamlit_watch(monkeypatch, money, picks=None):
     return f
 
 
+# The web retired the assessment status (scout_assessments unused, owner 2026-11-16): its
+# Assessment status filter, Assessed column and "Not yet assessed" tile. Everything else is
+# still Streamlit's, value for value.
+WEB_RETIRED_COLUMNS = ("Assessed",)
+WEB_RETIRED_TILES = ("Not yet assessed",)
+
+
 @pytest.mark.parametrize("money", [False, True], ids=["plain", "market value"])
 def test_watchlist_is_streamlits(monkeypatch, engine, money):
-    from lofc.model import assessment_status as AS
     from lofc.web.api import watchlist as api
     st_log = _streamlit_watch(monkeypatch, money)
-    web = api.page_json(list(AS.STATUSES), money)
+    web = api.page_json(money)
     if web["empty"]:
         pytest.skip("watchlist is empty in this database")
     frame = st_log.get("dataframe")[0][1].reset_index(drop=True)
+    frame = frame.drop(columns=list(WEB_RETIRED_COLUMNS))
     assert web["columns"] == list(frame.columns)
-    assert [(t["label"], t["value"]) for t in web["tiles"]] == [x[1:] for x in st_log.get("metric")]
+    assert [(t["label"], t["value"]) for t in web["tiles"]] == [
+        x[1:] for x in st_log.get("metric") if x[1] not in WEB_RETIRED_TILES]
     assert len(web["rows"]) == len(frame)
     for w, s in zip(web["rows"], frame.to_dict("records")):
         if w["not_rated"]:
@@ -244,23 +252,11 @@ def test_watchlist_is_streamlits(monkeypatch, engine, money):
                 assert (w["tm"] or "") == s[col]
             else:
                 assert w["cells"][col] == str(s[col]), col
-    # the CSV is Streamlit's download, byte for byte, when nobody's rating is withheld
+    # the CSV is Streamlit's download less the retired columns, when no rating is withheld
     if not any(r["not_rated"] for r in web["rows"]):
-        state, _src, _df, wframe, *_ = api.build(list(AS.STATUSES), money)
+        import io
+        state, _src, _df, wframe, *_ = api.build(money)
+        st_csv = pd.read_csv(io.BytesIO(st_log.get("download")[0][1]), dtype=str,
+                             keep_default_na=False).drop(columns=list(WEB_RETIRED_COLUMNS))
         assert wframe.drop(columns=[c for c in ("thin_n",) if c in wframe.columns]).to_csv(
-            index=False).encode("utf-8") == st_log.get("download")[0][1]
-
-
-def test_watchlist_status_filter_is_streamlits(monkeypatch, engine):
-    from lofc.model import assessment_status as AS
-    from lofc.web.api import watchlist as api
-    for chosen in ([AS.NOT_ASSESSED], [AS.SIGNED_OFF], []):
-        st_log = _streamlit_watch(monkeypatch, False, {"Assessment status": chosen})
-        web = api.page_json(chosen, False)
-        if web["empty"]:
-            pytest.skip("watchlist is empty in this database")
-        frames = st_log.get("dataframe")
-        if not frames:
-            assert web["rows"] == [] and web["none_match"] == st_log.get("info")[0][1]
-        else:
-            assert [r["cells"]["Player"] for r in web["rows"]] == list(frames[0][1]["Player"])
+            index=False) == st_csv.to_csv(index=False)

@@ -64,6 +64,16 @@ def test_bar_is_the_median_of_each_top6_clubs_best_and_names_them():
     assert {p["club"] for p in b["players"]} == set(top6)
 
 
+def test_bar_players_carry_their_minutes():
+    """Owner 2026-11-16: the Gap map detail shows each named top-6 player's minutes this season
+    (from the same rated frame; nothing recalculated)."""
+    rows = [(1, 4, CUR, "Winger", 3.1, 3, 3, 1014.0, "A", "a"),
+            (2, 4, CUR, "Winger", 3.9, 3, 3, 612.0, "B", "b")]
+    b = cv.bar(_cards(rows), CUR, ["A", "B"], "Winger")
+    assert {p["player"]: p["minutes"] for p in b["players"]} == {"a": 1014.0, "b": 612.0}
+    assert cv.LOW_MINUTES == 900
+
+
 def test_midfield_bar_takes_each_clubs_best_across_the_three_mid_groups():
     rows = [(1, 4, CUR, "Defensive Mid", 3.1, 3, 3, 900.0, "A", "a-dm"),
             (2, 4, CUR, "Attacking Mid", 3.9, 3, 3, 900.0, "A", "a-am"),
@@ -400,15 +410,15 @@ def test_gap_closed_rounds_half_up():
 
 
 def test_overall_weights_are_each_metrics_share_of_overall():
-    """Overall = Performance x 4/7 + Physical x 3/7 for outfielders (DIMENSION_WEIGHTS 40:30,
-    renormalised); within Performance the club's All Metrics weights; Physical equal (1/7 each).
+    """Overall = Performance x 65% + Physical x 35% for outfielders (DIMENSION_WEIGHTS, owner
+    2026-11-16); within Performance the club's All Metrics weights; Physical equal (1/7 each).
     Goalkeepers: Performance only."""
     from lofc.model import club_framework as cf
     from lofc.model import performance_weights as pw
     w = cv.overall_weights("Centre Back")
     d = cf.DIMENSION_WEIGHTS["Centre Back"]
     perf = d[cf.PERFORMANCE] / (d[cf.PERFORMANCE] + d[cf.PHYSICAL])
-    assert perf == pytest.approx(4 / 7, abs=1e-4)
+    assert perf == pytest.approx(0.65, abs=1e-12)
     assert w["ball_wins_p90"] == pytest.approx(0.1 * perf)
     assert w["pressures_p90"] == pytest.approx(0.065 * perf)
     assert w["distance_p90"] == pytest.approx((1 - perf) / 7)
@@ -708,3 +718,122 @@ def test_gap_example_above_the_bar_says_remaining_shortfalls():
     assert ex["total"] == ("Gap closed = total Counted ÷ total Gap = 46% of his remaining shortfalls on "
                            "these measures. Measures that count more in the Centre Forward rating count more.")
     assert len(ex["rows"]) == 3
+
+
+# --- owner 2026-11-20 (Decision A): other leagues are not compared with our League One level ---
+def _two_leagues():
+    """League One and Championship wingers; our level 3.0, the top-6 bar 3.6. Percentiles on the
+    shortfalls a/b of GC_OURS/GC_BAR (gap a 55, b 15)."""
+    rated = _cards([(1, 4, CUR, "Winger", 3.5, 3, 3, 900.0, "T", "L1 above"),
+                    (2, 4, CUR, "Winger", 2.6, 3, 3, 900.0, "T", "L1 below"),
+                    (3, 4, CUR, "Winger", 3.8, 3, 3, 900.0, "T", "L1 top"),
+                    (11, 3, CUR, "Winger", 2.2, 3, 3, 900.0, "C", "C low, closes all"),
+                    (12, 3, CUR, "Winger", 3.9, 3, 3, 900.0, "C", "C high, closes none"),
+                    (13, 3, CUR, "Winger", 2.9, 3, 3, 900.0, "C", "C mid, closes half"),
+                    (14, 3, CUR, "Winger", 3.0, 3, 3, 900.0, "C", "C no pcts")])
+    cands = rated[["player_id", "competition_id", "season_id"]].assign(age=24.0, contract_until=pd.NaT)
+    pcts = pd.DataFrame({"player_id": [1, 2, 3, 11, 12, 13], "competition_id": [4, 4, 4, 3, 3, 3],
+                         "season_id": CUR, "position_group": "Winger",
+                         "a": [20.0, 75.0, 47.5, 80.0, 10.0, 47.5], "b": [50.0, 65.0, 57.5, 80.0, 10.0, 57.5]})
+    prof = cv.gap_profile(GC_OURS, GC_BAR, ["a", "b", "c"])
+    kw = dict(pcts=pcts, tag_metrics=["a"], label=str, gap=prof, weights=GC_W)
+    return rated, cands, kw
+
+
+def _by_league(rec):
+    return {l["competition_id"]: l for l in rec["leagues"]}
+
+
+def test_other_leagues_list_players_below_our_level_ranked_by_gap_closed():
+    rated, cands, kw = _two_leagues()
+    for rank in ("", "gap"):
+        rec = cv.recommendations(rated, cands, CUR, "Winger", 3.0, set(), {3: "Championship", 4: "League One"},
+                                 rank=rank, **kw)
+        ch = _by_league(rec)[3]
+        # every rated Championship winger, below our level too; Gap closed high first, none last
+        assert [r["name"] for r in ch["rows"]] == ["C low, closes all", "C mid, closes half",
+                                                   "C high, closes none", "C no pcts"], rank
+        assert ch["count"] == 4 and ch["rank"] == "gap"
+        assert all(r["vs_best"] is None for r in ch["rows"])            # two leagues' scales
+        assert [r["overall"] for r in ch["rows"]] == [2.2, 2.9, 3.9, 3.0]   # his own league's Overall
+        assert ch["top_gap"]["name"] == "C low, closes all"
+
+
+def test_league_one_tab_is_unchanged():
+    rated, cands, kw = _two_leagues()
+    names = {3: "Championship", 4: "League One"}
+    rec = cv.recommendations(rated, cands, CUR, "Winger", 3.0, set(), names, **kw)
+    l1 = _by_league(rec)[4]
+    assert [r["name"] for r in l1["rows"]] == ["L1 top", "L1 above"] and l1["count"] == 2   # above 3.0, by Overall
+    assert [r["vs_best"] for r in l1["rows"]] == [0.8, 0.5] and l1["rank"] == ""
+    by = _by_league(cv.recommendations(rated, cands, CUR, "Winger", 3.0, set(), names, rank="gap", **kw))[4]
+    assert [r["name"] for r in by["rows"]] == ["L1 top", "L1 above"] and by["rank"] == "gap"
+    assert by["rows"][0]["gap_closed"] > by["rows"][1]["gap_closed"]
+
+
+def test_top6_level_only_narrows_league_one_only():
+    rated, cands, kw = _two_leagues()
+    rec = cv.recommendations(rated, cands, CUR, "Winger", 3.0, set(), {3: "Championship", 4: "League One"},
+                             bar=3.6, top6_only=True, **kw)
+    by = _by_league(rec)
+    assert [r["name"] for r in by[4]["rows"]] == ["L1 top"]
+    assert by[3]["count"] == 4
+
+
+# --- owner 2026-11-20 (Decision D): measures that move together count once in Gap closed -------
+def test_correlated_groups_chain_linked_measures():
+    import numpy as np
+    rng = np.random.default_rng(1)
+    x, y = rng.normal(size=40), rng.normal(size=40)
+    z = pd.DataFrame({"a": x, "a2": x * 2 + 1, "a3": -x + rng.normal(scale=0.01, size=40),
+                      "b": y, "c": rng.normal(size=40)})
+    assert cv.correlated_groups(z, ["a", "b", "a2", "c", "a3"]) == [["a", "a2", "a3"]]
+    assert cv.correlated_groups(z.head(19), ["a", "a2"]) == []            # fewer than 20 pairs
+    assert cv.correlated_groups(z, ["a", "zz"]) == []                      # missing column
+
+
+def test_grouped_weights_a_duplicated_measure_counts_once_and_sum_to_one():
+    w = {"a": 0.2, "a2": 0.2, "b": 0.6}
+    g = cv.grouped_weights(w, [["a", "a2"]])
+    assert sum(g.values()) == pytest.approx(1.0)
+    # a and a2 together weigh what ONE of them would: (0.1 + 0.1) : 0.6
+    assert g["a"] == pytest.approx(0.1 / 0.8) and g["a2"] == pytest.approx(0.1 / 0.8)
+    assert g["b"] == pytest.approx(0.6 / 0.8)
+    assert cv.grouped_weights(w, []) == pytest.approx(w)
+    # Gap closed with a duplicated measure equals Gap closed with it once
+    prof = {"a": (20.0, 60.0), "a2": (20.0, 60.0), "b": (40.0, 60.0)}
+    cand = {"a": 60.0, "a2": 60.0, "b": 40.0}
+    once = cv.gap_closed({"a": prof["a"], "b": prof["b"]}, cand, {"a": 0.2, "b": 0.6})
+    assert cv.gap_closed(prof, cand, g) == once
+
+
+def test_position_groups_on_the_pool_percentiles():
+    import numpy as np
+    rng = np.random.default_rng(2)
+    x = rng.uniform(0, 100, size=30)
+    pcts = pd.DataFrame({"player_id": range(30), "competition_id": [3, 4] * 15, "season_id": CUR,
+                         "position_group": "Winger", "a": x, "a2": x + rng.normal(scale=1, size=30),
+                         "b": rng.uniform(0, 100, size=30)})
+    other = pcts.assign(position_group="Centre Back", a2=rng.uniform(0, 100, size=30))
+    both = pd.concat([pcts, other], ignore_index=True)
+    assert cv.position_groups(both, "Winger", ["a", "a2", "b"]) == [["a", "a2"]]
+    assert cv.position_groups(both, "Centre Back", ["a", "a2", "b"]) == []
+
+
+def test_gap_example_tags_grouped_measures_and_rows_still_add_up():
+    groups = [["a", "b"]]
+    w = cv.grouped_weights(GX_W, groups)
+    ex = cv.gap_example("Full Back", GX_LEVEL, 3.67, GX_PROF, GX_TOP, w, "League One",
+                        label={"a": "Sprints", "b": "Distance", "f": "Crosses"}.get, groups=groups)
+    by = {r["label"]: r for r in ex["rows"]}
+    assert by["Sprints"]["tag"] == "linked" and by["Distance"]["tag"] == "linked"
+    assert by["Sprints"]["tip"] == "Moves with Distance: counted once together."
+    assert all(r.get("tag") is None for r in ex["rows"] if r["label"] not in ("Sprints", "Distance"))
+    for r in ex["rows"]:
+        f = lambda k: float(r[k].replace("−", "-").split()[0])      # noqa: E731
+        assert abs(f("gap") - (f("top6") - f("ours"))) < 1e-9
+        assert abs(f("diff") - (f("target") - f("ours"))) < 1e-9
+        assert f("counted") == min(max(f("diff"), 0.0), f("gap"))
+    assert ex["total"].endswith("Measures that move together count once.")
+    plain = cv.gap_example("Full Back", GX_LEVEL, 3.67, GX_PROF, GX_TOP, GX_W, "League One")
+    assert "move together" not in plain["total"] and all(r.get("tag") is None for r in plain["rows"])

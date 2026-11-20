@@ -27,7 +27,7 @@
       </div>
       <div class="actions">
         <button class="btn primary" id="h-watch" type="button">☆ Add to watchlist</button>
-        <a class="btn" id="h-assess" href="/assess">Assess this player</a>
+        <button class="btn" id="h-similar" type="button" hidden>Find similar</button>
         <a class="btn" id="h-tm" target="_blank" rel="noopener noreferrer" hidden>View on Transfermarkt ↗</a>
         <label class="rank-as" id="h-rank-wrap" hidden>Rank as <select id="h-rank" class="ctl"></select></label>
       </div>
@@ -59,8 +59,7 @@
 
     <div class="row tr2">
       <div class="card" id="c-style"><h2>Playing style</h2><div class="sub" id="sf-sub"></div><div id="sf-pills"></div><div id="sf"></div></div>
-      <div class="card" id="c-scout"><h2 id="sr-h"></h2><div id="sr-v"></div><div id="sr"></div>
-        <h3 style="margin-top:20px">Scout assessment</h3><div id="sa"></div></div>
+      <div class="card" id="c-scout"><h2 id="sr-h"></h2><div id="sr-v"></div><div id="sr"></div></div>
     </div>
 
     <div class="row tr2">
@@ -102,6 +101,20 @@
     </div>
 
     <div class="card" id="c-squad"></div>
+
+    <div class="card" id="c-similar" hidden>
+      <div class="sf-head"><div><h2>Similar players</h2><div class="sub" id="sim-sub"></div></div>
+        <div class="sim-ctl">
+          <div class="seg" id="sim-scope" role="group" aria-label="Leagues"><button type="button" data-scope="league" class="on" aria-pressed="true">Same league</button><button type="button" data-scope="all" aria-pressed="false">All leagues</button></div>
+          <label id="sim-league-wrap" hidden>League <select id="sim-league" class="ctl"><option value="">All</option></select></label>
+          <label>Max age <select id="sim-age" class="ctl"><option value="">Any</option></select></label>
+          <label>Min minutes <select id="sim-min" class="ctl"><option value="">Any</option></select></label>
+          <label>Contract <select id="sim-contract" class="ctl"><option value="">Any</option></select></label>
+        </div></div>
+      <div id="sim-notes"></div>
+      <div class="tw" id="sim"></div>
+      <p class="sim-how"><a id="sim-how" href="#">How these are matched →</a></p>
+    </div>
   </div>
 </section>
 {% endblock %}

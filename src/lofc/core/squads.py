@@ -225,22 +225,6 @@ def registered_squad_frame(season_id: int, rating_season_id: int,
     if squads.empty:
         return squad_frame(season_id, rating_season_id)
 
-    ours = pd.read_sql(
-        "SELECT player_id, tm_player_id, nationality, birth_date, contract_until, "
-        "       foot, height_cm FROM players WHERE tm_player_id IS NOT NULL",
-        get_engine())
-    # A Transfermarkt id claimed by more than one of our players would FAN THE JOIN OUT,
-    # listing that squad member twice. 15 such pairs exist (the unresolved identity-split
-    # defect). Dropped rather than picked, exactly as identity.drop_ambiguous_matches
-    # does: guessing which of two records is the real player would attach one man's rating
-    # and injury history to another. He still appears, from the scrape's own bio; he just
-    # carries no link.
-    ours = ours.drop_duplicates("tm_player_id", keep=False)
-    # The full roster, for the name+date-of-birth route below (players with no
-    # tm_player_id are absent from `ours`, which is keyed on it).
-    ours_all = pd.read_sql(
-        "SELECT player_id, player_name, birth_date FROM players "
-        "WHERE birth_date IS NOT NULL", get_engine())
     # ONE appearance row per player: a player who has turned out in two leagues this
     # season (a loanee playing U21 and senior football) has two, and joining both would
     # list him twice under the same club.
@@ -279,27 +263,8 @@ def registered_squad_frame(season_id: int, rating_season_id: int,
     # routes have run. Merging it on tm_player_id first left every name-linked player
     # (Oliver Dovin among them) with a player_id but no nationality, age or height, even
     # though the platform held all three.
-    link = squads[["tm_player_id", "player_name", "date_of_birth"]].copy()
-    link = link.merge(ours[["tm_player_id", "player_id"]], on="tm_player_id", how="left")
-
-    # Route 2: name + date of birth for rows with no id link. 717 of 3,783 squad rows have
-    # none, and 301 of those ARE players we hold. A key claimed by more than one of our
-    # players is DROPPED rather than guessed -- identity.drop_ambiguous_matches' rule, for
-    # the same reason: a wrong link attaches one man's record to another.
-    unlinked = link["player_id"].isna()
-    if unlinked.any():
-        keyed = ours_all.copy()
-        keyed["_k"] = (keyed["player_name"].str.lower().str.strip() + "|"
-                       + keyed["birth_date"].astype(str))
-        keyed = keyed.drop_duplicates("_k", keep=False)[["_k", "player_id"]]
-        gap = link.loc[unlinked].copy()
-        gap["_k"] = (gap["player_name"].str.lower().str.strip() + "|"
-                     + gap["date_of_birth"].dt.date.astype(str))
-        found = gap.merge(keyed, on="_k", how="left", suffixes=("", "_byname"))
-        link.loc[unlinked, "player_id"] = found["player_id_byname"].to_numpy()
-
     out = squads.copy()
-    out["player_id"] = link["player_id"].to_numpy()
+    out["player_id"] = link_squad_players(squads, get_engine()).to_numpy()
 
     bio = pd.read_sql(
         "SELECT player_id, nationality, birth_date, contract_until, foot, height_cm "
@@ -330,6 +295,41 @@ def registered_squad_frame(season_id: int, rating_season_id: int,
     out = with_last_season_position(out)
     out = with_registered_position(out)
     return out
+
+
+def link_squad_players(squads: pd.DataFrame, engine) -> pd.Series:
+    """Our player_id for each Transfermarkt squad row (index-aligned), or NaN.
+
+    Route 1: the Transfermarkt id. A Transfermarkt id claimed by more than one of our players
+    would FAN THE JOIN OUT, listing that squad member twice. 15 such pairs exist (the
+    unresolved identity-split defect). Dropped rather than picked, exactly as
+    identity.drop_ambiguous_matches does: guessing which of two records is the real player
+    would attach one man's rating and injury history to another.
+
+    Route 2: name + date of birth for rows with no id link. 717 of 3,783 squad rows have
+    none, and 301 of those ARE players we hold. A key claimed by more than one of our
+    players is DROPPED rather than guessed, for the same reason.
+    """
+    ours = pd.read_sql("SELECT player_id, tm_player_id FROM players "
+                       "WHERE tm_player_id IS NOT NULL", engine)
+    ours = ours.drop_duplicates("tm_player_id", keep=False)
+    # The full roster, for route 2 (players with no tm_player_id are absent from `ours`).
+    ours_all = pd.read_sql("SELECT player_id, player_name, birth_date FROM players "
+                           "WHERE birth_date IS NOT NULL", engine)
+    link = squads[["tm_player_id", "player_name", "date_of_birth"]].reset_index(drop=True)
+    link = link.merge(ours[["tm_player_id", "player_id"]], on="tm_player_id", how="left")
+    unlinked = link["player_id"].isna()
+    if unlinked.any():
+        keyed = ours_all.copy()
+        keyed["_k"] = (keyed["player_name"].str.lower().str.strip() + "|"
+                       + keyed["birth_date"].astype(str))
+        keyed = keyed.drop_duplicates("_k", keep=False)[["_k", "player_id"]]
+        gap = link.loc[unlinked].copy()
+        gap["_k"] = (gap["player_name"].str.lower().str.strip() + "|"
+                     + pd.to_datetime(gap["date_of_birth"], errors="coerce").dt.date.astype(str))
+        found = gap.merge(keyed, on="_k", how="left", suffixes=("", "_byname"))
+        link.loc[unlinked, "player_id"] = found["player_id_byname"].to_numpy()
+    return pd.Series(link["player_id"].to_numpy(), index=squads.index)
 
 
 def months_left(when, today: datetime.date | None = None) -> float | None:

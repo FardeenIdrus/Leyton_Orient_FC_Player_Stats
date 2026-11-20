@@ -45,6 +45,7 @@
         <div class="f"><label for="f-foot">Preferred foot</label><select class="ctl" id="f-foot" name="foot"></select></div>
         <div class="f f-wide"><label for="f-contract">Contract expiry</label><select class="ctl" id="f-contract" name="contract"></select></div>
         <div class="f"><label for="f-loan">Loan status</label><select class="ctl" id="f-loan" name="loan"></select></div>
+        <div class="f"><label for="f-scout">Scout verdict</label><select class="ctl" id="f-scout" name="scout"></select></div>
         <div class="f" id="style-wrap"><label for="f-style">Playing style</label><select class="ctl" id="f-style" name="style"></select></div>
         <div class="f" id="strong-wrap"><label>&nbsp;</label><label class="switch" id="sw-strong"><input type="checkbox" id="f-strong" name="strong_only"><i></i>Strong only</label></div>
       </div>
@@ -79,8 +80,6 @@
     <div class="rank-head">
       <div><h2>Ranking</h2><div class="note" id="count-cap">&nbsp;</div></div>
       <div class="rank-tools">
-        <label class="switch" id="sw-assessed" title=""><input type="checkbox" id="f-assessed" name="assessed"><i></i>Rank on scout-verified rating</label>
-        <label class="switch" id="sw-signed" hidden><input type="checkbox" id="f-signed" name="signed_only"><i></i>Signed-off assessments only</label>
         <label class="switch money" id="sw-signable" hidden><input type="checkbox" id="f-signable" name="signable"><i></i>Only signable players</label>
         <a class="btn small" id="csv" href="/api/players.csv" download>⬇ Download this list (CSV)</a>
       </div>

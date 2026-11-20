@@ -103,14 +103,17 @@ def test_page_shell_has_the_sections_controls_and_script(fake):
     assert r.status_code == 200
     for needle in ('id="v-card"', 'data-player="39154"', 'data-competition="5"', 'data-season="318"',
                    'id="back"', 'aria-label="Show affordability (modelled)"', 'id="h-watch"',
-                   'id="h-assess"', 'id="h-tm"', 'id="r-tiles"', 'id="sbs"', 'id="cf"', 'id="sf"',
+                   'id="h-tm"', 'id="r-tiles"', 'id="sbs"', 'id="cf"', 'id="sf"',
                    'id="so"', 'id="pr"', 'id="pp"', 'id="pz"', 'id="rc"', 'id="prad"', 'id="ph"',
-                   'id="sr"', 'id="sa"', 'id="av"', 'id="c-squad"', '/js/card.js',
+                   'id="sr"', 'id="av"', 'id="c-squad"', '/js/card.js',
                    '/css/card.css', 'Packing zones', 'Season by season',
                    'Availability and injury record'):
         assert needle in r.text, needle
     # the card sits under Players in the nav
     assert 'href="/players" class="on"' in r.text
+    # retired (owner 2026-11-16): no Assess link, no in-platform scout assessment block
+    for gone in ('id="h-assess"', "Assess this player", 'id="sa"', "Scout assessment"):
+        assert gone not in r.text, gone
 
 
 def test_page_shell_rejects_non_numeric_ids():

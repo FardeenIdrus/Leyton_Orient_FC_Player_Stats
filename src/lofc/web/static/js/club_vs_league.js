@@ -98,6 +98,10 @@ const sfRows = list => list.map(x => `<span class="sf-l">${esc(x.label)}</span><
 const gapVal = g => g == null ? '<span class="note">—</span>'
   : `<span class="cv-gapv ${g > 0 ? 'neg' : 'pos'}">${g > 0 ? '−' : '+'}${Math.abs(g).toFixed(2)}</span>`;
 
+// owner 2026-11-16: minutes this season beside a rating, and "low minutes" under D.low_minutes
+const lowMin = m => m != null && Math.round(m) < D.low_minutes ? `<span class="cv-low" data-tip="Under ${fmtInt(D.low_minutes)} minutes this season">low minutes</span>` : '';
+const minsOf = m => m == null ? '' : ` <span class="cv-min">· ${fmtInt(m)} min</span>${lowMin(m)}`;
+
 function drawGap() {
   if (!openInit && D.gaps.length) { OPEN.add(D.gaps[0].group); openInit = true; }
   const tag = p => p.tag ? `<span class="cv-tag away">${esc(p.tag)}</span>` : '';
@@ -116,15 +120,15 @@ function drawGap() {
           + (p.player_id === best ? '<span class="cv-ob">our best</span>' : '');
       const ours = g.players.length ? g.players.map(p => `<tr><td>${who(p)}${tag(p)}${sub(p)}</td><td class="n"><b>${p.rating == null ? '—' : two(p.rating)}</b></td></tr>`).join('')
         : `<tr><td colspan="2" class="note">${esc(g.note || '—')}</td></tr>`;
-      const bar = B.players.map(p => `<tr><td>${esc(p.player)}${sub(p)}</td><td class="note">${esc(p.club)}</td><td class="n"><b>${two(p.rating)}</b></td></tr>`).join('');
+      const bar = B.players.map(p => `<tr><td>${esc(p.player)}${sub(p)}</td><td class="note">${esc(p.club)}</td><td class="n cv-ovm"><b>${two(p.rating)}</b>${p.minutes == null ? '' : `<span class="cv-min"> ${fmtInt(p.minutes)} min</span>${lowMin(p.minutes)}`}</td></tr>`).join('');
       const all = g.all_shortfalls || [];
       return `<tr class="pos${open ? ' open' : ''}" data-g="${esc(g.group)}" tabindex="0" aria-expanded="${open}" aria-label="${esc(g.group)}: show detail">`
         + `<td><span class="cv-chev" aria-hidden="true">›</span><span class="cv-pos">${esc(g.group)}</span></td>`
-        + `<td class="cv-who"${L ? '' : ` title="${esc(g.note)}"`}>${L ? esc(L.name) + sub(L) : '—'}${g.vs ? `<button type="button" class="cv-back" data-back="${esc(g.group)}">Back to our best</button>` : ''}</td><td class="c">${L ? chip(L.rating) : chip(null)}</td>`
+        + `<td class="cv-who"${L ? '' : ` title="${esc(g.note)}"`}>${L ? esc(L.name) + minsOf(L.minutes) + sub(L) : '—'}${g.vs ? `<button type="button" class="cv-back" data-back="${esc(g.group)}">Back to our best</button>` : ''}</td><td class="c">${L ? chip(L.rating) : chip(null)}</td>`
         + `<td class="c">${chip(B.median)}</td><td class="c">${gapVal(g.gap)}</td><td>${top}</td></tr>`
         + `<tr class="cv-det" data-d="${esc(g.group)}"${open ? '' : ' hidden'}><td colspan="5"><div class="cv-grid2">`
         + `<table class="cv-dt"><colgroup><col><col class="d-ovr"></colgroup><thead><tr><th>Our players</th><th class="n">Overall</th></tr></thead><tbody>${ours}</tbody></table>`
-        + `<div><table class="cv-dt"><colgroup><col class="d-name"><col><col class="d-ovr"></colgroup><thead><tr><th>Top-6 bar</th><th>Club</th><th class="n">Overall</th></tr></thead><tbody>${bar || '<tr><td colspan="3" class="note">—</td></tr>'}</tbody></table>`
+        + `<div><table class="cv-dt"><colgroup><col class="d-name"><col><col class="d-ovm"></colgroup><thead><tr><th>Top-6 bar</th><th>Club</th><th class="n">Overall</th></tr></thead><tbody>${bar || '<tr><td colspan="3" class="note">—</td></tr>'}</tbody></table>`
         + `${B.fallback && B.label ? `<div class="cv-bar-note">${esc(B.label)}</div>` : ''}</div></div></td>`
         + `<td><div class="cv-sfl cv-sfd"><span class="h">Every shortfall</span><span class="h n">Ours</span><span class="h n">Top 6</span><span class="h n">Behind</span>`
         + `${all.length ? sfRows(all) : '<span class="sf-l note">—</span><span></span><span></span><span></span>'}</div></td></tr>`;
@@ -149,11 +153,12 @@ function drawRec() {
   $('cv-age').innerHTML = D.filters.ages.map(a => `<option value="${esc(a.key)}"${a.key === D.filters.age ? ' selected' : ''}>${esc(a.label === 'All' ? 'Any' : a.label)}</option>`).join('');
   $('cv-contract').innerHTML = '<option value="">Any</option>' + D.filters.contracts.map(c => `<option${c === D.filters.contract ? ' selected' : ''}>${esc(c)}</option>`).join('');
   for (const [id, on] of [['cv-strong', D.filters.strong], ['cv-top6only', D.filters.top6]]) { $(id).classList.toggle('on', on); $(id).setAttribute('aria-checked', String(on)); }
-  $('cv-rec-sub').textContent = C ? `${D.season} · rated above ${C.name} · ranked within each league`
-    : g.level ? `${D.season} · rated above our best at the position · ranked within each league`
+  // owner 2026-11-20: only League One is compared with our level; other leagues by Gap closed
+  $('cv-rec-sub').textContent = C ? `${D.season} · League One: rated above ${C.name} · other leagues: by Gap closed`
+    : g.level ? `${D.season} · League One: rated above our best · other leagues: by Gap closed`
     : `${D.season} · no Orient player rated here this season: the best rated players · ranked within each league`;
   const B = g.bar;
-  $('cv-level').innerHTML = `<div class="ours"><span>${C ? 'Comparing' : 'Our best'}</span><b>${g.level ? two(g.level.rating) : '—'}</b><span>${esc(g.level ? g.level.name : g.note)}</span></div>`
+  $('cv-level').innerHTML = `<div class="ours"><span>${C ? 'Comparing' : 'Our best'}</span><b>${g.level ? two(g.level.rating) : '—'}</b><span>${g.level ? esc(g.level.name) + minsOf(g.level.minutes) : esc(g.note)}</span></div>`
     + `<div><span>Top-6 bar</span><b>${two(B.median)}</b><span>median of ${B.n} named players${B.fallback ? ` · ${esc(D.prev_season)}` : ''}</span></div>`
     + `<div><span>Gap</span><b class="${g.gap > 0 ? 'neg' : 'pos'}">${g.gap == null ? '—' : gapText(g.gap)}</b><span>&nbsp;</span></div>`;
   const leagues = R.leagues;
@@ -165,25 +170,31 @@ function drawRec() {
   const cur = by.get(pick.active);
   drawHowGc(cur.example);
   $('cv-tabs').innerHTML = pick.tabs.map(id => by.get(id)).map(l => `<button type="button" role="tab" data-l="${l.competition_id}" class="cv-tab${l === cur ? ' on' : ''}" aria-selected="${l === cur}">${esc(l.league)}<span>${l.count}</span></button>`).join('');
-  // owner 2026-11-13: every player above him, no top-15 cap
+  // owner 2026-11-13: every player above him, no top-15 cap; owner 2026-11-20: another league's
+  // tab lists every rated player by Gap closed (his Overall is not on our League One scale)
   const who = C ? C.name : g.level ? g.level.name : '';
-  $('cv-count').innerHTML = `${cur.count} ${PL[D.selected] || ''}${who ? ` above ${esc(who)}` : ''} · ranked within ${esc(cur.league)}`;
+  const l1 = cur.competition_id === D.league_one, tabRank = l1 ? (R.rank || '') : 'gap';
+  $('cv-count').innerHTML = l1 ? `${cur.count} ${PL[D.selected] || ''}${who ? ` above ${esc(who)}` : ''} · ranked within ${esc(cur.league)}`
+    : `${cur.count} ${PL[D.selected] || ''} · by Gap closed within ${esc(cur.league)}`;
+  // owner 2026-11-16: every league tab except League One says Gap closed is within his league
+  $('cv-own').textContent = D.own_league_note;
+  $('cv-own').hidden = cur.competition_id === D.league_one;
   const W = R.weak_metrics || [];
   const valid = [...Object.keys(SORT_FIELD), ...W.map((_, k) => `w${k}`)];
   const key = valid.includes((s.sort || '').replace(/^-/, '')) ? s.sort : '';
   // the ranking's own column is marked when no other sort is chosen
-  const shown = key || (R.rank === 'gap' ? 'gc' : 'ov');
+  const shown = key || (tabRank === 'gap' ? 'gc' : 'ov');
   // the arrow points the way the list runs: ▼ = highest (or A) first
   const arrow = k => shown === k ? ' ▼' : shown === '-' + k ? ' ▲' : '';
   const sortTh = (k, text, tip, cls = 'c') => `<th class="${cls} cv-sort${shown.replace(/^-/, '') === k ? ' on' : ''}" data-sort="${k}" tabindex="0" role="button" aria-label="Sort by ${esc(text)}"${tip ? ` data-tip="${esc(tip)}"` : ''}>${esc(text)}${arrow(k)}</th>`;
   $('cv-rec-t').innerHTML = '<thead><tr><th class="n">#</th>' + sortTh('name', 'Player', '', '') + sortTh('club', 'Club', '', '')
     + sortTh('age', 'Age', '', 'n') + sortTh('min', 'Minutes', '', 'n') + sortTh('ov', 'Overall')
-    + (C ? sortTh('vb', 'vs him', C.terms['vs him']) : sortTh('vb', 'vs our best', D.terms['vs our best']))
+    + (!l1 ? '' : C ? sortTh('vb', 'vs him', C.terms['vs him']) : sortTh('vb', 'vs our best', D.terms['vs our best']))
     + sortTh('gc', 'Gap closed %', 'Gap closed %: ' + (C ? C.terms['Gap closed'] : D.terms['Gap closed']) + (R.gap_closed && R.gap_closed.custom ? ' Chosen metric columns only.' : ''))
     + sortTh('perf', 'Performance') + sortTh('phys', 'Physical')
     + W.map((w, k) => sortTh(`w${k}`, w.label)).join('') + '<th></th></tr></thead><tbody>'
     + sorted(cur.rows, key).map(([r, i]) => `<tr class="click" data-href="${esc(r.href)}"><td class="n note">${i + 1}</td><td><a class="pname" href="${esc(r.href + backQ())}">${esc(r.name)}</a>${r.position !== D.selected ? `<span class="cv-tag">${esc(r.position)}</span>` : ''}${r.top6_level ? `<span class="cv-t6" data-tip="Top-6 level: ${esc(D.terms['Top-6 level'])}">Top-6 level</span>` : ''}</td><td>${esc(r.club)}</td>`
-      + `<td class="n">${r.age == null ? '—' : r.age.toFixed(1)}</td><td class="n">${fmtInt(r.minutes)}</td><td class="c">${chip(r.overall)}</td><td class="c">${vsCell(r.vs_best)}</td><td class="c cv-gc">${pctSign(r.gap_closed)}</td><td class="c">${chip(r.performance)}</td><td class="c">${chip(r.physical)}</td>`
+      + `<td class="n">${r.age == null ? '—' : r.age.toFixed(1)}</td><td class="n">${fmtInt(r.minutes)}</td><td class="c">${chip(r.overall)}</td>${l1 ? `<td class="c">${vsCell(r.vs_best)}</td>` : ''}<td class="c cv-gc">${pctSign(r.gap_closed)}</td><td class="c">${chip(r.performance)}</td><td class="c">${chip(r.physical)}</td>`
       + W.map((_, k) => `<td class="c">${pct(r.weak[k])}</td>`).join('')
       + `<td><button type="button" class="cv-star${r.watched ? ' on' : ''}" data-ids="${r.ids.join('/')}" aria-label="${r.watched ? 'On watchlist' : 'Add to watchlist'}: ${esc(r.name)}">${r.watched ? '★' : '☆'}</button></td></tr>`).join('')
     + '</tbody>';
@@ -199,7 +210,7 @@ function drawHowGc(ex) {
   const num = c => `<td class="n">${esc(String(c))}</td>`;
   $('cv-how-gc').innerHTML = `<b>${esc(head)}</b>:${esc(rest.join(':'))}<div class="cv-gx-s">${esc(ex.scale)}</div>`
     + `<div class="tw"><table class="cv-gx"><thead><tr>${ex.columns.map((c, i) => `<th${i ? ' class="n"' : ''}>${esc(c)}</th>`).join('')}</tr></thead><tbody>`
-    + ex.rows.map(r => `<tr><td>${esc(r.label)}</td>${[r.ours, r.top6, r.gap, r.target, r.diff, r.counted].map(num).join('')}</tr>`).join('')
+    + ex.rows.map(r => `<tr><td>${esc(r.label)}${r.tag ? `<span class="cv-tag" data-tip="${esc(r.tip)}">${esc(r.tag)}</span>` : ''}</td>${[r.ours, r.top6, r.gap, r.target, r.diff, r.counted].map(num).join('')}</tr>`).join('')
     + (ex.more ? `<tr class="cv-gx-more"><td colspan="7" class="note">${esc(ex.more)}</td></tr>` : '')
     + `</tbody></table></div><div>${esc(ex.total)}</div><div><i>${esc(ex.why)}</i></div>`;
 }
@@ -286,14 +297,20 @@ $('cv-rec-t').addEventListener('click', async ev => {
   const tr = ev.target.closest('tr[data-href]');
   if (tr && !ev.target.closest('a')) location.assign(tr.dataset.href + backQ());
 });
+// the active tab's ranking: League One follows "Rank by"; any other league is by Gap closed
+const onLeagueOne = () => {
+  const R = D.recommendations, ids = R.leagues.map(l => l.competition_id);
+  return pickLeagues(ids, STORE && loadLeagues(STORE), st().league, R.default_leagues || []).active === D.league_one;
+};
 function sortBy(th) {
-  const k = th.dataset.sort, s = st(), cur = s.sort || (s.rank === 'gap' ? 'gc' : 'ov');
-  // Overall heading while ranked by Gap closed: back to the Overall ranking (a new list)
-  if (k === 'ov' && s.rank === 'gap' && !s.sort) return commit({sort: '', rank: ''});
+  const k = th.dataset.sort, s = st(), l1 = onLeagueOne();
+  const tr = l1 ? (s.rank === 'gap' ? 'gap' : '') : 'gap', cur = s.sort || (tr === 'gap' ? 'gc' : 'ov');
+  // Overall heading while League One is ranked by Gap closed: back to the Overall ranking (a new list)
+  if (k === 'ov' && l1 && s.rank === 'gap' && !s.sort) return commit({sort: '', rank: ''});
   // first click on a heading: highest (or A) first; again: the other way; Overall's highest
   // first is the default order, so it leaves the address clean
   const next = cur === k ? '-' + k : k;
-  commit({sort: next === 'ov' && s.rank !== 'gap' ? '' : next}, false);
+  commit({sort: next === 'ov' && tr !== 'gap' ? '' : next}, false);
 }
 
 // Metric columns (owner 2026-11-13): the 3 biggest shortfalls, or the recruiter's own pick

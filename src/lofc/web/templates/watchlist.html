@@ -12,14 +12,10 @@
   <div id="wl-main" hidden>
     <div class="filters" id="wl-filters">
       <div class="fl">
-        <div class="f wl-status"><label id="wl-status-label">Assessment status <span class="hlp" id="wl-status-help">?</span></label>
-          <div class="wl-checks" id="wl-status" role="group" aria-labelledby="wl-status-label"></div></div>
-        <div class="f"><label>&nbsp;</label><label class="switch" id="sw-money"><input type="checkbox" id="f-money" name="money"><i></i>Market value</label></div>
+        <div class="f"><label class="switch" id="sw-money"><input type="checkbox" id="f-money" name="money"><i></i>Market value</label></div>
       </div>
-      <p class="note wl-cap">Status “Scout sent” is your note; Assessed records that a scout did the assessment.</p>
     </div>
 
-    <div id="wl-none" class="info" hidden></div>
     <div class="tiles wl-tiles" id="wl-tiles"></div>
 
     <div class="card" id="wl-card">
@@ -34,8 +30,7 @@
       <div class="wl-edit-grid">
         <div class="f"><label for="e-note">Scout note</label>
           <textarea class="ctl" id="e-note" rows="6" placeholder="What to verify, who watched him, verdicts..."></textarea></div>
-        <div class="f wl-edit-side"><label for="e-status">Status</label><select class="ctl" id="e-status"></select>
-          <a class="btn" id="e-assess">Assess this player</a></div>
+        <div class="f wl-edit-side"><label for="e-status">Status</label><select class="ctl" id="e-status"></select></div>
       </div>
       <div class="wl-edit-actions">
         <button class="btn primary" id="e-save" type="button">Save</button>

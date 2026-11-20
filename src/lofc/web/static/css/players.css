@@ -106,3 +106,7 @@ input[type=range]{accent-color:var(--ink);width:100%}
 @media (max-width:1380px){#v-players #tw td:last-child{max-width:104px}#v-players td.sty{max-width:100px}#v-players .cut{max-width:94px}}
 @media (min-width:1501px){#v-players #tw th button{max-width:116px}}
 #v-players .pool-tag{display:block;width:max-content;font-size:11px;padding:0 6px;margin:2px 0 0;font-weight:600}
+/* Scout verdicts (2026-11-16): count pills stack in a narrow cell; hover lists each scout's latest */
+#v-players #tw td.vd{max-width:116px;white-space:normal;cursor:help}
+#v-players #tw td.vd .pill{white-space:normal;padding:2px 7px}
+@media (max-width:1380px){#v-players #tw td.vd{max-width:104px}#v-players #tw td.vd .pill{padding:2px 5px}}

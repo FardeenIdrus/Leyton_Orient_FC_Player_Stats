@@ -5,7 +5,6 @@ import types
 import pandas as pd
 import pytest
 
-from lofc.model import assessment_status as AS
 from lofc.web.api import card as card_api
 from lofc.web.api import watchlist as api
 from web_fakes import FakeStore, login, make
@@ -118,14 +117,18 @@ def test_page_shell(fake):
     r = _client().get("/watchlist")
     assert r.status_code == 200 and 'id="v-watchlist"' in r.text
     assert "/js/watchlist.js" in r.text and "Currently building" not in r.text
+    assert 'id="e-assess"' not in r.text and "Assess this player" not in r.text
 
 
 def test_rows_tiles_and_columns(fake):
     d = _client().get("/api/watchlist").json()
     assert d["empty"] is False
     assert [t["label"] for t in d["tiles"]] == ["On the list", "Contract ≤ 6 months",
-                                                "Currently injured", "Not yet assessed"]
-    assert [t["value"] for t in d["tiles"]] == [2, 1, 0, 2]
+                                                "Currently injured"]     # "Not yet assessed" retired
+    assert [t["value"] for t in d["tiles"]] == [2, 1, 0]
+    assert "Assessed" not in d["columns"] and "Assessed" not in d["help"]
+    for gone in ("statuses", "chosen", "status_help", "none_match"):
+        assert gone not in d
     assert d["columns"][:8] == ["Player", "Club", "League", "Position", "Age", "Composite",
                                 "Performance", "Physical"]
     assert "Market value" not in d["columns"]
@@ -134,10 +137,9 @@ def test_rows_tiles_and_columns(fake):
     assert al["cells"]["Composite"] == "3.41" and al["ratings"]["Composite"] == 3.41
     assert al["cells"]["This season (2026/27)"].startswith("455 min")
     assert al["href"] == "/player/1/5/318"
-    assert al["assess_href"] == "/assess?player=1&competition=5&season=318"
+    assert "assess_href" not in al                          # Assess retired (2026-11-16)
     assert al["note"] == "Watch his <b>first</b> touch" and al["status"] == "Watching"
     assert al["tm"] == "https://www.transfermarkt.com/-/profil/spieler/123"
-    assert d["statuses"] == list(AS.STATUSES)
     assert d["manual_statuses"] == FakeWatch.WATCHLIST_STATUSES
 
 
@@ -164,13 +166,25 @@ def test_money_adds_market_value(fake):
     assert d["rows"][0]["cells"]["Market value"] == "€1.5m"
 
 
-def test_status_filter(fake):
+def test_assessment_status_filter_retired_old_links_show_everyone(fake):
+    """scout_assessments is not used (owner 2026-11-16): an old ?status= link lists every row."""
     c = _client()
-    assert len(c.get("/api/watchlist?status=Not%20assessed").json()["rows"]) == 2
-    d = c.get("/api/watchlist?status=Signed%20off").json()
-    assert d["rows"] == [] and d["none_match"] == "No watched players match the chosen assessment status."
-    d = c.get("/api/watchlist?status=").json()                     # nothing ticked
-    assert d["rows"] == [] and d["chosen"] == []
+    for q in ("status=Not%20assessed", "status=Signed%20off", "status="):
+        assert len(c.get("/api/watchlist?" + q).json()["rows"]) == 2
+        assert len(c.get("/api/watchlist/csv?" + q).text.strip().splitlines()) == 3
+
+
+def test_web_watchlist_does_not_read_scout_assessments():
+    """The web path never loads the assessment statuses (Streamlit's own page still may)."""
+    import inspect
+    src = inspect.getsource(api)
+    assert "webcache.assessment_status" not in src and "AS.STATUSES" not in src
+
+
+def test_page_shell_has_no_assessment_filter(fake):
+    html = _client().get("/watchlist").text
+    for gone in ("Assessment status", 'id="wl-status"', "Assessed records", "Scout sent” is your note"):
+        assert gone not in html
 
 
 def test_empty_list(fake):
@@ -185,6 +199,7 @@ def test_csv_is_the_table(fake):
     assert "lofc_watchlist.csv" in r.headers["content-disposition"]
     head = r.text.splitlines()[0]
     assert head.startswith("Player,Club,League,Position,Age,Composite") and "Market value" in head
+    assert "Assessed" not in head.split(",")
 
 
 # --- writes ----------------------------------------------------------------------------------

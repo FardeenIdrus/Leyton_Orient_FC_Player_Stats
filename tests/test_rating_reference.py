@@ -59,7 +59,7 @@ def test_every_row_has_a_short_definition(position):
 
 
 def test_weights_line_comes_from_the_framework():
-    assert rr.weights_line("Centre Back") == "Rating = Performance 57% · Physical 43%"
+    assert rr.weights_line("Centre Back") == "Rating = Performance 65% · Physical 35%"
     assert rr.weights_line("Goalkeeper") == "Rating = Performance 100%"
 
 

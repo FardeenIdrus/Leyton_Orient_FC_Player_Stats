@@ -68,7 +68,8 @@ def test_card_exists_and_has_every_section(cards, label, p, s, c):
     assert d is not None
     assert set(d) >= {"meta", "header", "rating", "season_by_season", "current_form", "style",
                       "season_output", "impect", "performance", "packing_zones", "receptions",
-                      "physical", "scout_reports", "scout_assessment", "availability"}
+                      "physical", "scout_reports", "availability"}
+    assert "scout_assessment" not in d and "assess_url" not in d["header"]
     assert d["meta"]["player_id"] == p and d["meta"]["season_id"] == s
 
 

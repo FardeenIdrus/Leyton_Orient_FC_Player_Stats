@@ -78,8 +78,15 @@ def test_recommendations_are_per_league_above_our_level_and_never_ours(page, sto
     for lg in rec["leagues"]:
         assert len(lg["rows"]) == lg["count"]                     # owner 2026-11-13: no top-15 cap
         ov = [r["overall"] for r in lg["rows"]]
-        assert ov == sorted(ov, reverse=True)
-        assert all(level is None or o > level for o in ov)
+        if lg["competition_id"] == 4:
+            assert ov == sorted(ov, reverse=True) and lg["rank"] == ""
+            assert all(level is None or o > level for o in ov)
+            assert all(level is None or r["vs_best"] is not None for r in lg["rows"])
+        else:
+            # owner 2026-11-20: every rated player, by Gap closed (no figure last), no vs_best
+            gc = [-1 if r["gap_closed"] is None else r["gap_closed"] for r in lg["rows"]]
+            assert gc == sorted(gc, reverse=True) and lg["rank"] == "gap"
+            assert all(r["vs_best"] is None and not r["top6_level"] for r in lg["rows"])
         assert all(not r["club"].lower().startswith("leyton orient") for r in lg["rows"])
         assert all(r["ids"][1] == lg["competition_id"] for r in lg["rows"])
 
@@ -137,7 +144,7 @@ def test_top6_performance_physical_and_orients_row(page, engine, stored):
 
 def test_gap_closed_matches_a_plain_recomputation(engine):
     """Owner 2026-11-13: Gap closed for Centre Back, recomputed here from the stored season
-    figures: percentiles, the top-6 medians, the Overall weights (Performance 40 : Physical 30,
+    figures: percentiles, the top-6 medians, the Overall weights (Performance 65 : Physical 35, owner 2026-11-16;
     the club's per-metric Performance weights, Physical equal) and the capped, weighted share."""
     from lofc.model import club_framework as cf
     from lofc.model.performance_weights import WEIGHTS
@@ -150,19 +157,43 @@ def test_gap_closed_matches_a_plain_recomputation(engine):
         pytest.skip("no Centre Back level or bar")
     pcts = {}
 
-    def pct(pid, comp, season, pos):
+    def pct_frame(season):
         if season not in pcts:
             n = pd.read_sql(text("SELECT * FROM player_metrics_neutral WHERE season_id = :s"), engine,
                             params={"s": season})
             pcts[season] = metric_percentiles(n)
+        return pcts[season]
+
+    def pct(pid, comp, season, pos):
+        f = pct_frame(season)
         key = (pid, comp, season, pos)
-        return pcts[season].loc[key] if key in pcts[season].index else None
+        return f.loc[key] if key in f.index else None
+
+    def L_season(r):
+        return r["level"]["season_id"]
     L = row["level"]
     ours = pct(L["player_id"], L["competition_id"], L["season_id"], L["position"])
     bar = [pct(p["player_id"], p["competition_id"], p["season_id"], p["position"]) for p in row["bar"]["players"]]
     perf = {m: float(w) for m, (_t, w) in WEIGHTS[("Centre Back", "All Metrics")].items()}
     phys = cf.PHYSICAL_METRICS["Centre Back"]
-    weight = {m: w * 0.40 / 0.70 for m, w in perf.items()} | {m: 0.30 / 0.70 / len(phys) for m in phys}
+    weight = {m: w * 0.65 for m, w in perf.items()} | {m: 0.35 / len(phys) for m in phys}
+    # owner 2026-11-20: measures that move together (|r| >= 0.8 over the season's rated Centre
+    # Back percentiles, every league, 20+ pairs; linked pairs chain) count once
+    rated = pd.read_sql(text(
+        "SELECT player_id, competition_id, season_id, position_group FROM player_scorecards "
+        "WHERE archetype = 'All Metrics' AND objective_composite IS NOT NULL AND season_id = :s "
+        "AND position_group = 'Centre Back'"), engine, params={"s": L_season(row)})
+    pool = pct_frame(L_season(row)).reset_index().merge(rated, on=list(rated.columns))
+    ms = [m for m in weight if m in pool.columns]
+    corr = pool[ms].apply(pd.to_numeric, errors="coerce").corr(min_periods=20)
+    group_of = {m: {m} for m in ms}
+    for a in ms:
+        for b in ms:
+            if a < b and pd.notna(corr.loc[a, b]) and abs(corr.loc[a, b]) >= 0.8 and group_of[a] is not group_of[b]:
+                merged = group_of[a] | group_of[b]
+                for m in merged:
+                    group_of[m] = merged
+    weight = {m: w / len(group_of.get(m, {m})) for m, w in weight.items()}
     gaps = {}
     for m in weight:
         mine = ours.get(m)
@@ -203,7 +234,8 @@ def test_full_back_against_our_second_rated_full_back(engine):
     assert sel["level"]["player_id"] == him["player_id"] and sel["best"]["player_id"] == rated[0]["player_id"]
     assert sel["gap"] == pytest.approx(row["bar"]["median"] - him["rating"])
     assert d["recommendations"]["level"] == pytest.approx(him["rating"])
-    rows = [r for lg in d["recommendations"]["leagues"] for r in lg["rows"]]
+    # League One: above him (owner 2026-11-20: other leagues list every rated player, no vs_best)
+    rows = [r for lg in d["recommendations"]["leagues"] if lg["competition_id"] == 4 for r in lg["rows"]]
     assert rows and all(r["overall"] > him["rating"] for r in rows)
     assert all(abs(r["vs_best"] - (r["overall"] - him["rating"])) <= 0.005 + 1e-9 for r in rows)
     assert [w["metric"] for w in d["recommendations"]["weak_metrics"]] == [s["metric"] for s in sel["shortfalls"]]

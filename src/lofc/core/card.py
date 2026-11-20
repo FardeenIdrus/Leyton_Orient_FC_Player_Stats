@@ -794,53 +794,6 @@ def _style_block(row, league: str, season: str) -> dict:
                f"position, league and season."}}
 
 
-def _assessment_block(engine, row) -> dict:
-    """The two human bands, who entered them, who approved them, and when -- EVERY assessment,
-    not just the one that scores, because two assessors who disagree must both be visible."""
-    from lofc.dashboard import assessment_detail as ad
-    from lofc.dashboard import badges
-    from lofc.model import scout_scores
-    from lofc.store import assessments as store_assess
-    pid, cid, sid = int(row["player_id"]), int(row["competition_id"]), int(row["season_id"])
-    frame = store_assess.load_for_player(engine, pid, cid, sid)
-    position = row.get("position_group")
-    dims = (scout_scores.PSYCHOLOGICAL, scout_scores.MEDICAL)
-    out: dict = {"warning": None, "empty": None, "dimensions": []}
-    if frame.empty:
-        b = badges.for_status(None)
-        out["empty"] = {"badge": b.text, "tone": b.tone, "caption":
-                        "No psychological or medical assessment has been recorded for this "
-                        "player-season."}
-        return out
-    out["warning"] = outstanding_warning(scout_scores.missing_dimensions(
-        {d: ad.dimension_status(frame, d) for d in dims}))
-    for dimension in dims:
-        dim_rows = frame[frame["dimension"] == dimension]
-        d: dict = {"name": dimension, "badge": None, "tone": None, "caption": None,
-                   "entries": None, "flags": [], "notes": [], "criteria": None}
-        if dim_rows.empty:
-            b = badges.for_status(None)
-            d["badge"], d["tone"] = b.text, b.tone
-            out["dimensions"].append(d)
-            continue
-        entries = list(dim_rows.itertuples())
-        status = ad.dimension_status(frame, dimension)
-        scoring = [e for e in entries if e.status in ("submitted", "signed_off")]
-        if status == scout_scores.CONFLICT:
-            b = badges.for_status(scout_scores.CONFLICT)
-            d["badge"], d["tone"] = b.text, b.tone
-        d["caption"] = dimension_caption(status, len(entries), len(scoring))
-        d["entries"] = as_table(ad.entries_table(dim_rows))
-        d["flags"] = flag_lines(entries)
-        d["notes"] = [{"author": getattr(e, "author_name", "Unknown"),
-                       "blocks": [{"heading": h, "text": t} for h, t in ad.narrative_for(e)]}
-                      for e in entries if ad.narrative_for(e)]
-        d["criteria"] = criterion_detail(engine, str(position) if pd.notna(position) else None,
-                                         dimension, entries)
-        out["dimensions"].append(d)
-    return out
-
-
 def _scout_reports_block(engine, player_id: int) -> dict:
     from lofc.dashboard.tabs.scout_reports import reports_for_player, verdict_counts, verdict_tone
     reports = reports_for_player(engine, int(player_id))
@@ -1074,6 +1027,11 @@ def _live_club_split(engine, pid: int, live) -> list[dict] | None:
             for r in d.itertuples()]
 
 
+def _similar_stub(reason: str) -> dict:
+    from lofc.core import similar
+    return similar.card_stub(reason)
+
+
 def build_card(engine, player_id: int, competition_id: int, season_id: int,
                rank_as: str | None = None, show_money: bool = False) -> dict | None:
     """Every section of the player card for one player-season, as JSON-ready data (blanks are
@@ -1117,7 +1075,6 @@ def build_card(engine, player_id: int, competition_id: int, season_id: int,
                                             lambda c: L.competition_name_by_id().get(c)),
         "transfermarkt_url": (f"https://www.transfermarkt.com/-/profil/spieler/{int(tm_id)}"
                               if pd.notna(tm_id) else None),
-        "assess_url": f"/assess?player={pid}&competition={cid}&season={sid}",
         "watched": bool(watchlist.is_watched(engine, pid, cid, sid)),
     }
 
@@ -1257,8 +1214,9 @@ def build_card(engine, player_id: int, competition_id: int, season_id: int,
         "receptions": _receptions_block(row),
         "physical": physical_block,
         "scout_reports": _scout_reports_block(engine, pid),
-        "scout_assessment": _assessment_block(engine, row),
         "availability": _availability_block(engine, row),
+        # "Similar players": the list loads on its own (/api/card/.../similar, core.similar)
+        "similar": _similar_stub(reason),
         "glossary_note": "Definitions on the Glossary page",
     }
     return clean(out)

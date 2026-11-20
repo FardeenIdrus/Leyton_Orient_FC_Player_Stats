@@ -1,11 +1,6 @@
 /* Watchlist page only: what app.css + players.css do not cover. */
 #v-watchlist .filters{margin:12px 0 12px}
-#v-watchlist .wl-status{flex:1 1 520px}
-.wl-checks{display:flex;gap:6px 16px;flex-wrap:wrap;padding:6px 0}
-.wl-check{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--ink);cursor:pointer}
-.wl-check input{accent-color:var(--ink);width:16px;height:16px;margin:0}
-.wl-cap{margin:8px 0 0}
-.wl-tiles{grid-template-columns:repeat(4,1fr);margin-bottom:16px}
+.wl-tiles{grid-template-columns:repeat(3,1fr);margin-bottom:16px}
 .wl-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
 #wl-tw{margin-top:10px;max-height:calc(100vh - 260px);min-height:200px}
 #v-watchlist table{border-collapse:separate;border-spacing:0}

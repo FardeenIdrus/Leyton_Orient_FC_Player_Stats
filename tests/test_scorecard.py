@@ -37,6 +37,63 @@ def test_dimension_weights_sum_to_one_per_position():
         assert round(sum(weights.values()), 6) == 1.0, position
 
 
+OUTFIELD = [p for p in cf.DIMENSION_WEIGHTS if p != "Goalkeeper"]
+
+
+def test_outfield_rating_is_performance_65_physical_35():
+    """Owner 2026-11-16: outfield Performance : Physical = 65 : 35 in the objective composite
+    (was the club's 40 : 30 = 4/7 : 3/7). Exact, not 4-dp rounded weights."""
+    for position in OUTFIELD:
+        w = cf.DIMENSION_WEIGHTS[position]
+        share = w[cf.PERFORMANCE] / (w[cf.PERFORMANCE] + w[cf.PHYSICAL])
+        assert share == pytest.approx(0.65, abs=1e-12), position
+
+
+def test_scout_and_money_weights_unchanged_by_the_65_35_split():
+    """Performance + Physical still carry the club's 70 of 110, so Psychological, Medical,
+    Financial and Resale keep their relative weights; goalkeepers are untouched."""
+    for position in OUTFIELD:
+        w = cf.DIMENSION_WEIGHTS[position]
+        assert w[cf.PERFORMANCE] + w[cf.PHYSICAL] == pytest.approx(0.70 / 1.10, abs=1e-12)
+        for dim, raw in ((cf.PSYCHOLOGICAL, 0.10), (cf.MEDICAL, 0.15), (cf.FINANCIAL, 0.10),
+                         (cf.RESALE, 0.05)):
+            assert w[dim] == pytest.approx(raw / 1.10, abs=1e-12), (position, dim)
+    assert cf.DIMENSION_WEIGHTS["Goalkeeper"] == pytest.approx(
+        {cf.PERFORMANCE: 0.50, cf.PSYCHOLOGICAL: 0.20, cf.MEDICAL: 0.15, cf.FINANCIAL: 0.10,
+         cf.RESALE: 0.05})
+
+
+def test_objective_composite_combines_performance_and_physical_65_35():
+    w = cf.DIMENSION_WEIGHTS["Winger"]
+    dims = [cf.PERFORMANCE, cf.PHYSICAL]
+    assert scorecard._composite({cf.PERFORMANCE: 4.0, cf.PHYSICAL: 2.0}, w, dims)[0] == 3.30
+    assert scorecard._composite({cf.PERFORMANCE: 1.0, cf.PHYSICAL: 5.0}, w, dims)[0] == 2.40
+    # no Physical: Performance alone, unchanged
+    assert scorecard._composite({cf.PERFORMANCE: 3.47}, w, dims)[0] == 3.47
+
+
+def test_composite_exact_halves_round_up():
+    """65:35 of two 2-dp bands often lands exactly on a half (0.65 x 3.10 + 0.35 x 3.00 =
+    3.065). Halves go up, every time -- not wherever binary floating point happens to put
+    them (Python's round(3.035, 2) gives 3.03)."""
+    w = cf.DIMENSION_WEIGHTS["Centre Back"]
+    dims = [cf.PERFORMANCE, cf.PHYSICAL]
+    assert scorecard._composite({cf.PERFORMANCE: 3.10, cf.PHYSICAL: 3.00}, w, dims)[0] == 3.07
+    assert scorecard._composite({cf.PERFORMANCE: 3.00, cf.PHYSICAL: 3.10}, w, dims)[0] == 3.04
+    assert scorecard._composite({cf.PERFORMANCE: 2.00, cf.PHYSICAL: 2.10}, w, dims)[0] == 2.04
+
+
+def test_build_scorecards_objective_composite_is_65_35():
+    """End to end: a winger's stored Overall = 0.65 x Performance + 0.35 x Physical."""
+    rows = [{"player_id": i, "competition_id": 1, "season_id": 1, "position_group": "Winger",
+             "rankable": True, "np_xg_p90": float(i), "distance_p90": float(10 - i)}
+            for i in range(11)]
+    sc = scorecard.build_scorecards(_neutral(rows))
+    for r in sc.itertuples():
+        expect = scorecard._round2(0.65 * r.performance_band + 0.35 * r.physical_band)
+        assert r.objective_composite == expect
+
+
 def test_goalkeeper_has_no_physical_dimension():
     assert cf.PHYSICAL_METRICS["Goalkeeper"] == []
     assert cf.PHYSICAL not in cf.DIMENSION_WEIGHTS["Goalkeeper"]
@@ -195,7 +252,8 @@ def test_assessed_composite_excludes_financial_and_resale():
              cf.RESALE: 4.0, cf.PSYCHOLOGICAL: 3.8, cf.MEDICAL: 3.0}
     value, covered = _composite(bands, weights, ASSESSED_DIMENSIONS)
     assert covered == pytest.approx(0.86, abs=0.01)
-    assert value == pytest.approx(3.66, abs=0.01)
+    # (4.0 x 45.5 + 3.5 x 24.5 + 3.8 x 10 + 3.0 x 15) / 95 = 3.692 (65:35 split, 2026-11-16)
+    assert value == pytest.approx(3.69, abs=0.01)
 
 
 def test_assessed_composite_does_not_move_when_the_money_bands_change():

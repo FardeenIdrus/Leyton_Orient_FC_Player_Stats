@@ -7,7 +7,8 @@ is in `lofc.core.club_vs_league`; every number is a stored rating, minutes or pe
                                                            big picture
 `group` = the gap-map position whose recommendations to list (default: the biggest gap).
 `cols` = the chosen metric columns, comma-separated (default: the 3 biggest shortfalls);
-`rank=gap` ranks each league's list by Gap closed instead of Overall.
+`rank=gap` ranks League One's list by Gap closed instead of Overall; every other league's list
+is always by Gap closed (owner 2026-11-20).
 `vs` = one of our rated players at `group` to measure it against (default: our best).
 """
 from __future__ import annotations
@@ -142,7 +143,7 @@ def _base() -> dict:
                                 for p in b["players"]]
         d = _detail(src, pc[cur], lvl, bar_rows[g["group"]])
         g["shortfalls"], g["all_shortfalls"], profiles[g["group"]] = d["shortfalls"], d["all_shortfalls"], d["profile"]
-    return {"profiles": profiles, "bar_rows": bar_rows, "pcts_cur": pc[cur],
+    return {"corr_groups": _corr_groups(rated, pc[cur], cur), "profiles": profiles, "bar_rows": bar_rows, "pcts_cur": pc[cur],
             "cur": cur, "prev": prev, "names": names, "rated": rated, "ours": ours,
             "squad_ids": {int(i) for i in squad["player_id"]},
             "top6": [_club_out(r) for r in clubs.head(cv.TOP_N).to_dict("records")],
@@ -150,6 +151,17 @@ def _base() -> dict:
             "orient": cv._rank_text(table), "clubs": int(len(table)), "gaps": gaps,
             "big_picture": cv.big_picture(rated, neutral, cur, prev, getattr(src, "picture", src.physical),
                                           src.label, getattr(src, "sections", None), phases=_phases(src, neutral))}
+
+
+def _corr_groups(rated, pcts_cur, cur) -> dict:
+    """position -> its Gap closed measures that move together (owner 2026-11-20, Decision D):
+    cv.position_groups over this season's percentiles of the position's rated pool, every
+    league. Worked out once per data version (in _base)."""
+    keys = ["player_id", "competition_id", "season_id", "position_group"]
+    pool = rated.loc[rated["season_id"] == cur, keys].drop_duplicates()
+    have = pcts_cur.merge(pool, on=keys, how="inner") if pcts_cur is not None and len(pcts_cur) else pcts_cur
+    return {pos: cv.position_groups(have, pos, list(cv.overall_weights(pos)))
+            for grp in cv.GROUPS for pos in cv.positions_in(grp)}
 
 
 def _phases(src, neutral) -> dict | None:
@@ -221,7 +233,9 @@ def page_json(group=None, age=None, contract=None, strong=None, top6=None, cols=
             picked.append(m)
     custom = bool(picked) and picked != default
     columns = picked if custom else default
-    weights = cv.overall_weights(position)
+    # owner 2026-11-20 (Decision D): measures that move together count once
+    groups = b["corr_groups"].get(position, [])
+    weights = cv.grouped_weights(cv.overall_weights(position), groups)
     rec = cv.recommendations(b["rated"], src.candidates(b["cur"]), b["cur"], sel, level, b["squad_ids"],
                              src.league_names(), age=age, contract=contract, pcts=src.pcts(b["cur"]),
                              tag_metrics=columns, label=wl, strong2=strong, bar=row["bar"]["median"],
@@ -233,14 +247,17 @@ def page_json(group=None, age=None, contract=None, strong=None, top6=None, cols=
     # owner 2026-11-13: "How this is worked out" -- Gap closed step by step, per league tab
     for lg in rec["leagues"]:
         lg["example"] = cv.gap_example(sel, row["level"], row["bar"]["median"], profile, lg.pop("top_gap", None),
-                                       weights, lg["league"], label=wl, metrics=columns if custom else None)
+                                       weights, lg["league"], label=wl, metrics=columns if custom else None,
+                                       groups=groups)
     watched = src.watched()
     for lg in rec["leagues"]:
         for r in lg["rows"]:
             p, c, s = r["ids"]
             r["href"] = f"/player/{p}/{c}/{s}"
             r["watched"] = (p, c, s) in watched
-            r["top6_level"] = row["bar"]["median"] is not None and r["overall"] >= row["bar"]["median"]
+            # the bar is a League One rating (owner 2026-11-20): no badge in another league
+            r["top6_level"] = (lg["competition_id"] == cv.LEAGUE_ONE and row["bar"]["median"] is not None
+                               and r["overall"] >= row["bar"]["median"])
     for r in b["big_picture"]:
         r.setdefault("label", r["measure"])
     gaps_out = gaps
@@ -255,7 +272,9 @@ def page_json(group=None, age=None, contract=None, strong=None, top6=None, cols=
                         "cols": picked if custom else [], "rank": rank, "vs": row.get("vs"),
                         "ages": [{"key": k, "label": l} for k, l in AGE_BANDS],
                         "contracts": [k for k in S.CONTRACT_HORIZONS if k != "Any"]},
-            "big_picture": b["big_picture"], "terms": cv.TERMS}
+            "big_picture": b["big_picture"], "terms": cv.TERMS,
+            "own_league_note": cv.OWN_LEAGUE_NOTE, "league_one": cv.LEAGUE_ONE,
+            "low_minutes": cv.LOW_MINUTES}
 
 
 @router.get("/api/club-vs-league")

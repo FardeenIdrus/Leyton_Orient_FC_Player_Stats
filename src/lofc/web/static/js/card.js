@@ -119,7 +119,6 @@ function renderHeader(c) {
   $('h-notes').innerHTML = (H.scored_as ? `<div class="info">${md(H.scored_as)}</div>` : '')
     + H.other_leagues.map(t => `<p class="note">${md(t)}</p>`).join('');
   setWatch(H.watched);
-  $('h-assess').href = H.assess_url;
   const tm = $('h-tm');
   tm.hidden = !H.transfermarkt_url;
   if (H.transfermarkt_url) tm.href = H.transfermarkt_url;
@@ -369,7 +368,6 @@ function renderPhysical(Ph, c) {
 
 // ---- scouting ---------------------------------------------------------------------------
 const tonePill = t => t === 'positive' ? 'verdict-pos' : t === 'negative' ? 'verdict-neg' : 'verdict-mid';
-const badgePill = t => ({approved: 'verdict-pos', pending: 'verdict-mid', rejected: 'verdict-neg'}[t] || 'grey');
 
 function renderScouting(c) {
   const S = c.scout_reports;
@@ -379,24 +377,6 @@ function renderScouting(c) {
     `<details class="report"${S.open_single ? ' open' : ''}><summary>${r.title.map(([t, b]) => b ? `<b>${esc(t)}</b>` : esc(t)).join(' · ')}</summary>`
     + (r.match ? `<p class="note">${esc(r.match)}</p>` : '') + (r.squad_role ? `<p class="note">Squad role: ${esc(r.squad_role)}</p>` : '')
     + (r.comments ? `<p class="txt">${esc(r.comments)}</p>` : '') + '</details>').join('');
-  const A = c.scout_assessment;
-  let h = A.warning ? `<div class="warn">${md(A.warning)}</div>` : '';
-  if (A.empty) {
-    h += `<div class="badge-row"><span class="pill grey">${esc(A.empty.badge)}</span></div><p class="note">${esc(A.empty.caption)}</p>`;
-  }
-  h += A.dimensions.map(d => {
-    let x = `<div class="dim"><h4>${esc(d.name)}</h4>`;
-    if (d.badge) x += `<div class="badge-row"><span class="pill ${badgePill(d.tone)}">${esc(d.badge)}</span></div>`;
-    if (d.caption) x += `<p class="note">${esc(d.caption)}</p>`;
-    if (d.entries) x += tw(table(d.entries.columns, d.entries.rows, (col, v) => esc(dash(v))));
-    x += d.flags.map(f => `<p class="flagline">${md(f)}</p>`).join('');
-    x += d.notes.map(n => `<details class="notes-d"><summary>${esc(n.author)}'s notes</summary>${n.blocks.map(b => `<p><b>${esc(b.heading)}</b><br>${esc(b.text)}</p>`).join('')}</details>`).join('');
-    const k = d.criteria;
-    if (k && k.note) x += `<p class="note">${esc(k.note)}</p>`;
-    else if (k) x += `<details class="notes-d"><summary>${esc(k.label)}</summary>${k.empty ? empty(k.empty) : tw(table(k.columns, k.rows, (col, v) => esc(dash(v))))}</details>`;
-    return x + '</div>';
-  }).join('');
-  $('sa').innerHTML = h;
 }
 
 function renderAvailability(A) {
@@ -476,6 +456,103 @@ async function loadSquad() {
   }
 }
 
+// ---- similar players (core.similar; owner-approved 2026-11-16) -----------------------------
+// Its own request, made once the section nears the screen (or "Find similar" is pressed).
+// Filters (owner 2026-11-20): League (All leagues only), Max age, Min minutes, Contract.
+const sim = (() => {
+  const s = readState();
+  return {scope: s.sim_scope === 'all' ? 'all' : 'league', age: s.sim_age || '',
+    league: s.sim_league || '', min: s.sim_min || '', contract: s.sim_contract || ''};
+})();
+let simReq = 0, simAsked = false, simObs = null;
+const simBack = () => '?back=' + encodeURIComponent(location.pathname + location.search + '#c-similar');
+/** The Similar players page's query for the current filters (+ a selected match). */
+const simPageQuery = (match = '') => query({scope: sim.scope === 'all' ? 'all' : '', max_age: sim.age,
+  league: sim.scope === 'all' ? sim.league : '', min_minutes: sim.min, contract: sim.contract, match: match});
+const simApiQuery = () => simPageQuery();
+const simOpts = (list, cur, first = 'Any') => `<option value="">${esc(first)}</option>`
+  + list.map(([v, t]) => `<option value="${esc(v)}"${String(v) === String(cur ?? '') ? ' selected' : ''}>${esc(t)}</option>`).join('');
+
+function renderSimilar(D) {
+  $('sim-sub').textContent = D.sub || '';
+  for (const b of $('sim-scope').querySelectorAll('button')) {
+    const on = b.dataset.scope === D.scope;
+    b.classList.toggle('on', on); b.setAttribute('aria-pressed', on);
+  }
+  const all = D.scope === 'all';
+  $('sim-league-wrap').hidden = !all;
+  $('sim-league').innerHTML = simOpts(D.league_options || [], D.league, 'All');
+  $('sim-age').innerHTML = simOpts((D.age_options || []).map(a => [a, a]), D.max_age);
+  $('sim-min').innerHTML = simOpts((D.min_minutes_options || []).map(m => [m, fmtInt(m)]), D.min_minutes);
+  $('sim-contract').innerHTML = simOpts(D.contract_options || [], D.contract);
+  $('sim-how').href = `/similar/${KEY}${simPageQuery()}`;
+  $('sim-notes').innerHTML = [D.note, D.pool_note, D.physical_note].filter(Boolean)
+    .map(t => `<p class="note sim-note">${esc(t)}</p>`).join('');
+  if (!D.rows || !D.rows.length) { $('sim').innerHTML = empty(D.empty || ''); return; }
+  const cols = ['Player', 'Club', ...(all ? ['League'] : []), 'Age', 'Minutes', 'Overall', 'Similarity %', 'Biggest differences', ''];
+  const helps = {'Similarity %': D.similarity_help, 'Biggest differences': D.diff_help,
+    Overall: 'Rated in his own league.'};
+  const head = '<tr>' + cols.map(c => `<th class="${['Age', 'Minutes', 'Similarity %'].includes(c) ? 'n ' : ''}col-${colSlug(c || 'why')}"${helps[c] ? ` title="${esc(helps[c])}"` : ''}>${esc(c)}</th>`).join('') + '</tr>';
+  const body = D.rows.map(r => '<tr>'
+    + `<td><a href="${esc(r.href)}${simBack()}">${esc(r.name)}</a></td>`
+    + `<td>${esc(dash(r.club))}</td>` + (all ? `<td>${esc(dash(r.league))}</td>` : '')
+    + `<td class="n">${r.age == null ? '—' : r.age.toFixed(1)}</td><td class="n">${fmtInt(r.minutes)}</td>`
+    + `<td>${chip(r.overall)}</td><td class="n"><b>${r.similarity == null ? '—' : r.similarity}</b></td>`
+    + `<td class="sim-diff">${esc(r.differences_text || '—')}</td>`
+    + `<td class="sim-why"><a href="/similar/${KEY}${esc(simPageQuery(r.key))}">Why</a></td></tr>`).join('');
+  $('sim').innerHTML = `<table class="sim"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
+async function loadSimilar() {
+  simAsked = true;
+  const mine = ++simReq;
+  $('sim').innerHTML = '<div class="skel" style="height:120px"></div>';
+  try {
+    const D = await api(`/api/card/${KEY}/similar${simApiQuery()}`);
+    if (mine !== simReq) return;
+    renderSimilar(D);
+    if (location.hash === '#c-similar') $('c-similar').scrollIntoView();
+  } catch (e) {
+    if (mine === simReq) $('sim').innerHTML = empty(`Could not load this section (${e.message}).`);
+  }
+}
+
+function armSimilar(c) {
+  const on = !!(c.similar && c.similar.available);
+  show('h-similar', on); show('c-similar', on);
+  if (!on || simAsked) return;
+  if (location.hash === '#c-similar' || !('IntersectionObserver' in window)) return loadSimilar();
+  if (simObs) simObs.disconnect();
+  simObs = new IntersectionObserver(es => {
+    if (es.some(e => e.isIntersecting) && !simAsked) { simObs.disconnect(); loadSimilar(); }
+  }, {rootMargin: '400px'});
+  simObs.observe($('c-similar'));
+}
+
+function bindSimilar() {
+  $('h-similar').onclick = () => {
+    $('c-similar').scrollIntoView({behavior: 'smooth', block: 'start'});
+    if (!simAsked) loadSimilar();
+  };
+  $('sim-scope').onclick = ev => {
+    const b = ev.target.closest('button[data-scope]'); if (!b || b.dataset.scope === sim.scope) return;
+    sim.scope = b.dataset.scope;
+    writeState({sim_scope: sim.scope === 'all' ? 'all' : ''});
+    loadSimilar();
+  };
+  const pick = (id, key, stateKey) => {
+    $(id).onchange = ev => {
+      sim[key] = ev.target.value;
+      writeState({[stateKey]: sim[key]});
+      loadSimilar();
+    };
+  };
+  pick('sim-age', 'age', 'sim_age');
+  pick('sim-league', 'league', 'sim_league');
+  pick('sim-min', 'min', 'sim_min');
+  pick('sim-contract', 'contract', 'sim_contract');
+}
+
 // ---- page ---------------------------------------------------------------------------------
 function renderAll(c) {
   card = c;
@@ -490,6 +567,7 @@ function renderAll(c) {
   renderPhysical(c.physical, c);
   renderScouting(c);
   renderAvailability(c.availability);
+  armSimilar(c);
 }
 
 function setSwitch() {
@@ -553,6 +631,7 @@ function init() {
   else if (from === '/club-vs-league') $('back').textContent = '← Back to Club vs League One';
   else if (from !== '/players') $('back').textContent = '← Back';
   setSwitch();
+  bindSimilar();
   const flip = () => { state.money = !state.money; setSwitch(); writeState({money: state.money ? '1' : ''}); loadCard({squad: false}); };
   $('money-sw').onclick = flip;
   $('money-sw').onkeydown = ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); flip(); } };
@@ -581,6 +660,11 @@ function init() {
     state.rank_as = q.rank_as || '';
     state.money = ['1', 'true', 'on'].includes((q.money || '').toLowerCase());
     state.sq_season = q.sq_season || '';
+    const next = {scope: q.sim_scope === 'all' ? 'all' : 'league', age: q.sim_age || '',
+      league: q.sim_league || '', min: q.sim_min || '', contract: q.sim_contract || ''};
+    const changed = Object.keys(next).some(k => next[k] !== sim[k]);
+    Object.assign(sim, next);
+    if (simAsked && changed) loadSimilar();
     setSwitch();
     loadCard();
   });

@@ -178,9 +178,9 @@ def test_join_keys_are_deduped_so_a_player_is_listed_once_per_club():
     claimed by two of our players; either fans the join out and lists a squad member
     twice."""
     import pandas as pd
-    from lofc.core.squads import registered_squad_frame   # moved from tabs/squads (2.36)
+    from lofc.core.squads import link_squad_players, registered_squad_frame
     import inspect
-    src = inspect.getsource(registered_squad_frame)
+    src = inspect.getsource(registered_squad_frame) + inspect.getsource(link_squad_players)
     assert "DISTINCT ON (player_id)" in src, "appearance join is not deduped"
     assert 'drop_duplicates("tm_player_id", keep=False)' in src, (
         "ambiguous Transfermarkt ids are not dropped from the join")

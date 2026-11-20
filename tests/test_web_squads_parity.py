@@ -1,17 +1,11 @@
-"""The web Squads & loans page shows what the Streamlit page shows, on the REAL database
-(skipped without one).
+"""The rebuilt Squads & loans page against the REAL database (skipped without one).
 
-Streamlit's page is `tabs/squads.render`, driven here with a recording stand-in for `st` that
-answers the widgets (League / Club / Position / Player / Show) and keeps what the page draws:
-the four tiles, the table handed to `st.dataframe` and the CSV handed to the download button.
-The web page's `/api/squads` must give the same tiles and, cell for cell, the same table, for
-the same inputs. Two deliberate differences, both owner rules, are checked rather than skipped:
-minutes are whole numbers rounded half-up, and a composite from a peer pool under
-MIN_PEERS_FOR_RANKING is never shown (its cell is "—" with the "Not rated: only N ..." note).
+What the page shows for Leyton Orient and for a club in a league with no Transfermarkt data is
+checked, cell by cell where it matters, against the tables it is built from: per-club minutes
+(`impect_squad_minutes`, or `player_metrics_neutral` for a league-season the table does not hold
+yet), the Transfermarkt squad list, `player_loans`, `player_scorecards` and
+`player_current_club`. The Mac database is a copy of the server's; counts differ from live.
 """
-import datetime as dt
-import io
-
 import pandas as pd
 import pytest
 from sqlalchemy import create_engine
@@ -20,259 +14,162 @@ from lofc.config import settings
 from web_fakes import FakeStore, login, make
 
 DASH = "—"
-
-# (label, sidebar filters, page controls)
-CASES = [
-    ("default", {}, {}),
-    ("League Two", {}, {"league": "League Two"}),
-    ("Leyton Orient", {}, {"league": "League One", "club": "Leyton Orient"}),
-    ("Centre Backs", {}, {"position": "Centre Back"}),
-    ("name search", {}, {"q": "smith"}),
-    ("on loan only", {}, {"show": "On loan only"}),
-    ("loans, League One forwards", {}, {"show": "On loan only", "league": "League One",
-                                        "position": "Centre Forward"}),
-    ("contract expiring", {}, {"show": "Contract expiring (under 12 months)"}),
-    ("sidebar: age + foot", {"max_age": 23, "foot": "Left"}, {}),
-    ("sidebar: contract", {"contract_horizon": "Out of contract summer 2027"}, {}),
-    ("sidebar: loan now", {"loan": "On loan now"}, {}),
-    ("sidebar: leagues", {"leagues": ("League One",)}, {}),
-]
-IDS = [c[0] for c in CASES]
-SHOW_CODE = {"Everyone": None, "On loan only": "loan",
-             "Contract expiring (under 12 months)": "expiring"}
-
-
-def _need_db():
-    try:
-        create_engine(settings.database_url).connect().close()
-    except Exception:
-        pytest.skip("no database")
-
-
-class _Sel:
-    def __init__(self, rows):
-        self.rows = rows
-
-
-class _Picked:
-    def __init__(self):
-        self.selection = _Sel([])
-
-
-class _Col:
-    def __init__(self, rec):
-        self.rec = rec
-
-    def selectbox(self, label, options, **kw):
-        want = self.rec.controls.get(label.lower())
-        self.rec.options[label] = list(options)
-        return want if want in options else options[0]
-
-    def text_input(self, label, **kw):
-        return self.rec.controls.get("q", "")
-
-    def radio(self, label, options, **kw):
-        want = self.rec.controls.get("show")
-        return want if want in options else options[0]
-
-    def metric(self, label, value):
-        self.rec.metrics.append((label, value))
-
-    def download_button(self, label, data=None, file_name=None, **kw):
-        self.rec.download = (label, data, file_name)
-
-
-class StRecorder:
-    """Records what `tabs/squads.render` draws."""
-
-    def __init__(self, controls):
-        self.controls = controls
-        self.options, self.metrics, self.calls = {}, [], []
-        self.table = None
-        self.download = None
-        from lofc.dashboard.tabs import squads as T
-        self.column_config = T.st.column_config      # real config objects (plain dicts)
-
-    def subheader(self, t): self.calls.append(("subheader", t))
-    def caption(self, t): self.calls.append(("caption", t))
-    def error(self, t): self.calls.append(("error", t))
-    def info(self, t): self.calls.append(("info", t))
-
-    def columns(self, spec, **kw):
-        return [_Col(self) for _ in range(spec if isinstance(spec, int) else len(spec))]
-
-    def dataframe(self, table, **kw):
-        self.table = table.copy()
-        return _Picked()
-
-
-def streamlit_page(sidebar: dict, controls: dict) -> StRecorder:
-    """Draw the Streamlit Squads & loans page for these inputs; return the recorder."""
-    from lofc.dashboard import loaders as L
-    from lofc.dashboard.seasons import season_name_for
-    from lofc.dashboard.sidebar_filters import SidebarFilters
-    from lofc.dashboard.tabs import squads as T
-    seasons = L.available_seasons()
-    cur = max(seasons)
-    prev = max(s for s in seasons if s < cur)
-    rec = StRecorder(controls)
-    real = T.st
-    T.st = rec
-    try:
-        T.render(cur, prev, season_name_for(cur), season_name_for(prev), SidebarFilters(**sidebar))
-    finally:
-        T.st = real
-    return rec
-
-
-def _api_params(sidebar: dict, controls: dict) -> list[tuple[str, str]]:
-    q = [(k, str(v)) for k, v in controls.items() if k != "show"]
-    if SHOW_CODE.get(controls.get("show")):
-        q.append(("show", SHOW_CODE[controls["show"]]))
-    for k, v in sidebar.items():
-        key = {"contract_horizon": "contract"}.get(k, k)
-        q += [(key, x) for x in v] if isinstance(v, tuple) else [(key, str(v))]
-    return q
+CURRIE = 72298
 
 
 @pytest.fixture(scope="module")
-def client():
-    _need_db()
+def env():
+    try:
+        engine = create_engine(settings.database_url)
+        engine.connect().close()
+        cur = int(pd.read_sql("SELECT MAX(season_id) s FROM player_metrics_neutral",
+                              engine)["s"][0])
+    except Exception:
+        pytest.skip("no database")
     s = FakeStore()
-    s.add(username="u", full_name="Ann Scout", role="head_of_recruitment", password="correct-horse-1")
+    s.add(username="u", full_name="Ann Scout", role="scout", password="correct-horse-1")
     c, *_ = make(s)
     login(c, "u", "correct-horse-1")
-    return c
+    from lofc.web.api import squads as api
+    api._answers.clear()
+    return c, engine, cur
 
 
-def _streamlit_text(col: str, v) -> str:
-    """The cell as Streamlit draws it: text columns as given; Minutes / Months left typed
-    numbers ("%d"); the dates "MMM YYYY"."""
-    if v is None or (not isinstance(v, str) and pd.isna(v)) or v == DASH:
-        return DASH
-    if col in ("Contract to", "Loan ends"):
-        return pd.Timestamp(v).strftime("%b %Y")
-    if col == "Minutes":
-        return f"{int(float(v) + 0.5):,}"            # owner rule: half-up (Streamlit "%d" cut)
-    if col == "Months left":
-        return str(int(v))
-    return str(v)
+def _get(c, **params):
+    p = c.get("/api/squads", params=params).json()
+    keys = [x["key"] for x in p["columns"]]
+    rows = [dict(zip(keys, r)) for r in p["rows"]]
+    return p, rows
 
 
-@pytest.mark.parametrize("label,sidebar,controls", CASES, ids=IDS)
-def test_api_equals_streamlit(client, label, sidebar, controls):
-    from lofc.core import squads as S
-    rec = streamlit_page(sidebar, controls)
-    r = client.get("/api/squads", params=_api_params(sidebar, controls))
-    assert r.status_code == 200, r.text
-    p = r.json()
-    assert rec.table is not None, f"{label}: Streamlit drew no table ({rec.calls})"
-
-    # tiles: same labels, same numbers
-    assert [(t["label"], t["value"]) for t in p["tiles"]] == rec.metrics
-
-    # the resolved controls and their option lists
-    for name, key in (("League", "league"), ("Club", "club"), ("Position", "position")):
-        assert p["options"][key] == rec.options[name], name
-
-    # the table: same rows, same order, cell for cell
-    keys = [c["key"] for c in p["columns"]]
-    assert keys == S.DISPLAY_COLUMNS
-    assert len(p["rows"]) == len(rec.table), label
-    gated = 0
-    for i, (row, (_, want)) in enumerate(zip(p["rows"], rec.table.iterrows())):
-        for j, col in enumerate(keys):
-            cell, expect = row[j], _streamlit_text(col, want[col])
-            if isinstance(cell, dict) and "tag" in cell:  # rated against all midfielders
-                assert col in ("This season", "Last season", "Also rated"), col
-                assert cell["tag"] == "Rated against all midfielders"
-                assert cell["t"] == expect, (label, i, col, cell, expect)
-                continue
-            if isinstance(cell, dict):                   # a thin pool's composite: withheld
-                assert col in ("This season", "Last season", "Also rated"), col
-                assert cell["t"] == DASH and cell["note"].startswith("Not rated: only ")
-                assert cell["note"].endswith("with 450+ minutes (needs 10).")
-                gated += expect != DASH          # Streamlit showed a composite here
-                continue
-            assert cell == expect, (label, i, col, cell, expect)
-    # the download: Streamlit's file, with only the withheld composites blanked
-    s_label, s_data, s_name = rec.download
-    assert p["csv"]["name"] == s_name
-    web = pd.read_csv(io.BytesIO(client.get("/api/squads.csv", params=_api_params(
-        sidebar, controls)).content), dtype=str, keep_default_na=False)
-    old = pd.read_csv(io.BytesIO(s_data), dtype=str, keep_default_na=False)
-    assert list(web.columns) == list(old.columns) and len(web) == len(old)
-    diff = (web != old)
-    assert set(diff.columns[diff.any()]) <= {"This season", "Last season", "Also rated"}
-    assert int(diff.to_numpy().sum()) == gated
-    # a withheld composite is "—", or empty in a column the export rounds (as Streamlit's blanks)
-    assert set(web.to_numpy()[diff.to_numpy()]) <= {DASH, ""}
+def _minutes(engine, cur, club):
+    """The page's minutes source for one club: the per-club table where its league's per-club
+    minutes add up to the combined table's (within a minute, for 98% of players), else the
+    combined table."""
+    per = pd.read_sql("SELECT player_id, competition_id, minutes FROM impect_squad_minutes "
+                      "WHERE season_id = %(s)s AND team_name = %(c)s", engine,
+                      params={"s": cur, "c": club})
+    if len(per):
+        off = pd.read_sql(
+            "WITH s AS (SELECT player_id, SUM(minutes) m FROM impect_squad_minutes "
+            "           WHERE season_id = %(s)s AND competition_id = %(l)s GROUP BY 1) "
+            "SELECT AVG(CASE WHEN s.m IS NULL OR ABS(s.m - n.minutes) > 1 THEN 1.0 ELSE 0 END) x "
+            "FROM player_metrics_neutral n LEFT JOIN s USING (player_id) "
+            "WHERE n.season_id = %(s)s AND n.competition_id = %(l)s", engine,
+            params={"s": cur, "l": int(per["competition_id"].iloc[0])})["x"][0]
+        if off <= 0.02:
+            return per
+    return pd.read_sql("SELECT player_id, competition_id, minutes FROM player_metrics_neutral "
+                       "WHERE season_id = %(s)s AND team_name = %(c)s", engine,
+                       params={"s": cur, "c": club})
 
 
-def test_withheld_composites_are_exactly_the_thin_pools(client):
-    """Every "Not rated" cell is a pool under MIN_PEERS_FOR_RANKING, with its real size."""
-    from lofc.core import squads as S
-    from lofc.dashboard import loaders as L
-    from lofc.model.scorecard import MIN_PEERS_FOR_RANKING, peer_pool_sizes
-    seasons = L.available_seasons()
-    cur = max(seasons)
-    prev = max(s for s in seasons if s < cur)
-    sizes = {**peer_pool_sizes(S.season_scorecards(cur)), **peer_pool_sizes(S.season_scorecards(prev))}
-    thin = {k: v for k, v in sizes.items() if v < MIN_PEERS_FOR_RANKING}
-    p = client.get("/api/squads").json()
-    notes = {c["note"] for row in p["rows"] for c in row if isinstance(c, dict) and "note" in c}
-    assert notes, "no thin-pool composite in the squad list (data changed?)"
-    names = L.competition_name_by_id()
-    assert notes <= {f"Not rated: only {n} {pos}s in {names.get(c)} with 450+ minutes (needs 10)."
-                     for (c, _s, pos), n in thin.items()}
+def _half_up(x):
+    return f"{int(float(x) + 0.5):,}"
 
 
-def test_row_links_are_streamlits_click_targets(client):
-    """A row opens the card where Streamlit's click would have opened the player
-    (`best_profile_target` of `player_rated_rows`), and the two click messages fall on the
-    same rows as Streamlit's."""
-    from lofc.dashboard.tabs import squads as T
-    for params in ([], [("league", "League Two")], [("show", "loan")]):
-        p = client.get("/api/squads", params=params).json()
-        pids = p["player_ids"]
-        checked = 0
-        for i, pid in enumerate(pids):
-            if i % 25:
-                continue
-            link, msg = p["links"][i], p["messages"][i]
-            if pid is None:
-                assert link is None and msg and "no performance record" in msg
-                continue
-            target = T.best_profile_target(T.player_rated_rows(int(pid)))
-            if target is None:
-                assert link is None and msg and "no rating" in msg
-            else:
-                assert link == f"/player/{int(pid)}/{target[0]}/{target[1]}" and msg is None
+def test_orient_squad_is_minutes_plus_registered_players(env):
+    c, engine, cur = env
+    p, rows = _get(c)                                  # opens on Leyton Orient
+    assert p["state"]["club"] == "Leyton Orient"
+    mins = _minutes(engine, cur, "Leyton Orient")
+    tm = pd.read_sql("SELECT tm_player_id FROM transfermarkt_squads "
+                     "WHERE club_name = 'Leyton Orient'", engine)
+    marks = [r["Player"]["marks"] for r in rows]
+    tm_only = sum("TM only, no minutes" in m for m in marks)
+    unlisted = sum(any(x.startswith("Not on TM list") for x in m) for m in marks)
+    # the squad = every player with minutes here + every registered player without
+    assert len(rows) == len(mins) + tm_only
+    assert tm_only + len(mins) - unlisted == len(tm)
+    with_minutes = [r["Minutes"] for r, m in zip(rows, marks) if "TM only, no minutes" not in m]
+    assert sorted(with_minutes) == sorted(_half_up(m) for m in mins["minutes"])
+    assert p["tiles"][0] == {"label": "Players", "value": f"{len(rows):,}"}
+
+
+def test_orient_ratings_are_the_stored_league_one_composites(env):
+    c, engine, cur = env
+    p, rows = _get(c)
+    ids = [int(h.split("/")[2]) if h else None for h in p["links"]]
+    cards = pd.read_sql("SELECT player_id, objective_composite FROM player_scorecards "
+                        "WHERE season_id = %(s)s AND competition_id = 4 "
+                        "AND archetype = 'All Metrics'", engine, params={"s": cur})
+    want = dict(zip(cards["player_id"], cards["objective_composite"]))
+    checked = 0
+    for pid, r in zip(ids, rows):
+        v = r[[k for k in r if k == "Rating"][0]]
+        text = v["t"] if isinstance(v, dict) else v
+        if text != DASH:
+            assert pid in want and f"{want[pid]:.2f}" == text, (r["Player"], text)
             checked += 1
-        assert checked > 5
+    assert checked > 5
 
 
-def test_streamlit_page_is_unchanged_by_the_extraction():
-    """The page drawn after moving its logic into `core/squads.py` is the page drawn before it:
-    a snapshot taken from the original module (scratch, before the move) is compared when it
-    exists; otherwise this only checks the page draws."""
-    import json
-    import os
-    snap = os.environ.get("LOFC_SQUADS_SNAPSHOT")
-    _need_db()
-    for label, sidebar, controls in CASES:
-        rec = streamlit_page(sidebar, controls)
-        assert rec.table is not None, label
-        if snap and os.path.exists(snap):
-            want = json.load(open(snap))[label]
-            got = snapshot_of(rec)
-            assert got == want, label
+def test_orient_contracts_and_loans_come_from_transfermarkt(env):
+    c, engine, cur = env
+    p, rows = _get(c)
+    assert p["asof"][1]["t"].startswith(("Contracts & loans: Transfermarkt", "Contracts: Transfermarkt"))
+    loans_out = pd.read_sql("SELECT player_name FROM player_loans WHERE season_id = %(s)s "
+                            "AND parent_club = 'Leyton Orient'", engine, params={"s": cur})
+    loans_in = pd.read_sql("SELECT player_name FROM player_loans WHERE season_id = %(s)s "
+                           "AND club_name = 'Leyton Orient'", engine, params={"s": cur})
+    _, out = _get(c, league="League One", club="Leyton Orient", view="out")
+    _, inn = _get(c, league="League One", club="Leyton Orient", view="in")
+    assert len(out) == len(loans_out) and len(inn) == len(loans_in)
+    assert all(r["Loan"].startswith("To ") for r in out)
+    assert all(r["Loan"].startswith("From ") for r in inn)
+    # Loans out: minutes at the loan club, from Impect, where the loan club is covered
+    assert any(r["Minutes"] != "0" for r in out)
 
 
-def snapshot_of(rec: StRecorder) -> dict:
-    t = rec.table.astype(object).where(rec.table.notna(), None)
-    return {"metrics": [list(m) for m in rec.metrics], "options": rec.options,
-            "calls": [list(c) for c in rec.calls],
-            "table": [[None if v is None else str(v) for v in row] for row in t.itertuples(index=False)],
-            "columns": list(rec.table.columns),
-            "download": [rec.download[0], rec.download[1].decode("utf-8"), rec.download[2]]}
+def test_a_club_in_a_league_with_no_transfermarkt_data(env):
+    c, engine, cur = env
+    tm_leagues = set(pd.read_sql("SELECT DISTINCT competition_id FROM transfermarkt_squads",
+                                 engine)["competition_id"])
+    clubs = pd.read_sql("SELECT competition_id, team_name, COUNT(*) n FROM player_metrics_neutral "
+                        "WHERE season_id = %(s)s GROUP BY 1, 2 ORDER BY 2", engine,
+                        params={"s": cur})
+    other = clubs[~clubs["competition_id"].isin(tm_leagues)]
+    if other.empty:
+        pytest.skip("every league has Transfermarkt data")
+    from lofc.dashboard.loaders import competition_name_by_id
+    club = other.iloc[0]
+    league = competition_name_by_id()[int(club["competition_id"])]
+    p, rows = _get(c, league=league, club=club["team_name"])
+    assert p["state"]["club"] == club["team_name"]
+    assert "Contract to" not in [x["key"] for x in p["columns"]]
+    assert p["asof"][-1]["t"] == "No Transfermarkt data"
+    mins = _minutes(engine, cur, club["team_name"])
+    assert len(rows) == len(mins)
+    assert sorted(r["Minutes"] for r in rows) == sorted(_half_up(m) for m in mins["minutes"])
+    assert not any(r["Player"]["marks"] and not r["Player"]["marks"][0].startswith("Now at")
+                   for r in rows)
+
+
+def test_jack_currie_is_at_oxford_and_now_at_oxford(env):
+    c, engine, _ = env
+    now = pd.read_sql("SELECT club_name FROM player_current_club WHERE player_id = %(p)s",
+                      engine, params={"p": CURRIE})
+    assert now["club_name"].tolist() == ["Oxford United"]          # the committed override
+    p, rows = _get(c, league="League One", club="Oxford United")
+    currie = [r for r in rows if r["Player"]["t"] == "Jack Currie"]
+    assert currie and not any(m.startswith("Now at") for m in currie[0]["Player"]["marks"])
+    _, orient = _get(c, league="League One", club="Leyton Orient")
+    for r in orient:                       # if Orient lists him, it says where he is now
+        if r["Player"]["t"] == "Jack Currie":
+            assert "Now at Oxford United" in r["Player"]["marks"]
+
+
+def test_no_cross_league_rating_sort(env):
+    c, *_ = env
+    p, _ = _get(c, league="All", club="All", sort="Rating")
+    assert p["state"]["sort"] is None
+    p, _ = _get(c, league="League One", club="All", sort="Rating")
+    assert p["state"]["sort"] == "Rating"
+
+
+def test_every_league_is_offered(env):
+    c, engine, cur = env
+    p, _ = _get(c)
+    n = pd.read_sql("SELECT COUNT(DISTINCT competition_id) n FROM player_metrics_neutral "
+                    "WHERE season_id = %(s)s", engine, params={"s": cur})["n"][0]
+    assert len(p["options"]["league"]) - 1 == n

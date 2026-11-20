@@ -318,6 +318,61 @@ def player_scout_verdicts(player_id: int) -> list[dict]:
     return _cached()["scouts"](int(player_id))
 
 
+# ---- the Players page's "Scout verdicts" column and filter (owner 2026-11-16) ----------------
+# Display and filter only: nothing here reaches `objective_composite` or the list's order.
+_VERDICT_ORDER = ("Sign", "Monitor Priority", "Monitor", "Don't sign")
+VERDICT_ANY, VERDICT_HAS = "Any", "Has a scout report"
+VERDICT_FILTERS = [VERDICT_ANY, VERDICT_HAS, *_VERDICT_ORDER]
+
+
+def verdicts_by_player(rows) -> dict[int, dict]:
+    """player_id -> {pills, text, tip, latest} from scout_reports rows (player_id, scout,
+    verdict, fixture_date, submitted_at, missing_since). Pills count EVERY live report by
+    verdict ("2 Sign"), the club's order first; `tip` and `latest` are each scout's latest
+    verdict -- `scout_verdicts`, the Report page's rule. Unlinked / withdrawn rows are ignored."""
+    if rows is None or rows.empty:
+        return {}
+    live = rows[rows["player_id"].notna()]
+    if "missing_since" in live.columns:
+        live = live[live["missing_since"].isna()]
+    out: dict[int, dict] = {}
+    for pid, grp in live.groupby("player_id", sort=False):
+        said = grp["verdict"].map(lambda v: v.strip() if isinstance(v, str) else "")
+        counts = said[said != ""].value_counts()
+        order = [v for v in _VERDICT_ORDER if v in counts.index] + sorted(
+            (v for v in counts.index if v not in _VERDICT_ORDER), key=lambda v: (-counts[v], v))
+        pills = [{"text": f"{int(counts[v])} {v}", "tone": _VERDICT_TONES.get(v, "other")}
+                 for v in order]
+        latest = scout_verdicts(grp)
+        out[int(pid)] = {
+            "pills": pills, "text": " · ".join(p["text"] for p in pills),
+            "tip": "\n".join(f"{x['scout']}: {x['verdict']} · {x['date']}" for x in latest),
+            "latest": {x["verdict"] for x in latest if x["verdict"] != DASH}}
+    return out
+
+
+def verdict_matches(info: dict | None, choice: str) -> bool:
+    """The "Scout verdict" filter: Any; any linked report; else ANY scout's latest verdict."""
+    if choice == VERDICT_ANY:
+        return True
+    if info is None:
+        return False
+    return choice == VERDICT_HAS or choice in info["latest"]
+
+
+def verdicts_from_db(engine) -> dict[int, dict]:
+    """`verdicts_by_player` of every linked report in the scout_reports table."""
+    import pandas as pd
+    return verdicts_by_player(pd.read_sql(
+        "SELECT player_id, scout, verdict, fixture_date, submitted_at, missing_since "
+        "FROM scout_reports WHERE player_id IS NOT NULL AND missing_since IS NULL", engine))
+
+
+def all_player_verdicts() -> dict[int, dict]:
+    """`verdicts_from_db`, kept until the data version changes (a sheet sync)."""
+    return _cached()["verdicts"]()
+
+
 # =============================== the "Write your report" form ===============================
 def form_spec(position: str) -> dict:
     """The form's fields for this position: the three text areas, the Psychological criteria
@@ -396,7 +451,12 @@ def _cached():
         @wc.versioned(maxsize=256)
         def scouts(player_id: int):
             return scout_verdicts_from_db(_engine(), player_id)
-        _CACHES = {"season": season, "resolved": resolved, "base": base, "scouts": scouts}
+
+        @wc.versioned(maxsize=1)
+        def verdicts():
+            return verdicts_from_db(_engine())
+        _CACHES = {"season": season, "resolved": resolved, "base": base, "scouts": scouts,
+                   "verdicts": verdicts}
     return _CACHES
 
 

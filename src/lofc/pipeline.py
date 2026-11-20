@@ -98,6 +98,10 @@ def build_steps() -> list[tuple[str, list[str]]]:
     # Same linkage as the two steps above. DISPLAY ONLY.
     steps.append(("Current club: where each player is now (display only)",
                   [sys.executable, "-m", "lofc.model.current_club"]))
+    # Minutes per CLUB (a January mover at both clubs, with his minutes at each), from the same
+    # landed averages files and the same linkage. No API call. DISPLAY ONLY (Squads & loans).
+    steps.append(("Squad minutes: minutes per club (display only)",
+                  [sys.executable, "-m", "lofc.model.squad_minutes"]))
 
     # 5. Transfermarkt market values (the valuation target).
     if comp_ids & set(LEAGUE_CODE):

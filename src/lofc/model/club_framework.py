@@ -66,11 +66,16 @@ SCOUT_DIMENSIONS = [PSYCHOLOGICAL, MEDICAL]                     # entered by a h
 # is a typo, we NORMALISE each position's weights to sum to 1.0 -- assumption-free, and it
 # preserves the club's intended relative emphasis exactly. (GK normalisation is a no-op.)
 # The raw as-authored numbers are kept below for traceability.
+#
+# OUTFIELD PERFORMANCE : PHYSICAL = 65 : 35 (owner 2026-11-16). The club document's 40 : 30
+# (= 4/7 : 3/7 of the objective composite) became 45.5 : 24.5 -- the same 70 of 110, so
+# Psychological, Medical, Financial and Resale keep their relative weights exactly; only the
+# split inside the two data dimensions moved. Goalkeepers are unchanged (Performance only).
 _RAW_WEIGHTS: dict[str, dict[str, float]] = {
     "Goalkeeper": {PERFORMANCE: 0.50, PSYCHOLOGICAL: 0.20, MEDICAL: 0.15,
                    FINANCIAL: 0.10, RESALE: 0.05},   # sums to 1.00
 }
-_RAW_OUTFIELD = {PERFORMANCE: 0.40, PHYSICAL: 0.30, PSYCHOLOGICAL: 0.10,
+_RAW_OUTFIELD = {PERFORMANCE: 0.455, PHYSICAL: 0.245, PSYCHOLOGICAL: 0.10,
                  MEDICAL: 0.15, FINANCIAL: 0.10, RESALE: 0.05}   # sums to 1.10 (club quirk)
 for _pos in ("Centre Back", "Full Back", "Defensive Mid", "Central Mid",
              "Attacking Mid", "Winger", "Centre Forward"):
@@ -78,8 +83,10 @@ for _pos in ("Centre Back", "Full Back", "Defensive Mid", "Central Mid",
 
 
 def _normalise(weights: dict[str, float]) -> dict[str, float]:
+    # Not rounded: 4-dp weights (0.4136 : 0.2227) would make the split 65.0008 : 34.9992,
+    # not 65 : 35. (Under the old 40 : 30 the 4-dp weights happened to be exactly 4 : 3.)
     total = sum(weights.values())
-    return {dim: round(w / total, 4) for dim, w in weights.items()}
+    return {dim: w / total for dim, w in weights.items()}
 
 
 DIMENSION_WEIGHTS: dict[str, dict[str, float]] = {

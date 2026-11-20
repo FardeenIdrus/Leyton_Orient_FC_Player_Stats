@@ -10,32 +10,19 @@
 
   <div class="filters" id="filters">
     <div class="fl" id="fl-main">
-      <div class="f f-player"><label for="f-q">Player</label>
-        <input class="ctl" id="f-q" name="q" type="search" placeholder="Search a player…" autocomplete="off"></div>
       <div class="f f-league"><label for="f-league">League</label><select class="ctl" id="f-league" name="league"></select></div>
       <div class="f f-club"><label for="f-club">Club</label><select class="ctl" id="f-club" name="club"></select></div>
-      <div class="f f-position"><label for="f-position">Position</label><select class="ctl" id="f-position" name="position"></select></div>
-      <div class="f f-show"><label id="lbl-show">Show</label><div class="seg" id="f-show" role="group" aria-labelledby="lbl-show"></div></div>
-      <button type="button" class="btn" id="more-btn" aria-expanded="false" aria-controls="more">More filters ▾</button>
+      <div class="f f-view"><label id="lbl-view">View</label><div class="seg" id="f-view" role="group" aria-labelledby="lbl-view"></div></div>
+      <div class="f f-player"><label for="f-q">Player</label>
+        <input class="ctl" id="f-q" name="q" type="search" placeholder="Search a player…" autocomplete="off"></div>
     </div>
-    <div class="more" id="more">
-      <div class="fl">
-        <div class="f f-range"><label for="f-age">Maximum age</label>
-          <div class="pair"><input type="range" id="f-age" name="max_age" min="18" max="40" step="1" aria-label="Maximum age"><output id="age-out" class="val"></output></div>
-          <div class="ends"><span>18</span><span>40 (no cap)</span></div></div>
-        <div class="f f-leagues"><label id="lbl-leagues">Leagues</label>
-          <div class="popwrap">
-            <button type="button" class="ctl pop-btn" id="leagues-btn" aria-label="Leagues" aria-haspopup="true" aria-expanded="false">All leagues</button>
-            <div class="pop" id="leagues-pop" hidden>
-              <div class="pop-actions"><button type="button" class="btn small" id="leagues-all">All leagues</button><button type="button" class="btn small" id="leagues-none">Untick all</button></div>
-              <div class="pop-list" id="leagues-list"></div>
-            </div>
-          </div>
-        </div>
-        <div class="f"><label for="f-foot">Preferred foot</label><select class="ctl" id="f-foot" name="foot"></select></div>
-        <div class="f f-wide"><label for="f-contract">Contract expiry</label><select class="ctl" id="f-contract" name="contract"></select></div>
-        <div class="f f-loan"><label for="f-loan">Loan status</label><select class="ctl" id="f-loan" name="loan"></select></div>
-      </div>
+    <div class="fl" id="fl-more">
+      <div class="f f-position"><label for="f-position">Position</label><select class="ctl" id="f-position" name="position"></select></div>
+      <div class="f f-range"><label for="f-age">Maximum age</label>
+        <div class="pair"><input type="range" id="f-age" name="max_age" min="16" max="40" step="1" aria-label="Maximum age"><output id="age-out" class="val"></output></div></div>
+      <div class="f f-contract"><label for="f-contract">Contract expiring</label><select class="ctl" id="f-contract" name="contract"></select></div>
+      <div class="f f-loan"><label for="f-loan">Loan status</label><select class="ctl" id="f-loan" name="loan"></select></div>
+      <div class="f f-foot"><label for="f-foot">Preferred foot</label><select class="ctl" id="f-foot" name="foot"></select></div>
     </div>
   </div>
 

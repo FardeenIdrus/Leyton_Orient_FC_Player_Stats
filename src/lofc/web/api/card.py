@@ -6,6 +6,8 @@ the URL into a request and the result into JSON.
     GET  /api/card/{p}/{c}/{s}?rank_as=&money=            every section (blanks are null)
     GET  /api/card/{p}/{c}/{s}/squad?season=&rank_as=     "Against our <position>s" (season switch)
     GET  /api/card/{p}/{c}/{s}/csv?kind=scorecard|metrics&rank_as=   the two CSV downloads
+    GET  /api/card/{p}/{c}/{s}/similar?scope=&max_age=&league=&min_minutes=&contract=
+                                                          "Similar players" (core.similar)
     POST /api/card/{p}/{c}/{s}/watchlist   {"action": "add" | "remove"}   (session + header)
 
 The Players page links to the page shell with `?back=<url-encoded players URL>`.
@@ -46,6 +48,11 @@ def _squad():
 def _watchlist():
     from lofc.store import watchlist
     return watchlist
+
+
+def _similar():
+    from lofc.core import similar
+    return similar
 
 
 # Card answers built ahead of a click (TASKS 2.36 S-C): see lofc.web.prefetch.
@@ -119,6 +126,20 @@ async def squad_json(player_id: int, competition_id: int, season_id: int, reques
     return Response(body, media_type="application/json")
 
 
+@router.get("/api/card/{player_id}/{competition_id}/{season_id}/similar")
+async def similar_json(player_id: int, competition_id: int, season_id: int, request: Request,
+                       user: WebUser = Depends(current_user)):
+    """"Similar players" (owner-approved 2026-11-16): `core.similar.section`. Filters as the
+    Similar players page (`web.api.similar.parse_filters`); junk is ignored."""
+    from lofc.web.api.similar import parse_filters
+    f = parse_filters(request.query_params)
+    data = await run_in_threadpool(_similar().section, player_id, competition_id, season_id,
+                                   f["scope"], f["max_age"], f["league"], f["min_minutes"],
+                                   f["contract"])
+    from lofc.core.card import clean
+    return JSONResponse(clean(data))
+
+
 @router.get("/api/card/{player_id}/{competition_id}/{season_id}/csv")
 async def card_csv(player_id: int, competition_id: int, season_id: int, request: Request,
                    user: WebUser = Depends(current_user)):
@@ -190,7 +211,6 @@ def warm_card_caches() -> None:
         seasons = sorted(L.available_seasons(), reverse=True)
         for sid in seasons:
             steps.append(lambda sid=sid: card_core.stored_scorecards(sid))
-            steps.append(lambda sid=sid: webcache.assessment_status(sid))
             for position in POSITION_ORDER:
                 for lens in cf.archetypes_for(position):
                     steps.append(lambda p=position, a=lens, sid=sid: card_core.ranking_for(p, a, sid))
@@ -199,6 +219,11 @@ def warm_card_caches() -> None:
             for position in POSITION_ORDER:
                 for lens in cf.archetypes_for(position):
                     steps.append(lambda p=position, a=lens, sid=sid: squad.rated_rows(sid, p, a))
+        # "Similar players": each season x position z-matrix, built once per data version
+        from lofc.core import similar
+        for sid in seasons:
+            for position in POSITION_ORDER:
+                steps.append(lambda p=position, sid=sid: similar.pool_for(sid, p))
         for fn in steps:
             try:
                 fn()

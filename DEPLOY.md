@@ -1,31 +1,45 @@
 # Deployment
 
-The platform is one Docker stack, so deploying means running it on a machine that's online.
-This covers two cases: a **permanent URL on a server** (Option A), and a **quick shareable link
-from your laptop** for a demo (Option B).
+> **What this is.** The live server: what runs where, the schedules, backups, how to deploy,
+> and how to work on the Mac without breaking anything. **Current state:** the new web front
+> end serves the main address; the old Streamlit site is on a fallback address until it is
+> retired (`plan/TASKS.md`, Next X1). A code-only change needs only `/opt/lofc/scripts/deploy.sh`.
 
 ---
 
-## The live server — what runs where (verified 2026-10-16 to 10-22)
+## The live server — what runs where
 
 | | |
 |---|---|
-| URL | https://lofc-recruitment.duckdns.org (a `leytonorient.com` name is pending with club IT) |
-| Host | DigitalOcean droplet `lofc-platform`, London, Ubuntu 24.04, **2 vCPU / 3.8 GB RAM / 77 GB disk**, IP 165.22.122.157 |
-| Code | `/opt/lofc`, branch `main`, `docker-compose.prod.yml` (db, app, dashboard, web-blue / web-green, caddy) |
+| Main address | https://lofc-recruitment.duckdns.org — the new web front end (`DASHBOARD_DOMAIN`). A `leytonorient.com` name is pending with club IT. Which DuckDNS account holds this name is not known (owner, 2026-11-10/13: ask the colleague; not urgent) |
+| Fallback address | https://lofc-recruitment-old.duckdns.org — the old Streamlit dashboard (`OLD_DASHBOARD_DOMAIN`, created 2026-11-10). Retirement planned, not done |
+| Host | DigitalOcean droplet `lofc-platform`, London, Ubuntu 24.04, **4 vCPU / 8 GB RAM** (resized 2026-11-10, snapshot taken first), disk 80 GB, IP 165.22.122.157 |
+| Code | `/opt/lofc`, branch `main`, `docker-compose.prod.yml`: `db`, `app`, `dashboard` (Streamlit), `web-blue` / `web-green` (new site), `caddy` |
 | Network | DigitalOcean Cloud Firewall `lofc-platform-fw`: inbound TCP 22/80/443 only. Postgres is not exposed |
 | Docker logs | Capped in `/etc/docker/daemon.json` (json-file, 10 MB × 3 per container) |
-| OS upgrade | Ubuntu offers 26.04 — **not planned**; do not run `do-release-upgrade` without a snapshot and a plan |
+| Database connections | Every engine uses `pool_pre_ping=True`: the site heals by itself after a database restart (2026-11-10) |
+| OS | Ubuntu offers 26.04 — **not planned**; never run `do-release-upgrade` without a snapshot and a plan. 2026-11-16: the login banner says "System restart required" (pending updates) — owner to schedule a reboot |
 
-**Scheduled jobs** (root crontab; times UTC):
+**Scheduled jobs** (root crontab; times UTC; as recorded 2026-10-15/26):
 
 | When | Job | Does |
 |---|---|---|
 | Every minute | `scripts/scout_sync.sh` | Reads the club's scouting Google Sheet (read-only); writes only changes |
 | Daily 19:30 | `scripts/db_backup.sh` | Dumps OUR database to `/opt/lofc/backups` (14 kept, each verified) |
 | Sunday 03:30 | `docker builder prune -f --filter until=168h` | Clears Docker build cache (it grew 22 GB from deploys) |
-| Sunday 04:00 | `scripts/db_maintenance.sh` | `VACUUM (ANALYZE)` on the tables the pipeline rewrites weekly (reclaims dead rows) |
-| Monday 04:15 | `scripts/weekly_refresh.sh` | Impect + SkillCorner pull, rebuild, re-score. Result in `data/ops/last_success` / `last_failure` |
+| Sunday 04:00 | `scripts/db_maintenance.sh` | `VACUUM (ANALYZE)` on the tables the pipeline rewrites weekly |
+| **Monday 04:15** and **Thursday 04:15** | `scripts/weekly_refresh.sh` | The full pipeline: Impect + SkillCorner pull, rebuild, re-score. Result in `data/ops/last_success` / `last_failure`; the site's top bar shows the last pull dates |
+
+### How data stays fresh
+
+| Data | Refreshed | Rule (code) |
+|---|---|---|
+| The live season (2026/27) | **In full on every run** (Mon + Thu) | Impect and SkillCorner return season-to-date figures, so the whole season is re-pulled each time (`ingest/impect.py`, `ingest/skillcorner_api.py`: `is_live`) |
+| Finished seasons | **Re-pulled once their file is 30 days old** (`FINISHED_REFRESH_DAYS = 30`) | Providers revise past matches (National League 2025/26: 34 players changed July → October). So a correction to an old match reaches the platform within about a month, then everything is re-scored |
+| Transfermarkt (contracts, squads, loans, injuries) | By hand, from the Mac | Server is blocked (below) |
+| Scout reports | Every minute | `scripts/scout_sync.sh` |
+
+A season not yet started is skipped, not an error; an empty pull never overwrites stored data.
 
 **Backups — two layers:**
 
@@ -49,25 +63,30 @@ docker compose -f /opt/lofc/docker-compose.prod.yml exec -T db \
 Caddy routes `orient-matchanalysis.duckdns.org` to it (see `Caddyfile`). Our `.env` is
 `chmod 600` so it is not readable without Docker access.
 
-### The new web front end (from the 2.36 deploy; owner decisions 2026-11-09)
+### The web front end on the server
 
 | | |
 |---|---|
-| Main domain (`DASHBOARD_DOMAIN`) | The new web front end (FastAPI, `lofc.web.app`), served by **one** of two identical containers, `web-blue` / `web-green` |
-| Fallback domain (`OLD_DASHBOARD_DOMAIN`, a DuckDNS name, in `.env`) | The old Streamlit dashboard, kept for about two weeks after the switch; then remove that Caddy block and the variable |
+| Main domain (`DASHBOARD_DOMAIN`) | The web front end (FastAPI, `lofc.web.app`), served by **one** of two identical containers, `web-blue` / `web-green` |
+| Fallback domain (`OLD_DASHBOARD_DOMAIN`) | The old Streamlit dashboard. To retire it: remove its Caddy block, the variable and the `dashboard` service — see TASKS X1 for what must be decided first |
 | Which container serves | `caddy/web_upstream.caddy` (not committed), e.g. `reverse_proxy web-green:8600`; written by `scripts/web_switch.sh`, applied with a graceful `caddy reload` |
-| Health | `GET /healthz` → `{"status": "ok", "warm": true/false}` (liveness, always 200); `GET /readyz` → 200 once every start-up warm-up is done, 503 before |
+| Health | `GET /healthz` → `{"status": "ok", "warm": true/false}` (always 200); `GET /readyz` → 200 once every start-up warm-up is done, 503 before |
 | Process | `uvicorn … --workers 1 --proxy-headers`, no reloader; page caches live in the process |
-| Memory (measured 2026-11-09, production mode, after the full warm-up) | ~1.34 GB steady, 1.41 GB peak per web container; limit `mem_limit: 3g`, `cpus: 2.0`. During a deploy two run side by side for a few minutes (~2.8 GB) — needs the 8 GB server |
-| Warm-up | ~80 s on a Mac; the switch waits up to 20 min (`LOFC_WEB_READY_TRIES` × `LOFC_WEB_READY_INTERVAL`) |
-| Data changes | Any write the pages read (a scout-sheet sync that changes rows, the Monday pipeline, the daily rollover) re-runs every page's warm-up in the background (`core/webcache.rewarm_on_change`), ~3 min of one CPU |
+| Memory (measured 2026-11-09) | ~1.34 GB steady, 1.41 GB peak per web container; limit `mem_limit: 3g`, `cpus: 2.0`. During a switch two run side by side for a few minutes (~2.8 GB) — the reason for the 8 GB droplet |
+| Warm-up | ~3 min on the server (2 min 52 s and 3 min 27 s measured 2026-11-10); the switch waits up to 20 min (`LOFC_WEB_READY_TRIES` × `LOFC_WEB_READY_INTERVAL`) |
+| Data changes | Any write the pages read (a scout-sheet sync that changes rows, a pipeline run, the daily rollover) re-runs every page's warm-up in the background (`core/webcache.rewarm_on_change`), ~3 min of one CPU |
 
-**How a deploy switches it** (`scripts/deploy.sh` → `scripts/web_switch.sh`): build all images →
-restart db, app, dashboard, Caddy → migrations → start the idle colour from the new image → wait
-for its `/readyz` → point Caddy at it → stop the old colour. If the new one never gets warm or the
-reload fails, nothing switches and the old one keeps serving (the deploy exits 1). On the very
-first deploy the upstream file names the Streamlit dashboard, so the main domain keeps serving
-Streamlit until `web-blue` is warm.
+**What `scripts/deploy.sh` does, in order:**
+
+| Step | Why |
+|---|---|
+| `git pull --ff-only` | Nothing reaches the server by itself |
+| If the pull changed `deploy.sh`, re-run the new version once (`LOFC_DEPLOY_REEXEC` guard) | bash keeps reading the file it started with; on 2026-11-10 the old steps started Caddy without its upstream file and took every domain down for ~5–10 min |
+| `docker compose build` (always, even if the commit did not move) | The image bakes the code in; build first, restart second |
+| Create `caddy/web_upstream.caddy` if missing (points at `dashboard:8501`) | Caddy must never start without it |
+| `up -d db app dashboard caddy` | Never a plain `up -d --build`, which would recreate the serving web container cold |
+| `alembic upgrade head` | A schema change is live the moment the code that needs it is |
+| `scripts/web_switch.sh` | Start the idle colour from the new image → wait for `/readyz` → point Caddy at it → `caddy reload` → stop the old colour. If it never gets warm or the reload fails, nothing switches, the old one keeps serving and the deploy exits 1 |
 
 **Roll back to the Streamlit dashboard on the main domain** (seconds, no rebuild):
 ```bash
@@ -80,7 +99,7 @@ docker compose -f docker-compose.prod.yml exec -T caddy caddy reload --config /e
 | | Server | Workstation (Mac) |
 |---|---|---|
 | Role | Authoritative; the data staff use | Development; **all Transfermarkt scraping** |
-| Refreshes itself | Weekly (above) | Never |
+| Refreshes itself | Mon + Thu (above) | Never |
 | `.env` | has `SKIP_TRANSFERMARKT_SCRAPE=true` | does not |
 
 The server's database drifts ahead of the workstation's. **Before any data work on the
@@ -95,24 +114,43 @@ docker compose exec -T db pg_restore -U lofc -d lofc --no-owner < /tmp/prod.dump
 rm /tmp/prod.dump            # it holds user password hashes
 ```
 
+### Working on the Mac
+
+The owner works on the same Mac while builds and tests run. Keep the load low.
+
+| Rule | How |
+|---|---|
+| Docker Desktop limit | 4 CPUs / 6 GB (set by the owner 2026-11-13; checked with `docker info`) |
+| Container caps | `app` 2 CPUs, `web` 1.5, `db` 1.5. `web` is capped in `docker-compose.yml`; `app` and `db` with `docker update --cpus N <container>` — lost when a container is recreated, so re-check with `docker inspect -f '{{.HostConfig.NanoCpus}}' <container>` |
+| Run only what is needed | `docker compose up -d db app web` (pgAdmin, Streamlit, Metabase off unless needed) |
+| Tests | In the capped container, low priority: `docker compose exec -T app nice -n 15 python -m pytest -q` (never `docker compose run`, which is uncapped) |
+| JS rule tests | On the Mac (node is not in the container): `node --test tests/js/` |
+| Browser harness | On the Mac under `nice -n 15`: `scripts/web_check.py --pages <page>` while building, `--only <scenario>` to iterate, all pages before calling it done (setup in `docs/frontend.md`) |
+| One heavy job at a time | Full suite, smoke test and harness never in parallel; a timing failure on a busy Mac is re-run when quiet before it counts |
+
 ### Lessons that cost real time
 
 - **`.env` changes need a recreate, not a restart.** Compose injects `env_file` values when a
-  container is CREATED; `restart` keeps the old values, and they override the file. Use
+  container is CREATED; `restart` keeps the old values. Use
   `docker compose -f docker-compose.prod.yml up -d --force-recreate app dashboard` (and
-  `caddy` for `DASHBOARD_DOMAIN` or `Caddyfile` changes), then check with
+  `caddy` for `DASHBOARD_DOMAIN` / `OLD_DASHBOARD_DOMAIN` or `Caddyfile` changes; the web
+  containers pick up `.env` on the next deploy's switch), then check with
   `docker compose ... exec -T app printenv <NAME>`.
 - **`--force-recreate` does not rebuild.** It reuses the existing image; code or dependency
   changes need `deploy.sh`.
+- **Never `docker compose up -d --build` on the server.** It starts both web colours and can
+  start Caddy before its upstream file exists (the 2026-11-10 outage). Use `deploy.sh`.
 - **`deploy.sh` does not re-score.** It ships code and runs migrations. A change to stored
   scores needs the relevant pipeline step afterwards — only when data must be rebuilt. A change
   to the rating formula (metrics or weights in `model/club_framework.py` /
-  `performance_weights.py`) needs `python -m lofc.model.scorecard_run` then
-  `python -m lofc.constrain.run`, AFTER `deploy.sh` has finished.
+  `performance_weights.py`, or the peer-pool rule in `model/scorecard.py`) needs
+  `python -m lofc.model.scorecard_run` then `python -m lofc.constrain.run`, AFTER `deploy.sh`
+  has finished.
 - **After a manual `docker compose stop`, containers do NOT come back on reboot**
-  (`restart: unless-stopped` honours the stop). Start them with `up -d`.
+  (`restart: unless-stopped` honours the stop). Start them with `up -d` (or `deploy.sh`).
 - **`secrets/` never travels with a deploy** (gitignored). Copy the Google service-account key
   by hand into `/opt/lofc/secrets/`, owned by UID 1000 (the container user).
+- **A stale local database produces phantom bugs.** Resync before investigating numbers.
 
 ---
 
@@ -170,12 +208,13 @@ docker compose -f docker-compose.prod.yml exec -u root app chown -R appuser:appu
 
 The final `chown` is required: the image runs as `appuser`, and `docker cp` lands files as root.
 
-The `dashboard` service mounts no data at all — it runs entirely from Postgres.
+The `dashboard` service mounts no data at all — it runs entirely from Postgres. The web
+containers mount `appdata` read-only (glossary definitions, physical files).
 
 
 ### 3. Deploying code changes — always manual
 
-Nothing reaches the server on its own. `scripts/weekly_refresh.sh` (the Monday cron) runs the
+Nothing reaches the server on its own. `scripts/weekly_refresh.sh` (the Mon + Thu cron) runs the
 PIPELINE; it never runs `git pull`. Pushing to GitHub deploys nothing.
 
 `git pull` on its own is also not enough: the image bakes the source in at build time, so without
@@ -192,7 +231,9 @@ cold site.
 Wait for "deployed at <commit>" before running anything else: a pipeline step started earlier
 runs the OLD code.
 
-Then check it, read-only (~1 min; `SMOKE: PASS` expected):
+Then check it, read-only (~1 min; `SMOKE: PASS` expected). Note: the smoke test drives the
+**Streamlit** pages (Streamlit AppTest) plus SQL data checks; it does not open the new web
+pages. Check the web site by opening it.
 
 ```bash
 docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python scripts/smoke_test.py --quick
@@ -263,7 +304,8 @@ only a club LAN** (a cloud VM such as DigitalOcean, Hetzner or AWS gets you this
 forwarded from the internet, not just visible on the local network), and a **domain name
 pointed at the server's IP** (an A record). Caddy then issues HTTPS automatically.
 
-The production stack (`docker-compose.prod.yml`) publishes **only the dashboard**, behind Caddy
+The production stack (`docker-compose.prod.yml`) publishes **only the web front end** (and, while
+it exists, the fallback Streamlit dashboard), behind Caddy
 for automatic HTTPS. The database, the app container and the admin tools (pgAdmin, Metabase)
 are not exposed to the internet. Access control is the platform's **own login** — real
 accounts, scrypt-hashed passwords, lockout after 5 failed attempts, 12-hour sessions — not a
@@ -294,8 +336,13 @@ removed — see "Why no Caddy basic-auth" below.)
    SKILLCORNER_USERNAME=
    SKILLCORNER_PASSWORD=
 
-   # Public dashboard domain (Caddy issues HTTPS for this automatically):
+   # Public domain for the web front end (Caddy issues HTTPS for it automatically), and the
+   # fallback domain for the old Streamlit dashboard (required while that Caddy block exists):
    DASHBOARD_DOMAIN=recruitment.yourclub.com
+   OLD_DASHBOARD_DOMAIN=recruitment-old.yourclub.com
+
+   # Server only: Transfermarkt blocks datacentre IPs (section 1 above).
+   SKIP_TRANSFERMARKT_SCRAPE=true
 
    # Signs the "remembered session" cookie so a browser refresh doesn't sign staff out.
    # REQUIRED for login to persist across a refresh -- leaving it blank does not error,
@@ -305,9 +352,10 @@ removed — see "Why no Caddy basic-auth" below.)
    ```
    See `.env.example` for the full list of optional variables (target competitions,
    Impect/SkillCorner iteration overrides, `IMPECT_ONLY`).
-3. **Start the stack** (builds the lean image, brings up db + app + dashboard + Caddy):
+3. **Start the stack** — clone to `/opt/lofc` and use the deploy script (it builds, starts db,
+   app, dashboard and Caddy, applies migrations and brings up the web front end):
    ```bash
-   docker compose -f docker-compose.prod.yml up -d --build
+   /opt/lofc/scripts/deploy.sh
    ```
 4. **Populate the database** (first run downloads data; ~20-40 min):
    ```bash
@@ -322,16 +370,17 @@ removed — see "Why no Caddy basic-auth" below.)
    ```
    It prompts for a password (minimum 12 characters) without echoing it. Create further
    accounts the same way, with `--role` one of `scout`, `medical`, `head_of_recruitment`,
-   `admin` — an admin can also do this later from the dashboard's Users page. A forgotten
+   `admin` — an admin can also do this later from the Users page. A forgotten
    password is reset the same way, in person, with `python -m lofc.admin set-password
    --username <name>` (there is no email/self-service reset — the users table holds no email
    address at all).
 6. **Open `https://recruitment.yourclub.com`** and sign in with the account from step 5 — the
-   dashboard is live, on any device, from anywhere.
+   site is live, on any device, from anywhere.
 
-### Keeping data fresh (weekly refresh)
+### Keeping data fresh (Mon + Thu refresh)
 `scripts/weekly_refresh.sh` wraps `python -m lofc.pipeline` with a lock, rotated logs and
-success/failure markers in `data/ops/`. On a new server, install the cron lines listed under
+success/failure markers in `data/ops/`; what each run re-pulls is under "How data stays
+fresh" above. On a new server, install the cron lines listed under
 "The live server" above. Check `data/ops/last_success` / `data/ops/last_failure` to see
 whether the last run worked.
 
@@ -339,6 +388,13 @@ whether the last run worked.
 `src/lofc/reference/current_club_overrides.csv` (player_id, club_name, impect_squad_id, note, added),
 commit, push, run `/opt/lofc/scripts/deploy.sh`, then on the server
 `docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python -m lofc.model.current_club`.
+
+**Squads & loans: minutes per club** (`impect_squad_minutes`) are rebuilt by every Mon/Thu
+pipeline (step "Squad minutes", after "Current club") from the Impect files already landed, no
+API call. By hand: `docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python -m
+lofc.model.squad_minutes`. A league whose per-club minutes do not add up to the combined table's
+falls back to one club per player on the page (logged). A Transfermarkt club whose name differs
+from Impect's needs a row in `src/lofc/reference/club_crosswalk.csv` (code change: deploy).
 
 ### Why no Caddy basic-auth
 Caddy used to also gate the dashboard behind its own shared basic-auth password
@@ -351,7 +407,7 @@ their own login — a password that has to be told to everyone, never expires, i
 person, and (being shared) is exactly the kind of credential people write down or forward
 around. That's friction with no real security upside once the app-level login covers the same
 ground properly, so it has been removed: **one login, the platform's own.** `Caddyfile` now
-only terminates HTTPS and reverse-proxies to the dashboard.
+only terminates HTTPS and reverse-proxies to the web front end (and the fallback dashboard).
 (If you want a second layer anyway — e.g. to keep the platform off search engines and casual
 drive-bys entirely — put IP allowlisting or a VPN in front of Caddy instead of basic-auth; it
 doesn't collide with the app's own login the way a second password does.)
@@ -361,13 +417,13 @@ doesn't collide with the app's own login the way a second password does.)
   tunnel, e.g. `ssh -L 3000:localhost:3000 user@server` then open `localhost:3000`. (Add them to
   the Caddyfile on their own subdomain if you want them public — each already has its own login.)
 - **Backups:** see "The live server" above (nightly dump + DigitalOcean backups).
-- **Updates:** `scripts/deploy.sh` (pull, rebuild, migrate) — see section 3 above.
+- **Updates:** `scripts/deploy.sh` (pull, rebuild, migrate, web switch) — see section 3 above.
 - **Login-spray throttling:** the app throttles a burst of failed logins across many DIFFERENT
   usernames (`dashboard/login_throttle.py`), not by source address — behind a bare `cloudflared`
   quick tunnel or Caddy's default `reverse_proxy` (neither normalises a trusted client address
   today) there is no dependable, non-spoofable IP to key a limiter on. It's process-wide
-  in-memory state, correct for the single `dashboard` container this stack runs today. If this
-  is ever scaled to multiple dashboard replicas behind a real load balancer, move rate-limiting
+  in-memory state, correct while each site runs as one process (one web worker; one Streamlit
+  container). If this is ever scaled to multiple replicas behind a real load balancer, move rate-limiting
   there instead (where a trusted client address is more likely available) rather than relying on
   this throttle, which would then only see a fraction of the traffic per replica.
 
@@ -375,13 +431,13 @@ doesn't collide with the app's own login the way a second password does.)
 
 ## Option B — Quick shareable link from your laptop (no server, for a demo)
 
-Run the app locally as usual, then expose `localhost:8501` through a tunnel. The link works on
+Run the app locally as usual, then expose the web site, `localhost:8600`, through a tunnel. The link works on
 any device (phone, the interviewer's laptop) **while your machine is running it**. The
 platform's own login gate applies here too; set `SESSION_SECRET` in your local `.env` (see
 Option A step 2) if you want a signed-in session to survive a page refresh during the demo.
 
 ```bash
-docker compose up -d                 # the normal local stack
+docker compose up -d db app web     # the local stack (web site on :8600)
 # (populate once if you haven't: docker compose exec app python -m lofc.pipeline)
 # (create an account once if you haven't: docker compose exec app python -m lofc.admin create-user --username <you> --name "Your Name" --role admin)
 ```
@@ -390,14 +446,14 @@ Then, in another terminal, one of:
 - **Cloudflare (no signup):**
   ```bash
   brew install cloudflared        # or download it
-  cloudflared tunnel --url http://localhost:8501
+  cloudflared tunnel --url http://localhost:8600
   ```
   It prints a temporary `https://<random>.trycloudflare.com` URL. Share that.
 
 - **ngrok (free account):**
   ```bash
   brew install ngrok
-  ngrok http 8501
+  ngrok http 8600
   ```
   It prints a public `https://<random>.ngrok-free.app` URL.
 

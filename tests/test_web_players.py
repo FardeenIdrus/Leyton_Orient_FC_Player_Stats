@@ -45,10 +45,12 @@ def test_page_needs_a_session_and_has_every_control():
                   "Metric filters", "Minimum minutes", "Maximum age", "Preferred foot",
                   "Contract expiry", "Loan status", "Playing style", "Strong only",
                   "Show affordability (modelled)", "Transfer budget (€m)", "Wage budget (× club ceiling)",
-                  "Reset metric filters", "Rank on scout-verified rating",
-                  "Signed-off assessments only", "Only signable players",
+                  "Reset metric filters", "Scout verdict", "Only signable players",
                   "Download this list (CSV)", "About this list", "Not ranked", "✕ Clear"):
         assert label in html, label
+    # retired (owner 2026-11-16): nobody assesses in the platform
+    for gone in ("scout-verified", "Scout-verified", "Signed-off assessments", 'id="f-assessed"'):
+        assert gone not in html, gone
     assert re.search(r'<script type="module" src="/static/v/[0-9a-f]+/js/players.js">', html)
     assert not re.search(r"<script(?![^>]*\bsrc=)", html) and not re.search(r"\son[a-z]+=", html)
 
@@ -99,6 +101,19 @@ def test_all_leagues_selected_means_no_league_filter(parsed):
 def test_metric_filter_params_are_collected(parsed):
     q = parsed("pct_xa_p90=70&raw_top5_psv99_kmh=31.5&pct_bad=zz")
     assert q.pct == {"xa_p90": 70.0} and q.raw == {"top5_psv99_kmh": 31.5}
+
+
+def test_scout_verdict_filter_param(parsed):
+    assert parsed("").scout == "Any"
+    assert parsed("scout=Sign").scout == "Sign"
+    assert parsed("scout=Don%27t%20sign").scout == "Don't sign"
+    assert parsed("scout=Has%20a%20scout%20report").scout == "Has a scout report"
+    assert parsed("scout=nonsense").scout == "Any"
+
+
+def test_assessed_params_are_ignored(parsed):
+    q = parsed("assessed=1&signed_only=1")
+    assert not hasattr(q, "assessed") and not hasattr(q, "signed_only")
 
 
 def test_money_off_ignores_budget_and_wage(parsed):
@@ -228,7 +243,9 @@ def test_columns_and_cell_formats_are_todays():
     from lofc.dashboard.tabs.players import players_table_columns
     d = _client().get("/api/players?season=318&position=Winger&rank_as=Direct%20%26%201v1%20Specialist").json()
     keys = [c["key"] for c in d["columns"]]
-    assert keys == players_table_columns(lens=True, show_money=False, loan_column=False)
+    cols = players_table_columns(lens=True, show_money=False, loan_column=False)
+    cols[cols.index("Scouts")] = "Scout verdicts"   # web: replaces the old Scouts column (2026-11-16)
+    assert keys == cols and "Scouts" not in keys
     assert [c["label"] for c in d["columns"]][keys.index("Composite")] == "Composite (Direct & 1v1 Specialist)"
     assert "All-round" in keys
     for r in d["rows"][:300]:
@@ -347,16 +364,63 @@ def test_default_season_is_the_live_one_and_options_are_streamlits():
     assert o["archetypes"]["Winger"] == ["All Metrics", "Direct & 1v1 Specialist", "Crossing & Creative Threat"]
     assert o["archetypes"]["Goalkeeper"] == ["All Metrics"] and o["styles"]["Goalkeeper"] == []
     assert o["minutes"]["max"] >= 900
+    assert o["scout"] == ["Any", "Has a scout report", "Sign", "Monitor Priority", "Monitor",
+                          "Don't sign"]
+    assert "assessed" not in o["help"] and "signed_only" not in o["help"]
 
 
-def test_assessed_mode_renames_the_column_and_explains_itself():
+def test_old_assessed_urls_open_the_normal_ranking():
     _need_db()
-    d = _client().get("/api/players?season=318&position=Winger&assessed=1&signed_only=1").json()
-    comp = next(c for c in d["columns"] if c["key"] == "Composite")
-    assert comp["label"] == "Scout-verified rating" and "assessed ranking" in comp["help"]
-    assert d["assessed_caption"]
-    ids = [r["id"][0] for r in d["rows"]]
-    assert len(ids) == len(set(ids))
+    c = _client()
+    d = c.get("/api/players?season=318&position=Winger&assessed=1&signed_only=1").json()
+    base = c.get("/api/players?season=318&position=Winger").json()
+    comp = next(x for x in d["columns"] if x["key"] == "Composite")
+    assert comp["label"] == "Composite" and "assessed_caption" not in d
+    assert d["rows"] == base["rows"]
+
+
+def _verdict_rows():
+    from lofc.core import report_page as rp
+    import pandas as pd
+    e = create_engine(settings.database_url)
+    return rp.verdicts_by_player(pd.read_sql(
+        "SELECT player_id, scout, verdict, fixture_date, submitted_at, missing_since "
+        "FROM scout_reports WHERE player_id IS NOT NULL", e))
+
+
+def test_scout_verdicts_column_pills_and_tooltip():
+    _need_db()
+    d = _client().get("/api/players?season=319&position=Centre%20Forward").json()
+    col = next(c for c in d["columns"] if c["key"] == "Scout verdicts")
+    assert col["kind"] == "verdicts" and col["label"] == "Scout verdicts"
+    truth = _verdict_rows()
+    with_reports = [r for r in d["rows"] if r["id"][0] in truth]
+    assert with_reports, "no centre forward with a scout report in 2026/27"
+    for r in d["rows"]:
+        info = truth.get(r["id"][0])
+        if info is None:
+            assert r["cells"]["Scout verdicts"] in (None, "") and r["verdicts"] is None
+        else:
+            assert r["cells"]["Scout verdicts"] == info["text"]
+            assert r["verdicts"] == {"pills": info["pills"], "tip": info["tip"]}
+
+
+def test_scout_verdict_filter_narrows_and_keeps_the_ranking_order():
+    _need_db()
+    c = _client()
+    base = c.get("/api/players?season=319&position=Centre%20Forward").json()
+    order = [r["id"][0] for r in base["rows"]]
+    truth = _verdict_rows()
+    for choice in ("Has a scout report", "Sign", "Monitor Priority", "Monitor", "Don't sign"):
+        d = c.get("/api/players", params={"season": 319, "position": "Centre Forward",
+                                         "scout": choice}).json()
+        ids = [r["id"][0] for r in d["rows"]]
+        want = [p for p in order if p in truth
+                and (choice == "Has a scout report" or choice in truth[p]["latest"])]
+        assert ids == want, choice                       # same order as the ranking: a filter
+        assert [r["cells"]["#"] for r in d["rows"]] == list(range(1, len(ids) + 1))
+    has = c.get("/api/players?season=319&position=Centre%20Forward&scout=Has%20a%20scout%20report").json()
+    assert 0 < len(has["rows"]) < len(base["rows"])
 
 
 def test_contract_filter_caption_and_hidden_count():
@@ -389,6 +453,7 @@ def test_csv_is_the_displayed_columns_with_streamlits_filename():
     d = c.get("/api/players?season=318&position=Centre%20Back").json()
     header = r.text.splitlines()[0].split(",")
     assert header == [x["key"] for x in d["columns"]]
+    assert "Scout verdicts" in header and "Scouts" not in header
     assert len(r.text.strip().splitlines()) == len(d["rows"]) + 1
 
 
@@ -412,15 +477,12 @@ def test_wage_endpoint_syncs_slider_and_pounds():
     assert b["wage_x"] == 1.0
 
 
-def test_same_query_is_answered_from_the_cache_except_the_assessed_ranking():
+def test_same_query_is_answered_from_the_cache():
     _need_db()
     c = _client()
     a = c.get("/api/players?season=318&position=Centre%20Back").json()
     b = c.get("/api/players?season=318&position=Centre%20Back").json()
     assert a == b and a["ms"] == b["ms"]                 # second answer is the stored one
-    x = c.get("/api/players?season=318&position=Centre%20Back&assessed=1").json()
-    y = c.get("/api/players?season=318&position=Centre%20Back&assessed=1").json()
-    assert x["rows"] == y["rows"] and x["assessed_caption"]
 
 
 def test_metric_filters_do_not_change_the_cached_pool_or_other_lists():
@@ -430,3 +492,14 @@ def test_metric_filters_do_not_change_the_cached_pool_or_other_lists():
     c.get("/api/players?season=318&position=Winger&pct_xa_p90=90")
     again = c.get("/api/players?season=318&position=Winger&sort=Age&dir=asc").json()
     assert sorted(r["id"][0] for r in again["rows"]) == sorted(r["id"][0] for r in base["rows"])
+
+
+def test_list_scrolls_sideways_only_with_money_or_rank_as_on_narrow_screens():
+    """Owner 2026-11-16: with the old Scouts column gone the list fits its card again, so the
+    sideways scroll is back to money on, or Rank as below 1380 px -- never always on."""
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "src/lofc/web/static/js/players.js").read_text()
+    assert "toggleAttribute('data-scroll-x', true)" not in js
+    assert ("toggleAttribute('data-scroll-x', !!p.money || (!!p.rank_caption && "
+            "window.innerWidth < 1380))") in js
+    assert "case 'scouts'" not in js and "scoutPill" not in js

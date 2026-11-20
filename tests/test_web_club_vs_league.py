@@ -151,7 +151,8 @@ def test_top6_level_badge_and_the_pages_wording(fake):
     sel = next(g for g in d["gaps"] if g["group"] == d["selected"])
     for l in d["recommendations"]["leagues"]:
         for r in l["rows"]:
-            assert r["top6_level"] == (r["overall"] >= sel["bar"]["median"])
+            # owner 2026-11-20: the bar is a League One rating -- no badge in another league
+            assert r["top6_level"] == (l["competition_id"] == 4 and r["overall"] >= sel["bar"]["median"])
     html = _client().get("/club-vs-league").text
     from markupsafe import escape
     for k in ("Top 6", "Our level", "Top-6 bar", "Gap", "Top-6 level", "Players who could close the gap"):
@@ -160,8 +161,9 @@ def test_top6_level_badge_and_the_pages_wording(fake):
 
 def test_the_recommendations_help_is_the_owners_sentence(fake):
     assert cv.TERMS["Players who could close the gap"] == (
-        "Players rated above our best at this position, ranked by Overall or Gap closed; the metric "
-        "columns show his percentile on each chosen measure.")   # owner 2026-11-13
+        "League One: players rated above our best, ranked by Overall or Gap closed. Other leagues: "
+        "every rated player, ranked by Gap closed. The metric columns show his percentile on each "
+        "chosen measure.")   # owner 2026-11-13, other leagues 2026-11-20
     html = _client().get("/club-vs-league").text
     assert "Strong where we are weak" not in html
 
@@ -172,10 +174,13 @@ def test_owner_additions_vs_best_top6_filter_and_all_shortfalls(fake):
     assert d["filters"]["top6"] is False and "all_shortfalls" in sel
     for l in d["recommendations"]["leagues"]:
         for r in l["rows"]:
-            assert r["vs_best"] == cv.vs_best(r["overall"], sel["level"]["rating"])
+            # owner 2026-11-20: no "vs our best" outside League One (two leagues' scales)
+            want = cv.vs_best(r["overall"], sel["level"]["rating"]) if l["competition_id"] == 4 else None
+            assert r["vs_best"] == want
     on = _client().get("/api/club-vs-league?group=Winger&top6=1").json()
     assert on["filters"]["top6"] is True
-    assert all(r["top6_level"] for l in on["recommendations"]["leagues"] for r in l["rows"])
+    assert all(r["top6_level"] for l in on["recommendations"]["leagues"] if l["competition_id"] == 4
+               for r in l["rows"])
     assert d["terms"]["vs our best"] == ("His rating minus our best at this position; the gap is "
                                          "closed when this reaches the gap size.")   # the column's ⓘ
 
@@ -342,7 +347,8 @@ def test_gap_closed_wording(fake):
     how = html.split('id="cv-how"')[1].split("</details>")[0]
     from markupsafe import escape
     assert ("<b>Gap closed</b>: " + str(escape(cv.TERMS["Gap closed"]))
-            + " Each metric counts by its weight in the Overall rating.") in how
+            + " Each metric counts by its weight in the Overall rating; metrics that move together "
+            "count once.") in how                                    # owner 2026-11-20
     assert 'id="cv-cols"' in html and ">Metric columns<" in html and 'id="cv-rank"' in html
 
 
@@ -412,10 +418,12 @@ def test_vs_lists_players_above_him_with_his_columns_and_gap_closed(second):
     d = _client().get(f"/api/club-vs-league?group=Winger&vs={SECOND_W}").json()
     rec = d["recommendations"]
     rows = _rows(d)
-    assert rows and all(r["overall"] > 2.0 for r in rows)
-    assert "Between Winger" in [r["name"] for r in rows]                    # 2.3: above him
+    # League One: above him, "vs him" from him (owner 2026-11-20: other leagues list everyone)
+    l1 = [r for r in rows if r["ids"][1] == 4]
+    assert l1 and all(r["overall"] > 2.0 for r in l1)
+    assert "Between Winger" in [r["name"] for r in l1]                      # 2.3: above him
     assert "Between Winger" not in [r["name"] for r in _rows(base)]         # not above our best
-    assert all(r["vs_best"] == cv.vs_best(r["overall"], 2.0) for r in rows)
+    assert all(r["vs_best"] == cv.vs_best(r["overall"], 2.0) for r in l1)
     assert rec["level"] == 2.0
     assert [w["metric"] for w in rec["weak_metrics"]] == ["sprint_count_p90", "distance_p90"]
     want = cv.gap_closed({"sprint_count_p90": (20.0, 60.0), "distance_p90": (30.0, 50.0)},
@@ -510,3 +518,85 @@ def test_gap_closed_example_none_without_a_shortfall(fake):
     assert all(l["example"] is None for l in d["recommendations"]["leagues"])
     how = _client().get("/club-vs-league").text.split('id="cv-how"')[1].split("</details>")[0]
     assert 'id="cv-how-gc"' in how                                     # the line the page fills in
+
+
+def test_minutes_confidence_and_own_league_note_in_the_payload(fake):
+    """Owner 2026-11-16: (1) a line under the caption on every league tab except League One;
+    (2) minutes beside our compared player and each named top-6 player, "low minutes" under 900."""
+    d = _client().get("/api/club-vs-league").json()
+    assert d["own_league_note"] == "Gap closed % is relative to his own league."
+    assert d["league_one"] == 4 and d["low_minutes"] == 900
+    first = d["gaps"][0]
+    assert first["level"]["minutes"] == 900.0
+    assert all(p["minutes"] == 900.0 for p in first["bar"]["players"])
+
+
+def test_page_script_draws_minutes_and_the_own_league_line(fake):
+    html = _client().get("/club-vs-league").text
+    assert 'id="cv-own"' in html
+    import pathlib
+    js = (pathlib.Path(api.__file__).parents[1] / "static" / "js" / "club_vs_league.js").read_text()
+    assert "D.own_league_note" in js and "D.low_minutes" in js and "low minutes" in js
+
+
+# --- owner 2026-11-20 (Decision A): other leagues are not compared with our League One level ---
+@pytest.fixture
+def low_l2(two_metrics):
+    """Adds a League Two winger rated 2.0 (below our best, 2.5 + ...) who closes the whole gap
+    (sprints 60); the L2 star (4.9) closes half."""
+    c, n = two_metrics.cards(), two_metrics.neutral()
+    c = pd.concat([c, pd.DataFrame([(901, 5, CUR, "Winger", 2.0, 2.0, 2.0)], columns=c.columns)], ignore_index=True)
+    n = pd.concat([n, pd.DataFrame([(901, 5, CUR, 1000.0, "Other L2 side", "L2 low", 5.0)], columns=n.columns)],
+                  ignore_index=True)
+    base = two_metrics.pcts
+
+    def pcts(season):
+        f = base(season)
+        if season != CUR:
+            return f
+        return pd.concat([f, pd.DataFrame({"player_id": [901], "competition_id": [5], "season_id": [CUR],
+                                           "position_group": ["Winger"], "sprint_count_p90": [60.0],
+                                           "distance_p90": [50.0]})], ignore_index=True)
+    two_metrics.cards, two_metrics.neutral, two_metrics.pcts = (lambda: c), (lambda: n), pcts
+    api.clear()
+    return two_metrics
+
+
+def test_other_league_tab_lists_every_rated_player_by_gap_closed(low_l2):
+    for rank in ("", "gap"):
+        d = _client().get(f"/api/club-vs-league?group=Winger&rank={rank}").json()
+        l2 = next(l for l in d["recommendations"]["leagues"] if l["league"] == "League Two")
+        assert [r["name"] for r in l2["rows"]] == ["L2 low", "L2 star"] and l2["count"] == 2, rank
+        assert l2["rank"] == "gap"
+        assert all(r["vs_best"] is None and r["top6_level"] is False for r in l2["rows"])
+        assert l2["example"]["candidate"]["name"] == "L2 low"
+        l1 = next(l for l in d["recommendations"]["leagues"] if l["league"] == "League One")
+        level = _winger(d)["level"]["rating"]
+        assert all(r["overall"] > level and r["vs_best"] == cv.vs_best(r["overall"], level) for r in l1["rows"])
+        assert l1["rank"] == rank
+
+
+def test_top6_only_narrows_league_one_only(low_l2):
+    d = _client().get("/api/club-vs-league?group=Winger&top6=1").json()
+    bar = _winger(d)["bar"]["median"]
+    by = {l["league"]: l for l in d["recommendations"]["leagues"]}
+    assert all(r["overall"] >= bar for r in by["League One"]["rows"])
+    assert by["League Two"]["count"] == 2
+
+
+def test_gap_closed_uses_grouped_weights(fake, monkeypatch):
+    """Owner 2026-11-20 (Decision D): page_json weights = overall_weights with each correlated
+    group's members divided by the group size (groups from the season's position pool)."""
+    seen = {}
+    real = cv.recommendations
+
+    def spy(*a, **kw):
+        seen["weights"] = kw["weights"]
+        return real(*a, **kw)
+    monkeypatch.setattr(cv, "recommendations", spy)
+    monkeypatch.setattr(cv, "position_groups", lambda pcts, pos, ms: [["distance_p90", "hsr_distance_p90"]])
+    api.clear()
+    _client().get("/api/club-vs-league?group=Winger")
+    w = cv.overall_weights("Winger")
+    assert seen["weights"] == pytest.approx(cv.grouped_weights(w, [["distance_p90", "hsr_distance_p90"]]))
+    assert sum(seen["weights"].values()) == pytest.approx(1.0)

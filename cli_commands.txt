@@ -1,13 +1,76 @@
 ============================================================
 LOFC Recruitment Platform - CLI command reference
-Commands to run each phase and (later) the full pipeline.
-Updated as we build. Run all commands from the project root.
+What this is: the command for each stage. Run from the project root.
+Current state (2026-11-16): the web front end is the live site; the server refreshes
+Mon + Thu 04:15 UTC; Transfermarkt is scraped on the Mac only. The first block is what is
+used today; everything under "HISTORICAL" is the build record (legacy stages are RETIRED --
+do not re-run ingest.run / aggregate.run / store.load: thousands of paid API calls for data
+nothing reads). Append a block whenever a stage is added.
 ============================================================
 
 
+# =====================================================================================
+# CURRENT COMMANDS (start here)
+# =====================================================================================
+
+# ----- Server: deploy a code change (the ONLY command a code-only change needs) -----
+# Pull, re-run itself if deploy.sh changed, build, restart db/app/dashboard/caddy, migrate,
+# switch the web front end to a warm container (blue/green). Wait for "deployed at <commit>".
+/opt/lofc/scripts/deploy.sh
+# Then a read-only check (Streamlit pages + SQL data checks; open the web site to check it):
+docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python scripts/smoke_test.py --quick
+
+# ----- Server: re-score after a rating-formula change (only when data must be rebuilt) -----
+# After deploy.sh has finished. Metrics/weights (club_framework.py, performance_weights.py) or
+# the peer-pool rule (scorecard.py): the composite, then the shortlists that rank on it.
+docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python -m lofc.model.scorecard_run
+docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python -m lofc.constrain.run
+
+# ----- Server: one-off rebuilds (both also run in every Mon/Thu pipeline) -----
+# Tracked matches (SkillCorner count_match) from the landed files; no API call:
+docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python -m lofc.model.build_neutral --match-counts
+# Current club, after adding a row to src/lofc/reference/current_club_overrides.csv (deploy first):
+docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python -m lofc.model.current_club
+# Minutes per club (Squads & loans) from the landed Impect files; no API call. --season 319 for one season:
+docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python -m lofc.model.squad_minutes
+
+# ----- Server: did the last refresh work? -----
+cat /opt/lofc/data/ops/last_success /opt/lofc/data/ops/last_failure
+
+# ----- Mac: resync the local database from the server BEFORE any data work -----
+# Replace SERVER with the droplet IP. ~190 MB; check the size before dropping anything.
+ssh root@SERVER "docker compose -f /opt/lofc/docker-compose.prod.yml exec -T db pg_dump -U lofc -Fc lofc" > /tmp/prod.dump
+ls -lh /tmp/prod.dump        # must be ~190 MB, not 0 -- stop here if it is not
+docker compose exec -T db psql -U lofc -d lofc -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+docker compose exec -T db pg_restore -U lofc -d lofc --no-owner < /tmp/prod.dump
+rm /tmp/prod.dump            # it holds user password hashes
+
+# ----- Mac: run the stack with the load limits -----
+# Docker Desktop: 4 CPUs / 6 GB. Containers: app 2 CPUs, web 1.5 (compose), db 1.5.
+docker compose up -d db app web                 # web site at http://localhost:8600
+docker update --cpus 2 leyton_orient_fc_player_stats-app-1
+docker update --cpus 1.5 leyton_orient_fc_player_stats-db-1
+docker inspect -f '{{.Name}} {{.HostConfig.NanoCpus}}' $(docker compose ps -q)   # re-check after a recreate
+
+# ----- Mac: tests (one heavy job at a time) -----
+docker compose exec -T app nice -n 15 python -m pytest -q        # Python suite, in Docker
+node --test tests/js/                                           # JS rule tests (node is not in the container)
+
+# ----- Mac: browser harness for the web pages (host, not Docker; drives the Mac's Chrome) -----
+# Setup once: python3 -m venv <dir>/webvenv && <dir>/webvenv/bin/pip install playwright pytest
+# (do NOT run `playwright install`). Needs `web` and `app` up. Uses a throwaway local account.
+nice -n 15 <dir>/webvenv/bin/python scripts/web_check.py --pages players,compare --quick   # while building
+nice -n 15 <dir>/webvenv/bin/python scripts/web_check.py --pages report --only <scenario>  # iterate one scenario
+nice -n 15 <dir>/webvenv/bin/python scripts/web_check.py                                   # every page, before "done"
+
+
+# =====================================================================================
+# HISTORICAL: the build record, phase by phase (legacy stages are retired)
+# =====================================================================================
+
 # ===== Run the WHOLE pipeline (one command) =====
 # Populates a fresh database end to end (schema -> ingest -> ... -> shortlists).
-# Idempotent. First run downloads ~2.6GB and takes 20-40 min. Then open localhost:8501.
+# Idempotent. Then open the web site at http://localhost:8600.
 docker compose up -d
 docker compose exec app python -m lofc.pipeline
 
@@ -152,8 +215,8 @@ docker compose exec app python -m lofc.constrain.run
 docker compose exec db psql -U lofc -d lofc -c "SELECT s.rank, m.player_name, m.team_name, s.fit_score, s.market_value_eur, s.estimated_weekly_wage_gbp, s.wage_ceiling_gbp, s.is_near_miss FROM shortlists s JOIN player_season_metrics m USING(player_id,competition_id,season_id) WHERE s.position_group='Centre Forward' ORDER BY s.rank;"
 
 
-# ----- Phase 8: Dashboard (Streamlit) -----
-# The recruiter-facing app. Comes up automatically with `docker compose up -d`.
+# ----- Phase 8: Dashboard (Streamlit) -- now the OLD site (fallback address only) -----
+# Replaced by the web front end (http://localhost:8600) on 2026-11-10.
 
 # Open the dashboard in your browser
 open http://localhost:8501
@@ -264,7 +327,8 @@ docker compose exec db psql -U lofc -d lofc -c "DELETE FROM players WHERE player
 # pulls one only. Lands parquet under data/raw/impect/ (gitignored, licensed data).
 # IN-SEASON: the live season (config.LIVE_SEASON_ID) is ALWAYS re-pulled, because Impect
 # returns season-to-date aggregates -- a landed file goes stale after every matchweek.
-# Finished seasons stay skip-if-exists. A season with no matches yet is skipped, not an error.
+# Finished seasons are re-pulled once their file is 30 days old (FINISHED_REFRESH_DAYS).
+# A season with no matches yet is skipped, not an error.
 docker compose exec app python -m lofc.ingest.impect
 
 # ----- WEEKLY IN-SEASON REFRESH (run after each round of fixtures) -----
@@ -285,9 +349,13 @@ docker compose exec app python -m lofc.pipeline
 # loudly rather than overwriting good data. Monday early morning: Impect returns
 # season-to-date aggregates rather than per-match deltas, so a per-match trigger would
 # just re-download the same cumulative totals several times a week; one run after the
-# weekend (and any midweek round) is enough. NOT installed anywhere yet -- add this line
-# to the deployment server's crontab (`crontab -e`) once the platform is actually live:
-# 15 4 * * 1 /path/to/Leyton_Orient_FC_Player_Stats/scripts/weekly_refresh.sh >> /path/to/Leyton_Orient_FC_Player_Stats/data/ops/cron.out 2>&1
+# weekend is enough. INSTALLED on the server (root crontab), Monday AND Thursday 04:15 UTC
+# (Thursday added 2026-10-26 so midweek matches appear before the weekend; recorded in TASKS
+# 2.1d -- re-check the exact lines with `crontab -l` on the server):
+# 15 4 * * 1 /opt/lofc/scripts/weekly_refresh.sh >> /opt/lofc/data/ops/cron.out 2>&1
+# 15 4 * * 4 /opt/lofc/scripts/weekly_refresh.sh >> /opt/lofc/data/ops/cron.out 2>&1
+# Each run re-pulls the live season in full and any finished season whose file is 30+ days old
+# (FINISHED_REFRESH_DAYS), so provider corrections to past matches are picked up.
 
 # Check whether the last scheduled refresh worked, and when data was last good
 cat data/ops/last_success 2>/dev/null || echo "no successful refresh recorded yet"
@@ -375,8 +443,10 @@ docker compose exec app python -m lofc.admin deactivate-user --username fi
 docker compose exec app python -m lofc.admin reactivate-user --username fi
 
 # ----- Player report -------------------------------------------------------------------
-# The report is built in the dashboard (Scouting -> Report), where it can be downloaded as a
-# self-contained .html file. To turn that file into a print-ready landscape PDF:
+# On the web site: Decide -> Report. "Download report" / "Download data-only report" make the
+# file in the browser; print it from the browser (one landscape page). The script below was
+# written for the OLD Streamlit download (not checked against the web download). To turn that
+# file into a print-ready landscape PDF:
 #   RUNS ON THE HOST, NOT IN DOCKER -- it drives headless Chromium via Playwright, which is
 #   installed on the machine rather than in the container, so the image gains no rendering
 #   dependency and the PDF comes out of the same engine a person gets by printing the page.
@@ -476,3 +546,13 @@ docker compose exec -T app python scripts/smoke_test.py --quick
 # `build_neutral --write` (so the weekly pipeline keeps it fresh); this fills it on its own from
 # the landed files in data/raw/skillcorner/ (no API call, no other table touched):
 docker compose exec -T app python -m lofc.model.build_neutral --match-counts
+
+# --- Rating split impact report (2026-11-16): 40:30 -> 65:35, read-only, Excel to stdout ---
+# Run BEFORE the server rescore (it compares the stored Overall with 65:35 recomputed in memory).
+# Mac:
+ssh root@165.22.122.157 "docker compose -f /opt/lofc/docker-compose.prod.yml exec -T app python -" < scripts/weighting_impact.py > ~/Desktop/Weighting_65_35_impact.xlsx
+
+# Squads & loans: minutes per CLUB (impect_squad_minutes) from the landed Impect averages files; no API call. Weekly pipeline step after "Current club". --season 319 = one season
+docker compose exec -T app python -m lofc.model.squad_minutes
+# Transfermarkt club -> Impect squad list (src/lofc/reference/club_crosswalk.csv): report unmatched clubs; --seed rewrites it (hand rows kept)
+docker compose exec -T app python -m lofc.model.club_crosswalk

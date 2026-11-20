@@ -1,189 +1,129 @@
 # Leyton Orient FC — Player Recruitment Intelligence Platform
 
-Turns event and physical data into a ranked shortlist of **affordable, undervalued** signings,
-scored on **Leyton Orient's own recruitment framework**. It is a *decision* intelligence
-platform, not a reporting dashboard: the core deliverable is a scoring and ranking model that
-produces a judgement not already in the data, with a clean Streamlit layer on top. It runs end
-to end as one Docker stack.
-
-> **Live** at https://lofc-recruitment.duckdns.org (see [`DEPLOY.md`](DEPLOY.md)). What is open:
-> [`plan/TASKS.md`](plan/TASKS.md). Every document and its purpose: [Documentation](#documentation).
+> **What this is.** A decision platform for the club's recruitment staff: Impect event data and
+> SkillCorner physical data → every player rated **1–5 on Leyton Orient's own framework**, plus
+> Transfermarkt contracts, squads, loans and injuries, and the club's scouting sheet.
+> **Live** at https://lofc-recruitment.duckdns.org (the new web front end) and in daily use.
+> **Current focus:** correctness and clarity of the live site; retiring the old Streamlit site
+> (still on a fallback address). What is open: [`plan/TASKS.md`](plan/TASKS.md).
 
 ## What it does
 
-For every player, across 7 leagues, the platform computes per-90 metrics, ranks them into
-percentiles within position and league, and scores each player **1–5 on the club's framework**
-(the metrics, thresholds and dimension weights come straight from the club's own documents).
-Each player gets a **composite** score; the shortlist ranks by it and layers on market value,
-modelled wages, and affordability gates. A themed dashboard lets a recruiter drill into
-profiles, compare players, and see exactly how every score is built.
+For every player in **25 leagues** (the EFL, Scotland, Premier League 2, Ireland and 18 more
+licensed Impect competitions; registry in `src/lofc/leagues.py`) the platform computes per-90
+metrics, ranks them into percentiles **within league, season and position**, and turns them into
+a 1–5 rating on the club's metrics, thresholds and weights. The ranking is
+`objective_composite` (Performance + Physical); scout input never changes it.
 
-- **Performance** data → **Impect** · **Physical** data → **SkillCorner** · **Market values** →
-  **Transfermarkt**.
-- Leagues: the EFL (Championship, League One, League Two, National League), the Scottish
-  Premiership & Championship, and Premier League 2.
+| Data | Provider | How it arrives |
+|---|---|---|
+| Event (Performance) | **Impect** | API, weekly refresh |
+| Physical (tracking) | **SkillCorner** | API, weekly refresh |
+| Contracts, squads, loans, injuries, market values | **Transfermarkt** | Scraped on the Mac only (the server is blocked), pushed to the server |
+| Scout reports | Club's scouting Google Sheet | Read-only sync every minute |
 
-## Quick start
+How the rating works: [`docs/methodology.md`](docs/methodology.md).
 
-```bash
-cp .env.example .env                 # then add the provider credentials (see below)
-docker compose up -d                 # starts Postgres + app + dashboard + pgAdmin + Metabase
-docker compose exec app python -m lofc.pipeline   # populate the database end to end
-```
+## The site
 
-Then open the dashboard at **http://localhost:8501**.
+Sign in at the live address. Pages, as grouped in the navigation rail:
 
-> The first `pipeline` run downloads the data and takes a while; it is idempotent, so
-> re-running is fast and safe (data already on disk is skipped). Every command is also listed,
-> with comments, in [`cli_commands.txt`](cli_commands.txt).
+| Group | Page | What it is |
+|---|---|---|
+| Find | **Players** | The ranked list (season, position, leagues, Rank as, more filters, metric filters) and the player card |
+| Find | **Squads & loans** | Every registered squad member: contract, loan, minutes, rating |
+| Assess a player | **Compare** | Up to three players of one position, side by side; remembers the last comparison; download |
+| Assess a player | **Scout reports** | The club's scouting sheet beside each player's rating; Data vs scout and Squad role filters |
+| Decide | **Watchlist** | Tracked targets with form, injury, contract and rating |
+| Decide | **Report** | One-page player report: one wide sheet, downloads made in the browser (authored or data-only), photo, availability rows, scout verdicts, drafts kept in that browser; search lists every player A–Z |
+| Decide | Assess · Sign-off | Show "Currently building" on the new site; still on the old site |
+| Analysis | **Physical** | SkillCorner leaders, Two metrics chart, Leyton Orient squad (Physical \| Performance, Excel download) |
+| Analysis | **Club vs League One** | Where Orient fall short of a top-6 League One side, and who could close the gap |
+| Reference | What goes into each rating · How playing styles work · Glossary | The rules and definitions, in the providers' words |
+| Admin | **Users** | Accounts (admins only) |
+
+Every list page remembers its last settings in that browser; the top bar shows when Impect and
+SkillCorner were last pulled.
 
 ## Signing in
 
-The dashboard sits behind a login gate: scrypt-hashed passwords, a 12-character minimum, an
-account lockout after 5 failed attempts, 12-hour sessions, and a behaviour-based throttle
-against password-spraying across many usernames (not IP-based — behind a tunnel there is no
-trustworthy client address). With `SESSION_SECRET` set in `.env`, a signed session cookie lets
-a browser refresh keep you signed in instead of bouncing back to the sign-in form. Accounts
-are created by an administrator:
+Real accounts only: scrypt-hashed passwords (12-character minimum), lockout after 5 failed
+attempts, a throttle against password-spraying, 12-hour sessions in a signed cookie
+(`SESSION_SECRET` is required; the web app refuses to start without it). No self-service
+sign-up or email reset; an administrator creates and resets accounts, from the Users page or:
 
 ```bash
-docker compose exec app python -m lofc.admin create-user --username fi --name "..." --role scout
+docker compose exec app python -m lofc.admin create-user --username <name> --name "..." --role scout
+docker compose exec app python -m lofc.admin set-password --username <name>
 ```
 
-There is **no self-service sign-up**. A forgotten password is reset by an administrator in
-person (`python -m lofc.admin set-password --username fi`) — the accounts table holds no email
-address, so there is no email-based reset link to send. `list-users` shows every account and
-whether it is currently locked out, and `deactivate-user`/`reactivate-user` block or restore
-sign-in. **Accounts are never deleted** — every assessment stays attributed to whoever made it.
-An administrator can do all of this from the browser too, on the **Users** page (Admin section
-of the sidebar, visible only to the `admin` role) — the CLI and the page call the same
-underlying code, so the two can never disagree on the rules.
+Roles: `scout`, `medical`, `head_of_recruitment`, `admin`. Accounts are never deleted, only
+deactivated, so every assessment stays attributed.
+
+## Run it locally (Mac)
+
+```bash
+cp .env.example .env                   # provider credentials + SESSION_SECRET
+docker compose up -d db app web        # Postgres, the pipeline/test container, the web site
+```
+
+Open **http://localhost:8600** (the web site; reloads on save). The old Streamlit dashboard is
+the `dashboard` service on :8501, kept only while the fallback address exists.
+
+**Do not build the local database from the providers.** Resync it from the server first
+(command in [`DEPLOY.md`](DEPLOY.md) → "Two machines"): the server refreshes twice a week, the
+Mac never does. Mac load limits, tests and the browser harness: [`DEPLOY.md`](DEPLOY.md) →
+"Working on the Mac".
 
 ## The pipeline
 
-`python -m lofc.pipeline` runs all stages in order, each idempotent:
+`python -m lofc.pipeline` runs every stage in order; each is idempotent and recorded in
+`pipeline_runs`. On the server it runs from cron (Monday and Thursday 04:15 UTC). The live
+season is re-pulled in full each run; finished seasons are re-pulled once their files are 30
+days old, so provider corrections to past matches are picked up.
 
 ```
-schema → Impect pull (+ its metric definitions) → SkillCorner pull
-       → combined metric table → position shares
-       → Transfermarkt squads/loans (workstation only) → squad loader
-       → percentiles → playing-style clusters → valuation → identity → injuries → player bio
-       → club scorecard (1–5 composite) → shortlists
+schema → Impect pull + KPI definitions → SkillCorner pull
+       → combined metric table → position shares → style signals → current club
+       → Transfermarkt squad + loan loaders → percentiles → valuation → identity
+       → injuries → player bio → club scorecard (1–5) → shortlists
 ```
 
-Players are then ranked on the club **1–5 composite**, computed by a pipeline stage and stored
-in `player_scorecards`, so the dashboard, the offline shortlist and the BI layer all read the
-same numbers. You can run any stage on its own (see `cli_commands.txt`).
-
-## Dashboard tabs
-
-The sidebar groups the pages into **Scouting** (Players, Squads & loans, Scout reports,
-Compare, Watchlist, Report), **Assessment** (Assess, Sign-off), **Analysis** (Physical),
-**Reference** (What goes into each rating, Glossary) and — for administrators only — **Admin**
-(Users).
-
-- **Players** — the one decision workspace: a composite-ranked list — searchable by name
-  across every position and league in the season, accent/case-insensitive — and, on click or
-  search, the full player detail (bio, dimension scores, the club-framework grand table of
-  metric → percentile → 1–5 band, charts on the club's own metrics, and a **"Current form"**
-  section showing the live season's minutes/goals/assists as plain facts once it exists, never
-  as a rating). Merged from the former Shortlist + Club scorecard + Player profile tabs.
-  **Money is opt-in** — market value, modelled wages and the affordability gates appear only
-  when "Show affordability (modelled)" is ticked, and never reorder the default ranking. An
-  opt-in **"Rank on scout-verified rating"** toggle (off by default) switches the ranking to
-  the scout-assessed composite for players who have one. Opens on the season being played. An advisory flag below the club minimum
-  on any dimension names that dimension and by how much, rather than a generic warning.
-- **Compare** — two or three players head-to-head on the club's Performance metrics, plus a
-  raw physical table (raw because physical output *is* comparable across leagues).
-- **Watchlist** — tracked targets enriched with current-season form, most recent recorded
-  injury, contract months remaining, and the real club composite (replacing an old, retired
-  0–100 "Quality" figure) — plus an at-a-glance strip of what needs attention (contracts
-  expiring within 6 months, players currently injured, players not yet assessed).
-- **Squads & loans** — every registered squad member: contract, loan status, this season's
-  minutes and rating, last season's rating.
-- **Scout reports** — the club's scouting sheet, read-only, synced every minute; each report
-  beside the player's rating, and whether the model agrees.
-- **Report** — a one-page player report (see below).
-- **Physical** — SkillCorner tracking data.
-- **Assess** — the scout-assessment form: the club's own criteria for that player's position,
-  Psychological scored 1–5 per criterion, Medical entered as a band with an injury and
-  availability evidence panel beside it. Injury data informs the judgement; it never becomes
-  the score.
-- **Sign-off** — the approval queue for the Head of Recruitment/admin: sign off an assessment,
-  **reject** one (an optional reason — it stays on the record and the scout can resubmit),
-  enter and sign off your own, or leave it. Where two scouts' assessments disagree, none of
-  them scores until one of those actions resolves it.
-- **Users** *(Admin only)* — list every account, create one, reset a password, clear a
-  lockout, or deactivate/reactivate. Accounts are never deleted, so every past assessment
-  stays attributed.
-- **What goes into each rating** — per position, the metrics in each rating and their weights.
-- **Glossary** — searchable definitions for every metric, in the providers' own wording;
-  metrics that count towards the rating are tagged.
-
-## Interfaces
-
-- **Dashboard** — http://localhost:8501
-- **pgAdmin** — http://localhost:5050 (visual database browser; password `lofc`)
-- **Metabase (BI)** — http://localhost:3000 (self-serve reporting over the same database)
-- **psql / SQL** — `docker compose exec db psql -U lofc -d lofc`
-
-## Documentation
-
-One file per purpose:
-
-| File | Purpose |
-|---|---|
-| [`plan/TASKS.md`](plan/TASKS.md) | What is open, in order |
-| [`plan/BUILD_PLAN.md`](plan/BUILD_PLAN.md) | Register of known problems + dated work log |
-| [`docs/architecture.md`](docs/architecture.md) | How the system is built: sources, pipeline, code, tables |
-| [`docs/methodology.md`](docs/methodology.md) | How players are scored |
-| [`DEPLOY.md`](DEPLOY.md) | The live server, scheduled jobs, backups, deploying |
-| [`cli_commands.txt`](cli_commands.txt) | The command for each stage |
-| [`plan/HISTORY.md`](plan/HISTORY.md) | Frozen log of earlier decisions (the *why*) |
-
-## Deployment
-
-`docker compose up` is the whole stack, so deploying is running it on a server. See
-[`DEPLOY.md`](DEPLOY.md) for a production setup (Caddy for HTTPS, database and admin tools
-kept internal — the dashboard's own login gate handles authentication) and a quick tunnel
-option for a demo link. **It is deployed and in live use** — the live server, its scheduled jobs and backups are described in [`DEPLOY.md`](DEPLOY.md).
-
-## Tech stack
-
-Python 3.11 · Impect / SkillCorner / Transfermarkt clients · pandas / numpy / scikit-learn ·
-PostgreSQL 16 · SQLAlchemy + Alembic · Streamlit + Plotly · Docker / docker compose ·
-pydantic-settings · pytest.
-
-## Data and credentials
-
-The platform runs on **licensed data** — Impect (event), SkillCorner (physical) and
-Transfermarkt (market values). Provider credentials go in `.env`; target leagues/seasons are
-configured in `src/lofc/config.py`. **Licensed feeds and the club's confidential documents
-(`docs/*.xlsx`, `*.docx`) are gitignored and never published.** Modelled inputs (wages, and —
-until the club's real files land — parts of the framework) are clearly labelled and swappable
-for real club data via drop-in CSVs in `data/reference/`.
+Stage by stage: [`docs/architecture.md`](docs/architecture.md). Commands:
+[`cli_commands.txt`](cli_commands.txt).
 
 ## Tests
 
 ```bash
-docker compose exec app python -m pytest -q
-docker compose exec app python -m pytest --cov=lofc --cov-report=term-missing
+docker compose exec -T app nice -n 15 python -m pytest -q     # Python suite, in Docker
+node --test tests/js/                                          # JS rule tests, on the Mac
 ```
 
-## Player reports
+Browser harness for the web pages: `scripts/web_check.py` (see [`docs/frontend.md`](docs/frontend.md)).
 
-A one-page report for any player, for the Head of Recruitment, the manager and the chairman —
-none of whom need an account to read it.
+## Documentation
 
-Open **Scouting → Report** in the dashboard, search for a player, and download the report. It
-is a self-contained HTML file: open it and print to PDF, or convert it in one command:
+| File | Purpose |
+|---|---|
+| [`plan/TASKS.md`](plan/TASKS.md) | What is open, in order (Now / Next / Parked / Done) |
+| [`plan/BUILD_PLAN.md`](plan/BUILD_PLAN.md) | Register of known problems + dated work log |
+| [`docs/architecture.md`](docs/architecture.md) | How the system is built: sources, pipeline, code, tables |
+| [`docs/methodology.md`](docs/methodology.md) | How players are scored |
+| [`docs/frontend.md`](docs/frontend.md) | How the web front end is built and tested |
+| [`DEPLOY.md`](DEPLOY.md) | The live server, schedules, backups, deploying, the Mac workflow |
+| [`cli_commands.txt`](cli_commands.txt) | The command for each stage |
+| [`plan/HISTORY.md`](plan/HISTORY.md) | Frozen log of earlier decisions (the *why*) |
 
-```bash
-python3 scripts/report_to_pdf.py ~/Downloads/<player>_report.html
-```
+## Tech stack
 
-The report shows the club composite and its dimension bands, the player's percentile profile
-against his own league, season and position, a style scatter, a physical radar and his
-availability record. Where a scout has written an assessment their summary appears and the
-page is stamped *Provisional* or *Final*; where none exists it is stamped *Data only* and says
-so, which is what makes it usable for a fixture you are about to attend.
+Python 3.11 · FastAPI + Jinja2 + plain JavaScript (ES modules, no build step) · pandas / numpy /
+scikit-learn · PostgreSQL 16 · SQLAlchemy + Alembic · Docker Compose · Caddy (HTTPS) ·
+pytest, Playwright (browser harness), node:test. The old site: Streamlit + Plotly.
+
+## Data and credentials
+
+Licensed data (Impect, SkillCorner, Transfermarkt pulls) and the club's documents (`club_docs/`)
+are gitignored and never published. Credentials live in `.env`, read through
+`lofc.config.settings`; never in code. Modelled inputs (wages, Financial Fit, Resale Potential)
+are labelled as modelled, appear only behind "Show affordability (modelled)", and never change
+the ranking.

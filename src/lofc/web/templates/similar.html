@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Similar players{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_url('css/card.css') }}">
+<link rel="stylesheet" href="{{ static_url('css/similar.css') }}">
+<section class="view on" id="v-similar" data-page="similar"
+         data-player="{{ ids.player }}" data-competition="{{ ids.competition }}" data-season="{{ ids.season }}">
+  <div class="card-top"><a href="/player/{{ ids.player }}/{{ ids.competition }}/{{ ids.season }}" id="back" class="back">← Back to player</a></div>
+  <div class="section-label">Similar players</div>
+  <h1 id="sim-player">Similar players</h1>
+  <div class="meta" id="sim-meta"></div>
+  <div id="sim-status" class="note" role="status"></div>
+
+  <div class="card" id="c-sim-list">
+    <div class="sf-head"><div><h2>Closest 10</h2><div class="sub" id="sim-sub"></div></div>
+      <div class="sim-ctl">
+        <div class="seg" id="sim-scope" role="group" aria-label="Leagues"><button type="button" data-scope="league" class="on" aria-pressed="true">Same league</button><button type="button" data-scope="all" aria-pressed="false">All leagues</button></div>
+        <label id="sim-league-wrap" hidden>League <select id="sim-league" class="ctl"><option value="">All</option></select></label>
+        <label>Max age <select id="sim-age" class="ctl"><option value="">Any</option></select></label>
+        <label>Min minutes <select id="sim-min" class="ctl"><option value="">Any</option></select></label>
+        <label>Contract <select id="sim-contract" class="ctl"><option value="">Any</option></select></label>
+      </div></div>
+    <div id="sim-notes"></div>
+    <div class="tw" id="sim-list"></div>
+  </div>
+
+  <div class="card" id="c-sim-break" hidden>
+    <div class="sf-head"><div><h2 id="sim-break-h">Breakdown</h2><div class="sub" id="sim-break-sub"></div></div>
+      <a class="btn" id="sim-compare" href="/compare">Open in Compare</a></div>
+    <div class="sim-score" id="sim-score"></div>
+    <div class="tw" id="sim-break"></div>
+    <p class="note" id="sim-break-note"></p>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ static_url('js/similar.js') }}"></script>{% endblock %}

@@ -7,12 +7,10 @@ import pytest
 from lofc.web import pages
 from web_fakes import FakeStore, login, make
 
-# /players, /compare and /report are real pages now (tests/test_web_players.py,
-# test_web_compare.py, test_web_report.py), as are /scout-reports and /watchlist
-# (test_web_scout_reports.py, test_web_watchlist.py), /squads (test_web_squads.py) and /physical
-# (test_web_physical.py), and the Reference pages (test_web_rating_reference.py,
-# test_web_playing_styles.py, test_web_glossary.py); Assess and Sign-off are still placeholders.
-ROUTES = ["/assess", "/sign-off"]
+# Every nav page is a real page now. Assess and Sign-off are retired (owner 2026-11-16: scouts
+# report through the JotForm sheet, never the platform): their old links go to Players.
+RETIRED = ["/assess", "/sign-off", "/signoff",
+           "/assess?player=1&competition=5&season=318"]
 
 
 def _client(role="scout", name="Ann Scout"):
@@ -23,18 +21,15 @@ def _client(role="scout", name="Ann Scout"):
     return c
 
 
-@pytest.mark.parametrize("path", ROUTES)
-def test_every_page_renders_with_heading_card_and_highlight(path):
-    c = _client()
-    r = c.get(path)
-    assert r.status_code == 200
-    page = next(p for p in pages.PAGES.values() if p.path == path)
-    assert f"<h1>{page.title.replace('&', '&amp;')}</h1>" in r.text
-    # owner 2026-11-09: "Being rebuilt" / "Use the current platform for now." -> "Currently building"
-    assert "Currently building" in r.text
-    assert "Being rebuilt" not in r.text and "Use the current platform for now" not in r.text
-    on = re.findall(r'<a href="([^"]+)" class="on"', r.text)
-    assert on == [path]                                  # exactly the current page is highlighted
+@pytest.mark.parametrize("path", RETIRED)
+def test_retired_assess_and_signoff_redirect_to_players(path):
+    r = _client().get(path, follow_redirects=False)
+    assert r.status_code in (301, 302, 303, 307, 308) and r.headers["location"] == "/players"
+
+
+def test_no_page_is_a_placeholder_any_more():
+    assert not {"assess", "sign-off"} & set(pages.PAGES)
+    assert all(p.path not in ("/assess", "/sign-off") for p in pages.PAGES.values())
 
 
 def test_users_page_exists_for_admin_and_is_403_for_others():
@@ -44,7 +39,7 @@ def test_users_page_exists_for_admin_and_is_403_for_others():
 
 
 NAV_LABELS = ["Players", "Squads &amp; loans", "Compare", "Scout reports", "Watchlist", "Report",
-              "Assess", "Sign-off", "Physical", "Club vs League One", "What goes into each rating",
+              "Physical", "Club vs League One", "What goes into each rating",
               "How playing styles work", "Glossary"]
 
 

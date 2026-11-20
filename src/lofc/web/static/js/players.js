@@ -18,8 +18,8 @@ const defaults = () => ({
   season: opts.default_season, position: opts.default_position, leagues: [],
   rank_as: opts.default_archetype, min_minutes: opts.minutes.default, max_age: opts.max_age.default,
   foot: 'Any', contract: opts.contract[0], loan: opts.loan[0], style: 'All styles',
-  strong_only: false, money: false, budget: null, wage: null, assessed: false,
-  signed_only: false, signable: null, sort: '', dir: 'desc', pct: {}, raw: {}});
+  strong_only: false, money: false, budget: null, wage: null, scout: 'Any',
+  signable: null, sort: '', dir: 'desc', pct: {}, raw: {}});
 
 function fromUrl() {
   const q = new URLSearchParams(location.search), d = defaults(), s = d;
@@ -37,8 +37,7 @@ function fromUrl() {
   s.strong_only = q.get('strong_only') === '1' && s.style !== 'All styles';
   s.money = q.get('money') === '1';
   s.budget = n('budget', 0, 150); s.wage = n('wage', 0, 200000);
-  s.assessed = q.get('assessed') === '1';
-  s.signed_only = s.assessed && q.get('signed_only') === '1';
+  pick('scout', opts.scout);
   s.signable = q.get('signable') === '1' ? 1 : q.get('signable') === '0' ? 0 : null;
   s.sort = q.get('sort') || ''; s.dir = q.get('dir') === 'asc' ? 'asc' : 'desc';
   for (const [k, v] of q) {
@@ -59,7 +58,7 @@ function toQuery(s) {
   put('contract', s.contract, d.contract); put('loan', s.loan, d.loan);
   put('style', s.style, d.style); if (s.strong_only) q.set('strong_only', '1');
   if (s.money) { q.set('money', '1'); put('budget', s.budget, null); put('wage', s.wage, null); }
-  if (s.assessed) { q.set('assessed', '1'); if (s.signed_only) q.set('signed_only', '1'); }
+  put('scout', s.scout, d.scout);
   if (s.money && s.signable !== null) q.set('signable', String(s.signable));
   if (s.sort) { q.set('sort', s.sort); q.set('dir', s.dir); }
   for (const [m, v] of Object.entries(s.pct)) if (v > 0) q.set('pct_' + m, v);
@@ -87,6 +86,7 @@ function buildStaticControls() {
   fillSelect($('f-foot'), opts.foot);
   fillSelect($('f-contract'), opts.contract);
   fillSelect($('f-loan'), opts.loan);
+  fillSelect($('f-scout'), opts.scout);
   $('leagues-list').innerHTML = opts.leagues.map((l, i) =>
     `<label><input type="checkbox" name="league_${i}" value="${esc(l)}" aria-label="${esc(l)}">${esc(l)}</label>`).join('');
   for (const id of ['f-minutes', 'f-minutes-num']) {
@@ -103,7 +103,7 @@ function buildStaticControls() {
   tip('sw-strong', h.strong_only); tip('f-rank', h.rank_as); tip('f-minutes', h.minutes);
   tip('f-age', h.max_age); tip('f-contract', h.contract); tip('f-loan', h.loan);
   tip('f-foot', h.foot); tip('sw-money', h.money); tip('f-wagex', h.wage_x);
-  tip('f-wage', h.wage_pounds); tip('sw-assessed', h.assessed); tip('sw-signed', h.signed_only);
+  tip('f-wage', h.wage_pounds); tip('f-scout', h.scout);
 }
 
 function leaguesLabel() {
@@ -125,12 +125,11 @@ function setControls() {
   $('f-minutes').value = st.min_minutes; $('f-minutes-num').value = st.min_minutes;
   $('f-age').value = st.max_age; $('age-out').textContent = st.max_age >= 40 ? '40+' : st.max_age;
   $('f-foot').value = st.foot; $('f-contract').value = st.contract; $('f-loan').value = st.loan;
+  $('f-scout').value = st.scout;
   $('f-money').checked = st.money;
   document.querySelectorAll('.money').forEach(e => { if (e.id !== 'sw-signable') e.hidden = !st.money; });
   if (st.budget != null) { $('f-budget').value = st.budget; $('f-budget-num').value = st.budget; }
   if (st.wage != null) $('f-wage').value = st.wage;
-  $('f-assessed').checked = st.assessed; $('sw-signed').hidden = !st.assessed;
-  $('f-signed').checked = st.signed_only;
   const sel = st.leagues.length ? new Set(st.leagues) : new Set(opts.leagues);
   document.querySelectorAll('#leagues-list input').forEach(i => { i.checked = sel.has(i.value); });
   $('leagues-btn').textContent = leaguesLabel();
@@ -239,13 +238,16 @@ const stylePills = arr => {
   return arr.map(s => s.endsWith('(leans)') ? `<span class="pill lean">${esc(s.replace(' (leans)', ''))}</span>`
     : s === 'No standout style' ? `<span class="note">${esc(s)}</span>` : `<span class="pill strong">${esc(s)}</span>`).join('');
 };
-const scoutPill = v => !v ? '' : `<span class="pill ${v === 'High priority' ? 'verdict-pos' : v === 'Not recommended' ? 'verdict-neg' : 'verdict-mid'}">${esc(v)}</span>`;
+const VTONE = {positive: 'verdict-pos', negative: 'verdict-neg', neutral: 'verdict-mid'};
+/** Scout verdicts: one pill per verdict ("2 Sign"); hover lists each scout's latest. */
+const verdictPills = x => !x ? '<td class="vd"></td>'
+  : `<td class="vd" title="${esc(x.tip)}">${x.pills.map(p => `<span class="pill ${VTONE[p.tone] || 'grey'}">${esc(p.text)}</span>`).join('')}</td>`;
 
-function cell(col, v, tag) {
+function cell(col, v, tag, r) {
   switch (col.kind) {
+    case 'verdicts': return verdictPills(r && r.verdicts);
     case 'rating': return `<td class="rating">${ratingChip(v)}</td>`;
     case 'style': return `<td class="sty">${stylePills(v)}</td>`;
-    case 'scouts': return `<td>${scoutPill(v)}</td>`;
     case 'bool': return `<td class="c">${v ? '✓' : ''}</td>`;
     case 'num': return `<td class="n">${col.key === 'Mins' ? fmtInt(v) : esc(dash(v))}</td>`;
     // long club / league names are cut with an ellipsis (full text on hover) so every rating
@@ -269,7 +271,7 @@ function render(p) {
   $('pl-notice').innerHTML = p.notice
     ? (p.notice.level === 'info' ? `<div class="info">${esc(p.notice.text)}</div>` : noticeLine(p.notice.text)) : '';
   $('count-cap').innerHTML = md(p.count_caption);
-  const lines = [p.contract_caption, p.rank_caption, p.assessed_caption, p.money && p.money.note].filter(Boolean);
+  const lines = [p.contract_caption, p.rank_caption, p.money && p.money.note].filter(Boolean);
   $('cap-lines').innerHTML = lines.map(l => `<div>${md(l)}</div>`).join('');
   $('pl-hidden').innerHTML = p.hidden_text ? `<div class="notice">${esc(p.hidden_text)}</div>` : '';
   $('sw-signable').hidden = !p.money;
@@ -294,7 +296,7 @@ function render(p) {
   const back = encodeURIComponent('/players' + location.search);
   $('pl-body').innerHTML = p.rows.map(r =>
     `<tr class="click" tabindex="0" data-href="/player/${r.id[0]}/${r.id[1]}/${r.id[2]}?back=${back}">` +
-    cols.map(c => cell(c, r.cells[c.key], r.tag)).join('') + '</tr>').join('')
+    cols.map(c => cell(c, r.cells[c.key], r.tag, r)).join('') + '</tr>').join('')
     || `<tr><td colspan="${cols.length}" class="note">No ${esc(p.title)} match these filters.</td></tr>`;
 
   $('nr-sub').textContent = p.not_ranked.sub;
@@ -338,7 +340,7 @@ function renderChips() {
   if (st.loan !== d.loan) chips.push(['Loan', st.loan, 'loan']);
   if (st.style !== 'All styles') chips.push(['Style', st.style + (st.strong_only ? ' (strong only)' : ''), 'style']);
   if (st.money) chips.push(['Affordability', 'on', 'money']);
-  if (st.assessed) chips.push(['Ranking', 'scout-verified' + (st.signed_only ? ', signed off' : ''), 'assessed']);
+  if (st.scout !== d.scout) chips.push(['Scout verdict', st.scout, 'scout']);
   if (spec) {
     for (const g of spec.physical) for (const s of g.sliders) if (s.metric in st.raw)
       chips.push([s.kind === 'Max' ? 'Max' : 'Min', `${s.label.replace(/^(Min|Max) /, '')} ${s.kind === 'Max' ? '≤' : '≥'} ${st.raw[s.metric]}`, 'raw_' + s.metric]);
@@ -354,7 +356,6 @@ function removeChip(key) {
   const d = defaults();
   if (key === 'leagues') st.leagues = [];
   else if (key === 'money') { st.money = false; st.signable = null; }
-  else if (key === 'assessed') { st.assessed = false; st.signed_only = false; }
   else if (key === 'style') { st.style = 'All styles'; st.strong_only = false; }
   else if (key.startsWith('pct_')) delete st.pct[key.slice(4)];
   else if (key.startsWith('raw_')) delete st.raw[key.slice(4)];
@@ -378,7 +379,7 @@ function bind() {
   $('f-season').addEventListener('change', e => { st.season = Number(e.target.value); st.pct = {}; st.raw = {}; commit(); });
   $('f-position').addEventListener('change', e => onPositionChange(e.target.value));
   $('f-rank').addEventListener('change', e => { st.rank_as = e.target.value; st.pct = {}; st.raw = {}; commit(); });
-  for (const [id, key] of [['f-foot', 'foot'], ['f-contract', 'contract'], ['f-loan', 'loan']])
+  for (const [id, key] of [['f-foot', 'foot'], ['f-contract', 'contract'], ['f-loan', 'loan'], ['f-scout', 'scout']])
     $(id).addEventListener('change', e => { st[key] = e.target.value; commit(); });
   $('f-style').addEventListener('change', e => { st.style = e.target.value; if (st.style === 'All styles') st.strong_only = false; commit(); });
   $('f-strong').addEventListener('change', e => { st.strong_only = e.target.checked && st.style !== 'All styles'; commit(); });
@@ -412,8 +413,6 @@ function bind() {
     st.wage = r.wage; commit();
   };
   $('f-money').addEventListener('change', e => { st.money = e.target.checked; if (!st.money) st.signable = null; commit(); });
-  $('f-assessed').addEventListener('change', e => { st.assessed = e.target.checked; if (!st.assessed) st.signed_only = false; commit(); });
-  $('f-signed').addEventListener('change', e => { st.signed_only = e.target.checked; commit(); });
   $('f-signable').addEventListener('change', e => { st.signable = e.target.checked ? 1 : 0; commit(); });
 
   // leagues pop-over

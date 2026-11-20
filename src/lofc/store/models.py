@@ -1037,6 +1037,28 @@ class PlayerCurrentClub(Base):
     updated_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class ImpectSquadMinutes(Base):
+    """Minutes per CLUB, per player, per league-season, from the landed Impect averages files
+    (`model/squad_minutes.py`). `player_metrics_neutral` names one club per league-season (the
+    one he played most for); a January mover has a row here for each club. Display only."""
+    __tablename__ = "impect_squad_minutes"
+    __table_args__ = (
+        UniqueConstraint("player_id", "impect_squad_id", "competition_id", "season_id",
+                         name="uq_impect_squad_minutes"),
+        Index("ix_impect_squad_minutes_league", "competition_id", "season_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    player_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    impect_squad_id: Mapped[int] = mapped_column(Integer)
+    team_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    competition_id: Mapped[int] = mapped_column(Integer)
+    season_id: Mapped[int] = mapped_column(Integer)
+    minutes: Mapped[float] = mapped_column(Float)
+    position_group: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class PipelineRun(Base):
     """One row per pipeline step, and per league inside a league-by-league step.
 

@@ -40,6 +40,8 @@ remain in the list.
 
 from __future__ import annotations
 
+from decimal import ROUND_HALF_UP, Decimal
+
 import pandas as pd
 
 from lofc.model import club_framework as cf
@@ -300,7 +302,16 @@ def _composite(dim_bands: dict[str, float], weights: dict[str, float],
     if present_w <= 0:
         return None, 0.0
     val = sum(present[d] * weights[d] for d in present if d in weights) / present_w
-    return round(val, 2), round(present_w, 2)
+    return _round2(val), round(present_w, 2)
+
+
+def _round2(value: float) -> float:
+    """Two decimals, exact halves UP. 65 : 35 of two 2-dp bands often lands exactly on a half
+    (0.65 x 3.10 + 0.35 x 3.00 = 3.065); Python's round() would send it whichever way binary
+    floating point happens to store it (round(3.035, 2) = 3.03, round(3.065, 2) = 3.07). The
+    value is first taken to 9 dp to drop that float noise, then rounded half up. Under the old
+    4 : 3 split no composite could land on a half, so every stored rating is unchanged by it."""
+    return float(Decimal(f"{value:.9f}").quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 # A percentile is a rank within a peer group, so it is only as meaningful as that group is

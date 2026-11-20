@@ -21,7 +21,7 @@ TICK = "✓"
 
 
 def weights_line(position: str) -> str:
-    """'Rating = Performance 57% · Physical 43%' -- the objective composite's real split."""
+    """'Rating = Performance 65% · Physical 35%' -- the objective composite's real split."""
     w = cf.DIMENSION_WEIGHTS[position]
     perf, phys = w.get(cf.PERFORMANCE, 0.0), w.get(cf.PHYSICAL, 0.0)
     if not phys:

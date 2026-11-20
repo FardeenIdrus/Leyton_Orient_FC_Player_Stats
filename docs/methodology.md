@@ -1,12 +1,14 @@
 # Methodology
 
-How a player goes from provider data to a 1–5 rating, a ranked list and an
-affordability verdict. Every number below is computed by the code named alongside it;
-the dashboard's **Methodology** and **What goes into each rating** pages show the same
-rules. Where each metric comes from is documented in `docs/architecture.md`.
+> **What this is.** How a player goes from provider data to a 1–5 rating, a ranked list and
+> (opt-in) an affordability verdict, plus the rules of the Club vs League One page. Every number
+> is computed by the code named alongside it; the site's **What goes into each rating** page
+> shows the same rules. **Current state (2026-11-16):** 39 scored metrics (32 Impect + 7
+> SkillCorner), peer-pool floor of 10 with a midfield fallback pool, no league-strength
+> adjustment. Where each metric comes from: `docs/architecture.md`.
 
 The guiding principle: percentile ranking within honest peer groups does the core work.
-Machine learning is used in one place only, the market-value regression (§7).
+Machine learning is used in one place only, the market-value regression (§8).
 
 ---
 
@@ -14,11 +16,13 @@ Machine learning is used in one place only, the market-value regression (§7).
 
 | Source | What it gives | Leagues | Seasons |
 |---|---|---|---|
-| **Impect** | Event data: the 32 Performance metrics, minutes, position, birth date, foot | Championship, League One, League Two, National League, Scottish Premiership, Scottish Championship, Premier League 2 | 2024/25, 2025/26, 2026/27 |
-| **SkillCorner** | Tracking data: the 7 Physical metrics (and more for display) | The same, **except the Scottish Championship** | 2025/26, 2026/27 |
+| **Impect** | Event data: the 32 Performance metrics, minutes, position, birth date, foot | 25 competitions (`src/lofc/leagues.py`): the EFL (Championship, League One, League Two), National League, Scottish Premiership and Championship, Premier League 2, and 18 more added 2026-10-26 (e.g. Irish Premier Division, Ligue 2, Allsvenskan) | 2024/25 on; calendar-year seasons ("2026") file under the season starting that year |
+| **SkillCorner** | Tracking data: the 7 Physical metrics (and more for display) | Championship, League One, League Two, National League, Premier League 2, Scottish Premiership, Irish Premier Division (`config.DEFAULT_SKILLCORNER_TARGETS`) | 2025/26, 2026/27 (Ireland: 2025, 2026) |
 | **Transfermarkt** (scraped) | Market value, contract end, loans, injuries, height | Values used for the four English leagues | Values for 2025/26 only |
 
-So a 2024/25 rating has no Physical part, and a Scottish Championship rating never has one.
+So a 2024/25 rating has no Physical part, and neither does any rating in a league SkillCorner
+does not cover (the Scottish Championship and 17 of the 18 newer leagues): those are rated on
+Performance alone.
 
 ## 2. One row per player, per league, per season
 
@@ -49,7 +53,7 @@ across both wings counts as a winger.
 
 **The 450-minute floor.** Only players with **450+ minutes** (about five full matches) are
 *rankable*. Below that a per-90 rate is noise: one goal in a 20-minute cameo reads as 4.5
-per 90. The sidebar's minutes filter never goes below 450.
+per 90. The minimum-minutes filter never goes below 450.
 
 ## 3. Percentiles: compare each player with his real peers
 
@@ -83,7 +87,7 @@ encoded in `model/club_framework.py` and computed by `model/scorecard.py`.
 
 **Performance** uses the club's metric list for the position. Where the club names a
 concept Impect does not measure directly, the nearest Impect measurement is used
-(`CLUB_SUCCESSOR`), and the dashboard names it for what it actually measures. Some club
+(`CLUB_SUCCESSOR`), and the site names it for what it actually measures. Some club
 entries end up on the same Impect measurement (for example "counterpressures" and
 "pressures in the opposition half" both resolve to counterpressures); that measurement
 **counts once**. One club metric, long-ball %, has no Impect equivalent and is left out.
@@ -113,9 +117,11 @@ It stays on the platform as a display metric and a Players filter.
 
 So the rating draws on **39 metrics: 32 Impect + 7 SkillCorner**.
 
-The **"Top speed"** column on the Players page shows `top5_psv99_kmh`, the average of his
-five fastest matches, in km/h. That column is display only; it is the same value that is
-one of the seven Physical metrics, not an extra one.
+The **"Top speed"** column on the Players page shows `top5_psv99_kmh` — SkillCorner's **PSV-99
+Top 5**, the average of his five fastest matches, in km/h. It is the same value that is one of
+the seven Physical metrics, not an extra one. SkillCorner's single fastest reading (the peak
+speed its own app shows) is **not in our feed**: the feed's `peak_velocity` is an average of
+per-match peaks, so a "Peak speed" figure was not added (checked 2026-11-16).
 
 ### Step 2 — percentile to a 1–5 band
 
@@ -145,12 +151,14 @@ as zero; the player card shows it as "No value". Dimension scores are rounded to
 ### Step 4 — combine the areas
 
 The club weights six areas. Its outfield weights add up to 110% in the document, so each
-position is rescaled to 100%, which keeps the club's relative emphasis exactly:
+position is rescaled to 100%, which keeps the club's relative emphasis exactly. Outfield
+Performance : Physical is 65 : 35 (owner 2026-11-16; the document's 40 : 30 became 45.5 :
+24.5, the same 70 of 110, so the other four areas are unchanged):
 
-| Area | Outfield (as written → rescaled) | Goalkeeper |
+| Area | Outfield (used → rescaled) | Goalkeeper |
 |---|---|---|
-| Performance | 40% → 36.4% | 50% |
-| Physical | 30% → 27.3% | none (folded into Performance, per the club's GK table) |
+| Performance | 45.5% → 41.4% (document: 40%) | 50% |
+| Physical | 24.5% → 22.3% (document: 30%) | none (folded into Performance, per the club's GK table) |
 | Psychological | 10% → 9.1% | 20% |
 | Medical Risk | 15% → 13.6% | 15% |
 | Financial Fit | 10% → 9.1% | 10% |
@@ -168,8 +176,9 @@ removes him from the list.
 | `full_composite` | + Financial Fit + Resale Potential | Shown only with **Show affordability (modelled)** on. Never ranks. |
 | `assessed_composite` (shown as **Scout-verified rating**) | Performance + Physical + Psychological + Medical Risk | Only when a scout has completed **both** Psychological and Medical. Never includes the money areas. |
 
-For an outfielder with both data areas, the ranking therefore weights **Performance 57%
-and Physical 43%** (36.4 and 27.3 rescaled to their total). An outfielder with no tracking
+For an outfielder with both data areas, the ranking therefore weights **Performance 65%
+and Physical 35%** (41.4 and 22.3 rescaled to their total; 57% and 43% before 2026-11-16).
+Composites are rounded to two decimals, exact halves up (3.065 → 3.07). An outfielder with no tracking
 data, and every goalkeeper, is rated on **Performance alone**. Scout input never touches
 `objective_composite`.
 
@@ -187,9 +196,9 @@ affordability is switched on.
 
 ### Colours on screen
 
-Rating cells on the Players page are shaded by the same thresholds
-(`players.band_colour`): **below 2.0** red, **2.0 to under 3.0** amber, **3.0 to under 4.0**
-light green, **4.0 and above** green.
+Rating chips are shaded by the same thresholds (web: `chip` in `static/js/common.js`;
+Streamlit: `players.band_colour`): **below 2.0** red, **2.0 to under 3.0** amber, **3.0 to
+under 4.0** light green, **4.0 and above** green; no rating = grey "—".
 
 ### A worked example
 
@@ -231,10 +240,10 @@ All seven Physical metrics:
 
 Average → **Physical 4.70**.
 
-> Composite = (3.59 × 0.3636 + 4.70 × 0.2727) ÷ (0.3636 + 0.2727) = **4.07**
+> Composite = 3.59 × 0.65 + 4.70 × 0.35 = **3.98** (4.07 under the old 57 : 43)
 
 He also has modelled money bands (Financial Fit 3.15, Resale Potential 3.62), so his
-`full_composite` is 3.94. No area is below 2.0, so no veto.
+`full_composite` is 3.86. No area is below 2.0, so no veto.
 
 ## 5. Peer-pool floor: when a rating is not a ranking
 
@@ -247,7 +256,7 @@ So a composite is **withheld from the ranked list** when fewer than
 (`scorecard.pool_is_thin`). The number is still computed and stored. The Players page says
 how many players were withheld and why; **Squads & loans** lists them with current-season
 facts. The pool size is counted from the whole season's scorecards, so narrowing the
-sidebar never makes a pool look thinner than it is.
+filters never makes a pool look thinner than it is.
 
 **Midfield fallback (owner, 16 Nov 2026).** A Defensive, Central or Attacking Mid pool below
 10 is rated against **all midfielders** of that league + season (every rankable Defensive,
@@ -257,8 +266,9 @@ Pools of 10+ and all other positions are unchanged. The pages tag him "Rated aga
 midfielders" and quote no rank. Stored as `player_scorecards.peer_pool` ('position' /
 'midfield') and `peer_pool_size` (`scorecard.pool_assignment`).
 *Example:* Lyall Cameron, the only rankable Scottish Premiership Central Mid in 2026/27, was
-3.00 on everything (pool of 1). Against all 38 Scottish Premiership midfielders, still on the
-Central Mid metrics: Composite 3.09, Performance 3.20, Physical 2.95.
+3.00 on everything (pool of 1). Against all Scottish Premiership midfielders, still on the
+Central Mid metrics: Composite 3.09 against 38 on the Mac copy; **3.06 against 40 on the live
+server** after its re-score (2026-11-16 — the server's data was newer).
 
 A player who is not rated shows "—" for every percentile and band, and one line: "Not rated:
 only N <Position>s in <League> with 450+ minutes (needs 10)."
@@ -268,7 +278,7 @@ A player's true standing ("8th of 13") is quoted only within his own pool
 are selected, and its first column is "#", not "Rank": a composite says how a player
 compares within his own league, not across leagues.
 
-## 6. Archetypes — "Rank as" in the sidebar (optional lens)
+## 6. Archetypes — "Rank as" (optional lens)
 
 **Full Back** and **Winger** have archetypes. An archetype scores Performance on a
 **subset** of the position's metrics, so a recruiter can rank players as a specific type.
@@ -283,7 +293,7 @@ concept cannot survive under a second club name.
 | Winger | Direct & 1v1 Specialist | Safe possession and crossing | 17 |
 | Winger | Crossing & Creative Threat | Solo ball-carrying | 20 |
 
-The default is **All Metrics** (the full list). When an archetype is picked in the sidebar
+The default is **All Metrics** (the full list). When an archetype is picked
 ("**Rank as**"), the list ranks on the archetype composite and the **All-round** composite
 stays visible beside it. Other positions have a single club profile.
 
@@ -306,9 +316,93 @@ Head of Recruitment's 24 styles; rules in `model/styles.py`.
   styles are added. Wingers are labelled twice: *where* (In behind · Pocket · Wide) and
   *what* (1v1 · Creator). Thresholds are fixed, so a label means the same for every user.
 
-Shown as a Style filter in the sidebar, a Style column, a Style fit section on the player
+Shown as a Playing style filter, a Style column, a Style fit section on the player
 card, and explained to recruiters on Reference → How playing styles work. Never read by the rating or the ranking. Team style influences receptions
 (a winger in a direct side receives more in behind) — accepted.
+
+## 6c. Similar players (player card + Similar players page; owner-approved 2026-11-16, method revised 2026-11-20)
+
+"Similar players" on the card lists the 10 players whose profile on the rating's measures is
+closest to his; the **Similar players** page (`/similar/<player>/<competition>/<season>`, reached
+from the card, not in the navigation) shows the same list and breaks one match down measure by
+measure. Code: `core/similar.py`; tests `tests/test_core_similar.py`, `tests/test_web_similar.py`,
+`tests/test_similar_real.py`.
+
+| Step | Rule |
+|---|---|
+| Pool | Same season and position group, **rated** players only (an Overall from a pool of 10+, so 450+ minutes), never the player himself. **Same league** (default) or **All leagues** |
+| Measures | The position's rating measures: Performance (club list, stored names) + Physical (SkillCorner). Goalkeepers: Performance only |
+| z-score | Per measure z = (value − mean) / sd (population sd) **within league + season + position** (the pool he was rated in: a thin midfield group uses all the league's midfielders, as his rating does). Lower-is-better measures (Turnovers) sign-flipped; \|z\| clipped at 3 |
+| Weight | The measure's share of Overall: its weight inside its dimension × the dimension's share (`club_vs_league.overall_weights`, read from `club_framework` at run time — outfield 65 : 35) |
+| Correlation R | The measures' correlation matrix on the season's position pool (all leagues, z-scores): **Ledoit–Wolf shrinkage** (`sklearn.covariance.LedoitWolf`) fitted on the players who have every measure, converted to a correlation matrix. If fewer than 3 × (number of measures) players have every measure: pairwise correlation (pairs of measures with 20+ players; else 0) shrunk toward identity by the Ledoit–Wolf intensity of all players with gaps filled by 0. Eigenvalues floored at 10⁻⁶ (always positive definite) |
+| Distance | **Weighted Mahalanobis** over the measures both have (set S): d² = Δᵀ D R_SS⁻¹ D Δ / Σ w, Δ = z gaps, D = diag(√w), R_SS = R restricted to S (not re-estimated). With R = identity this is the old weighted Euclidean √(Σ w·Δ² / Σ w). Needs ≥ 70% of the target's own Overall weight present for both, else he is left out |
+| Similarity % | The **% of all pairs** of players at that position and season (all leagues; pairs whose shared weight is ≥ 70% of the larger of the two players' own weight) that are **further apart** than this pair. Whole number, .5 up; identical = 100. Help text: "More alike than this % of all <position> pairs." |
+| Order | By similarity only. Overall is shown as rated in his own league; never ranked across leagues |
+| Filters | League (one league; only with All leagues), Max age, Min minutes (900 / 1,350 / 1,800), Contract (Under 6 / Under 12 months: whole calendar months left < 6 or < 12, already-expired dates included, unknown dates left out — the Squads rule). They narrow the candidates only; the similarity number never changes. Still the top 10, no cut-off |
+| Biggest differences | The 2 measures with the largest weight × \|z gap\|, shown as his z minus this player's ("Sprints +1.2"); + = he is better. Descriptive only, not the score |
+
+**Why z-scores within the league.** Each measure is placed against his own league, so "All
+leagues" compares *profiles*, never levels across leagues (no league-strength adjustment
+exists). The page says: "Measures are compared within each player's own league."
+
+**Why distance, not cosine.** Cosine similarity compares only the *shape* of a profile: a
+player with the same shape at half the level scores 100%. Distance on z-scores penalises the
+level gap (test: a near-copy ranks first; same shape at half the level is over 10× further away).
+
+**Why Mahalanobis.** Measures that move together (the running measures, the two top speeds)
+would otherwise count the same thing several times. Mahalanobis allows for every correlation at
+once, partly or fully, instead of an on/off grouping at |r| ≥ 0.8. Two exact copies of a measure
+(weight w each) add w·Δ² — one copy's worth — where weighted Euclidean adds 2w·Δ² (test). A
+pair whose gaps run *against* a positive correlation (better on one, worse on its partner)
+counts as further apart than the same gaps on unrelated measures.
+
+**Why the 70% rule uses Overall weights.** Physical is 35% of an outfielder's Overall: a player
+with no physical data covers 65% of a tracked player's weight, so the two are never matched. A
+player with no physical data (most non-English leagues) is compared on the performance measures
+he has, and the card says "No physical data for him: compared on performance only."
+
+**Why a pair rank.** The % reads the same at every position: 80 means this pair is closer than
+80% of all pairs of that position. Distances concentrate (many measures), so most top-10 lists
+sit between about 60 and 99.
+
+**Measures that move together (|r| ≥ 0.8 in R, 2026/27)** — shown as a "linked" tag on the page:
+
+| Position | Pairs |
+|---|---|
+| Goalkeeper | Goals saved above average · Shot stopping % |
+| Centre Back, Centre Forward | High-speed runs · High-speed running distance; High-speed runs · Sprints; Sprints · Sprint distance; the two top speeds |
+| Full Back | as Centre Back, plus Expected assists · NP xG + xA |
+| Defensive Mid | as Centre Back, plus Bypassed opponents (packing) · Deep progressions |
+| Central Mid (fallback rule: 38 players with every measure) | Bypassed opponents · Deep progressions; High-speed runs · High-speed running distance; Sprints · Sprint distance |
+| Winger | High-speed runs · Sprints; Sprints · Sprint distance; the two top speeds |
+| Attacking Mid | Sprints · Sprint distance; the two top speeds |
+
+Ledoit–Wolf shrinkage on the real pools is small (0.02–0.17), so R stays close to the sample
+correlations.
+
+**Worked example.** Three measures, weights A 0.5, B 0.3, C 0.2; r(A, B) = 0.6, C unrelated.
+Target z = (1.0, 0.0, −0.5); candidate z = (0.5, 0.4, no value).
+Shared weight = 0.5 + 0.3 = 0.8 of the target's 1.0 → 80% ≥ 70%, kept.
+D·Δ = (√0.5 × −0.5, √0.3 × 0.4) = (−0.354, 0.219).
+R_SS⁻¹ = [[1, −0.6], [−0.6, 1]] / 0.64 → (0.125 + 0.048 + 1.2 × 0.0775) / 0.64 = 0.416.
+d = √(0.416 / 0.8) = **0.721** (with R = identity it would be √(0.173 / 0.8) = 0.465: he is
+worse on A but better on its partner B, which counts as further apart).
+If the position's pair distances were 0.3, 0.6, 0.8, 1.0, 1.4, three of five are further apart →
+**60**.
+Real case: Charlie Wellens (Full Back, League One 2026/27) → Elijah Campbell, d = 1.106; 235,390
+of 291,301 Full Back pairs are further apart → **81**, top of his League One list.
+
+**The Similar players page.** Header: the player (name, club, league, position, season), linked
+to his card. The filters above; the list (click a row or its "Why"; the first is selected). The
+breakdown of the selected match, one row per measure in the score, largest weight × |z gap|
+first: Measure · Weight (% of Overall) · both stored values · both z ("vs league") · Difference
+(match − him, z). A measure one of them lacks shows "—" and "not used". "Open in Compare" opens
+the two on Compare. One line under the table: "Score uses every measure together, allowing for
+measures that move together."
+
+Built once per season and position per data version (`webcache`), warmed with the card
+(0.1–0.3 s per position; 2026/27 keeps 1.4 M pair distances, 5.5 MB); a request takes
+under 10 ms. Never read by the rating or the ranking.
 
 ## 7. Season shown
 
@@ -367,7 +461,7 @@ Players with no market value have no money bands; the areas drop out of
 
 With affordability on, two gates decide whether a player is **signable** (`constrain/filters.py`):
 
-- **Fee gate:** market value ≤ the transfer budget set in the sidebar.
+- **Fee gate:** market value ≤ the transfer budget set in the filters.
 - **Wage gate:** modelled weekly wage within the wage-framework ceiling for his position and
   age band. The wage is a band from **×0.70 to ×1.40** of the central estimate. He passes if
   the **low** end fits, and is flagged **wage-marginal** if the band straddles the ceiling,
@@ -378,13 +472,13 @@ published league wage reporting (`store/reference_data.py`); it is never derived
 market value. Both the wage grid and the ceiling are stand-ins until the club's real wage
 data is loaded.
 
-Survivors are ranked on `objective_composite`, the same stored number the dashboard shows
+Survivors are ranked on `objective_composite`, the same stored number the site shows
 (`player_scorecards`, written by `model/scorecard_run.py`). If nobody passes at a given
 budget, the five best by composite are returned as near-misses.
 
 ## 10. Contract-expiry filter
 
-The sidebar **Contract expiry** filter offers *Any*, *Out of contract summer 2027*,
+The **Contract expiry** filter offers *Any*, *Out of contract summer 2027*,
 *summer 2028*, and *Contract already expired (free agents)* (`seasons.contract_mask`).
 
 - A forward horizon means **still under contract today and expiring by the cut-off**, so
@@ -409,8 +503,8 @@ and superseded by the rule-based playing styles in §6b. It never fed the rating
   are not the same standard.
 - **Early-season ratings are thin.** Small pools are withheld (§5); those that pass the
   floor still rest on fewer matches than a full season.
-- **No physical data** for 2024/25 or the Scottish Championship; those ratings are
-  Performance only.
+- **No physical data** for 2024/25, the Scottish Championship or the newer leagues SkillCorner
+  does not cover (all but Ireland); those ratings are Performance only.
 - **Money is 2025/26 English leagues only**, and fair value is a screening signal with
   wide error (§8).
 - **Event data is on-ball.** Off-ball work is seen only through the SkillCorner Physical
@@ -450,7 +544,12 @@ percentile; the page only picks, weights by minutes and compares. Code: `src/lof
 7. **Players who could close the gap.** This season's rated players at the position (not ours)
    with an Overall above our level — **one list per league, every such player** (no top-15 cap
    since 13 Nov 2026; caption "<N> full backs above <our player> · ranked within <league>"),
-   because a rating compares a player only with his own league, ranked by Overall. Every
+   because a rating compares a player only with his own league, ranked by Overall.
+   **Other leagues (owner 2026-11-20, decision A):** the "above our level" filter, "Top-6 level
+   only", the "Top-6 level" badge and "vs our best" apply to the League One tab only (an Overall
+   from another league is not on our scale). Every other tab lists every rated player at the
+   position, always ranked by Gap closed (ties by Overall, no figure last); caption
+   "<N> wingers · by Gap closed within <league>". Every
    heading sorts the list (13 Nov 2026): numbers highest first, Player and Club A–Z, a second
    click reverses; the choice is kept in the address (`sort=`). Three columns, one per shortfall metric
    from "Biggest shortfalls", show his percentile in his own league and position (green 70+,
@@ -500,9 +599,17 @@ players. For every metric where bar > ours (the "Every shortfall" set):
 * gap = bar − ours; closed = his percentile − ours, kept between 0 and gap (no credit beyond the
   top-6 level, none for being worse than ours; a metric he has no figure for closes nothing).
 * w = the metric's share of the Overall rating = its weight inside its dimension × that
-  dimension's share. Overall = Performance × 4/7 + Physical × 3/7 for outfielders (the club's
-  40 : 30); goalkeepers Performance only. Inside Performance: the club's "All Metrics" weights
+  dimension's share. Overall = Performance × 65% + Physical × 35% for outfielders
+  (`DIMENSION_WEIGHTS`); goalkeepers Performance only. Inside Performance: the club's "All Metrics" weights
   (`performance_weights.py`); inside Physical: equal (1/7 each). Code: `club_vs_league.overall_weights`.
+* **Measures that move together count once (owner 2026-11-20, decision D).** Measures whose
+  percentiles correlate at |r| ≥ 0.8 (this season's rated players at the position, all leagues,
+  20+ pairs; linked pairs chain into one group) share one weight: each member's w is divided by
+  the group's size, then all weights rescaled to sum to 1 (a ratio, so the rescale changes no
+  score). Real 2026/27 groups: e.g. Centre Back {HSR count, HSR distance, sprint count, sprint
+  distance}, {top speed, average match top speed}; in the three midfield positions chaining puts
+  top speed into the running group (6 measures count as one). The fold-out table marks them
+  "linked". Code: `club_vs_league.correlated_groups`, `grouped_weights`.
 * **Gap closed = 100 × Σ w·closed ÷ Σ w·gap**, a whole number (.5 up); "—" if there is no
   shortfall to close. His percentiles are his own (his league and position), as in the metric
   columns.
@@ -510,6 +617,12 @@ players. For every metric where bar > ours (the "Every shortfall" set):
 By default it counts every shortfall. When the recruiter chooses the metric columns (up to 5),
 it counts only those; if none of them is a shortfall it shows "—". "Rank by: Gap closed" lists
 each league's list by it (ties by Overall). "Strong on 2+" always uses the 3 biggest shortfalls.
+
+**Minutes and own league (owner 2026-11-16).** Every league tab except League One carries one
+line under the caption: "Gap closed % is relative to his own league." Our compared player (level
+strip, Gap map row) and each named top-6 player (Gap map detail) show this season's minutes
+(`player_metrics_neutral`, the frame the page already reads); under 900 (`LOW_MINUTES`) a small
+"low minutes" marker is added. No rating is recalculated.
 
 **On the page (13 Nov 2026).** "How this is worked out" shows Gap closed as a mini table built
 live from the page's own figures: the selected position, the player it is measured against (our

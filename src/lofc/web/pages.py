@@ -19,8 +19,9 @@ _NAV: list[tuple[str, list[tuple[str, str, str]]]] = [
     ("Find", [("players", "/players", "Players"), ("squads", "/squads", "Squads & loans")]),
     ("Assess a player", [("compare", "/compare", "Compare"),
                          ("scout-reports", "/scout-reports", "Scout reports")]),
-    ("Decide", [("watchlist", "/watchlist", "Watchlist"), ("report", "/report", "Report"),
-                ("assess", "/assess", "Assess"), ("sign-off", "/sign-off", "Sign-off")]),
+    # Assess and Sign-off retired 2026-11-16 (scouts report through the JotForm sheet); their
+    # old paths redirect to Players (app.py RETIRED_PATHS).
+    ("Decide", [("watchlist", "/watchlist", "Watchlist"), ("report", "/report", "Report")]),
     ("Analysis", [("physical", "/physical", "Physical"),
                   ("club-vs-league", "/club-vs-league", "Club vs League One")]),
     ("Reference", [("rating-reference", "/rating-reference", "What goes into each rating"),

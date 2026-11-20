@@ -2,14 +2,17 @@
 `lofc.core.watchlist_page` (what the Streamlit Watchlist page now calls), over the same
 `store.watchlist` rows, read fresh on every request so an edit shows at once.
 
-    GET  /watchlist?status=&money=&open=      page shell
-    GET  /api/watchlist?status=&money=        tiles + rows   (status repeated; absent = all,
-                                              `status=` alone = none ticked)
-    GET  /api/watchlist/csv?status=&money=    the table as CSV (lofc_watchlist.csv)
+    GET  /watchlist?money=&open=      page shell
+    GET  /api/watchlist?money=        tiles + rows
+    GET  /api/watchlist/csv?money=    the table as CSV (lofc_watchlist.csv)
     POST /api/watchlist/{p}/{c}/{s}  {"note", "status"}   Save (session + X-LOFC-Request)
 
 Remove is the card's `POST /api/card/{p}/{c}/{s}/watchlist {"action": "remove"}`. Like the
 Streamlit page, any signed-in role may edit (no `auth.can` check there).
+
+Web only (owner 2026-11-16): scout_assessments is not used, so the assessment status --
+Streamlit's "Assessment status" filter, "Assessed" column and "Not yet assessed" tile -- is not
+read or shown here; an old `?status=` link lists everyone. The Streamlit page keeps them.
 """
 from __future__ import annotations
 
@@ -35,7 +38,6 @@ COLUMN_HELP = {
     "Injury": "Most recent recorded spell (Transfermarkt). None on file is not a fitness guarantee.",
     "Market value": "Transfermarkt, latest known valuation.",
     "Months left": "Calendar months until the contract expires. Under 6: free to sign a pre-contract.",
-    "Assessed": "Psychological and Medical assessment status. Separate from Status.",
     "Status": "Your own tracking status.",
 }
 
@@ -67,67 +69,58 @@ def _sources():
         def __contains__(self, key):
             return key in _openable(int(key[2]))
     return types.SimpleNamespace(
-        engine=L.get_engine(), store=watchlist, assessment=webcache.assessment_status(None),
+        engine=L.get_engine(), store=watchlist,
         live_season_id=settings.live_season_id, current_form=L.load_current_form,
         injuries_for=L.load_injuries_for_players, scorecards_for=_season_scorecards,
         names=L._competition_name_by_id(), valuations=load_valuations_for_players,
         openable=Openable(), now=None)
 
 
-def _chosen(request: Request) -> list[str]:
-    from lofc.model import assessment_status as AS
-    q = request.query_params
-    if "status" not in q:
-        return list(AS.STATUSES)
-    picked = set(q.getlist("status"))
-    return [s for s in AS.STATUSES if s in picked]
-
-
 def _money(request: Request) -> bool:
     return (request.query_params.get("money") or "").lower() in ("1", "true", "on")
 
 
-def build(chosen: list[str], money: bool):
-    """(state, df, frame, header, alerts): state "empty" | "none" | "ok"."""
+# The retired assessment status (see the module note): `enrich` joins an empty frame, so
+# nothing reads scout_assessments; its column and tile are dropped below.
+_NO_ASSESSMENTS = pd.DataFrame(columns=["player_id", "competition_id", "season_id",
+                                        "assessment_status"])
+_RETIRED_COLUMNS = ["Assessed"]
+_RETIRED_TILES = {"not_assessed"}
+
+
+def build(money: bool):
+    """(state, src, df, frame, header, alerts): state "empty" | "ok"."""
     from lofc.core import watchlist_page as wp
     src = _sources()
     df = src.store.load(src.engine)
     if df.empty:
         return "empty", src, None, None, None, None
-    df, header = wp.enrich(df, assessment=src.assessment, live_season_id=src.live_season_id,
+    df, header = wp.enrich(df, assessment=_NO_ASSESSMENTS, live_season_id=src.live_season_id,
                            current_form=src.current_form, injuries_for=src.injuries_for,
                            scorecards_for=src.scorecards_for, now=src.now)
-    df = wp.filter_status(df, chosen)
-    if df.empty:
-        return "none", src, df, None, header, None
     # Honesty rule (D1): no rating from a pool below MIN_PEERS_FOR_RANKING.
     thin = wp.thin_sizes(df, src.scorecards_for)
     notes = wp.pool_notes(df, src.scorecards_for, src.names)
     df = wp.apply_pool_floor(df, thin)
     df["thin_n"] = thin
     frame = wp.display_frame(df, header, money, src.names, valuations=src.valuations)
+    frame = frame.drop(columns=_RETIRED_COLUMNS)
     # after the display frame: the not-rated line and the midfield-pool tag are not columns
     df["not_rated_line"], df["pool_tag"] = notes["not_rated"], notes["pool_tag"]
     return "ok", src, df, frame, header, wp.alerts(df)
 
 
-def page_json(chosen: list[str], money: bool) -> dict:
+def page_json(money: bool) -> dict:
     from lofc.core import watchlist_page as wp
-    from lofc.model import assessment_status as AS
-    state, src, df, frame, header, alerts = build(chosen, money)
-    out = {"empty": state == "empty", "statuses": list(AS.STATUSES), "chosen": chosen,
-           "status_help": wp.STATUS_HELP, "money": money,
+    state, src, df, frame, header, alerts = build(money)
+    out = {"empty": state == "empty", "money": money,
            "manual_statuses": list(src.store.WATCHLIST_STATUSES)}
     if state == "empty":
         out["text"] = wp.EMPTY
         return out
-    out.update(rows=[], tiles=[], columns=[], none_match=None, form_header=header,
-               help=COLUMN_HELP)
-    if state == "none":
-        out["none_match"] = wp.NONE_MATCH
-        return out
+    out.update(form_header=header, help=COLUMN_HELP)
     out["tiles"] = [{"label": label, "value": alerts[key], "help": tip}
-                    for label, key, tip in wp.TILES]
+                    for label, key, tip in wp.TILES if key not in _RETIRED_TILES]
     out["columns"] = list(frame.columns)
     rows = []
     for i in range(len(df)):
@@ -152,7 +145,6 @@ def page_json(chosen: list[str], money: bool) -> dict:
             "not_rated": r["not_rated_line"] if isinstance(r["not_rated_line"], str) else None,
             "pool_tag": r["pool_tag"] if isinstance(r["pool_tag"], str) else None,
             "href": f"/player/{p}/{c}/{s}" if (p, c, s) in src.openable else None,
-            "assess_href": f"/assess?player={p}&competition={c}&season={s}",
             "tm": tm if isinstance(tm, str) and tm.startswith("https://") else None})
     out["rows"] = rows
     return out
@@ -160,14 +152,14 @@ def page_json(chosen: list[str], money: bool) -> dict:
 
 @router.get("/api/watchlist")
 async def watchlist_json(request: Request, user: WebUser = Depends(current_user)):
-    data = await run_in_threadpool(page_json, _chosen(request), _money(request))
+    data = await run_in_threadpool(page_json, _money(request))
     return JSONResponse(data)
 
 
 @router.get("/api/watchlist/csv")
 async def watchlist_csv(request: Request, user: WebUser = Depends(current_user)):
     def run():
-        state, _src, _df, frame, *_ = build(_chosen(request), _money(request))
+        state, _src, _df, frame, *_ = build(_money(request))
         return frame.drop(columns=[c for c in ("thin_n",) if c in frame.columns]) \
             if state == "ok" else None
     frame = await run_in_threadpool(run)
@@ -215,11 +207,10 @@ def warm_watchlist() -> None:
     ~5 s cold. Never raises."""
     import logging
     import time
-    from lofc.model import assessment_status as AS
     log = logging.getLogger("lofc.web.warmup")
     t0 = time.perf_counter()
     try:
-        page_json(list(AS.STATUSES), True)
+        page_json(True)
     except Exception:                                           # noqa: BLE001
         log.warning("watchlist warm-up failed", exc_info=True)
     log.warning("watchlist warm-up done in %.1f s", time.perf_counter() - t0)

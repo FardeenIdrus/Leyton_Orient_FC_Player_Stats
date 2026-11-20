@@ -120,7 +120,7 @@ _SCORECARD_TABLES = _CORE_TABLES + ("player_scorecards",)
 # does not change the tokens above (`_hash_stats` keeps only the tables asked for).
 _WEB_TABLES = _SCORECARD_TABLES + ("player_detail_metrics", "scout_reports",
                                    "scout_assessments", "transfermarkt_squads",
-                                   "skillcorner_match_counts")
+                                   "skillcorner_match_counts", "impect_squad_minutes")
 
 
 def _hash_stats(stats: pd.DataFrame, postmaster_start: str, tables) -> str:

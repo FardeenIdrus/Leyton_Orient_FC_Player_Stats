@@ -238,3 +238,54 @@ def test_scout_verdicts_none_and_blanks():
                              submitted_at=dt.date(2026, 9, 1))])
     assert rp.scout_verdicts(rows) == [{"scout": "Ann", "verdict": "—", "date": "—",
                                         "tone": "other"}]
+
+
+# ---- the Players page's "Scout verdicts" column (owner 2026-11-16) -----------------------------
+def _pid_rows(rows):
+    cols = ["player_id", "scout", "verdict", "fixture_date", "submitted_at", "missing_since"]
+    return pd.DataFrame([{**dict.fromkeys(cols), **r} for r in rows], columns=cols)
+
+
+def test_verdicts_by_player_counts_every_report_and_keeps_latest_per_scout():
+    rows = _pid_rows([
+        dict(player_id=7, scout="Ann", verdict="Monitor", fixture_date=dt.date(2026, 8, 1)),
+        dict(player_id=7, scout="Ann", verdict="Sign", fixture_date=dt.date(2026, 9, 12)),
+        dict(player_id=7, scout="Bob", verdict="Sign", fixture_date=dt.date(2026, 10, 3)),
+        dict(player_id=7, scout="Cy", verdict="Unrealistic Player: Wages / Fee",
+             fixture_date=dt.date(2026, 7, 5)),
+        dict(player_id=7, scout="Dee", verdict="Don't sign", fixture_date=dt.date(2026, 7, 1),
+             missing_since=pd.Timestamp("2026-10-01")),                            # withdrawn
+        dict(player_id=9, scout="Ann", verdict="Monitor Priority", fixture_date=dt.date(2026, 9, 1)),
+    ])
+    out = rp.verdicts_by_player(rows)
+    assert set(out) == {7, 9}
+    seven = out[7]
+    # every live report counted; the club's order first (Sign, Monitor Priority, Monitor,
+    # Don't sign), anything else after
+    assert seven["pills"] == [
+        {"text": "2 Sign", "tone": "positive"}, {"text": "1 Monitor", "tone": "neutral"},
+        {"text": "1 Unrealistic Player: Wages / Fee", "tone": "other"}]
+    assert seven["text"] == "2 Sign · 1 Monitor · 1 Unrealistic Player: Wages / Fee"
+    # the tooltip: each scout's LATEST verdict (the report's own rule), newest first
+    assert seven["tip"] == ("Bob: Sign · 3 Oct 2026\nAnn: Sign · 12 Sep 2026\n"
+                            "Cy: Unrealistic Player: Wages / Fee · 5 Jul 2026")
+    assert seven["latest"] == {"Sign", "Unrealistic Player: Wages / Fee"}
+    assert out[9]["latest"] == {"Monitor Priority"}
+    assert out[9]["pills"] == [{"text": "1 Monitor Priority", "tone": "neutral"}]
+
+
+def test_verdicts_by_player_empty_and_unlinked():
+    assert rp.verdicts_by_player(_pid_rows([])) == {}
+    rows = _pid_rows([dict(player_id=None, scout="Ann", verdict="Sign")])
+    assert rp.verdicts_by_player(rows) == {}
+
+
+def test_verdict_filter_choices_and_matching():
+    assert rp.VERDICT_FILTERS == ["Any", "Has a scout report", "Sign", "Monitor Priority",
+                                  "Monitor", "Don't sign"]
+    info = {"latest": {"Monitor", "Don't sign"}}
+    assert rp.verdict_matches(info, "Any") and rp.verdict_matches(None, "Any")
+    assert rp.verdict_matches(info, "Has a scout report")
+    assert not rp.verdict_matches(None, "Has a scout report")
+    assert rp.verdict_matches(info, "Don't sign") and rp.verdict_matches(info, "Monitor")
+    assert not rp.verdict_matches(info, "Sign") and not rp.verdict_matches(None, "Sign")

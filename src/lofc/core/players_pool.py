@@ -345,8 +345,7 @@ class ListRequest:
     show_money: bool = False
     pct: dict = field(default_factory=dict)          # performance metric -> minimum percentile
     raw: dict = field(default_factory=dict)          # physical metric -> slider value
-    assessed: bool = False                           # "Rank on scout-verified rating"
-    signed_only: bool = False
+    scout: str = "Any"                               # "Scout verdict" filter (display only)
     signable: bool | None = None                     # None = Streamlit's default (on if any qualify)
     sort: str | None = None                          # a column label; None = the ranking order
     descending: bool = True
@@ -385,12 +384,12 @@ def season_notice(res: PoolResult, f: PoolFilters) -> tuple[str, str] | None:
 
 
 def build_list(req: ListRequest, res: PoolResult | None = None) -> ListResult:
-    """Metric filters -> assessed ranking -> sort -> signable -> the displayed table, the steps
-    `tabs/players.py::_players` ran inline. Formatting helpers are Streamlit's own."""
+    """Metric filters -> scout verdict filter -> sort -> signable -> the displayed table, the
+    steps `tabs/players.py::_players` ran inline (its assessed ranking is not offered here:
+    retired on the web 2026-11-16). Formatting helpers are Streamlit's own."""
     from lofc.dashboard.tabs import players as pt
     from lofc.dashboard.formatting import numeric_or_dash
-    from lofc.core import webcache
-    from lofc.model import assessment_status
+    from lofc.core import report_page as rp
 
     f = req.filters
     res = res or build_pool(f)
@@ -400,40 +399,20 @@ def build_list(req: ListRequest, res: PoolResult | None = None) -> ListResult:
 
     pool, unknown = apply_metric_values(res.pool, f.season_id, position, f.archetype,
                                         req.pct, req.raw)
+    rank_column = RANK_COLUMN
+    pool = pool.sort_values(rank_column, ascending=False, na_position="last").reset_index(drop=True)
+    # Scout verdicts: what the club's scouts said (scout_reports). Display and filter only --
+    # filtered AFTER the sort, so the order is the ranking's; nothing here touches the composite.
+    verdicts = rp.all_player_verdicts()
+    if req.scout != rp.VERDICT_ANY:
+        keep = pool["player_id"].map(lambda p: rp.verdict_matches(verdicts.get(int(p)), req.scout))
+        pool = pool[keep.astype(bool)].reset_index(drop=True)
     meta: dict = {"hidden": unknown, "hidden_text": hidden_text(unknown),
                   "contract_caption": _contract_caption(f, len(pool), res.contract_unknown),
                   "rank_caption": (f"Rank as **{f.archetype}** — the Composite is scored on this "
                                    "archetype's metrics; **All-round** shows the full-profile "
                                    "composite for context.") if lens else None,
-                  "assessed_caption": None, "money_count": None}
-
-    if req.assessed:
-        # Match the loader the rest of the page uses: an archetype lens ranks on that
-        # archetype's assessed composite.
-        sc = scorecards(f.season_id, position, f.archetype)
-        pool = pool.merge(sc[KEYS3 + ["assessed_composite"]], on=KEYS3, how="left")
-        # the same frame as `load_assessment_status`, kept until an assessment changes
-        pool = assessment_status.attach(pool, webcache.assessment_status(f.season_id))
-        # Conflicted assessments have no composite; count them rather than hide them silently.
-        conflicted = int((pool["assessment_status"] == assessment_status.CONFLICTED).sum())
-        pool = pool[pool["assessed_composite"].notna()]
-        rank_column = "assessed_composite"
-        if req.signed_only:
-            pool = pool[pool["assessment_status"] == assessment_status.SIGNED_OFF]
-        if pool.empty:
-            msg = ("No player has both dimensions assessed yet — the assessed ranking is empty "
-                   "until a scout completes Psychological and Medical.")
-        else:
-            msg = (f"{len(pool)} players have both human dimensions assessed. This is a "
-                   "different ranking from the default, not a filter on it.")
-        if conflicted:
-            msg += (f" **{conflicted} assessed player{'s' if conflicted != 1 else ''} not shown** "
-                    "here — their assessments conflict, so nothing scores until someone signs "
-                    "one off from the sign-off queue.")
-        meta["assessed_caption"] = msg
-    else:
-        rank_column = RANK_COLUMN
-    pool = pool.sort_values(rank_column, ascending=False, na_position="last").reset_index(drop=True)
+                  "money_count": None}
 
     only_qualifying = False
     if req.show_money:
@@ -465,13 +444,10 @@ def build_list(req: ListRequest, res: PoolResult | None = None) -> ListResult:
                      if "strong_styles" in view.columns else [[] for _ in range(len(view))])
     if {"loan_club", "parent_club"} <= set(view.columns):
         view["On loan at"] = pt.on_loan_at_column(view["loan_club"], view["parent_club"])
-    # What the club's scouts concluded; blank = nobody watched him. Display only.
-    consensus = webcache.scout_consensus()      # = consensus_by_player, kept per data version
-    if not consensus.empty:
-        view = view.merge(consensus[["player_id", "Scouts"]], on="player_id", how="left")
-    else:
-        view["Scouts"] = None
-    view["Scouts"] = view["Scouts"].fillna("")
+    # What the club's scouts said; blank = nobody watched him. Display only.
+    info = [verdicts.get(int(p)) for p in view["player_id"].tolist()]
+    view["Scout verdicts"] = [i["text"] if i else "" for i in info]
+    view["_verdicts"] = [{"pills": i["pills"], "tip": i["tip"]} if i else None for i in info]
     if lens:
         view["All-round"] = view["allround_composite"].round(2)
     view["Age"] = numeric_or_dash(view["age"], "{:.1f}")
@@ -487,11 +463,10 @@ def build_list(req: ListRequest, res: PoolResult | None = None) -> ListResult:
     loan_active = f.loan != S.LOAN_ANY
     columns = pt.players_table_columns(lens=lens, show_money=req.show_money,
                                        loan_column=loan_active and "On loan at" in view.columns)
-    meta["composite_label"] = ("Scout-verified rating" if req.assessed
-                               else f"Composite ({f.archetype})" if lens else "Composite")
-    meta["composite_help"] = (
-        "Performance + Physical + Psychological + Medical (1-5) — the assessed ranking, opt-in."
-        if req.assessed else "The club's objective composite (1-5) — the ranking.")
+    # web only (owner 2026-11-16): Scout verdicts replaces Streamlit's Scouts column
+    columns[columns.index("Scouts")] = "Scout verdicts"
+    meta["composite_label"] = f"Composite ({f.archetype})" if lens else "Composite"
+    meta["composite_help"] = "The club's objective composite (1-5) — the ranking."
     if req.sort and req.sort in columns and req.sort in table.columns and len(table):
         table = _sorted(table, req.sort, req.descending)
     return ListResult(pool=res, table=table, columns=columns,
@@ -541,20 +516,19 @@ COLUMN_HELP = {
     "Below fair value": "How far under fair value the market prices them. '—' = no known valuation.",
     "Fee in budget": "Transfer fee fits the budget.",
     "Wages in budget": "Modelled wage fits the ceiling.",
+    "Scout verdicts": "Scout reports by verdict. Hover: each scout's latest.",
 }
 
 
 def column_defs(lr: ListResult) -> list[dict]:
-    from lofc.dashboard.tabs.players import SCOUTS_HELP
     out = []
     for c in lr.columns:
         label, help_ = c, COLUMN_HELP.get(c)
         if c == "Composite":
             label, help_ = lr.meta["composite_label"], lr.meta["composite_help"]
-        elif c == "Scouts":
-            help_ = SCOUTS_HELP
         kind = ("rating" if c in RATING_COLUMNS else "style" if c == "Style"
-                else "scouts" if c == "Scouts" else "bool" if c in ("Fee in budget", "Wages in budget")
+                else "verdicts" if c == "Scout verdicts"
+                else "bool" if c in ("Fee in budget", "Wages in budget")
                 else "num" if c in ("#", "Age", "Mins", "Top speed", "Market value", "Est. wage",
                                     "Below fair value") else "text")
         out.append({"key": c, "label": label, "help": help_, "kind": kind})
@@ -598,8 +572,9 @@ def row_dicts(lr: ListResult) -> list[dict]:
     from lofc.core.card import pool_tag
     tags = [pool_tag(v) for v in t["peer_pool"].tolist()] if "peer_pool" in t.columns \
         else [None] * len(t)
+    verdicts = t["_verdicts"].tolist() if "_verdicts" in t.columns else [None] * len(t)
     return [{"id": [int(a), int(b), int(c)], "cells": {k: cols[k][i] for k in lr.columns},
-             "tag": tags[i]}
+             "tag": tags[i], "verdicts": verdicts[i]}
             for i, (a, b, c) in enumerate(ids)]
 
 

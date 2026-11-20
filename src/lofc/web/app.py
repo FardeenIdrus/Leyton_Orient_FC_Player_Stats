@@ -121,6 +121,9 @@ def _form(body: bytes) -> dict[str, str]:
                                                       keep_blank_values=True).items()}
 
 
+RETIRED_PATHS = ("/assess", "/sign-off", "/signoff")
+
+
 def lockout_message(seconds: int) -> str:
     """Same wording as the Streamlit login (`dashboard.session.lockout_message`), rounded UP."""
     minutes = max(1, -(-seconds // 60))
@@ -331,6 +334,8 @@ def create_app(*, users=None, secret: str | None = None, info_items=None,
     players_api.mount(app, render, shell)
     from lofc.web.api import card as card_api
     card_api.mount(app, render, shell)
+    from lofc.web.api import similar as similar_api
+    similar_api.mount(app, render, shell)
     from lofc.web.api import compare as compare_api
     compare_api.mount(app, render, shell)
     from lofc.web.api import report as report_api
@@ -352,6 +357,13 @@ def create_app(*, users=None, secret: str | None = None, info_items=None,
 
     for page in pages.PAGES.values():
         register(page)
+
+    # Retired pages (owner 2026-11-16): in-platform Assess and Sign-off were never used. Old
+    # links and bookmarks land on Players; the tables and the Streamlit pages are untouched.
+    async def retired(request: Request):
+        return RedirectResponse("/players", status_code=303)
+    for path in RETIRED_PATHS:
+        app.add_api_route(path, retired, methods=["GET"], include_in_schema=False)
 
     def start_rewarm_watcher() -> None:
         # Once every start-up warm-up has finished, watch the data version: any write (a

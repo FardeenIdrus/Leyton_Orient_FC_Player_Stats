@@ -3,7 +3,7 @@ workbook "LOFC - what goes into each rating - Weightings to be assigned 5", owne
 
 Each metric is tagged High / Mid / Low; one weight per tier within a table; every table sums
 to exactly 1 (exact fractions, so no rounding drift). Physical has NO weights yet -- it stays
-an equal-weight average, and the 57% Performance / 43% Physical split is unchanged.
+an equal-weight average. (The Performance : Physical split is in club_framework: 65 : 35.)
 
 Taken from the workbook as written, except five tables whose tiers were applied unevenly
 (owner: "ensure the weighting is accurate"). Each keeps its tier RATIO, scaled to sum to 1:

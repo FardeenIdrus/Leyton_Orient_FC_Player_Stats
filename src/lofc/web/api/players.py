@@ -86,8 +86,11 @@ class Query:
         self.budget = _num(g("budget"), 0, 150, None)
         self.wage = _num(g("wage"), 0, 200_000, None)
         self.wage_x = _num(g("wage_x"), 0.5, 25, None)
-        self.assessed = _flag(g("assessed"))
-        self.signed_only = _flag(g("signed_only")) and self.assessed
+        # "Scout verdict" (owner 2026-11-16); the old assessed / signed_only switches are gone
+        # and their parameters ignored, so an old link still opens the normal ranking.
+        from lofc.core.report_page import VERDICT_ANY, VERDICT_FILTERS
+        sv = g("scout")
+        self.scout = sv if sv in VERDICT_FILTERS else VERDICT_ANY
         sg = g("signable")
         self.signable = None if sg in (None, "") else _flag(sg)
         self.sort = g("sort") or None
@@ -110,12 +113,12 @@ class Query:
 
     def request(self) -> pp.ListRequest:
         return pp.ListRequest(filters=self.filters(), show_money=self.money, pct=self.pct,
-                              raw=self.raw, assessed=self.assessed, signed_only=self.signed_only,
+                              raw=self.raw, scout=self.scout,
                               signable=self.signable, sort=self.sort, descending=self.descending)
 
 
-# The pool only depends on the sidebar-style filters, so moving a metric slider, toggling the
-# assessed ranking or sorting reuses it. Keyed on the data version so a pipeline write
+# The pool only depends on the sidebar-style filters, so moving a metric slider, the scout
+# verdict filter or sorting reuses it. Keyed on the data version so a pipeline write
 # invalidates it; a few entries only (each holds one season's candidate frame).
 _pool_cache: "collections.OrderedDict[tuple, pp.PoolResult]" = collections.OrderedDict()
 _pool_lock = threading.Lock()
@@ -198,7 +201,7 @@ def list_payload(q: Query) -> tuple[dict, pp.ListResult]:
         "meta": f"{season_name} · {_scope(q)} · 450+ minutes",
         "notice": None if notice is None else {"level": notice[0], "text": notice[1]},
         "count_caption": m["count_caption"], "contract_caption": m["contract_caption"],
-        "rank_caption": m["rank_caption"], "assessed_caption": m["assessed_caption"],
+        "rank_caption": m["rank_caption"],
         "hidden": m["hidden"], "hidden_text": m["hidden_text"],
         "signable": m["signable"], "money_count": m["money_count"],
         "affordable_now": m.get("affordable_now"),
@@ -234,6 +237,7 @@ async def options(user: WebUser = Depends(current_user)):
 def options_payload() -> dict:
     """Filter choices + help texts: the same for everyone until the data changes (it read a
     600 s scrape-date loader and the wage framework on every page load)."""
+    from lofc.core.report_page import VERDICT_FILTERS
     seasons = pp.season_options()
     ceilings = {p: pp.prime_ceiling(p) for p in pp.POSITION_ORDER}
     return {
@@ -242,7 +246,7 @@ def options_payload() -> dict:
         "leagues": L.league_names(), "archetypes": pp.archetypes_by_position(),
         "default_archetype": cf.DEFAULT_ARCHETYPE, "styles": pp.styles_by_position(),
         "contract": list(S.CONTRACT_HORIZONS), "loan": S.LOAN_FILTERS,
-        "foot": pp.FOOT_CHOICES, "minutes": pp.minutes_bounds(),
+        "foot": pp.FOOT_CHOICES, "minutes": pp.minutes_bounds(), "scout": VERDICT_FILTERS,
         "max_age": {"min": 18, "max": 40, "default": 40},
         "budget": {"min": 0, "max": 150, "step": 0.5, "default": 5.0},
         "wage_x": {"min": 0.5, "max": 25, "step": 0.5, "default": 1.0},
@@ -270,10 +274,7 @@ def options_payload() -> dict:
             "wage_x": ("1× = Leyton Orient's modelled weekly-wage ceiling for each position "
                        "and age band (modelled estimates)."),
             "wage_pounds": "Weekly wage cap for a prime-age player in this position.",
-            "assessed": ("Ranks on Performance + Physical + Psychological + Medical Risk (86% "
-                         "of the framework's weight; the data-only rating is 64%). Only players "
-                         "with BOTH human dimensions assessed."),
-            "signed_only": "Only signed-off assessments (an unsigned one still scores).",
+            "scout": "Any scout's latest verdict. The ranking is unchanged.",
         },
     }
 
@@ -302,8 +303,8 @@ async def wage(request: Request, user: WebUser = Depends(current_user)):
 
 # Whole answers, keyed by the exact query: back/forward and toggling a sort or switch on and
 # off ask for the same list again. Keyed on `web_data_version`, which also tracks the scout
-# reports (Scouts column) and the scout assessments (scout-verified ranking), so a saved report
-# or assessment shows within ~30 s, as the 60 s loaders it replaces did.
+# reports (Scout verdicts column), so a synced report shows within ~30 s, as the
+# 60 s loaders it replaces did.
 _answers: "collections.OrderedDict[tuple, bytes]" = collections.OrderedDict()
 _ANSWER_CACHE_SIZE = 64
 
