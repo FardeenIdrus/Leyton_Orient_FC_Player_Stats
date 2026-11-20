@@ -2,9 +2,11 @@
 // broken down measure by measure. Draws what /api/similar/... sends; it computes no number.
 // Provider strings go through esc() or textContent, never raw into innerHTML.
 import {esc, dash, fmtInt, chip, api, readState, writeState, onStateChange} from './common.js';
+import {PAGE, filterRows, rowText} from './report_search.js';
 
 const $ = id => document.getElementById(id);
 const root = $('v-similar');
+const HAS_PLAYER = !!root.dataset.player;
 const KEY = `${root.dataset.player}/${root.dataset.competition}/${root.dataset.season}`;
 
 const fromUrl = q => ({scope: q.scope === 'all' ? 'all' : 'league', max_age: q.max_age || '',
@@ -135,5 +137,52 @@ function bind() {
   onStateChange(q => { st = fromUrl(q); load(); });
 }
 
-bind();
-load();
+// ---- player search (owner 2026-11-20: Similar players is its own page in the nav) ----------
+// Every player of the chosen season A-Z (the Report's list, /api/report/players); typing
+// filters it; a pick opens /similar/<player>/<league>/<season>, keeping the filters.
+const seasonRows = {};
+const rowsFor = season => {
+  if (!seasonRows[season]) {
+    seasonRows[season] = api('/api/report/players?' + new URLSearchParams({season})).then(d => d.rows || []);
+    seasonRows[season].catch(() => { delete seasonRows[season]; });
+  }
+  return seasonRows[season];
+};
+
+function wireSearch() {
+  const box = $('sim-search'), out = $('sim-results'), season = $('sim-season');
+  let shown = [], drawn = 0, seq = 0;
+  const more = () => {
+    const next = shown.slice(drawn, drawn + PAGE);
+    out.insertAdjacentHTML('beforeend', next.map((r, k) =>
+      `<button type="button" data-i="${drawn + k}">${esc(rowText(r))}</button>`).join(''));
+    drawn += next.length;
+  };
+  const run = async () => {
+    const mine = ++seq, sid = season.value;
+    let rows;
+    try { rows = await rowsFor(sid); } catch { rows = []; }
+    if (mine !== seq) return;
+    shown = filterRows(rows, box.value); drawn = 0;
+    out.innerHTML = shown.length ? '' : `<div class="none">${esc(rows.length
+      ? 'No player matches that name in this season.' : 'No players in this season.')}</div>`;
+    out.scrollTop = 0; more(); out.hidden = false;
+  };
+  out.addEventListener('scroll', () => {
+    if (drawn < shown.length && out.scrollTop + out.clientHeight >= out.scrollHeight - 400) more();
+  });
+  box.addEventListener('focus', run);
+  box.addEventListener('input', () => { clearTimeout(box._t); box._t = setTimeout(run, 60); });
+  season.addEventListener('change', () => { if (!out.hidden || box.value) run(); });
+  out.addEventListener('click', e => {
+    const b = e.target.closest('button[data-i]'); if (!b) return;
+    const r = shown[+b.dataset.i];
+    location.href = `/similar/${r[0]}/${r[1]}/${season.value}${query(st, {match: false})}`;
+  });
+  document.addEventListener('click', e => { if (!e.target.closest('.searchbox')) out.hidden = true; });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') out.hidden = true; });
+}
+
+wireSearch();
+if (HAS_PLAYER) { bind(); load(); }
+else $('sim-status').textContent = 'Search a player to see his closest matches.';

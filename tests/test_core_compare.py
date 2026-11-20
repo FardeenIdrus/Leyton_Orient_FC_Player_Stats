@@ -134,3 +134,110 @@ def test_default_candidates_same_with_a_kept_lookup():
     want = ["D", "A", "B"]
     assert C.default_candidates(pool, idx, "Winger") == want
     assert C.default_candidates(pool, idx, "Winger", C.index_lookup(idx)) == want
+
+
+# ---- one season per slot (owner 2026-11-20): honesty when the slots' league or season differ ---
+def _now(**kw):
+    base = {"player_id": 1, "competition_id": 4, "season_id": 319, "player_name": "P",
+            "team_name": "T", "league": "League One", "objective_composite": 3.68,
+            "performance_band": 3.50, "physical_band": 4.10}
+    base.update(kw)
+    return pd.Series(base)
+
+
+def _prev(league):
+    return pd.DataFrame([{"player_id": 1, "prev_composite": 3.41, "prev_physical": 4.50,
+                          "prev_performance": 3.40, "prev_league": league}])
+
+
+def test_season_change_from_another_league_is_was_x_without_a_delta_or_colour():
+    row = C.compare_row(_now(), _prev("League Two"))
+    assert row["Overall"] == "3.41 (League Two) → 3.68"
+    assert row["Performance"] == "3.40 (League Two) → 3.50"
+    assert row["Physical"] == "4.50 (League Two) → 4.10"
+    assert C.change_parts(row["Overall"]) == {"now": "3.68", "sub": "was 3.41 (League Two)",
+                                              "tone": "neutral"}
+    assert C.change_parts(row["Physical"])["sub"] == "was 4.50 (League Two)"
+
+
+def test_season_change_in_the_same_league_keeps_its_delta_and_colour():
+    row = C.compare_row(_now(), _prev("League One"))
+    assert row["Overall"] == "3.41 → 3.68 (+0.27)"
+    assert C.change_parts(row["Overall"])["tone"] == "up"
+
+
+def test_mixed_means_any_difference_in_league_or_season():
+    a = _now()
+    assert not C.mixed([a, _now(player_id=2)])
+    assert C.mixed([a, _now(season_id=318)])
+    assert C.mixed([a, _now(competition_id=5)])
+
+
+def test_uncoloured_drops_best_and_worst_and_leaves_the_rows_alone():
+    rows = [{"metric": "x", "label": "X", "tier": "High",
+             "cells": [{"text": "1", "pct": 90.0, "cls": "best"},
+                       {"text": "2", "pct": 10.0, "cls": "worst"}]}]
+    out = C.uncoloured(rows)
+    assert [c["cls"] for c in out[0]["cells"]] == [None, None]
+    assert [c["text"] for c in out[0]["cells"]] == ["1", "2"]
+    assert rows[0]["cells"][0]["cls"] == "best"
+
+
+def test_season_league_heading():
+    assert C.season_league("2025/26", "League Two") == "2025/26 · League Two"
+    assert C.season_league("2025/26", None) == "2025/26"
+
+
+def test_season_options_list_only_his_seasons_in_this_position_newest_first():
+    by_season = {319: {("Winger", 7): [4]}, 318: {("Winger", 7): [5, 903]},
+                 317: {("Centre Back", 7): [5]}}
+    seasons = {319: "2026/27", 318: "2025/26", 317: "2024/25"}
+    leagues = {4: "League One", 5: "League Two", 903: "Premier League 2"}
+    assert C.season_options(7, "Winger", by_season, seasons.get, leagues.get) == [
+        {"season": 319, "competition_id": 4, "label": "2026/27 · League One"},
+        {"season": 318, "competition_id": 5, "label": "2025/26 · League Two"},
+        {"season": 318, "competition_id": 903, "label": "2025/26 · Premier League 2"}]
+
+
+def test_display_names_add_the_season_when_a_player_is_compared_with_himself():
+    a, b = _now(), _now(season_id=318)
+    assert C.display_names([a, b]) == ["P (2026/27)", "P (2025/26)"]
+    assert C.display_names([a, _now(team_name="U")]) == ["P (T)", "P (U)"]     # unchanged
+
+
+def test_per_season_frames():
+    frames = C.BySeason({318: "a", 319: "b"})
+    assert C.per_season(frames, 319) == "b" and C.per_season("plain", 319) == "plain"
+
+
+def test_orient_line_only_when_every_shown_player_is_league_one_in_its_season():
+    l1 = _now()
+    assert C.orient_allowed([l1, _now(player_id=2)], 319)
+    assert not C.orient_allowed([l1, _now(competition_id=5)], 319)
+    assert not C.orient_allowed([l1, _now(season_id=318)], 319)
+    assert not C.orient_allowed([_now(season_id=318)] * 2, 319)
+
+
+def _pool():
+    return pd.DataFrame({"player_id": [1, 2, 3, 4, 5],
+                         "league": ["League Two", "League One", "Championship", "League One",
+                                    "League Two"]})
+
+
+ORDER = ["Championship", "League One", "League Two"]
+
+
+def test_opening_league_is_league_one_when_present_else_the_first_chosen():
+    assert C.opening_league(_pool(), (), ORDER) == "League One"
+    assert C.opening_league(_pool(), ("Championship", "League One"), ORDER) == "League One"
+    assert C.opening_league(_pool(), ("League Two", "Championship"), ORDER) == "League Two"
+    no_l1 = _pool()[_pool()["league"] != "League One"]
+    assert C.opening_league(no_l1, (), ORDER) == "Championship"
+    assert C.opening_league(_pool().iloc[0:0], (), ORDER) is None
+
+
+def test_league_grouped_keeps_the_pool_order_within_each_league_never_across():
+    got = C.league_grouped(_pool(), (), ORDER)
+    assert got["player_id"].tolist() == [2, 4, 3, 1, 5]        # League One first, then ORDER
+    got = C.league_grouped(_pool(), ("League Two", "Championship"), ORDER)
+    assert got["player_id"].tolist() == [1, 5, 3, 2, 4]

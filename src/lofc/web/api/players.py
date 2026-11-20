@@ -5,8 +5,9 @@ parameters into a request and the result into JSON.
     GET /players                    page shell (replaces the placeholder)
     GET /api/players/options        filter choices + defaults (+ help texts)
     GET /api/players/metrics        metric-filter sliders for a season/position/Rank as
-    GET /api/players                the ranked list (rows, captions, not-ranked)
-    GET /api/players.csv            the same list as CSV ("exactly what is on screen")
+    GET /api/players                one league tab's ranked list (rows, captions, not-ranked)
+                                    + every chosen league's tab and count (owner 2026-11-20)
+    GET /api/players.csv            every tab as CSV, one block per league
     GET /api/players/search?q=      every position and league this season
     GET /api/players/wage           wage slider <-> £ box conversion
 """
@@ -70,6 +71,8 @@ class Query:
         chosen = [x for x in params.getlist("leagues") if x in all_leagues]
         # Every league selected = no league filter (the shared-filters rule on Squads too).
         self.leagues = tuple(chosen) if chosen and set(chosen) < set(all_leagues) else ()
+        # the open tab; checked against the tabs once the pool is known (junk -> the default)
+        self.league = g("league") or None
         top = pp.minutes_bounds()["max"]
         self.min_minutes = int(_num(g("min_minutes"), 450, top, 450))
         self.max_age = int(_num(g("max_age"), 18, 40, 40))
@@ -170,15 +173,22 @@ def _plural(position: str) -> str:
     return f"{position}s"
 
 
-def _scope(q: Query) -> str:
-    n = len(q.leagues)
-    return "All leagues" if not n else q.leagues[0] if n == 1 else f"{n} leagues"
+def _tabs(q: Query, req: pp.ListRequest, res: pp.PoolResult) -> tuple[list[str], str | None]:
+    """One tab per chosen league (owner 2026-11-20): ratings are within league, so leagues are
+    never ranked in one list. Returns (tabs in the picker's order, the open tab)."""
+    present = set(res.pool["league"].dropna()) | set(res.withheld["league"].dropna())
+    tabs = pp.tab_leagues(L.league_names(), req.filters.leagues, present)
+    return tabs, pp.default_tab(tabs, q.league)
 
 
 def list_payload(q: Query) -> tuple[dict, pp.ListResult]:
     t0 = time.perf_counter()
     req = q.request()
     res = cached_pool(req.filters)
+    tabs, league = _tabs(q, req, res)
+    counts = pp.league_counts(req, res, tabs)
+    if league is not None:
+        req, res = pp.league_request(req, res, league)
     lr = pp.build_list(req, res)
     f, m = req.filters, lr.meta
     notice = pp.season_notice(res, f)
@@ -198,7 +208,8 @@ def list_payload(q: Query) -> tuple[dict, pp.ListResult]:
     payload = {
         "season": f.season_id, "season_name": season_name, "position": f.position,
         "title": _plural(f.position),
-        "meta": f"{season_name} · {_scope(q)} · 450+ minutes",
+        "meta": f"{season_name} · {league or 'All leagues'} · 450+ minutes",
+        "league": league, "tabs": [{"league": lg, "count": counts[lg]} for lg in tabs],
         "notice": None if notice is None else {"level": notice[0], "text": notice[1]},
         "count_caption": m["count_caption"], "contract_caption": m["contract_caption"],
         "rank_caption": m["rank_caption"],
@@ -214,7 +225,7 @@ def list_payload(q: Query) -> tuple[dict, pp.ListResult]:
         "not_ranked": {
             "sub": f"450+ minutes, but fewer than {MIN_PEERS_FOR_RANKING} rated in their league",
             "rows": withheld,
-            "empty": f"No unranked {_plural(f.position)} in {season_name}."},
+            "empty": f"No unranked {_plural(f.position)} in {league or season_name}."},
         "about": about,
         "ms": round((time.perf_counter() - t0) * 1000),
     }
@@ -344,8 +355,11 @@ async def players_csv(request: Request, user: WebUser = Depends(current_user)):
     q = _query_of(request)
 
     def build():
-        _, lr = list_payload(q)
-        return pp.csv_bytes(lr), pp.csv_filename(q.position)
+        req = q.request()
+        res = cached_pool(req.filters)
+        tabs, _ = _tabs(q, req, res)
+        lists = [(lg, pp.build_list(*pp.league_request(req, res, lg))) for lg in tabs]
+        return pp.csv_by_league(lists), pp.csv_filename(q.position)
     data, name = await run_in_threadpool(build)
     return Response(data, media_type="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})

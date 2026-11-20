@@ -404,7 +404,7 @@ def players_download(s, w):
     href = link.get_attribute("href") or ""
     s.note("players: CSV link carries the filters", None if "position=Winger" in href and "season=318" in href else href)
     got = s.page.evaluate("(h) => fetch(h).then(r => r.text().then(t => [r.status, t.split('\\n')[0]]))", href)
-    s.note("players: CSV downloads with today's header", None if got[0] == 200 and got[1].startswith("#,Player,Club,League") else str(got))
+    s.note("players: CSV downloads with today's header", None if got[0] == 200 and got[1].startswith("League,Rank in league,Player,Club") else str(got))
 
 
 def players_history_and_url(s, w):
@@ -659,6 +659,7 @@ def card_squad_season(s, w):
     s.step("card: squad season 2", lambda p: seg.nth(1).click(timeout=3000))
     s.note("card: squad season in the URL", None if "sq_season=" in s.page.url else s.page.url)
     s.note("card: squad section drawn", None if "Where he would sit by rating" in s.page.inner_text("#c-squad")
+           or "so ratings are not compared" in s.page.inner_text("#c-squad")       # owner 2B 2026-11-20
            or "to compare with" in s.page.inner_text("#c-squad")
            or "enough minutes" in s.page.inner_text("#c-squad") else "section empty")
     s.step("card: squad season 1", lambda p: s.page.locator("#sq-seg button").nth(0).click(timeout=3000))
@@ -3700,6 +3701,28 @@ def physical_find_lists_players(s, w):
 
 _COMMON = {"exercise": True, "scenarios": []}
 
+def similar_search(s, w):
+    """Owner 2026-11-20: Similar players in the nav opens with a player search; a pick opens his
+    list on the same page."""
+    s.goto("/similar", check=True, desc="similar: search page")
+    s.note("similar: in the nav, highlighted",
+           None if s.page.locator('nav a[href="/similar"].on').count() else "not highlighted")
+    box = s.page.locator("#sim-search")
+    s.step("similar: type a name", lambda p: box.fill("Wellens", timeout=3000))
+    btn = s.page.locator("#sim-results button").first
+    try:
+        btn.wait_for(timeout=8000)
+    except Exception:
+        return s.note("similar: search lists players", "no results")
+    s.step("similar: pick the player", lambda p: btn.click(timeout=3000), expect_nav=True)
+    s.note("similar: pick opens his page", None if "/similar/" in s.page.url else s.page.url)
+    try:
+        s.page.locator("#sim-list table.sim tbody tr").first.wait_for(timeout=10000)
+        s.note("similar: his list loads", None)
+    except Exception:
+        s.note("similar: his list loads", "no rows")
+
+
 def similar_page(s, w):
     """Similar players page (owner 2026-11-20): 10 rows, the first selected with its breakdown;
     another row selects it (URL match=); All leagues shows the League picker; Open in Compare
@@ -3782,7 +3805,7 @@ PAGES = {
         physical_find_lists_players, info_bar_dates]},
     "club-vs-league": {"path": "/club-vs-league", "exercise": True, "scenarios": [club_vs_league, club_vs_league_gap_closed, club_vs_league_pick_player, club_vs_league_phase_and_example, club_vs_league_sort_every_column, club_vs_league_remembers,
         club_vs_league_gc_one_decimal]},
-    "similar": {"path": "/similar/52123/4/319", "exercise": True, "scenarios": [similar_page]},
+    "similar": {"path": "/similar/52123/4/319", "exercise": True, "scenarios": [similar_page, similar_search]},
     "rating-reference": {"path": "/rating-reference", "exercise": True, "scenarios": [reference_rating]},
     "playing-styles": {"path": "/playing-styles", "exercise": True, "scenarios": [reference_styles]},
     "glossary": {"path": "/glossary", "exercise": True, "scenarios": [reference_glossary]},

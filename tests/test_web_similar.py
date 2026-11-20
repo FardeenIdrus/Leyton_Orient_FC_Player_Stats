@@ -100,14 +100,14 @@ def test_page_api_needs_a_session(fake, path):
     assert fake.page_calls == []
 
 
-def test_page_needs_a_session_and_is_not_in_the_nav():
+def test_page_needs_a_session_and_is_highlighted_in_the_nav():
     c, *_ = make()
     assert c.get(PAGE).status_code == 303
     html = _client().get(PAGE).text
     assert re.search(r'<script type="module" src="/static/v/[0-9a-f]+/js/similar.js">', html)
     assert not re.search(r"<script(?![^>]*\bsrc=)", html) and not re.search(r"\son[a-z]+=", html)
     nav = html.split("<nav", 1)[1].split("</nav>", 1)[0]
-    assert "/similar" not in nav
+    assert re.search(r'<a href="/similar" class="on"', nav)          # owner 2026-11-20: own page
     for i in ("sim-scope", "sim-age", "sim-league", "sim-min", "sim-contract", "sim-list",
               "sim-break", "sim-player"):
         assert f'id="{i}"' in html, i
@@ -136,3 +136,24 @@ def test_page_script_draws_the_breakdown_and_the_compare_link():
     assert "compare_href" in js and "not used" in js and "linked" in js
     html = _client().get(PAGE).text
     assert 'id="sim-compare"' in html and ">Open in Compare<" in html
+
+
+def test_similar_page_in_the_nav_opens_with_a_player_search():
+    """Owner 2026-11-20: Similar players is its own page in the sidebar: search any player of a
+    season, then his list and breakdown (the card's links still open it on a player)."""
+    c, *_ = make()
+    assert c.get("/similar").status_code == 303
+    html = _client().get("/similar").text
+    nav = html.split("<nav", 1)[1].split("</nav>", 1)[0]
+    assert re.search(r'<a href="/similar" class="on"[^>]*>Similar players</a>', nav)
+    for i in ("sim-search", "sim-results", "sim-season"):
+        assert f'id="{i}"' in html, i
+    assert 'data-player=""' in html
+    assert re.search(r'<script type="module" src="/static/v/[0-9a-f]+/js/similar.js">', html)
+
+
+def test_page_script_searches_players_without_ids():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "src/lofc/web/static/js/similar.js").read_text()
+    assert "/api/report/players" in js and "filterRows" in js
+    assert "location.href = `/similar/" in js or "location.assign(`/similar/" in js

@@ -7,7 +7,8 @@ this module only turns the URL into a request and the result into JSON.
     GET /api/compare/pool?(same)   the picker's list: the filtered pool, ranked
     GET /api/compare/search?season=&position=&q=   typed search, that position only (C5)
 
-Slots are "<player_id>-<competition_id>" in the season of `season`. Filters are the Players
+Slots are "<player_id>-<competition_id>" in the season of `season`, or of `a_season` /
+`b_season` / `c_season` when that slot has its own (owner 2026-11-20). Filters are the Players
 page's (`players.Query`), so Compare picks from the same pool (`core.players_pool.build_pool`).
 """
 from __future__ import annotations
@@ -40,6 +41,19 @@ def parse_key(v) -> tuple[int, int] | None:
         return (int(p), int(c)) if p.isdigit() and c.isdigit() else None
     except (TypeError, ValueError):
         return None
+
+
+def slot_keys(params, page_season: int, seasons) -> dict[str, tuple[int, int, int] | None]:
+    """{slot: (player, competition, season)}: a slot's own season (`a_season`=318) when it
+    names one we hold, else the page season -- so every old URL opens as it did."""
+    out = {}
+    for s in SLOTS:
+        key = parse_key(params.get(s))
+        own = params.get(f"{s}_season")
+        own = int(own) if own is not None and str(own).isdigit() else None
+        sid = own if own in set(int(x) for x in seasons) else int(page_season)
+        out[s] = None if key is None else (key[0], key[1], sid)
+    return out
 
 
 # --- version-keyed copies of the loaders Compare reads (webcache: kept until the data changes,
@@ -108,24 +122,32 @@ def _index(season_id: int) -> pd.DataFrame:
 def _lookup(season_id: int) -> dict:
     """`C.index_lookup` of the season's search index plus (player, competition) -> label, kept
     per season: rebuilding them took ~0.3 s of every uncached Compare answer."""
-    look = C.index_lookup(_index(season_id))
+    idx = _index(season_id)
+    look = C.index_lookup(idx)
     look["label_of"] = {(p, c): lbl for (p, c, _s), lbl in look["by_key"].items()}
     look["key_of"] = {v: k for k, v in look["label_of"].items()}
+    # (position, player) -> his competitions this season: a slot's season options
+    pos_of: dict = {}
+    for pos, pid, cid in zip(idx["position_group"].tolist(), idx["player_id"].astype(int).tolist(),
+                             idx["competition_id"].astype(int).tolist()):
+        pos_of.setdefault((pos, pid), []).append(cid)
+    look["pos_of"] = pos_of
     return look
 
 
 @webcache.versioned(maxsize=64)
 def _orient(position: str, season_id: int, exclude: tuple[int, ...] = ()):
-    """`squad.orient_median`, leaving out every compared player who is ours (owner C1,
-    2026-11-09: as the card leaves out its own player). N counts the players actually used."""
+    """Median percentiles of our current players at `position` RATED IN LEAGUE ONE that season
+    (the line is only drawn beside League One players -- owner decision 2B, 2026-11-20: never
+    mix leagues), leaving out every compared player who is ours (owner C1, 2026-11-09).
+    N counts the players actually used."""
     from lofc.core import squad
-    if len(exclude) <= 1:
-        return squad.orient_median(position, season_id,
-                                   exclude_player_id=exclude[0] if exclude else None)
+    from lofc.core.club_vs_league import LEAGUE_ONE
     from lofc.dashboard import loaders as L
     sq = squad.squad()
     ours = squad._ours(position, season_id,
-                       sq_all=sq[~sq["player_id"].astype(int).isin(exclude)])
+                       sq_all=sq[~sq["player_id"].astype(int).isin(list(exclude))])
+    ours = [o for o in ours if o.competition_id == LEAGUE_ONE]
     return squad.median_pct(ours, squad._metric_cols(L.load_scorecard_percentiles(season_id)))
 
 
@@ -142,8 +164,23 @@ def _zone_slice(row) -> pd.DataFrame:
 
 
 # --- payload ---------------------------------------------------------------------------------
-def _slots_from(params) -> dict[str, tuple[int, int] | None]:
-    return {s: parse_key(params.get(s)) for s in SLOTS}
+def _seasons() -> list[int]:
+    from lofc.dashboard import loaders as L
+    return sorted((int(s) for s in L.available_seasons()), reverse=True)
+
+
+def _season_options(pid: int, pos: str) -> list[dict]:
+    from lofc.dashboard import loaders as L
+    from lofc.dashboard import seasons as S
+    names = L.competition_name_by_id()
+    return C.season_options(pid, pos, {s: _lookup(s)["pos_of"] for s in _seasons()},
+                            S.season_name_for, names.get)
+
+
+def _season_tag(label: str, sid: int, page_sid: int) -> str:
+    """A label from another season than the page's carries it: "…  ·  2025/26"."""
+    from lofc.dashboard import seasons as S
+    return label if sid == page_sid else f"{label}  ·  {S.season_name_for(sid)}"
 
 
 class _Q:
@@ -163,6 +200,13 @@ class _Q:
 
 def _filters(params):
     return _Q(params)
+
+
+def _opening_pool(pool: pd.DataFrame, f) -> pd.DataFrame:
+    """The pool league by league (owner 2026-11-20: no cross-league order): the opening picks
+    and the picker list start with League One (or the first chosen league), in its own order."""
+    from lofc.dashboard import loaders as L
+    return C.league_grouped(pool, tuple(f.leagues), L.league_names())
 
 
 def _table(rows: list[dict], withheld=()) -> list[dict]:
@@ -223,34 +267,39 @@ def compare_payload(params) -> dict:
     notice = pp.season_notice(res, f)
     out["notice"] = None if notice is None else {"level": notice[0], "text": notice[1]}
 
-    # Slots exactly as the Streamlit selectboxes: a URL slot of another position (or one not in
-    # this season) falls back to its default; A and B default from the ranked pool.
-    label_of, row_of = look["label_of"], look["row_of"]
-    state: dict = {}
-    for s, key in _slots_from(params).items():
-        if key is not None and key in label_of:
-            state[f"cmp_{s}"] = label_of[key]
+    # Slots as the Streamlit selectboxes: a URL slot of another position (or one we do not hold
+    # in its season) falls back to its default; A and B default from the pool, League One (or
+    # the first chosen league) first. Each slot may be in its own season (owner 2026-11-20).
+    seasons = _seasons()
+    keys: dict = {}
+    for s, key in slot_keys(params, sid, seasons).items():
+        if key is not None and key[1] in _lookup(key[2])["pos_of"].get((pos, key[0]), []):
+            keys[s] = key
+    state: dict = {f"cmp_{s}": _season_tag(_lookup(k[2])["label_of"][k[:2]], k[2], sid)
+                   for s, k in keys.items()}
     state.setdefault("cmp_c", C.NONE_OPTION)
-    C.sanitize_slots(state, same_pos)
-    C.fill_default_slots(state, C.default_candidates(res.pool, idx, pos, look))
-    picks = [state["cmp_a"], state["cmp_b"], state["cmp_c"]]
+    C.fill_default_slots(state, C.default_candidates(_opening_pool(res.pool, f), idx, pos, look))
     key_of = look["key_of"]
-    for s, lbl in zip(SLOTS, picks):
-        if lbl in key_of:
-            p, c = key_of[lbl]
-            out["slots"][s] = f"{p}-{c}"
-    out["slot_labels"] = {s: (lbl if lbl in key_of else None) for s, lbl in zip(SLOTS, picks)}
+    for s in ("a", "b"):
+        if s not in keys and state[f"cmp_{s}"] in key_of:
+            keys[s] = (*key_of[state[f"cmp_{s}"]], sid)
+    for s in SLOTS:
+        k = keys.get(s)
+        out["slots"][s] = None if k is None else f"{k[0]}-{k[1]}"
+    out["slot_seasons"] = {s: (keys[s][2] if s in keys and keys[s][2] != sid else None)
+                           for s in SLOTS}
+    out["slot_labels"] = {s: (state.get(f"cmp_{s}") if s in keys else None) for s in SLOTS}
+    out["slot_options"] = {s: (C.safe(lambda k=keys[s]: _season_options(k[0], pos), [])
+                               if s in keys else []) for s in SLOTS}
 
-    chosen = list(dict.fromkeys(x for x in picks if x and x != C.NONE_OPTION))
+    chosen = list(dict.fromkeys(keys[s] for s in SLOTS if s in keys))
     if len(chosen) < 2:
         out["message"] = {"level": "info", "text": C.PICK_TWO}
         return out
     recs, reasons = [], []
     scorecards = lambda s: pp.scorecards(s, pos, cf.DEFAULT_ARCHETYPE)   # noqa: E731 (= load_scorecards)
-    for lbl in chosen:
-        t = idx.iloc[row_of[lbl]]
-        row, reason = C.pick_row((int(t["player_id"]), int(t["competition_id"]), int(t["season_id"])),
-                                 res.pool, _candidates, scorecards, blank_unrated=True)
+    for key in chosen:
+        row, reason = C.pick_row(key, res.pool, _candidates, scorecards, blank_unrated=True)
         recs.append(row)
         reasons.append(reason)
     if any(r is None for r in recs):
@@ -260,32 +309,47 @@ def compare_payload(params) -> dict:
         out["message"] = {"level": "error", "text": C.NOT_LIKE}
         return out
 
-    ctx = C.extras_context(tuple(int(r["player_id"]) for r in recs), sid, _styles, _history,
-                           _scouts, L.competition_name_by_id)
+    used = sorted({int(r["season_id"]) for r in recs})
+
+    def by_season(fn):
+        """One loader result, or one per season when the slots are in several."""
+        return fn(used[0]) if len(used) == 1 else C.BySeason({x: fn(x) for x in used})
+
+    ctx = by_season(lambda x: C.extras_context(
+        tuple(int(r["player_id"]) for r in recs if int(r["season_id"]) == x), x, _styles,
+        _history, _scouts, L.competition_name_by_id))
     # Not rated on a thin pool (owner 2026-11-16): no percentile shown as if real -- alone in a
     # pool every percentile is 50 by construction. The pool each was rated in: his position's,
     # or all midfielders of his league (the midfield fallback, tagged).
     thins = [thin_pool_size(reason, r.get("peer_count"), r.get("minutes"))
              for r, reason in zip(recs, reasons)]
     withheld = {i for i, n in enumerate(thins) if n is not None}
-    scopes = peer_pool_scopes(scorecards(sid))
-    v = C.compare_view(recs, pos, f.archetype, q.money, _metric_values(sid), _sc_pcts(sid),
-                       _prev(sid), ctx, withheld=withheld)
+    scopes = {}
+    for x in used:
+        scopes.update(peer_pool_scopes(scorecards(x)))
+    v = C.compare_view(recs, pos, f.archetype, q.money, by_season(_metric_values),
+                       by_season(_sc_pcts), by_season(_prev), ctx, withheld=withheld,
+                       uncolour_mixed=True)
     names = v["names"]
+    many_seasons = len(used) > 1
 
     players, named_vs = [], []
     for i, (r, reason) in enumerate(zip(recs, reasons)):
         league = text_or(r.get("league"), C.DASH)
         thin = thins[i]
         scope = scopes.get((int(r["competition_id"]), int(r["season_id"]), pos))
-        vs = C.vs_text(pos, league, thin, scope)
-        named_vs.append((str(r["player_name"]), vs))
         pid, cid, rsid = int(r["player_id"]), int(r["competition_id"]), int(r["season_id"])
+        vs = C.vs_text(pos, league, thin, scope)
+        if many_seasons:                 # the same league in two seasons is two pools
+            vs = f"{vs} {S.season_name_for(rsid)}"
+        named_vs.append((str(r["player_name"]), vs))
         club = text_or(r.get("team_name"), "")
         players.append({
             "player_id": pid, "competition_id": cid, "season_id": rsid, "key": f"{pid}-{cid}",
             "name": str(r["player_name"]), "header_name": names[i],
-            "sub": " · ".join(x for x in (club, str(v["rows"][i].get("League") or "")) if x),
+            "sub": club,
+            "season_league": C.season_league(S.season_name_for(rsid),
+                                             text_or(r.get("league"), None)),
             "href": f"/player/{pid}/{cid}/{rsid}",
             "not_rated": C.not_rated_caption(reason, r.get("peer_count"), r.get("minutes"),
                                              pos, league),
@@ -302,10 +366,18 @@ def compare_payload(params) -> dict:
                   "cells": [{"text": str(r.get(k, C.DASH))} if k in C.TEXT_ROWS
                             else C.change_parts(str(r.get(k, C.DASH))) for r in rows]}
                  for k in C.summary_attributes(rows)],
-        "caption": C.SUMMARY_CAPTION, "note": v["note"]}
+        "caption": C.SUMMARY_CAPTION, "note": v["note"],
+        "mixed_note": C.MIXED_NOTE if v["mixed"] else None}
 
     orient, n_orient = _orient(pos, sid, C.safe(
         lambda: _ours_among(int(r["player_id"]) for r in recs), ()))
+    # Owner 2026-11-20: the Orient line only beside players all rated in League One in its
+    # season (a not-rated player is not drawn, so he does not count).
+    shown = [r for i, r in enumerate(recs) if i not in withheld]
+    orient_note = None
+    if n_orient and not C.orient_allowed(shown, sid):
+        n_orient = 0
+        orient_note = f"Orient median shown for {C.LEAGUE_ONE} {season_name} only."
     rad = v["radar"]
     out["perf_radar"] = {
         "heading": "Performance profile" + (f" · {f.archetype}" if v["lens"] else ""),
@@ -313,8 +385,10 @@ def compare_payload(params) -> dict:
         "axes": rad["axes"], "labels": [LABELS.get(m, m) for m in rad["axes"]],
         "traces": [{"name": n, "values": vals} for n, vals in rad["traces"]],
         "no_data": ("No percentiles for " + ", ".join(rad["no_data"]) + ".") if rad["no_data"] else None,
-        "leagues_note": C.LEAGUES_NOTE if v["different_leagues"] else None,
-        "orient": _orient_line(orient, n_orient, rad["axes"], pos)}
+        # one line when the pools differ: the summary's MIXED_NOTE says it for the page
+        "leagues_note": None,
+        "orient": _orient_line(orient, n_orient, rad["axes"], pos),
+        "orient_note": orient_note}
     ph = v["phys_radar"]
     out["phys_radar"] = None if not v["has_physical"] else {
         "heading": "Physical profile",
@@ -325,7 +399,8 @@ def compare_payload(params) -> dict:
         "no_data": C.no_physical_caption(ph["no_data"]) if ph["no_data"] else None,
         "orient": _orient_line(orient, n_orient, ph["axes"], pos)}
     out["perf_table"] = {"heading": v["perf_heading"].replace("Performance", "Performance · in the rating", 1),
-                         "sub": f"Value · percentile vs {vs_line} · best green, worst red",
+                         "sub": f"Value · percentile vs {vs_line}"
+                                + ("" if v["mixed"] else " · best green, worst red"),
                          "rows": _table(v["perf_rows"], withheld)}
     out["perf_other"] = {"rows": _table(v["other_rows"], withheld)}
     out["phys_table"] = None if not v["phys_rows"] else {
@@ -351,13 +426,14 @@ def compare_payload(params) -> dict:
 
 
 def pool_payload(params) -> dict:
-    """The picker's list: the filtered pool in ranking order (what Streamlit defaults A/B from)."""
+    """The picker's list: the filtered pool league by league, League One (or the first chosen
+    league) first, each in ranking order -- A/B default from its top (`_opening_pool`)."""
     from lofc.core.card import clean
     from lofc.web.api import players as players_api
     q = _filters(params)
     f = q.filters()
     label_of = _lookup(f.season_id)["label_of"]
-    pool = players_api.cached_pool(f).pool
+    pool = _opening_pool(players_api.cached_pool(f).pool, f)
     out = []
     for r in pool.itertuples():
         key = (int(r.player_id), int(r.competition_id))
@@ -371,22 +447,32 @@ def pool_payload(params) -> dict:
 
 def search_payload(params) -> dict:
     """Typed search in a slot (owner C5, 2026-11-09): players of the selected Position only,
-    any league and outside the filters, as `players_pool.search` (same matching, same items)."""
+    any league and outside the filters, as `players_pool.search` (same matching, same items).
+    The page season's matches first; then players we hold only in other seasons, each in his
+    latest (owner 2026-11-20), labelled with that season."""
     from lofc.core import players_pool as pp
     from lofc.web.api import players as players_api
     text = (params.get("q") or "").strip()
     if not text:
         return {"results": []}
     q = players_api.Query(params)
-    idx, look = _index(q.season), _lookup(q.season)
-    labels = pp.filter_labels(look["by_position"].get(q.position, []), text)[:30]
-    out = []
-    for label in labels:
-        r = idx.iloc[look["row_of"][label]]
-        out.append({"label": label, "player_id": int(r["player_id"]),
-                    "competition_id": int(r["competition_id"]), "season_id": int(r["season_id"]),
-                    "name": str(r["player_name"]), "position": str(r["position_group"]),
-                    "league": None if pd.isna(r["league"]) else str(r["league"])})
+    page = int(q.season)
+    out, seen = [], set()
+    for sid in [page] + [x for x in _seasons() if x != page]:
+        idx, look = _index(sid), _lookup(sid)
+        before = set(seen)
+        for label in pp.filter_labels(look["by_position"].get(q.position, []), text):
+            if len(out) >= 30:
+                break
+            r = idx.iloc[look["row_of"][label]]
+            pid = int(r["player_id"])
+            if pid in before:
+                continue
+            seen.add(pid)
+            out.append({"label": _season_tag(label, sid, page), "player_id": pid,
+                        "competition_id": int(r["competition_id"]), "season_id": int(r["season_id"]),
+                        "name": str(r["player_name"]), "position": str(r["position_group"]),
+                        "league": None if pd.isna(r["league"]) else str(r["league"])})
     return {"results": out}
 
 

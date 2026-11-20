@@ -353,12 +353,17 @@ def test_vs_ours_column_blank_for_thin_pool_and_missing_values():
 
 
 def test_vs_ours_help_names_the_median():
-    assert C.vs_ours_help("Centre Forward", 4) == ("Gap to our current Centre Forwards' median "
-                                                   "(4 players). Percentiles are within each "
-                                                   "player's own league.")
-    assert C.vs_ours_help("Winger", 1) == ("Gap to our current Wingers' median (1 player). "
-                                           "Percentiles are within each player's own league.")
-    assert C.vs_ours_help("Winger", 0) is None
+    # owner decision 2B (2026-11-20): the median is over ours rated in HIS league only
+    assert C.vs_ours_help("Centre Forward", 4, "League One") == (
+        "Gap to the median of our current Centre Forwards rated in League One (4 players).")
+    assert C.vs_ours_help("Winger", 1, "League Two") == (
+        "Gap to the median of our current Wingers rated in League Two (1 player).")
+    assert C.vs_ours_help("Winger", 0, "League One") is None
+
+
+def test_vs_ours_none_in_his_league_line():
+    assert C.vs_ours_none_help("Winger", "National League", "2025/26") == (
+        "None of our Wingers was rated in National League in 2025/26.")
 
 
 def test_keys_by_label_maps_each_row_label_back_to_its_metric():

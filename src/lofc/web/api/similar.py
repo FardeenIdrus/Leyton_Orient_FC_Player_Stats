@@ -69,12 +69,29 @@ async def similar_page_json(player_id: int, competition_id: int, season_id: int,
 def mount(app, render, shell) -> None:
     app.include_router(router)
 
+    def _seasons():
+        """[(id, label)] newest first, and the default (the Players page's), for the search."""
+        from lofc.core import players_pool as pp
+        from lofc.dashboard import loaders as L
+        from lofc.dashboard.seasons import season_name_for
+        ids = sorted(L.available_seasons(), reverse=True)
+        return [(s, season_name_for(s)) for s in ids], (pp.default_season(ids) if ids else None)
+
+    @app.get("/similar", response_class=HTMLResponse, name="page_similar_search")
+    async def similar_search(request: Request, user: WebUser = Depends(current_user)):
+        """Owner 2026-11-20: its own page in the nav -- search any player, then his list."""
+        from lofc.web import pages
+        seasons, default = await run_in_threadpool(_seasons)
+        return render(request, "similar.html", **shell(
+            request, user, "similar", page=pages.PAGES["similar"],
+            ids=dict(player="", competition="", season=default or ""), seasons=seasons))
+
     @app.get("/similar/{player_id}/{competition_id}/{season_id}", response_class=HTMLResponse,
              name="page_similar")
     async def similar_page(player_id: int, competition_id: int, season_id: int, request: Request,
                            user: WebUser = Depends(current_user)):
         from lofc.web import pages
-        # Highlighted under Players, as the player card it is reached from.
+        seasons, _default = await run_in_threadpool(_seasons)
         return render(request, "similar.html", **shell(
-            request, user, "players", page=pages.PAGES["players"],
-            ids=dict(player=player_id, competition=competition_id, season=season_id)))
+            request, user, "similar", page=pages.PAGES["similar"],
+            ids=dict(player=player_id, competition=competition_id, season=season_id), seasons=seasons))

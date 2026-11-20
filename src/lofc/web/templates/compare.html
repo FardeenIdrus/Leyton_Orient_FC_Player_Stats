@@ -43,12 +43,15 @@
       </div>
     </div>
     <div class="fl slots">
-      {% for slot, label in [("a", "Player A"), ("b", "Player B"), ("c", "Player C (optional)")] %}
+      {% for slot, label, short in [("a", "Player A", "Player A"), ("b", "Player B", "Player B"), ("c", "Player C (optional)", "Player C")] %}
       <div class="f slot" data-slot="{{ slot }}">
         <label for="slot-{{ slot }}"><i class="dot d{{ loop.index0 }}"></i>{{ label }}</label>
-        <div class="searchbox">
-          <input class="ctl" id="slot-{{ slot }}" name="slot_{{ slot }}" type="search" autocomplete="off" aria-label="{{ label }}" placeholder="Search a player…">
-          <div class="results" id="res-{{ slot }}" hidden></div>
+        <div class="slot-row">
+          <div class="searchbox">
+            <input class="ctl" id="slot-{{ slot }}" name="slot_{{ slot }}" type="search" autocomplete="off" aria-label="{{ label }}" placeholder="Search a player…">
+            <div class="results" id="res-{{ slot }}" hidden></div>
+          </div>
+          <select class="ctl slot-season" id="season-{{ slot }}" name="season_{{ slot }}" aria-label="{{ short }} season" title="Season" hidden></select>
         </div>
       </div>
       {% endfor %}
@@ -59,7 +62,7 @@
 
   <div id="cmp-body" hidden>
     <div class="cmp-tools"><button type="button" class="btn small" id="cmp-dl" aria-label="Download this comparison">⬇ Download</button></div>
-    <div class="card" id="c-sum"><div class="tw"><table id="cmp-sum"></table></div><p class="note" id="cmp-sumcap"></p></div>
+    <div class="card" id="c-sum"><div class="tw"><table id="cmp-sum"></table></div><p class="note" id="cmp-mixed" hidden></p><p class="note" id="cmp-sumcap"></p></div>
 
     <div class="row tr2 cmp-pair" id="r-perf">
       <div class="card" id="c-pt"><h2 id="pt-h">Performance · in the rating</h2><div class="sub" id="pt-sub"></div>

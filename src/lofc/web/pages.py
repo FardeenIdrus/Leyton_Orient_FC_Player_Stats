@@ -18,6 +18,7 @@ class Page:
 _NAV: list[tuple[str, list[tuple[str, str, str]]]] = [
     ("Find", [("players", "/players", "Players"), ("squads", "/squads", "Squads & loans")]),
     ("Assess a player", [("compare", "/compare", "Compare"),
+                         ("similar", "/similar", "Similar players"),
                          ("scout-reports", "/scout-reports", "Scout reports")]),
     # Assess and Sign-off retired 2026-11-16 (scouts report through the JotForm sheet); their
     # old paths redirect to Players (app.py RETIRED_PATHS).

@@ -201,3 +201,18 @@ def test_csv_with_a_non_latin1_name_downloads(fake, monkeypatch):
 def test_watchlist_rejects_a_non_json_body(fake):
     r = _client().post(KEY + "/watchlist", content="x", headers={"X-LOFC-Request": "1"})
     assert r.status_code == 400
+
+
+def test_card_js_draws_the_not_compared_line_tags_and_raw_physical_table():
+    """Owner decision 2B (2026-11-20): the section draws the API's line, the "Rated in <league>"
+    tag and the raw physical table, and never a verdict when ratings are not compared."""
+    from pathlib import Path
+    import lofc.web
+    js = (Path(lofc.web.__file__).parent / "static" / "js" / "card.js").read_text()
+    sq = js[js.index("function renderSquad"):js.index("function bindSquad")]
+    for needle in ("S.not_compared", "p.elsewhere", "S.raw_physical", "S.raw_physical_note",
+                   "Physical, raw values"):
+        assert needle in sq, needle
+    # the raw table has no colour, percentile bar or band chip
+    raw = sq[sq.index("Physical, raw values"):sq.index("S.raw_physical_note")]
+    assert "pcol(" not in raw and "chip(" not in raw and "bar(" not in raw

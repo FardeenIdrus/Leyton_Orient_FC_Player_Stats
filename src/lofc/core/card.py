@@ -179,12 +179,22 @@ def keys_by_label(labels, names: dict) -> list:
     return [key_of.get(x) for x in labels]
 
 
-def vs_ours_help(position: str, n_orient: int) -> str | None:
+def vs_ours_help(position: str, n_orient: int, league: str) -> str | None:
+    """The "vs ours" heading's help: the median is over ours rated in HIS league only
+    (owner decision 2B, 2026-11-20: percentiles from different leagues are not comparable)."""
     if not n_orient:
         return None
-    return (f"Gap to our current {position}s' median "
-            f"({n_orient} player{'' if n_orient == 1 else 's'}). "
-            "Percentiles are within each player's own league.")
+    return (f"Gap to the median of our current {position}s rated in {league} "
+            f"({n_orient} player{'' if n_orient == 1 else 's'}).")
+
+
+def vs_ours_none_help(position: str, league: str, season_name: str) -> str:
+    """Why every "vs ours" cell is "—": ours at the position all played in other leagues."""
+    return f"None of our {position}s was rated in {league} in {season_name}."
+
+
+def orient_line_label(position: str, n_orient: int, league: str) -> str | None:
+    return f"Leyton Orient median ({n_orient}), {league} {position}s" if n_orient else None
 
 
 def weight_tiers(metrics, position: str, lens: str) -> list:
@@ -869,7 +879,8 @@ def _availability_block(engine, row) -> dict:
     return out
 
 
-def _physical_block(row, mv_row, prow, position: str, orient: dict, n_orient: int) -> dict:
+def _physical_block(row, mv_row, prow, position: str, orient: dict, n_orient: int,
+                    league: str = "") -> dict:
     """Physical tables, the one line saying why there are none, and the radar. A goalkeeper has
     no physical gap line: physical never counts in his rating."""
     from lofc.dashboard import detail_section as ds
@@ -906,7 +917,7 @@ def _physical_block(row, mv_row, prow, position: str, orient: dict, n_orient: in
         radar = {"labels": [PHYSICAL[m][0] for m in axes], "metrics": axes,
                  "player": [float(prow[m]) for m in axes],
                  "orient": [orient.get(m) for m in axes],
-                 "orient_label": f"Leyton Orient median ({n_orient}), {position}s" if n_orient else None}
+                 "orient_label": orient_line_label(position, n_orient, league)}
     return {"in_rating": rated, "other": other, "gap": gap, "radar": radar,
             "caption": "Per 90 minutes played. Metres per minute is a rate."}
 
@@ -1152,7 +1163,18 @@ def build_card(engine, player_id: int, competition_id: int, season_id: int,
     # --- performance ---
     grand = P._grand_table(row, position, lens, sc_pcts, metric_values)
     full = P._full_stats_table(row, sc_pcts, metric_values)
-    orient, n_orient = squad.orient_median(position, sid, exclude_player_id=pid)
+    # our median is over ours rated in HIS league that season only (owner decision 2B)
+    orient, n_orient = squad.orient_median(position, sid, exclude_player_id=pid,
+                                           competition_id=cid)
+    # ours exist at the position but none in his league: every "vs ours" cell is "—"
+    none_here = not n_orient and squad.ours_count(position, exclude_player_id=pid) > 0
+    vs_help = (vs_ours_help(position, n_orient, league) if n_orient
+               else vs_ours_none_help(position, league, season_name) if none_here else None)
+
+    def vs_col(keys):
+        if n_orient:
+            return vs_ours_column(keys, prow, orient, thin)
+        return [None] * len(keys) if none_here else None
     chart_metrics = [m for m in perf_metrics if prow is not None and m in prow.index
                      and pd.notna(prow[m])] if not withhold else []
     performance = {
@@ -1160,26 +1182,24 @@ def build_card(engine, player_id: int, competition_id: int, season_id: int,
         "table": None if grand.empty else _shown(as_table(grand.drop(columns=["Dimension"]))),
         # one entry per table row (rows follow `perf_metrics`): weight group + gap to our median
         "tiers": None if grand.empty else weight_tiers(perf_metrics, position, lens),
-        "vs_ours": None if grand.empty or not n_orient
-        else vs_ours_column(perf_metrics, prow, orient, thin),
-        "vs_ours_help": vs_ours_help(position, n_orient),
+        "vs_ours": None if grand.empty else vs_col(perf_metrics),
+        "vs_ours_help": vs_help,
         "scored_on_lens": None if lens == cf.DEFAULT_ARCHETYPE else lens,
         "all_tracked": None if full is None or full.empty else {
             **_shown(as_table(full)),
-            "vs_ours": vs_ours_column(keys_by_label(full["Metric"], LABELS), prow, orient, thin)
-            if n_orient else None,
-            "vs_ours_help": vs_ours_help(position, n_orient)},
+            "vs_ours": vs_col(keys_by_label(full["Metric"], LABELS)),
+            "vs_ours_help": vs_help},
         "profile": None if len(chart_metrics) < 3 else {
             "sub": f"Percentile vs {vs}",
             "metrics": chart_metrics, "labels": [LABELS.get(m, m) for m in chart_metrics],
             "player": [float(prow[m]) for m in chart_metrics],
             "orient": [orient.get(m) for m in chart_metrics],
-            "orient_label": f"Leyton Orient median ({n_orient}), {position}s" if n_orient else None},
+            "orient_label": orient_line_label(position, n_orient, league)},
         "csv_name": f"{str(row['player_name']).replace(' ', '_')}_{sid}",
     }
 
     physical_block = _physical_block(row, mv_df.iloc[0] if not mv_df.empty else None, prow,
-                                     position, orient, n_orient)
+                                     position, orient, n_orient, league)
     if withhold:
         physical_block["radar"] = None
         for part in ("in_rating", "other"):
@@ -1190,9 +1210,8 @@ def build_card(engine, player_id: int, competition_id: int, season_id: int,
     for part in ("in_rating", "other"):
         if physical_block[part] is not None:
             keys = physical_block[part].pop("metrics")
-            physical_block[part]["vs_ours"] = (vs_ours_column(keys, prow, orient, thin)
-                                               if n_orient else None)
-            physical_block[part]["vs_ours_help"] = vs_ours_help(position, n_orient)
+            physical_block[part]["vs_ours"] = vs_col(keys)
+            physical_block[part]["vs_ours_help"] = vs_help
     physical_block["sub"] = f"Percentile vs {vs} · rated physical metrics"
     physical_block["table_sub"] = f"SkillCorner · per 90 · percentile vs {vs}"
     out = {

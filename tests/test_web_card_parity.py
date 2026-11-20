@@ -386,11 +386,15 @@ def _squad(engine, p, c, s, season=None):
 @pytest.mark.parametrize("label,p,c,s", [x for x in CASES if x[0] != "goalkeeper"], ids=lambda v: v if isinstance(v, str) else None)
 def test_squad_rank_is_counted_from_its_own_table(engine, label, p, c, s):
     S = _squad(engine, p, c, s)
-    if S["empty"]:
+    if S["empty"] or S["not_compared"]:
         return
     rows = S["table"]
     assert rows[0]["is_target"] and not any(r["is_target"] for r in rows[1:])
-    ours = [r["overall"] for r in rows[1:] if r["overall"] is not None]
+    # only ours in HIS league are ranked (owner decision 2B); the rest are tagged
+    ours = [r["overall"] for r in rows[1:] if r["overall"] is not None and not r["elsewhere"]]
+    for r in rows[1:]:
+        if r["overall"] is not None and r["league"] != rows[0]["league"]:
+            assert r["elsewhere"] == f"Rated in {r['league']}"
     if rows[0]["overall"] is None:
         assert S["verdict"]["rank_text"] == "—"
     else:
@@ -410,7 +414,14 @@ def test_orient_player_is_compared_with_the_others_not_himself(engine):
 
 
 def test_orient_line_is_the_median_of_the_others_percentiles(engine):
-    S = _squad(engine, 24835, 4, 319 if False else 318, season=None)
+    # a League One centre forward in 2026/27, when our centre forwards are all League One
+    # (Connolly 2025/26 is no longer compared: none of our other forwards was in League One)
+    r = pd.read_sql("SELECT s.player_id FROM player_scorecards s JOIN player_metrics_neutral n "
+                    "USING (player_id, competition_id, season_id, position_group) WHERE "
+                    "s.season_id=319 AND s.competition_id=4 AND s.position_group='Centre Forward' "
+                    "AND s.archetype='All Metrics' AND n.team_name <> 'Leyton Orient' "
+                    "ORDER BY n.minutes DESC LIMIT 1", engine)
+    S = _squad(engine, int(r.iloc[0, 0]), 4, 319)
     if not S.get("radar") or not S.get("metrics"):
         pytest.skip("no metric comparison for this season")
     players = S["metrics"]["players"]
@@ -519,10 +530,12 @@ def _expected_vs(engine, p, c, s, labels, names):
     from lofc.dashboard.tabs import players as P
     row, _, _ = C.card_row(p, c, s)
     prow = P._sc_pct_series(L.load_scorecard_percentiles(s), p, c, s)
-    orient, n = squad.orient_median(row["position_group"], s, exclude_player_id=p)
+    orient, n = squad.orient_median(row["position_group"], s, exclude_player_id=p,
+                                    competition_id=c)
     keys = C.keys_by_label(labels, names)
     assert None not in keys
-    return [C.gap_to_ours(prow.get(k), orient.get(k)) for k in keys], C.vs_ours_help(row["position_group"], n)
+    return ([C.gap_to_ours(prow.get(k), orient.get(k)) for k in keys],
+            C.vs_ours_help(row["position_group"], n, row["league"]))
 
 
 def _phys_names():
@@ -552,9 +565,19 @@ def test_other_physical_has_vs_ours_against_the_orient_median(engine, cards):
 def test_extra_tables_have_no_vs_ours_without_orient_players(engine, monkeypatch):
     from lofc.core import card, squad
     monkeypatch.setattr(squad, "orient_median", lambda *a, **k: ({}, 0))
+    monkeypatch.setattr(squad, "ours_count", lambda *a, **k: 0)     # none at the position
     d = card.build_card(engine, 39154, 5, 318)
     for t in (d["performance"]["all_tracked"], d["physical"]["other"]):
         assert t["rows"] and t["vs_ours"] is None and t["vs_ours_help"] is None
+
+
+def test_extra_tables_vs_ours_dashes_when_ours_are_only_in_other_leagues(engine, monkeypatch):
+    from lofc.core import card, squad
+    monkeypatch.setattr(squad, "orient_median", lambda *a, **k: ({}, 0))
+    d = card.build_card(engine, 39154, 5, 318)
+    for t in (d["performance"]["all_tracked"], d["physical"]["other"]):
+        assert t["rows"] and t["vs_ours"] == [None] * len(t["rows"])
+        assert t["vs_ours_help"] == "None of our Wingers was rated in League Two in 2025/26."
 
 
 def test_extra_tables_vs_ours_blank_for_a_thin_pool(engine, monkeypatch):
@@ -574,3 +597,80 @@ def test_all_metrics_csv_is_unchanged_by_vs_ours(engine):
     want = P._full_stats_table(row, L.load_scorecard_percentiles(318), L.load_metric_values(318))
     assert text == want.to_csv(index=False)
     assert text.splitlines()[0] == "Metric,Source,Season total,Per 90 / rate,Percentile"
+
+
+# --- owner decision 2B (2026-11-20): ratings compared only within his league ------------------
+def _league_of(engine, pid, sid):
+    """The league of a player's most-minutes row that season (the row the section uses)."""
+    r = pd.read_sql("SELECT competition_id FROM player_metrics_neutral WHERE player_id=%(p)s "
+                    "AND season_id=%(s)s ORDER BY minutes DESC NULLS LAST LIMIT 1", engine,
+                    params={"p": int(pid), "s": int(sid)})
+    return None if r.empty else int(r.iloc[0, 0])
+
+
+def test_card_orient_median_is_only_ours_in_his_league(engine):
+    """League Two winger (Dobra's 2025/26 league): the median is over our League Two wingers."""
+    from lofc.core import squad
+    ours = squad.ours_at(squad.squad(), "Winger")
+    same = [int(i) for i in ours["player_id"] if _league_of(engine, i, 318) == 5]
+    _, n = squad.orient_median("Winger", 318, exclude_player_id=39154, competition_id=5)
+    assert 0 < n <= len(same) < len(ours)
+
+
+def test_section_ranks_only_ours_in_his_league_on_real_data(engine):
+    S = _squad(engine, 39154, 5, 318)                         # League Two winger
+    assert S["not_compared"] is None and S["raw_physical"] is None
+    league = S["table"][0]["league"]
+    for r in S["table"][1:]:
+        if r["overall"] is not None:
+            assert (r["elsewhere"] is None) == (r["league"] == league)
+    assert all(p["is_target"] or p["name"] in {r["name"] for r in S["table"]
+                                               if r["league"] == league}
+               for p in (S["metrics"] or {"players": []})["players"])
+
+
+def _national_league_winger(engine):
+    from lofc.core import squad
+    ours = {int(i) for i in squad.ours_at(squad.squad(), "Winger")["player_id"]}
+    if any(_league_of(engine, i, 318) == 65 for i in ours):
+        pytest.skip("one of our wingers played in the National League")
+    r = pd.read_sql("SELECT s.player_id, s.competition_id FROM player_scorecards s "
+                    "JOIN player_metrics_neutral n USING (player_id, competition_id, season_id, "
+                    "position_group) WHERE s.season_id=318 AND s.competition_id=65 AND "
+                    "s.position_group='Winger' AND s.archetype='All Metrics' AND "
+                    "n.top5_psv99_kmh IS NOT NULL ORDER BY n.minutes DESC LIMIT 1", engine)
+    if r.empty:
+        pytest.skip("no rated National League winger with SkillCorner data")
+    return int(r.iloc[0, 0])
+
+
+def test_national_league_target_is_not_ranked_and_gets_raw_physical(engine):
+    pid = _national_league_winger(engine)
+    S = _squad(engine, pid, 65, 318)
+    assert S["verdict"] is None and S["radar"] is None and S["metrics"] is None
+    assert S["better"] is None and S["worse"] is None
+    assert S["not_compared"] == ("None of our wingers was rated in National League in 2025/26, "
+                                 "so ratings are not compared.")
+    R = S["raw_physical"]
+    assert R and R["rows"][0]["is_target"] and R["rows"][0]["source"] == "National League · 2025/26"
+    # the raw values are the stored ones, one decimal place, from each player's own row
+    raw = pd.read_sql("SELECT distance_p90 FROM player_metrics_neutral WHERE player_id=%(p)s "
+                      "AND competition_id=65 AND season_id=318 AND position_group='Winger'",
+                      engine, params={"p": pid}).iloc[0, 0]
+    from lofc.dashboard import detail_section as ds
+    i = R["columns"].index(dict(ds.PHASE_METRICS)["distance_p90"]) - 2
+    assert R["rows"][0]["values"][i] == f"{float(raw):.1f}"
+    top = R["columns"].index({m: lbl for m, lbl, _ in ds.SPEED_METRICS}["top5_psv99_kmh"]) - 2
+    assert R["rows"][0]["values"][top] is not None            # he was picked with a top speed
+    assert {r["name"] for r in R["rows"][1:]} == {r["name"] for r in S["table"][1:]}
+
+
+def test_card_vs_ours_is_dashes_for_a_national_league_target(engine):
+    from lofc.core import card
+    pid = _national_league_winger(engine)
+    d = card.build_card(engine, pid, 65, 318)
+    P = d["performance"]
+    assert P["vs_ours"] and all(v is None for v in P["vs_ours"])
+    assert P["vs_ours_help"] == "None of our Wingers was rated in National League in 2025/26."
+    assert P["profile"] is None or P["profile"]["orient_label"] is None
+    assert d["physical"]["radar"] is None or d["physical"]["radar"]["orient_label"] is None

@@ -20,7 +20,10 @@ const ALL_STYLES = 'All styles';
 const defaults = () => ({season: opts.default_season, position: opts.default_position, leagues: [],
   rank_as: opts.default_archetype, money: false, min_minutes: opts.minutes.default,
   max_age: opts.max_age.default, foot: 'Any', contract: opts.contract[0], loan: opts.loan[0],
-  style: ALL_STYLES, strong_only: false, a: null, b: null, c: null});
+  style: ALL_STYLES, strong_only: false, a: null, b: null, c: null,
+  a_season: null, b_season: null, c_season: null});
+// a slot's own season (owner 2026-11-20): null = the page season
+const SEASON_OF = k => k + '_season';
 // "More filters" (owner C4): the Players page's, narrowing the list a picker shows
 const MORE = ['min_minutes', 'max_age', 'foot', 'contract', 'loan', 'style'];
 
@@ -39,7 +42,11 @@ function fromUrl() {
   pick('foot', opts.foot); pick('contract', opts.contract); pick('loan', opts.loan);
   pick('style', opts.styles[s.position] || []);
   s.strong_only = q.get('strong_only') === '1' && s.style !== ALL_STYLES;
-  for (const k of SLOTS) { const v = q.get(k); s[k] = /^\d+-\d+$/.test(v || '') ? v : null; }
+  for (const k of SLOTS) {
+    const v = q.get(k); s[k] = /^\d+-\d+$/.test(v || '') ? v : null;
+    const own = Number(q.get(SEASON_OF(k)));
+    s[SEASON_OF(k)] = s[k] && opts.seasons.some(x => x.id === own) && own !== s.season ? own : null;
+  }
   return s;
 }
 
@@ -53,7 +60,10 @@ function toQuery(s, {slots = true} = {}) {
   if (s.money) q.set('money', '1');
   for (const k of MORE) if (s[k] !== d[k]) q.set(k, String(s[k]));
   if (s.strong_only) q.set('strong_only', '1');
-  if (slots) for (const k of SLOTS) if (s[k]) q.set(k, s[k]);
+  if (slots) for (const k of SLOTS) if (s[k]) {
+    q.set(k, s[k]);
+    if (s[SEASON_OF(k)]) q.set(SEASON_OF(k), s[SEASON_OF(k)]);
+  }
   const t = q.toString();
   return t ? '?' + t : '';
 }
@@ -132,11 +142,34 @@ async function refresh() {
   last = d;
   // the server fills A/B defaults and drops slots of another position: keep the URL exact
   // (shareable) without adding a history entry
-  for (const k of SLOTS) st[k] = d.slots[k];
+  takeSlots(d);
   const qs = toQuery(st);
   if (qs !== location.search) history.replaceState({}, '', location.pathname + qs);
   render(d);
   if (!d.message) remember();
+}
+
+/** The slots (and each slot's own season) as the server resolved them. */
+function takeSlots(d) {
+  for (const k of SLOTS) {
+    st[k] = d.slots[k];
+    st[SEASON_OF(k)] = (d.slot_seasons || {})[k] || null;
+  }
+}
+
+/** Each slot's Season picker: only the seasons (and league) we hold for that player. */
+function showSlotSeasons(d) {
+  const all = d.slot_options || {};
+  for (const k of SLOTS) {
+    const sel = $('season-' + k), list = all[k] || [];
+    sel.hidden = !list.length;
+    sel._opts = list;
+    if (!list.length) { sel.innerHTML = ''; continue; }
+    const sid = st[SEASON_OF(k)] || st.season, cid = Number(String(st[k] || '').split('-')[1]);
+    fill(sel, list.map((_, i) => i), list.map(o => o.label));
+    const at = list.findIndex(o => o.season === sid && o.competition_id === cid);
+    sel.value = String(at < 0 ? 0 : at);
+  }
 }
 
 // ---- rendering ---------------------------------------------------------------------------
@@ -150,6 +183,7 @@ function render(d) {
   $('cmp-notice').innerHTML = d.notice
     ? (d.notice.level === 'info' ? `<div class="info">${esc(d.notice.text)}</div>` : `<div class="note" style="margin-top:8px">${esc(d.notice.text)}</div>`) : '';
   showSlotLabels();
+  showSlotSeasons(d);
   if (d.message) {
     const cls = d.message.level === 'error' ? 'notice' : d.message.level === 'warn' ? 'warn' : 'info';
     $('cmp-msg').innerHTML = `<div class="${cls}">${esc(d.message.text)}</div>`;
@@ -183,7 +217,8 @@ function renderSummary(d) {
   const P = d.players;
   let h = '<thead><tr><th class="k"></th>' + P.map((p, i) =>
     `<th><a class="nm" href="${esc(p.href + backQ())}">${dot(i)}${esc(p.header_name)}</a>`
-    + `<span class="sm">${esc(p.sub)}</span>`
+    + (p.sub ? `<span class="sm">${esc(p.sub)}</span>` : '')
+    + (p.season_league ? `<span class="sl">${esc(p.season_league)}</span>` : '')
     + (p.not_rated ? `<span class="nr">${esc(p.not_rated)}</span>` : '')
     // the midfield fallback pool: rated against all midfielders of his league (the card's tag)
     + (p.pool_tag ? `<span class="pill grey pool-tag">${esc(p.pool_tag)}</span>` : '') + '</th>').join('') + '</tr></thead><tbody>';
@@ -201,6 +236,8 @@ function renderSummary(d) {
   }
   $('cmp-sum').innerHTML = h + '</tbody>';
   $('cmp-sumcap').textContent = [d.summary.caption, d.summary.note].filter(Boolean).join(' ');
+  $('cmp-mixed').hidden = !d.summary.mixed_note;
+  $('cmp-mixed').textContent = d.summary.mixed_note || '';
 }
 
 /** raw[i] = player k's shown value for that axis, from the metric table with the same label. */
@@ -227,7 +264,7 @@ function renderRadars(d) {
   // No physical chart at all (goalkeepers, or nobody has tracking): no empty card; its
   // caption goes under the Performance radar.
   const physChart = F && F.traces.length;
-  $('prad').innerHTML = radarBlock(P, d.players, d.perf_table && d.perf_table.rows) + notes([P.no_data, P.leagues_note, !physChart && F ? F.no_data : null]);
+  $('prad').innerHTML = radarBlock(P, d.players, d.perf_table && d.perf_table.rows) + notes([P.no_data, P.leagues_note, P.orient_note, !physChart && F ? F.no_data : null]);
   $('c-phrad').hidden = !physChart;
   if (physChart) {
     $('phrad-sub').textContent = F.sub;
@@ -351,8 +388,10 @@ function downloadFile() {
     + '.rdr-svg{max-width:100%;height:auto}'
     + '@media print{html,body{background:#fff}.dl-page{padding:0}.card{break-inside:avoid}details>*{display:block}}'
     + `</style></head><body><div class="dl-page">${root.outerHTML}</div></body></html>`;
-  const names = last.players.map(p => fileSafe(p.header_name)).filter(Boolean);
-  const file = `Compare_${names.join('_v_')}_${fileSafe(season)}.html`;
+  // one season for all: it ends the name; slots in different seasons each carry their own
+  const many = new Set(last.players.map(p => p.season_id)).size > 1;
+  const names = last.players.map(p => fileSafe(many ? `${p.name} ${(p.season_league || '').split(' · ')[0]}` : p.header_name)).filter(Boolean);
+  const file = `Compare_${names.join('_v_')}${many ? '' : '_' + fileSafe(season)}.html`;
   const url = URL.createObjectURL(new Blob([html], {type: 'text/html'}));
   const a = document.createElement('a');
   a.href = url; a.download = file; document.body.appendChild(a); a.click(); a.remove();
@@ -386,11 +425,11 @@ async function openList(slot) {
   try {
     if (!q || q === current) {
       const p = await poolList();
-      items = p.players.map(x => ({label: x.label, key: x.key, composite: x.composite, position: st.position}));
+      items = p.players.map(x => ({label: x.label, key: x.key, composite: x.composite, position: st.position, season: st.season}));
     } else {
       // owner C5: the selected Position only (any league, outside the filters)
       const r = await api('/api/compare/search?' + new URLSearchParams({season: st.season, position: st.position, q}));
-      items = r.results.map(x => ({label: x.label, key: `${x.player_id}-${x.competition_id}`, position: x.position, league: x.league}));
+      items = r.results.map(x => ({label: x.label, key: `${x.player_id}-${x.competition_id}`, position: x.position, league: x.league, season: x.season_id}));
     }
   } catch (e) { return; }
   if (mine !== searchSeq) return;
@@ -408,6 +447,8 @@ function closeAll() {
 function pick(slot, item) {
   closeAll();
   st[slot] = item.key;
+  // the page season when he has data then (the server listed him there), else his latest
+  st[SEASON_OF(slot)] = item.key && item.season && item.season !== st.season ? item.season : null;
   document.activeElement && document.activeElement.blur();
   commit();
 }
@@ -430,6 +471,13 @@ function bindSlots() {
       pick(slot, out._items[Number(b.dataset.i)]);
     });
     inp.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== inp) { out.hidden = true; showSlotLabels(); } }, 150));
+    $('season-' + slot).addEventListener('change', e => {
+      const o = (e.target._opts || [])[Number(e.target.value)];
+      if (!o || !st[slot]) return;
+      st[slot] = `${st[slot].split('-')[0]}-${o.competition_id}`;
+      st[SEASON_OF(slot)] = o.season === st.season ? null : o.season;
+      commit();
+    });
   }
 }
 
@@ -476,7 +524,9 @@ function bindMore() {
 function bind() {
   $('f-season').addEventListener('change', e => { st.season = Number(e.target.value); commit(); });
   $('f-position').addEventListener('change', e => {
-    setPosition(e.target.value); st.a = st.b = st.c = null; commit();
+    setPosition(e.target.value);
+    for (const k of SLOTS) st[k] = st[SEASON_OF(k)] = null;
+    commit();
   });
   $('f-rank').addEventListener('change', e => { st.rank_as = e.target.value; commit(); });
   $('f-money').addEventListener('change', e => { st.money = e.target.checked; commit(); });
@@ -529,7 +579,7 @@ function bind() {
     try {
       const d = await pre;
       if (mine === seq) {
-        last = d; for (const k of SLOTS) st[k] = d.slots[k];
+        last = d; takeSlots(d);
         const qs = toQuery(st);
         if (qs !== location.search) history.replaceState({}, '', location.pathname + qs);
         render(d);

@@ -17,3 +17,13 @@ table.sim-b tr.unused td{color:var(--muted)}
 .sim-tag{display:inline-block;font-size:11px;font-weight:600;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 5px;margin-left:6px;vertical-align:1px;cursor:help}
 .sim-tag.off{cursor:default}
 #sim-break-note{margin:10px 0 0}
+/* Player search (owner 2026-11-20: own page in the nav). */
+.sim-find{margin:12px 0 4px}
+.sim-find .f-season{flex:0 0 140px}
+.sim-find .f.grow{flex:1 1 320px}
+#v-similar .searchbox{position:relative}
+#v-similar .searchbox input.ctl{width:100%}
+#v-similar .results{position:absolute;z-index:20;left:0;right:0;top:calc(100% + 4px);background:#fff;border:1px solid #CDD1D7;border-radius:8px;box-shadow:0 8px 24px rgba(20,22,27,.14);max-height:360px;overflow:auto}
+#v-similar .results button{display:block;width:100%;text-align:left;font:inherit;font-size:14.5px;padding:9px 12px;border:0;border-bottom:1px solid var(--line);background:#fff;cursor:pointer;color:var(--ink)}
+#v-similar .results button:hover,#v-similar .results button:focus-visible{background:var(--soft)}
+#v-similar .results .none{padding:10px 12px;color:var(--muted);font-size:14px}

@@ -100,9 +100,10 @@ def test_compare_row_shows_last_season_to_this_season_with_change():
                           "prev_performance": 3.4, "prev_league": "League Two",
                           "prev_position": "Full Back"}])
     row = cmp.compare_row(_pool_row(objective_composite=3.68), prev, show_money=False)
-    assert row["Overall"] == "3.41 (League Two) → 3.68 (+0.27)"    # league differs -> shown
-    assert row["Performance"] == "3.40 → 3.40 (0.00)"
-    assert row["Physical"] == "4.50 → 4.10 (-0.40)"
+    # league differs -> named, and no change is taken across leagues (owner 2026-11-20)
+    assert row["Overall"] == "3.41 (League Two) → 3.68"
+    assert row["Performance"] == "3.40 (League Two) → 3.40"
+    assert row["Physical"] == "4.50 (League Two) → 4.10"
     assert row["League"] == "League One"
     same = cmp.compare_row(_pool_row(league="League Two", objective_composite=3.68), prev)
     assert same["Overall"] == "3.41 → 3.68 (+0.27)"
@@ -144,7 +145,8 @@ def test_comparison_html_has_players_as_columns_and_attributes_as_rows():
     for label in ("Age", "Minutes", "Overall", "Performance", "Physical"):
         assert f">{label}<" in html
     # this season's value is the prominent figure; last season sits beside it
-    assert ">3.68<" in html and "+0.27 vs 3.41 (League Two)" in html
+    # another league last season: what he had, no change across leagues (owner 2026-11-20)
+    assert ">3.68<" in html and "was 3.41 (League Two)" in html and "+0.27" not in html
     assert ">3.10<" in html and "-0.80 vs 3.90" in html
 
 

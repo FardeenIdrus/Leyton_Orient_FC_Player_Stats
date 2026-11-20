@@ -5,13 +5,24 @@
 <link rel="stylesheet" href="{{ static_url('css/similar.css') }}">
 <section class="view on" id="v-similar" data-page="similar"
          data-player="{{ ids.player }}" data-competition="{{ ids.competition }}" data-season="{{ ids.season }}">
-  <div class="card-top"><a href="/player/{{ ids.player }}/{{ ids.competition }}/{{ ids.season }}" id="back" class="back">← Back to player</a></div>
+  {% if ids.player %}<div class="card-top"><a href="/player/{{ ids.player }}/{{ ids.competition }}/{{ ids.season }}" id="back" class="back">← Back to player</a></div>{% endif %}
   <div class="section-label">Similar players</div>
   <h1 id="sim-player">Similar players</h1>
   <div class="meta" id="sim-meta"></div>
+  <div class="filters sim-find">
+    <div class="fl">
+      <div class="f f-season"><label for="sim-season">Season</label>
+        <select class="ctl" id="sim-season">{% for s, label in seasons %}<option value="{{ s }}"{% if s|string == ids.season|string %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+      <div class="f grow"><label for="sim-search">Find a player</label>
+        <div class="searchbox">
+          <input id="sim-search" class="ctl" type="search" autocomplete="off" placeholder="Any player, any position, any league…" aria-controls="sim-results">
+          <div class="results" id="sim-results" hidden></div>
+        </div></div>
+    </div>
+  </div>
   <div id="sim-status" class="note" role="status"></div>
 
-  <div class="card" id="c-sim-list">
+  <div class="card" id="c-sim-list"{% if not ids.player %} hidden{% endif %}>
     <div class="sf-head"><div><h2>Closest 10</h2><div class="sub" id="sim-sub"></div></div>
       <div class="sim-ctl">
         <div class="seg" id="sim-scope" role="group" aria-label="Leagues"><button type="button" data-scope="league" class="on" aria-pressed="true">Same league</button><button type="button" data-scope="all" aria-pressed="false">All leagues</button></div>

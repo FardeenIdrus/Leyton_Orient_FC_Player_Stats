@@ -11,9 +11,13 @@ NOT FC Lorient), at the `position_group` where they played most over the last co
 and the current one together. A January signing or a returning loanee is "ours" from the day
 Impect says so, and a player who has left is not.
 
-No league-strength adjustment is made (owner decision): each player carries his league as a tag,
-and the percentiles are within his own league and position, exactly as everywhere else. A
-league-position pool below MIN_PEERS_FOR_RANKING is never rated here either.
+No league-strength adjustment is made (owner decision): ratings and percentiles are within league,
+season and position, so he is ranked, gapped and median-lined ONLY against those of ours whose
+row that season is in HIS league (owner decision 2B, 2026-11-20). The rest of ours stay in the
+table, tagged "Rated in <league>"; when none of ours is in his league, nothing is ranked and the
+section shows the position's raw SkillCorner physical values side by side instead (raw values
+are comparable across leagues; ratings are not). A league-position pool below
+MIN_PEERS_FOR_RANKING is never rated here either.
 
 The pure functions up to the "data" banner take plain values, so tests need no database; the
 loaders below it are version-cached like `loaders.py` (`_versioned`).
@@ -115,15 +119,20 @@ def title(position: str, target_is_ours: bool) -> str:
 
 
 def subtitle(position: str, archetype: str | None = None) -> str:
-    base = f"Leyton Orient's current {plural(position).lower()} · each rated in his own league"
+    base = f"Leyton Orient's current {plural(position).lower()} · only those in his league are compared"
     # the rank-as lens: say so, or the numbers read as the default rating
     return base + (f" · Rated as {archetype}"
                    if archetype and archetype != cf.DEFAULT_ARCHETYPE else "")
 
 
-def median_label(position: str, n: int) -> str:
+def _in(league: str | None) -> str:
+    """"League One " when some of ours were left out for playing elsewhere, else nothing."""
+    return f"{league} " if league else ""
+
+
+def median_label(position: str, n: int, league: str | None = None) -> str:
     """The radar key for our line: how many of our players the median is over."""
-    return f"Our current {position.lower()}s' median ({n})"
+    return f"Our current {_in(league)}{position.lower()}s' median ({n})"
 
 
 def ordinal(n: int) -> str:
@@ -132,21 +141,42 @@ def ordinal(n: int) -> str:
     return f"{n}{suffix}"
 
 
-def among_text(n_ours: int, n_unrated: int, position: str) -> str:
-    who = f"only {position.lower()}" if n_ours == 1 else f"{n_ours} {plural(position).lower()}"
-    tail = f" ({n_unrated} not rated this season)" if n_unrated else ""
+def among_text(n_ours: int, n_unrated: int, position: str, n_elsewhere: int = 0) -> str:
+    if n_ours == 1:
+        who = f"1 {position.lower()}" if n_elsewhere else f"only {position.lower()}"
+    else:
+        who = f"{n_ours} {plural(position).lower()}"
+    parts = ([f"{n_unrated} not rated this season"] if n_unrated else []) + \
+            ([f"{n_elsewhere} in other leagues"] if n_elsewhere else [])
+    tail = f" ({', '.join(parts)})" if parts else ""
     return f"among our {who}{tail}"
 
 
-def gap_note(n_compared: int, position: str) -> str:
+def gap_note(n_compared: int, position: str, league: str | None = None) -> str:
     who = (f"our only rated {position.lower()}" if n_compared == 1
-           else f"the best of our {n_compared} {plural(position).lower()}")
+           else f"the best of our {n_compared} {_in(league)}{plural(position).lower()}")
     return f"Gap in percentile points vs {who} on that metric."
 
 
-def better_heading(n_compared: int, position: str) -> str:
+def better_heading(n_compared: int, position: str, league: str | None = None) -> str:
     return (f"Better than our only rated {position.lower()}" if n_compared == 1
-            else f"Better than all our {plural(position)}")
+            else f"Better than all our {_in(league)}{plural(position)}")
+
+
+def elsewhere_tag(league: str | None) -> str:
+    return f"Rated in {league}"
+
+
+def not_compared_text(position: str, league: str | None, season_name: str) -> str:
+    """The one line when none of ours played in his league that season (or he has no row)."""
+    if not league:
+        return f"He has no minutes in {season_name}, so ratings are not compared."
+    return (f"None of our {plural(position).lower()} was rated in {league} in {season_name}, "
+            "so ratings are not compared.")
+
+
+def no_physical_text(season_name: str) -> str:
+    return f"No SkillCorner data for him in {season_name}."
 
 
 def unrated_text(minutes) -> str:
@@ -182,10 +212,40 @@ class SfPlayer:
     style: str | None = None
     pct: dict = field(default_factory=dict)
     is_target: bool = False
+    player_id: int | None = None
+    competition_id: int | None = None     # the league of his row that season; None = no row
+    row_position: str | None = None       # the position_group of that row
+    elsewhere: str | None = None          # "Rated in League Two": rated, not in HIS league
+    raw: dict = field(default_factory=dict)   # raw SkillCorner physical values of that row
 
     @property
     def rated(self) -> bool:
         return self.overall is not None and not pd.isna(self.overall)
+
+
+def split_ours(ours: list[SfPlayer], competition_id) -> tuple[list[SfPlayer], list[SfPlayer]]:
+    """(compared, elsewhere): ours whose row that season is in his league (plus those with no
+    row at all, who are simply "No minutes this season"), and ours who played in another league.
+    A rated player elsewhere is tagged `elsewhere`; he is listed, never ranked against him.
+    `competition_id` None (he has no row): nobody is compared."""
+    same, other = [], []
+    for p in ours:
+        if competition_id is None:
+            (other if p.competition_id is not None else same).append(p)
+        elif p.competition_id is None or p.competition_id == competition_id:
+            same.append(p)
+        else:
+            other.append(p)
+    if competition_id is None:
+        same, other = [], other + same
+    for p in other:
+        p.elsewhere = elsewhere_tag(p.league) if p.rated and p.competition_id is not None else None
+    return same, other
+
+
+def by_minutes(ours: list[SfPlayer]) -> list[SfPlayer]:
+    """Most minutes first: the order for ours who are listed but not ranked."""
+    return sorted(ours, key=lambda p: -(p.minutes or 0))
 
 
 def order_ours(ours: list[SfPlayer]) -> list[SfPlayer]:
@@ -301,8 +361,28 @@ def table_rows(players: list[SfPlayer]) -> list[dict]:
             "style": (p.style or None) if p.rated else None,
             "contract": p.contract or None,
             "unrated": None if p.rated else unrated_text(p.minutes),
+            "elsewhere": p.elsewhere,
         })
     return rows
+
+
+def _one_dp(v) -> str | None:
+    """The card's physical-table format (`card._physical_block`): one decimal place."""
+    return None if v is None or pd.isna(v) else f"{float(v):.1f}"
+
+
+def raw_physical_table(players: list[SfPlayer], metrics: list[tuple[str, str]],
+                       season_name: str) -> dict | None:
+    """Him and each of ours with the RAW SkillCorner value per physical measure (raw values are
+    comparable across leagues: no percentile, no rank, no "better" colour), each row naming the
+    league and season its values come from. None when he has no value at all."""
+    if not players or not any(_num(players[0].raw.get(k)) is not None for k, _ in metrics):
+        return None
+    return {"columns": ["Player", "Values from"] + [label for _, label in metrics],
+            "rows": [{"name": p.name, "is_target": p.is_target,
+                      "source": f"{p.league} · {season_name}" if p.league else None,
+                      "values": [_one_dp(p.raw.get(k)) for k, _ in metrics]}
+                     for p in players]}
 
 
 def metric_matrix(players: list[SfPlayer], perf: list[tuple[str, str]],
@@ -513,10 +593,11 @@ def make_player(player_id: int, name: str, season_id: int, metrics: list[str] | 
     rows = rated_rows(season_id) if rows is None else rows
     pf = L.load_scorecard_percentiles(season_id) if pf is None else pf
     p = SfPlayer(name=name, age=_age_now(birth), contract=_contract(contract),
-                 is_target=is_target)
+                 is_target=is_target, player_id=int(player_id))
     r = rows.loc[player_id] if player_id in rows.index else None
     if r is not None:
         comp = int(r["competition_id"])
+        p.competition_id, p.row_position = comp, r["position_group"]
         p.minutes = float(r["minutes"]) if pd.notna(r["minutes"]) else None
         p.club = r["team_name"] if pd.notna(r["team_name"]) else None
         p.league = L.competition_name_by_id().get(comp)
@@ -562,15 +643,50 @@ def _ours(position: str, season_id: int, exclude_player_id=None, metrics=None,
             for r in sq.itertuples()]
 
 
-def orient_median(position: str, season_id: int,
-                  exclude_player_id=None) -> tuple[dict[str, float], int]:
+def orient_median(position: str, season_id: int, exclude_player_id=None,
+                  competition_id=None) -> tuple[dict[str, float], int]:
     """Median percentile per metric across Leyton Orient's CURRENT players at `position`
     who have percentiles in `season_id`, and how many that is. ({}, 0) when none.
     `exclude_player_id`: leave one player out (the card passes its own player when he is ours,
-    so his own figures never move the line he is drawn against)."""
+    so his own figures never move the line he is drawn against).
+    `competition_id`: only ours whose row that season is in that league (the card passes its
+    own league: percentiles from different leagues are not comparable, owner decision 2B).
+    None = every current player at the position (Compare, unchanged)."""
     ours = _ours(position, season_id, exclude_player_id=exclude_player_id)
+    if competition_id is not None:
+        ours = [p for p in ours if p.competition_id == int(competition_id)]
     pf = L.load_scorecard_percentiles(season_id)
     return median_pct(ours, _metric_cols(pf))
+
+
+def ours_count(position: str, exclude_player_id=None) -> int:
+    """How many current Leyton Orient players are at `position` (the card's own player left out)."""
+    return len(ours_at(squad(), position, exclude_player_id))
+
+
+def physical_values(season_id: int, ids: list[int]) -> dict:
+    """(player_id, competition_id, position_group) -> {metric: raw value} of the physical
+    measures held in player_metrics_neutral for `ids` in `season_id` (SkillCorner, per 90;
+    top speeds in km/h). Not cached: a handful of rows, and the section's answer is cached."""
+    cols = sorted({m for ms in cf.PHYSICAL_METRICS.values() for m in ms})
+    if not ids or not cols:
+        return {}
+    f = pd.read_sql(
+        f"SELECT player_id, competition_id, position_group, {', '.join(cols)} "
+        "FROM player_metrics_neutral WHERE season_id = %(s)s AND player_id = ANY(%(i)s)",
+        L.get_engine(), params={"s": int(season_id), "i": [int(i) for i in ids]})
+    return {(int(r.player_id), int(r.competition_id), r.position_group):
+            {m: (None if pd.isna(getattr(r, m)) else float(getattr(r, m))) for m in cols}
+            for r in f.itertuples()}
+
+
+def physical_measures(position: str) -> list[tuple[str, str]]:
+    """The position's physical rating measures (`cf.PHYSICAL_METRICS`) with the card's own
+    labels and units, in the card's physical-table order."""
+    from lofc.dashboard import detail_section as ds
+    entries = list(ds.PHASE_METRICS) + [(m, label) for m, label, _ in ds.SPEED_METRICS]
+    scored = set(cf.PHYSICAL_METRICS.get(position, []))
+    return [(m, label) for m, label in entries if m in scored]
 
 
 # --- the section ---------------------------------------------------------------------------
@@ -593,7 +709,8 @@ def section(player_id: int, player_name: str, position: str, season_id: int,
                  "position": position, "season": sid, "seasons": season_choices(),
                  "target_is_ours": target_is_ours, "empty": None, "compare_note": None,
                  "verdict": None, "table": [], "radar": None, "better": None, "worse": None,
-                 "gap_note": None, "metrics": None}
+                 "gap_note": None, "metrics": None, "not_compared": None,
+                 "raw_physical": None, "raw_physical_note": None}
 
     radar_keys = ct.radar_metrics(position, archetype)
     perf_keys = [m for m, _t in ct.rating_metrics(position, archetype)]
@@ -612,19 +729,38 @@ def section(player_id: int, player_name: str, position: str, season_id: int,
 
     target = make_player(pid, player_name, sid, perf_keys + phys_keys, birth=birth,
                          contract=contract, is_target=True, pf=pf, styles=styles, rows=rows)
-    ours = order_ours(ours)
-    s = summary(target, ours)
+    same, elsewhere = split_ours(ours, target.competition_id)
+    season_name = seasons_mod.season_name_for(sid)
+    if not any(p.competition_id is not None for p in same):
+        # none of ours played in his league that season: nothing is ranked against him
+        out["not_compared"] = not_compared_text(position, target.league, season_name)
+        listed = by_minutes(same + elsewhere)
+        out["table"] = table_rows([target] + listed)
+        measures = physical_measures(position)
+        if measures and target.competition_id is not None:
+            raw = physical_values(sid, [pid] + [p.player_id for p in listed])
+            for p in [target] + listed:
+                p.raw = raw.get((p.player_id, p.competition_id, p.row_position), {}) \
+                    if p.competition_id is not None else {}
+            out["raw_physical"] = raw_physical_table([target] + listed, measures, season_name)
+            if out["raw_physical"] is None:
+                out["raw_physical_note"] = no_physical_text(season_name)
+        return out
+
+    league = target.league if elsewhere else None     # named only when some were left out
+    same = order_ours(same)
+    s = summary(target, same)
     best = s["best"]
     out["verdict"] = {
         "rank_text": s["rank_text"], "rank": s["rank"], "of": s["of"],
-        "among": among_text(s["n_ours"], s["n_unrated"], position),
+        "among": among_text(s["n_ours"], s["n_unrated"], position, len(elsewhere)),
         "his_rating": _num(target.overall) if target.rated else None,
         "his_league": target.league if target.rated else None,
         "our_best": _num(best.overall) if best else None,
         "our_best_sub": f"{best.name} · {best.league or DASH}" if best else None}
-    out["table"] = table_rows([target] + ours)
+    out["table"] = table_rows([target] + same + by_minutes(elsewhere))
 
-    better, worse, n_cmp = gap_lists(target, ours, radar_keys)
+    better, worse, n_cmp = gap_lists(target, same, radar_keys)
     if not n_cmp:
         out["compare_note"] = (f"None of our {plural(position).lower()} has enough minutes "
                                "this season to compare metric by metric.")
@@ -633,16 +769,16 @@ def section(player_id: int, player_name: str, position: str, season_id: int,
         out["compare_note"] = ("He has no percentiles this season, so there is no "
                                "metric-by-metric comparison.")
         return out
-    med, n_med = median_pct(ours, radar_keys)
+    med, n_med = median_pct(same, radar_keys)
     out["radar"] = {"labels": [ct.row_label(m) for m in radar_keys], "metrics": radar_keys,
                     "target": [target.pct.get(m) for m in radar_keys],
                     "ours_median": [med.get(m) for m in radar_keys], "target_name": target.name,
-                    "median_label": median_label(position, n_med)}
-    out["better"] = {"heading": better_heading(n_cmp, position),
+                    "median_label": median_label(position, n_med, league)}
+    out["better"] = {"heading": better_heading(n_cmp, position, league),
                      "items": gap_items(better, ct.row_label)}
     out["worse"] = {"heading": "Where one of ours is better",
                     "items": gap_items(worse, ct.row_label)}
-    out["gap_note"] = gap_note(n_cmp, position)
-    out["metrics"] = metric_matrix([target] + ours, [(m, ct.row_label(m)) for m in perf_keys],
+    out["gap_note"] = gap_note(n_cmp, position, league)
+    out["metrics"] = metric_matrix([target] + same, [(m, ct.row_label(m)) for m in perf_keys],
                                    [(m, ct.row_label(m)) for m in phys_keys])
     return out

@@ -92,7 +92,7 @@ function radarBlock(labels, player, orient, name, orientLabel, raw) {
   // gaps is not drawn, and a one-line note says which metrics it lacks.
   if (hasOrient && !gaps.length) series.push(orientSeries(orient, orientLabel || 'Leyton Orient median'));
   const note = gaps.length ? `Orient median not drawn: no value for ${gaps.join(', ')}.`
-    : !hasOrient ? 'No Orient median: no current player at this position has percentiles.' : '';
+    : !hasOrient ? 'No Orient median: none of ours at this position rated in his league.' : '';
   return radar(labels, series) + (note ? `<p class="rdr-note">${esc(note)}</p>` : '');
 }
 
@@ -404,18 +404,29 @@ function renderSquad(S) {
     + `<div class="seg" id="sq-seg" role="group" aria-label="Season">${seasons}</div></div>`;
   if (S.empty) { box.innerHTML = h + `<p>${esc(S.empty)}</p>`; return bindSquad(); }
   const V = S.verdict;
-  h += `<div class="verdict"><div><div class="k">Where he would sit by rating</div><div class="v">${esc(V.rank_text)}</div><div class="s">${esc(V.among)}</div></div>`
+  // None of ours in his league that season (owner decision 2B): no rank, one line instead
+  if (S.not_compared) h += `<p class="note">${esc(S.not_compared)}</p>`;
+  else h += `<div class="verdict"><div><div class="k">Where he would sit by rating</div><div class="v">${esc(V.rank_text)}</div><div class="s">${esc(V.among)}</div></div>`
     + `<div><div class="k">His rating</div><div class="v">${fixed(V.his_rating)}</div><div class="s">${esc(V.his_league || '—')}</div></div>`
     + `<div><div class="k">Our best</div><div class="v">${fixed(V.our_best)}</div><div class="s">${esc(V.our_best_sub || '')}</div></div></div>`;
   const cols = ['Player', 'Age', 'Club that season', 'Minutes', 'Overall', 'Performance', 'Physical', 'Playing style', 'Contract to'];
   const rows = S.table.map(p => {
-    const name = `${esc(p.name)}${p.is_target ? '<span class="tag">Target</span>' : ''}${p.note ? `<div class="note">${esc(p.note)}</div>` : ''}`;
+    const name = `${esc(p.name)}${p.is_target ? '<span class="tag">Target</span>' : ''}${p.note ? `<div class="note">${esc(p.note)}</div>` : ''}${p.elsewhere ? `<div class="note">${esc(p.elsewhere)}</div>` : ''}`;
     const club = `${esc(dash(p.club))}${p.league_abbr ? `<span class="lg" title="${esc(p.league || '')}">${esc(p.league_abbr)}</span>` : ''}`;
     const mid = p.unrated ? `<td colspan="4" class="note">${esc(p.unrated)}</td>`
       : `<td>${chip(p.overall)}</td><td>${chip(p.performance)}</td><td>${chip(p.physical)}</td><td>${esc(dash(p.style))}</td>`;
     return `<tr class="${p.is_target ? 'target' : ''}"><td>${name}</td><td class="n">${p.age == null ? '—' : p.age.toFixed(1)}</td><td>${club}</td><td class="n">${fmtInt(p.minutes)}</td>${mid}<td>${esc(dash(p.contract))}</td></tr>`;
   }).join('');
   h += tw(`<table><thead>${thead(cols)}</thead><tbody>${rows}</tbody></table>`);
+  if (S.not_compared) {
+    // raw SkillCorner values are comparable across leagues: side by side, no rank, no colours
+    const RP = S.raw_physical;
+    if (RP) h += `<b>Physical, raw values</b>` + tw(`<table class="sq-raw"><thead><tr>${RP.columns.map((c, i) => `<th${i > 1 ? ' class="n"' : ''}>${esc(c)}</th>`).join('')}</tr></thead><tbody>${RP.rows.map(r =>
+      `<tr class="${r.is_target ? 'target' : ''}"><td>${esc(r.name)}${r.is_target ? '<span class="tag">Target</span>' : ''}</td><td>${esc(dash(r.source))}</td>`
+      + r.values.map(v => `<td class="n">${esc(dash(v))}</td>`).join('') + '</tr>').join('')}</tbody></table>`);
+    else if (S.raw_physical_note) h += empty(S.raw_physical_note);
+    box.innerHTML = h; return bindSquad();
+  }
   if (S.compare_note || !S.radar) { box.innerHTML = h + empty(S.compare_note || ''); return bindSquad(); }
   const li = it => `<li><span class="${it.kind}">${esc(it.arrow)}</span> ${esc(it.label)} <span class="note">· ${esc(it.detail)}</span></li>`;
   const list = L => `<b>${esc(L.heading)}</b><ul>${L.items.length ? L.items.map(li).join('') : '<li class="note">—</li>'}</ul>`;

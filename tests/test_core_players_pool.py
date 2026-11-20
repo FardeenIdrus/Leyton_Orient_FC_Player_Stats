@@ -164,3 +164,82 @@ def test_season_players_every_player_a_to_z_with_the_search_key(monkeypatch):
         want = {l.split(" — ")[0] for l in filter_labels(idx["label"].tolist(), q)}
         got = {r[2] for r in rows if fold(q) in r[6]}
         assert {w.split(" (")[0] for w in want} == got, q
+
+
+# --- owner 2026-11-20: one tab per chosen league, each ranked within its league ----------------
+# Ratings are percentile bands WITHIN league + season + position, so a list ordered across
+# leagues by them is invalid (no league-strength adjustment, deliberately).
+def _two_league_result():
+    from lofc.core import players_pool as pp
+    pool = pd.DataFrame({
+        "player_id": [1, 2, 3, 4, 5], "competition_id": [8, 9, 8, 9, 9], "season_id": 318,
+        "league": ["League One", "League Two", "League One", "League Two", "League Two"],
+        "objective_composite": [4.5, 4.4, 3.9, 3.1, 2.0],
+        "qualifies": [True, False, False, True, False],
+        "affordable_fee": [True, True, False, True, False],
+        "affordable_wage": [True, False, False, True, False]})
+    withheld = pd.DataFrame({"player_name": ["X", "Y"], "team_name": ["A", "B"],
+                             "league": ["League Two", "Championship"]})
+    return pp.PoolResult(pool=pool, withheld=withheld, contract_unknown=5,
+                         candidates=pool.iloc[0:0], search_index=pool.iloc[0:0],
+                         ranking=pool.iloc[0:0],
+                         contract_unknown_by_league={"League One": 2, "League Two": 3})
+
+
+def test_league_result_keeps_only_that_league_in_ranking_order():
+    from lofc.core import players_pool as pp
+    res = _two_league_result()
+    two = pp.league_result(res, "League Two")
+    assert list(two.pool["player_id"]) == [2, 4, 5]
+    assert list(two.pool.index) == [0, 1, 2]
+    assert list(two.withheld["player_name"]) == ["X"]
+    assert two.contract_unknown == 3
+    assert pp.league_result(res, "Championship").contract_unknown == 0
+    assert pp.league_result(res, "Championship").pool.empty
+
+
+def test_tab_leagues_follow_the_picker_and_drop_leagues_with_nobody():
+    from lofc.core import players_pool as pp
+    picker = ["Championship", "League One", "League Two", "Scottish Prem"]
+    present = {"League Two", "League One", "Championship"}
+    assert pp.tab_leagues(picker, (), present) == ["Championship", "League One", "League Two"]
+    assert pp.tab_leagues(picker, ("League Two", "League One"), present) == ["League One", "League Two"]
+    # a single chosen league is always its tab, even with nobody in it (today's behaviour)
+    assert pp.tab_leagues(picker, ("Scottish Prem",), present) == ["Scottish Prem"]
+    assert pp.tab_leagues(picker, (), set()) == picker
+
+
+def test_default_tab_is_league_one_else_the_first():
+    from lofc.core import players_pool as pp
+    assert pp.default_tab(["Championship", "League One", "League Two"]) == "League One"
+    assert pp.default_tab(["Championship", "League Two"]) == "Championship"
+    assert pp.default_tab(["Championship", "League Two"], "League Two") == "League Two"
+    assert pp.default_tab(["Championship", "League One"], "Atlantis") == "League One"
+    assert pp.default_tab([], "League Two") is None
+
+
+def test_league_counts_are_per_league_after_filters(monkeypatch):
+    from lofc.core import players_pool as pp
+    from lofc.core import report_page as rp
+    res = _two_league_result()
+    monkeypatch.setattr(pp, "apply_metric_values",
+                        lambda pool, *a, **k: (pool[pool["player_id"] != 3], 0))
+    monkeypatch.setattr(rp, "all_player_verdicts", lambda: {})
+    req = pp.ListRequest(filters=pp.PoolFilters(season_id=318, position="Winger"))
+    assert pp.league_counts(req, res, ["League One", "League Two"]) == {"League One": 1, "League Two": 3}
+    # signable is decided per league: League One's only qualifier keeps it, League Two too
+    money = pp.ListRequest(filters=req.filters, show_money=True)
+    assert pp.league_counts(money, res, ["League One", "League Two"]) == {"League One": 1, "League Two": 1}
+
+
+def test_csv_is_one_block_per_league_with_league_and_rank_in_league():
+    from lofc.core import players_pool as pp
+    def lr(league, names):
+        t = pd.DataFrame({"#": list(range(1, len(names) + 1)), "Player": names,
+                          "League": [league] * len(names), "Composite": [3.0] * len(names)})
+        return pp.ListResult(pool=None, table=t, columns=["#", "Player", "League", "Composite"],
+                             keys=None, meta={})
+    out = pp.csv_by_league([("League One", lr("League One", ["a", "b"])),
+                            ("League Two", lr("League Two", ["c"]))]).decode().splitlines()
+    assert out == ["League,Rank in league,Player,Composite",
+                   "League One,1,a,3.0", "League One,2,b,3.0", "League Two,1,c,3.0"]

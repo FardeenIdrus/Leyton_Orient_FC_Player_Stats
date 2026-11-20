@@ -66,6 +66,7 @@ class PoolResult:
     candidates: pd.DataFrame         # after age/league/contract/foot, before position/minutes
     search_index: pd.DataFrame       # season-wide, built BEFORE any filter
     ranking: pd.DataFrame            # the season's full scorecard set for the archetype
+    contract_unknown_by_league: dict = field(default_factory=dict)   # the same count, per league
 
 
 @functools.lru_cache(maxsize=32)
@@ -110,10 +111,14 @@ def build_pool(f: PoolFilters, with_search_index: bool = True) -> PoolResult:
     # excluded -- but counted, so "no Scottish player is expiring" is never confused with
     # "we do not know".
     contract_unknown = 0
+    unknown_by_league: dict = {}
     mask = S.contract_mask(candidates["contract_until"], f.contract_horizon)
     if mask is not None:
         in_position = candidates["position_group"] == f.position
-        contract_unknown = int((candidates["contract_until"].isna() & in_position).sum())
+        no_date = candidates["contract_until"].isna() & in_position
+        contract_unknown = int(no_date.sum())
+        unknown_by_league = {str(k): int(v) for k, v in
+                             candidates.loc[no_date, "league"].value_counts().items()}
         candidates = candidates[mask]
     if f.foot != "Any":
         candidates = candidates[candidates["foot"].isin([f.foot.lower(), "both"])]
@@ -166,7 +171,49 @@ def build_pool(f: PoolFilters, with_search_index: bool = True) -> PoolResult:
     pool = pool.sort_values("objective_composite", ascending=False,
                             na_position="last").reset_index(drop=True)
     return PoolResult(pool=pool, withheld=withheld, contract_unknown=contract_unknown,
-                      candidates=candidates, search_index=search_index, ranking=ranking)
+                      candidates=candidates, search_index=search_index, ranking=ranking,
+                      contract_unknown_by_league=unknown_by_league)
+
+
+# ---- one list per league (owner 2026-11-20) ------------------------------------------------------
+# Ratings are percentile bands WITHIN league + season + position: ordering players from different
+# leagues by them is invalid (no league-strength adjustment, deliberately). The web page shows one
+# tab per chosen league, each its own ranked list.
+DEFAULT_TAB = "League One"
+
+
+def league_result(res: PoolResult, league: str) -> PoolResult:
+    """The pool narrowed to one league, ranking order kept (as if only that league were chosen)."""
+    pool = res.pool[res.pool["league"] == league].reset_index(drop=True)
+    withheld = res.withheld[res.withheld["league"] == league]
+    return PoolResult(pool=pool, withheld=withheld,
+                      contract_unknown=int(res.contract_unknown_by_league.get(league, 0)),
+                      candidates=res.candidates, search_index=res.search_index,
+                      ranking=res.ranking,
+                      contract_unknown_by_league={league: res.contract_unknown_by_league.get(league, 0)})
+
+
+def tab_leagues(picker: list[str], chosen: tuple, present: set) -> list[str]:
+    """The tabs: the chosen leagues (none chosen = all) in the picker's order, without leagues
+    that have nobody in this position after the filters -- unless that leaves no tab."""
+    base = [lg for lg in picker if not chosen or lg in chosen]
+    return [lg for lg in base if lg in present] or base
+
+
+def default_tab(tabs: list[str], wanted: str | None = None) -> str | None:
+    """The asked-for tab when it is one; else League One when chosen; else the first."""
+    if wanted in tabs:
+        return wanted
+    if DEFAULT_TAB in tabs:
+        return DEFAULT_TAB
+    return tabs[0] if tabs else None
+
+
+def league_request(req: "ListRequest", res: PoolResult, league: str) -> tuple["ListRequest", PoolResult]:
+    """The request and pool for one league's tab."""
+    import dataclasses
+    f = dataclasses.replace(req.filters, leagues=(league,))
+    return dataclasses.replace(req, filters=f), league_result(res, league)
 
 
 # ---- money controls ------------------------------------------------------------------------
@@ -394,19 +441,11 @@ def build_list(req: ListRequest, res: PoolResult | None = None) -> ListResult:
     f = req.filters
     res = res or build_pool(f)
     lens = f.archetype != cf.DEFAULT_ARCHETYPE
-    position = f.position
     metric_values = L.load_metric_values(f.season_id)
 
-    pool, unknown = apply_metric_values(res.pool, f.season_id, position, f.archetype,
-                                        req.pct, req.raw)
     rank_column = RANK_COLUMN
-    pool = pool.sort_values(rank_column, ascending=False, na_position="last").reset_index(drop=True)
-    # Scout verdicts: what the club's scouts said (scout_reports). Display and filter only --
-    # filtered AFTER the sort, so the order is the ranking's; nothing here touches the composite.
+    pool, unknown = _metric_and_scout(req, res.pool)
     verdicts = rp.all_player_verdicts()
-    if req.scout != rp.VERDICT_ANY:
-        keep = pool["player_id"].map(lambda p: rp.verdict_matches(verdicts.get(int(p)), req.scout))
-        pool = pool[keep.astype(bool)].reset_index(drop=True)
     meta: dict = {"hidden": unknown, "hidden_text": hidden_text(unknown),
                   "contract_caption": _contract_caption(f, len(pool), res.contract_unknown),
                   "rank_caption": (f"Rank as **{f.archetype}** — the Composite is scored on this "
@@ -414,25 +453,14 @@ def build_list(req: ListRequest, res: PoolResult | None = None) -> ListResult:
                                    "composite for context.") if lens else None,
                   "money_count": None}
 
-    only_qualifying = False
+    pool, money = _signable(req, pool)
+    meta.update(money)
     if req.show_money:
-        qualifying = pool[pool["qualifies"]]
-        fee_ok, wage_ok = int(pool["affordable_fee"].sum()), int(pool["affordable_wage"].sum())
-        meta["count_caption"] = (f"**{len(pool)}** {position}s · **{fee_ok}** within the transfer "
-                                 f"budget · **{wage_ok}** within the wage budget · "
-                                 f"**{len(qualifying)}** affordable on both.")
-        only_qualifying = (not qualifying.empty) if req.signable is None else bool(req.signable)
         meta["affordable_now"] = int(res.pool["qualifies"].sum())
-        meta["money_count"] = {"total": len(pool), "fee": fee_ok, "wage": wage_ok,
-                               "both": len(qualifying)}
-        if only_qualifying and not qualifying.empty:
-            pool = qualifying.reset_index(drop=True)
-    else:
-        meta["count_caption"] = f"**{len(pool)}** {position}s ranked."
-    meta["signable"] = only_qualifying
 
     view = pool.copy().reset_index(drop=True)
-    # "#" is the row's position in the list as currently filtered -- not a cross-league rank.
+    # "#" is the row's position in the list as currently filtered: with one league per request
+    # (the web page's tabs) it is the rank within that league, never a cross-league rank.
     view.insert(0, "#", range(1, len(view) + 1))
     view["Mins"] = view["minutes"].map(pt.whole_minutes)
     # Top speed = average of his 5 fastest matches (SkillCorner PSV-99 Top 5), raw km/h.
@@ -471,6 +499,61 @@ def build_list(req: ListRequest, res: PoolResult | None = None) -> ListResult:
         table = _sorted(table, req.sort, req.descending)
     return ListResult(pool=res, table=table, columns=columns,
                       keys=table[KEYS3].reset_index(drop=True), meta=meta)
+
+
+def _metric_and_scout(req: ListRequest, pool: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Metric filters, then the ranking order, then the scout verdict filter (display and filter
+    only -- AFTER the sort, so the order is the ranking's; nothing here touches the composite).
+    Row-by-row filters: the same rows whether applied to all leagues or to one."""
+    from lofc.core import report_page as rp
+    f = req.filters
+    pool, unknown = apply_metric_values(pool, f.season_id, f.position, f.archetype,
+                                        req.pct, req.raw)
+    # stable: tied composites keep the pool's order, so a league's tab lists exactly the order
+    # that league has inside the season-wide pool (quicksort on a slice could swap ties)
+    pool = pool.sort_values(RANK_COLUMN, ascending=False, na_position="last",
+                            kind="stable").reset_index(drop=True)
+    if req.scout != rp.VERDICT_ANY:
+        verdicts = rp.all_player_verdicts()
+        keep = pool["player_id"].map(lambda p: rp.verdict_matches(verdicts.get(int(p)), req.scout))
+        pool = pool[keep.astype(bool)].reset_index(drop=True)
+    return pool, unknown
+
+
+def _signable(req: ListRequest, pool: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """The count caption and, with affordability on, the 'Only signable players' narrowing
+    (default on when anyone in this list qualifies)."""
+    f = req.filters
+    where = f" in {f.leagues[0]}" if len(f.leagues) == 1 else ""
+    meta: dict = {"money_count": None}
+    only_qualifying = False
+    if req.show_money:
+        qualifying = pool[pool["qualifies"]]
+        fee_ok, wage_ok = int(pool["affordable_fee"].sum()), int(pool["affordable_wage"].sum())
+        meta["count_caption"] = (f"**{len(pool)}** {f.position}s{where} · **{fee_ok}** within the "
+                                 f"transfer budget · **{wage_ok}** within the wage budget · "
+                                 f"**{len(qualifying)}** affordable on both.")
+        only_qualifying = (not qualifying.empty) if req.signable is None else bool(req.signable)
+        meta["money_count"] = {"total": len(pool), "fee": fee_ok, "wage": wage_ok,
+                               "both": len(qualifying)}
+        if only_qualifying and not qualifying.empty:
+            pool = qualifying.reset_index(drop=True)
+    else:
+        meta["count_caption"] = f"**{len(pool)}** {f.position}s ranked{where}."
+    meta["signable"] = only_qualifying
+    return pool, meta
+
+
+def league_counts(req: ListRequest, res: PoolResult, leagues: list[str]) -> dict[str, int]:
+    """Players listed in each league's tab after every filter -- the metric and scout filters
+    once over all leagues (row-by-row, so the same rows), the signable switch per league."""
+    import dataclasses
+    pool, _ = _metric_and_scout(req, res.pool)
+    out = {}
+    for lg in leagues:
+        one = dataclasses.replace(req, filters=dataclasses.replace(req.filters, leagues=(lg,)))
+        out[lg] = len(_signable(one, pool[pool["league"] == lg])[0])
+    return out
 
 
 # Columns whose displayed text is not what should order them (formatted strings, pill lists).
@@ -578,12 +661,19 @@ def row_dicts(lr: ListResult) -> list[dict]:
             for i, (a, b, c) in enumerate(ids)]
 
 
-def csv_bytes(lr: ListResult) -> bytes:
-    """"Saves exactly what is on screen": the displayed columns, "#" first, as Streamlit exports."""
-    t = lr.table
-    export = t[[c for c in lr.columns if c != "#"]].copy()
-    export.insert(0, "#", t["#"])
-    return export.to_csv(index=False).encode("utf-8")
+def csv_by_league(lists: list[tuple[str, ListResult]]) -> bytes:
+    """The displayed columns, one block per league in tab order (owner 2026-11-20): "League"
+    and "Rank in league" first, never one cross-league order."""
+    blocks = []
+    for league, lr in lists:
+        t = lr.table
+        export = t[[c for c in lr.columns if c not in ("#", "League")]].copy()
+        export.insert(0, "Rank in league", t["#"].to_numpy())
+        export.insert(0, "League", league)
+        blocks.append(export)
+    if not blocks:
+        return b""
+    return pd.concat(blocks, ignore_index=True).to_csv(index=False).encode("utf-8")
 
 
 def csv_filename(position: str) -> str:

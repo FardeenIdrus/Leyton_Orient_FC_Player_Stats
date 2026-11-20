@@ -209,10 +209,16 @@ def _legacy(**kw):
 
 
 def _displayed(pool):
-    """The order Streamlit's table shows: `_players` sorts the pool a SECOND time (quicksort is
-    not stable, so tied composites can swap places against the first sort)."""
+    """The order the web list shows: the pool sorted a second time, stably (owner 2026-11-20:
+    per-league tabs; ties keep the pool's order)."""
     return pool.sort_values("objective_composite", ascending=False,
-                            na_position="last").reset_index(drop=True)
+                            na_position="last", kind="stable").reset_index(drop=True)
+
+
+def _in_league(pool, league):
+    """One league's tab: the pool's own order (build_pool's sort), ties kept as they are --
+    the list re-sorts stably (owner 2026-11-20: one tab per league)."""
+    return pool[pool["league"] == league].reset_index(drop=True)
 
 
 COMBOS = [
@@ -230,12 +236,22 @@ COMBOS = [
 
 @pytest.mark.parametrize("qs,legacy", COMBOS, ids=[c[1]["position"] + str(c[1]["season_id"]) for c in COMBOS])
 def test_api_rows_are_the_streamlit_pool_in_the_same_order(qs, legacy):
+    """Owner 2026-11-20: one tab per league; each tab is the Streamlit pool for that league,
+    in the same order (never one list across leagues)."""
     _need_db()
-    d = _client().get("/api/players?" + qs).json()
-    old = _displayed(_legacy(**legacy)["pool"])
-    assert [r["id"][0] for r in d["rows"]] == list(old["player_id"])
-    assert d["count_caption"] == f"**{len(old)}** {legacy['position']}s ranked."
-    assert [r["cells"]["Player"] for r in d["rows"]] == list(old["player_name"])
+    c = _client()
+    d = c.get("/api/players?" + qs).json()
+    old = _legacy(**legacy)["pool"]
+    assert sum(t["count"] for t in d["tabs"]) == len(old)
+    for tab in d["tabs"]:
+        lg = tab["league"]
+        t = c.get("/api/players?" + qs + "&league=" + lg.replace(" ", "%20")).json()
+        want = _in_league(old, lg)
+        assert [r["id"][0] for r in t["rows"]] == list(want["player_id"]), lg
+        assert [r["cells"]["Player"] for r in t["rows"]] == list(want["player_name"]), lg
+        assert [r["cells"]["#"] for r in t["rows"]] == list(range(1, len(want) + 1))
+        assert t["count_caption"] == f"**{len(want)}** {legacy['position']}s ranked in {lg}."
+        assert tab["count"] == len(want)
 
 
 def test_columns_and_cell_formats_are_todays():
@@ -277,7 +293,8 @@ def test_money_columns_only_with_money_on_and_caption_counts():
                ("Market value", "Est. wage", "Below fair value", "Fee in budget", "Wages in budget"))
     assert keys_on[-5:] == ["Market value", "Est. wage", "Below fair value", "Fee in budget", "Wages in budget"]
     m = on["money_count"]
-    assert on["count_caption"].startswith(f"**{m['total']}** Wingers · **{m['fee']}** within the transfer budget")
+    assert on["count_caption"].startswith(
+        f"**{m['total']}** Wingers in {on['league']} · **{m['fee']}** within the transfer budget")
     assert on["money"]["note"].startswith("Affordable = both")
     assert on["signable"] == (m["both"] > 0)
     # signable default = on when any qualify: the list is the qualifying subset
@@ -291,6 +308,7 @@ def test_money_columns_only_with_money_on_and_caption_counts():
 def test_money_parity_with_streamlit_gates():
     _need_db()
     old = _legacy(season_id=318, position="Centre Back", budget_eur=5_000_000.0, wage_multiplier=2.0)["pool"]
+    old = old[old["league"] == "League One"]          # the default tab
     ceiling = None
     from lofc.core import players_pool as pp
     ceiling = pp.prime_ceiling("Centre Back")
@@ -309,6 +327,7 @@ def test_metric_filter_hidden_count_and_rows_match_streamlit_function():
     pcts = L.load_scorecard_percentiles(318)
     in_pos = pcts.loc[pcts["position_group"] == "Winger", ["player_id", "competition_id"]]
     raw = L.load_metric_values(318).merge(in_pos, on=["player_id", "competition_id"])
+    old = old[old["league"] == "League One"].reset_index(drop=True)      # the default tab
     expect, unknown = mf.apply_metric_filters(old, pcts, raw, {"xa_p90": 70.0}, {"top5_psv99_kmh": 31.0}, {})
     expect = _displayed(expect)
     d = _client().get("/api/players?season=318&position=Winger&pct_xa_p90=70&raw_top5_psv99_kmh=31").json()
@@ -341,14 +360,21 @@ def test_thin_pools_are_withheld_named_and_announced_never_ranked():
     from lofc.dashboard import loaders as L
     if 319 not in L.available_seasons():
         pytest.skip("no live season")
-    d = _client().get("/api/players?season=319&position=Centre%20Forward").json()
+    c = _client()
     old = _legacy(season_id=319, position="Centre Forward")
-    assert len(d["not_ranked"]["rows"]) == len(old["withheld"])
-    assert {r["name"] for r in d["not_ranked"]["rows"]} == set(old["withheld"]["player_name"])
-    ranked = {r["id"][0] for r in d["rows"]}
-    assert not ranked & set(old["withheld"]["player_name"].index)  # sanity
-    if len(old["withheld"]):
-        assert d["notice"] is not None            # seasons.ranking_notice is surfaced
+    seen = 0
+    for tab in c.get("/api/players?season=319&position=Centre%20Forward").json()["tabs"]:
+        lg = tab["league"]
+        d = c.get("/api/players", params={"season": 319, "position": "Centre Forward",
+                                         "league": lg}).json()
+        w = old["withheld"][old["withheld"]["league"] == lg]
+        # per tab: only that league's withheld players
+        assert {r["league"] for r in d["not_ranked"]["rows"]} <= {lg}
+        assert sorted(r["name"] for r in d["not_ranked"]["rows"]) == sorted(w["player_name"])
+        seen += len(d["not_ranked"]["rows"])
+        if len(w):
+            assert d["notice"] is not None        # seasons.ranking_notice is surfaced
+    assert seen == old["withheld"]["league"].notna().sum()
 
 
 def test_default_season_is_the_live_one_and_options_are_streamlits():
@@ -428,9 +454,14 @@ def test_contract_filter_caption_and_hidden_count():
     d = _client().get("/api/players?season=318&position=Centre%20Back&contract=Out%20of%20contract%20summer%202027").json()
     assert d["contract_caption"].startswith("Contract filter: **Out of contract summer 2027** —")
     assert "expiring by 2027-06-30" in d["contract_caption"]
-    old = _legacy(season_id=318, position="Centre Back", contract_horizon="Out of contract summer 2027")
+    assert d["league"] == "League One"
+    old = _legacy(season_id=318, position="Centre Back", contract_horizon="Out of contract summer 2027",
+                  chosen_leagues=("League One",))
     assert f"**{old['contract_unknown']} hidden**" in d["contract_caption"]
-    assert [r["id"][0] for r in d["rows"]] == list(_displayed(old["pool"])["player_id"])
+    # the hidden count is League One's own; the rows are League One's order in the full pool
+    every = _legacy(season_id=318, position="Centre Back", contract_horizon="Out of contract summer 2027")
+    assert [r["id"][0] for r in d["rows"]] == list(_in_league(every["pool"], "League One")["player_id"])
+    assert sorted(r["id"][0] for r in d["rows"]) == sorted(old["pool"]["player_id"])
 
 
 def test_sorting_orders_by_the_value_and_keeps_ranking_numbers():
@@ -452,9 +483,11 @@ def test_csv_is_the_displayed_columns_with_streamlits_filename():
     assert 'filename="lofc_players_centre_back.csv"' in r.headers["content-disposition"]
     d = c.get("/api/players?season=318&position=Centre%20Back").json()
     header = r.text.splitlines()[0].split(",")
-    assert header == [x["key"] for x in d["columns"]]
+    # owner 2026-11-20: League and Rank in league first; "#" is the rank in league
+    assert header == ["League", "Rank in league"] + [
+        x["key"] for x in d["columns"] if x["key"] not in ("#", "League")]
     assert "Scout verdicts" in header and "Scouts" not in header
-    assert len(r.text.strip().splitlines()) == len(d["rows"]) + 1
+    assert len(r.text.strip().splitlines()) == sum(t["count"] for t in d["tabs"]) + 1
 
 
 def test_search_spans_every_position_and_ignores_accents():
@@ -503,3 +536,96 @@ def test_list_scrolls_sideways_only_with_money_or_rank_as_on_narrow_screens():
     assert ("toggleAttribute('data-scroll-x', !!p.money || (!!p.rank_caption && "
             "window.innerWidth < 1380))") in js
     assert "case 'scouts'" not in js and "scoutPill" not in js
+
+
+# ---- owner 2026-11-20: one tab per chosen league, each ranked within its league ----------------
+
+def test_query_reads_the_league_tab(parsed):
+    assert parsed("").league is None
+    assert parsed("league=League%20Two").league == "League Two"
+
+
+def test_two_leagues_are_two_lists_each_ranked_within_its_league():
+    _need_db()
+    c = _client()
+    base = "season=318&position=Winger&leagues=League%20One&leagues=League%20Two"
+    d = c.get("/api/players?" + base).json()
+    assert [t["league"] for t in d["tabs"]] == ["League One", "League Two"]
+    assert d["league"] == "League One"                         # default tab
+    for lg in ("League One", "League Two"):
+        t = c.get("/api/players?" + base + "&league=" + lg.replace(" ", "%20")).json()
+        assert t["league"] == lg
+        assert {r["cells"]["League"] for r in t["rows"]} == {lg}
+        comp = [float(r["cells"]["Composite"]) for r in t["rows"] if r["cells"]["Composite"]]
+        assert comp == sorted(comp, reverse=True)
+        assert [r["cells"]["#"] for r in t["rows"]] == list(range(1, len(t["rows"]) + 1))
+        assert next(x["count"] for x in t["tabs"] if x["league"] == lg) == len(t["rows"])
+        assert t["count_caption"] == f"**{len(t['rows'])}** Wingers ranked in {lg}."
+        assert t["meta"] == f"2025/26 · {lg} · 450+ minutes"
+    assert d["tabs"] == c.get("/api/players?" + base + "&league=League%20Two").json()["tabs"]
+
+
+def test_default_view_opens_on_league_one_never_a_cross_league_list():
+    _need_db()
+    from lofc.dashboard import loaders as L
+    d = _client().get("/api/players?season=318&position=Centre%20Forward").json()
+    tabs = [t["league"] for t in d["tabs"]]
+    assert d["league"] == "League One" and len(tabs) > 1
+    assert tabs == [lg for lg in L.league_names() if lg in tabs]        # picker order
+    assert {r["cells"]["League"] for r in d["rows"]} == {"League One"}
+
+
+def test_junk_league_tab_falls_back_to_the_default():
+    _need_db()
+    c = _client()
+    d = c.get("/api/players?season=318&position=Winger&league=Atlantis").json()
+    assert d["league"] == "League One"
+    # a tab outside the chosen leagues also falls back: the first chosen, League One absent
+    e = c.get("/api/players?season=318&position=Winger&leagues=League%20Two&leagues=Championship"
+              "&league=League%20One").json()
+    assert e["league"] == [t["league"] for t in e["tabs"]][0]
+    assert {r["cells"]["League"] for r in e["rows"]} <= {e["league"]}
+
+
+def test_single_league_is_one_tab_and_todays_list():
+    _need_db()
+    d = _client().get("/api/players?season=318&position=Winger&leagues=League%20Two").json()
+    assert [t["league"] for t in d["tabs"]] == ["League Two"] and d["league"] == "League Two"
+    old = _legacy(season_id=318, position="Winger", chosen_leagues=("League Two",))["pool"]
+    assert [r["id"][0] for r in d["rows"]] == list(old["player_id"])
+    assert d["tabs"][0]["count"] == len(old)
+
+
+def test_header_sort_stays_inside_the_tab():
+    _need_db()
+    c = _client()
+    d = c.get("/api/players?season=318&position=Centre%20Back&league=League%20Two&sort=Age&dir=asc").json()
+    base = c.get("/api/players?season=318&position=Centre%20Back&league=League%20Two").json()
+    assert {r["cells"]["League"] for r in d["rows"]} == {"League Two"}
+    assert sorted(r["id"][0] for r in d["rows"]) == sorted(r["id"][0] for r in base["rows"])
+    assert sorted(r["cells"]["#"] for r in d["rows"]) == list(range(1, len(base["rows"]) + 1))
+
+
+def test_csv_blocks_follow_the_tabs_each_ranked_from_one():
+    _need_db()
+    import csv
+    import io
+    c = _client()
+    base = "season=318&position=Winger&leagues=League%20One&leagues=League%20Two&league=League%20Two"
+    d = c.get("/api/players?" + base).json()
+    rows = list(csv.DictReader(io.StringIO(c.get("/api/players.csv?" + base).text)))
+    leagues = [r["League"] for r in rows]
+    assert leagues == sorted(leagues, key=[t["league"] for t in d["tabs"]].index)   # tab order
+    for t in d["tabs"]:
+        ranks = [int(r["Rank in league"]) for r in rows if r["League"] == t["league"]]
+        assert ranks == list(range(1, t["count"] + 1))
+
+
+def test_players_js_keeps_the_tab_in_the_url_and_state():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "src/lofc/web/static/js/players.js").read_text()
+    assert "put('league', s.league, '')" in js                # in the URL -> rememberState keeps it
+    assert "s.league = q.get('league')" in js                 # back/forward restore it
+    assert 'id="pl-tabs"' in (Path(__file__).resolve().parents[1]
+                              / "src/lofc/web/templates/players.html").read_text()
+    assert "next.league = r.league" in js                     # search: Back returns to his tab

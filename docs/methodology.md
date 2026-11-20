@@ -404,6 +404,27 @@ Built once per season and position per data version (`webcache`), warmed with th
 (0.1–0.3 s per position; 2026/27 keeps 1.4 M pair distances, 5.5 MB); a request takes
 under 10 ms. Never read by the rating or the ranking.
 
+## 6d. No ranking across leagues (owner 2026-11-20, cross-league audit)
+
+A rating or percentile only compares a player with his own league, season and position, so no
+page orders, subtracts or colours "best" across leagues:
+
+* **Players:** one tab per chosen league, each ranked within its league ("#" = rank in that
+  league); the CSV has one block per league with "League" and "Rank in league".
+* **Card, "Against our <position>s":** rank, "our best", the better/worse lists, the radar's
+  Orient median and the card's "vs ours" use only our players rated in **his league that
+  season**. Ours rated elsewhere stay in the table, tagged "Rated in <league>", unranked. If none
+  of ours shares his league: one line ("None of our <pos>s was rated in <league> in <season>, so
+  ratings are not compared.") and a "Physical, raw values" table (SkillCorner per-90 / km/h, which
+  are comparable across leagues), each row naming the league and season of its values.
+* **Compare:** each player can be from any season we hold. When leagues or seasons differ: no
+  best/worst colours, no rating differences; a season-on-season change from another league reads
+  "was X.XX (<league>)" with no delta. The Orient line is drawn only beside League One players
+  of its season, from ours rated in League One.
+* Club vs League One and Similar players: sections above. Still open from the audit (owner to
+  decide): Physical squad Excel and band sort, Scout reports "Data agrees/disagrees", Watchlist
+  and Scout reports rating sort.
+
 ## 7. Season shown
 
 The Players page **opens on the newest season held, the one being played (2026/27)**

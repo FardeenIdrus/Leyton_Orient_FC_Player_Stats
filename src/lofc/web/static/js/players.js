@@ -15,7 +15,7 @@ let physTab = 0;
 
 // ---- state <-> URL -----------------------------------------------------------------------
 const defaults = () => ({
-  season: opts.default_season, position: opts.default_position, leagues: [],
+  season: opts.default_season, position: opts.default_position, leagues: [], league: '',
   rank_as: opts.default_archetype, min_minutes: opts.minutes.default, max_age: opts.max_age.default,
   foot: 'Any', contract: opts.contract[0], loan: opts.loan[0], style: 'All styles',
   strong_only: false, money: false, budget: null, wage: null, scout: 'Any',
@@ -29,6 +29,8 @@ function fromUrl() {
   pick('position', opts.positions);
   pick('rank_as', opts.archetypes[s.position]);
   s.leagues = q.getAll('leagues').filter(l => opts.leagues.includes(l));
+  // the open league tab (owner 2026-11-20); the server falls back when it is not a tab
+  s.league = q.get('league') || ''; if (!opts.leagues.includes(s.league)) s.league = '';
   const n = (k, lo, hi) => { const v = Number(q.get(k)); return q.get(k) !== null && q.get(k) !== '' && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : null; };
   s.min_minutes = n('min_minutes', 450, opts.minutes.max) ?? s.min_minutes;
   s.max_age = n('max_age', 18, 40) ?? s.max_age;
@@ -53,6 +55,7 @@ function toQuery(s) {
   const put = (k, v, dv) => { if (v != null && v !== '' && v !== dv) q.set(k, String(v)); };
   put('season', s.season, d.season); put('position', s.position, d.position);
   s.leagues.forEach(l => q.append('leagues', l));
+  put('league', s.league, '');
   put('rank_as', s.rank_as, d.rank_as); put('min_minutes', s.min_minutes, d.min_minutes);
   put('max_age', s.max_age, d.max_age); put('foot', s.foot, d.foot);
   put('contract', s.contract, d.contract); put('loan', s.loan, d.loan);
@@ -217,6 +220,11 @@ async function refresh() {
   try { payload = await (pre || api('/api/players' + qs)); } catch (e) { return fail(mine, e); }
   if (mine !== seq) return;
   lastPayload = payload;
+  // a tab that is not one of the chosen leagues: the server opened the default, the URL follows
+  if (st.league && st.league !== payload.league) {
+    st.league = ''; $('csv').href = '/api/players.csv' + toQuery(st);
+    history.replaceState({}, '', location.pathname + toQuery(st));
+  }
   render(payload);
   rememberState('players');     // owner 2026-11-13: the nav link reopens these settings
 }
@@ -266,6 +274,7 @@ function render(p) {
     const short = cut > 0 ? t.slice(0, cut + 1) + ' · listed under Not ranked below' : t;
     return `<div class="note" style="margin-top:8px" title="${esc(t)}">${esc(short)}</div>`;
   };
+  $('pl-tabs').innerHTML = (p.tabs || []).map(t => `<button type="button" role="tab" data-league="${esc(t.league)}" class="pl-tab${t.league === p.league ? ' on' : ''}" aria-selected="${t.league === p.league}">${esc(t.league)}<span>${fmtInt(t.count)}</span></button>`).join('');
   $('pl-title').textContent = p.title;
   $('pl-meta').textContent = p.meta;
   $('pl-notice').innerHTML = p.notice
@@ -432,7 +441,9 @@ function bind() {
     document.querySelectorAll('#leagues-list input').forEach(i => { i.checked = false; }));
   $('leagues-list').addEventListener('change', () => {
     const on = [...document.querySelectorAll('#leagues-list input:checked')].map(i => i.value);
-    st.leagues = on.length === opts.leagues.length ? [] : on; commit();
+    st.leagues = on.length === opts.leagues.length ? [] : on;
+    if (st.leagues.length && !st.leagues.includes(st.league)) st.league = '';
+    commit();
   });
 
   // fold-outs
@@ -458,7 +469,13 @@ function bind() {
 
   $('active').addEventListener('click', e => { const b = e.target.closest('[data-remove]'); if (b) removeChip(b.dataset.remove); });
 
-  // sort: ascending -> descending -> back to the ranking order
+  // league tabs: each its own ranked list (ratings are within league)
+  $('pl-tabs').addEventListener('click', e => {
+    const b = e.target.closest('[data-league]'); if (!b || b.dataset.league === st.league) return;
+    st.league = b.dataset.league; commit();
+  });
+
+  // sort (within the open tab): ascending -> descending -> back to the ranking order
   $('pl-head').addEventListener('click', e => {
     const b = e.target.closest('[data-sort]'); if (!b) return;
     const c = b.dataset.sort;
@@ -517,6 +534,7 @@ function pickPlayer(r) {
     next.strong_only = false; next.pct = {}; next.raw = {};
   }
   if (next.leagues.length && r.league && !next.leagues.includes(r.league)) next.leagues.push(r.league);
+  if (r.league) next.league = r.league;     // Back returns to his league's tab
   window.location.assign(`/player/${r.player_id}/${r.competition_id}/${r.season_id}?back=` +
     encodeURIComponent('/players' + toQuery(next)));
 }

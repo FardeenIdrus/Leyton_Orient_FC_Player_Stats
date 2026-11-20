@@ -1395,6 +1395,25 @@ with "no sideways scrolling" in the same sentence — ask what he means. Not bui
   not in the feed. Top speed stays PSV-99 Top 5.
 - Full dated notes: "2.36 front-end notes" at the end of this work log.
 
+### 2026-11-20 (later) — no ranking across leagues on Players, card and Compare; Similar players in the nav (built locally, not deployed)
+
+- **Players (audit HIGH 1, owner: tabs).** One tab per chosen league, each ranked within its
+  league; `league=` in the URL; CSV one block per league with "League" and "Rank in league".
+  Default payload 215 KB → 15 KB. Tabs on one scrolling row.
+- **Card "Against our <pos>s" (audit HIGH 2, owner option 2B).** Ratings, gaps, Orient median and
+  "vs ours" only vs ours rated in his league that season; others tagged "Rated in <league>";
+  none in his league → one line + "Physical, raw values" table (raw values comparable).
+- **Compare (owner request).** A season per player (`a_season=`); different league/season → no
+  best/worst colours, no deltas, one line; "was X.XX (<league>)" for a change from another league;
+  Orient line only beside League One players, built only from ours rated in League One; opening
+  picks from one league.
+- **Similar players in the nav (owner).** `/similar` with Season + player search; Home tile.
+- **Squads.** Filter bar fills the width.
+- **New finding (not fixed):** our players' rows are their most-minutes row, which can be at another
+  position (e.g. Chinedu 2025/26 National League Centre Back, listed Full Back).
+- Checks: full suite 3,274 passed / 0 failed; browser harness Players 148, Compare 123, card 141,
+  Similar 56 actions, 0 failures (harness updated for tabs, 2B, CSV header).
+
 ### 2026-11-20 — Similar players on Mahalanobis + its own page; Club vs League One other leagues; cross-league audit (built locally, not deployed)
 
 - **Similar players (owner decisions B, E, F; page at the owner's request).** Distance = weighted

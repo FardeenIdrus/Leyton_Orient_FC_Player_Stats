@@ -31,6 +31,11 @@ NO_DATA = "One of these players has no data for this season."
 NOT_LIKE = "Compare like with like: these players are not all in one position."
 SUMMARY_CAPTION = "Big number: this season. Small: change from last season (green up, red down)."
 LEAGUES_NOTE = "Different leagues: percentiles are within each player's own league."
+# One season per slot (owner 2026-11-20): ratings and percentiles are within league + season +
+# position, so slots of different (league, season) are never coloured best / worst.
+MIXED_NOTE = "Ratings and percentiles are within each player's own league and season."
+LEAGUE_ONE = "League One"
+LEAGUE_ONE_ID = 4                         # = core.club_vs_league.LEAGUE_ONE
 
 
 # --- slots ---------------------------------------------------------------------------------
@@ -87,6 +92,81 @@ def sanitize_slots(state, labels: list[str]) -> None:
 def same_position(frame: pd.DataFrame) -> bool:
     """True when every row is one position -- comparisons are strictly like-for-like."""
     return frame["position_group"].nunique(dropna=False) <= 1
+
+
+# --- one season per slot (owner 2026-11-20) -------------------------------------------------
+class BySeason(dict):
+    """{season_id: frame}: one loader result per season when the slots are in different
+    seasons. `compare_view` reads each player's own from it (`per_season`)."""
+
+
+def per_season(x, season_id):
+    return x[int(season_id)] if isinstance(x, BySeason) else x
+
+
+def contexts(recs: list) -> set:
+    """The (competition, season) pairs the compared players are rated in."""
+    return {(int(r["competition_id"]), int(r["season_id"])) for r in recs}
+
+
+def mixed(recs: list) -> bool:
+    """True when the players are not all in one league and season: their ratings and
+    percentiles come from different pools, so they are shown but never ranked against each other."""
+    return len(contexts(recs)) > 1
+
+
+def uncoloured(rows: list[dict]) -> list[dict]:
+    """A copy of `compare_tables.build_rows` rows with no best / worst colour."""
+    return [{**r, "cells": [{**c, "cls": None} for c in r["cells"]]} for r in rows]
+
+
+def season_league(season_name, league) -> str:
+    """A slot's header line: "2025/26 · League Two"."""
+    return " · ".join(str(x) for x in (season_name, league) if x)
+
+
+def season_options(player_id: int, position: str, by_season: dict, season_name, league_name
+                   ) -> list[dict]:
+    """The seasons (and league in each) we hold this player at `position`, newest first:
+    `by_season` = {season_id: {(position, player_id): [competition_id, ...]}}."""
+    out = []
+    for sid in sorted(by_season, reverse=True):
+        for cid in by_season[sid].get((position, int(player_id)), []):
+            out.append({"season": int(sid), "competition_id": int(cid),
+                        "label": season_league(season_name(sid), league_name(cid))})
+    return out
+
+
+def orient_allowed(recs: list, season_id: int) -> bool:
+    """The Orient median line (`squad.orient_median`, one season) is drawn only beside players
+    who are all rated in League One in that same season (owner 2026-11-20)."""
+    return bool(recs) and contexts(recs) == {(LEAGUE_ONE_ID, int(season_id))}
+
+
+def opening_league(pool: pd.DataFrame, chosen, order) -> str | None:
+    """The league the opening picks come from: League One when it is chosen (or no league is
+    chosen) and in the pool, else the first chosen league in the pool, else the first in
+    `order` (L.league_names) that the pool holds. Never a cross-league ranking."""
+    if pool is None or pool.empty or "league" not in pool.columns:
+        return None
+    present = set(pool["league"].dropna())
+    wanted = list(chosen) or list(order)
+    if LEAGUE_ONE in present and (not chosen or LEAGUE_ONE in chosen):
+        return LEAGUE_ONE
+    return next((lg for lg in [*wanted, *order] if lg in present), None)
+
+
+def league_grouped(pool: pd.DataFrame, chosen, order) -> pd.DataFrame:
+    """The pool league by league -- the opening league first, then the chosen leagues, then
+    `order` -- each in the pool's own order. Ratings are within a league, so the picker list
+    never interleaves leagues by rating."""
+    if pool is None or pool.empty or "league" not in pool.columns:
+        return pool
+    first = opening_league(pool, chosen, order)
+    seq = list(dict.fromkeys([first, *chosen, *order, *pool["league"].dropna()]))
+    rank = {lg: i for i, lg in enumerate(seq)}
+    key = pool["league"].map(lambda lg: rank.get(lg, len(rank)))
+    return pool.assign(_lg=key.to_numpy()).sort_values("_lg", kind="stable").drop(columns="_lg")
 
 
 def pick_row(key: tuple[int, int, int], pool: pd.DataFrame, candidates_fn, scorecards_fn,
@@ -263,16 +343,18 @@ def compare_row(r: pd.Series, prev: pd.DataFrame | None, show_money: bool = Fals
     # the change reads "—". Performance is comparable whenever both seasons have one.
     same_parts = pd.notna(prev_row.get("prev_physical")) and pd.notna(r.get("physical_band"))
 
-    def cell(prev_col, now_col, league_note=False, needs_same_parts=False):
+    def cell(prev_col, now_col, needs_same_parts=False):
         if needs_same_parts and not prev_row.empty and not same_parts:
             now = r.get(now_col)
             return f"{value_or_dash(now, '{:.2f}')} (—)" if pd.notna(now) else "—"
         text = season_change(prev_row.get(prev_col), r.get(now_col))
         prev_league = prev_row.get("prev_league")
-        # Only name the league when it differs: a move up or down a division changes what the
-        # number means, so the reader needs to see it.
-        if league_note and " → " in text and pd.notna(prev_league) and prev_league != league_now:
+        # Another league last season: ratings are within a league, so no change is taken
+        # across one -- "3.41 (League Two) → 3.68" reads "was 3.41 (League Two)", uncoloured
+        # (owner 2026-11-20).
+        if " → " in text and pd.notna(prev_league) and prev_league != league_now:
             head, tail = text.split(" → ", 1)
+            tail = re.sub(r" \([+-]?\d+\.\d+\)$", "", tail)
             text = f"{head} ({prev_league}) → {tail}"
         return text
 
@@ -280,9 +362,9 @@ def compare_row(r: pd.Series, prev: pd.DataFrame | None, show_money: bool = Fals
            "League": value_or_dash(r.get("league"), "{}"),
            "Age": value_or_dash(r.get("age"), "{:.1f}"),
            "Minutes": _half_up_int(r.get("minutes")),
-           "Overall": cell("prev_composite", "objective_composite", True, True),
+           "Overall": cell("prev_composite", "objective_composite", True),
            "Performance": cell("prev_performance", "performance_band"),
-           "Physical": cell("prev_physical", "physical_band", needs_same_parts=True)}
+           "Physical": cell("prev_physical", "physical_band", True)}
     if show_money:
         market_eur = r.get("market_value_eur")
         row["Market (€m)"] = value_or_dash(
@@ -385,28 +467,46 @@ def mv_series(metric_values: pd.DataFrame | None, r: pd.Series) -> pd.Series | N
 
 
 def display_names(recs: list) -> list[str]:
-    """Column heads: the name, plus the club only when two players share a name."""
+    """Column heads: the name, plus the club only when two players share a name -- or the
+    season, when they are in different seasons (a player compared with himself)."""
+    from lofc.dashboard.seasons import season_name_for
     raw = [r["player_name"] for r in recs]
-    return [f'{n} ({r["team_name"]})' if raw.count(n) > 1 else n for n, r in zip(raw, recs)]
+
+    def tag(n, r):
+        same = [x for x in recs if x["player_name"] == n]
+        if len({int(x["season_id"]) for x in same}) > 1:
+            return season_name_for(int(r["season_id"]))
+        return r["team_name"]
+    return [f"{n} ({tag(n, r)})" if raw.count(n) > 1 else n for n, r in zip(raw, recs)]
 
 
 def compare_view(recs: list, position: str, archetype: str, show_money: bool,
                  metric_values: pd.DataFrame | None, sc_pcts: pd.DataFrame,
-                 prev: pd.DataFrame | None, ctx: dict, withheld=()) -> dict:
+                 prev: pd.DataFrame | None, ctx: dict, withheld=(),
+                 uncolour_mixed: bool = False) -> dict:
     """Everything below the slot pickers, for 2-3 resolved player rows of one position.
     Percentiles come from the scorecard (position + league + season), the same source the
     player profile and the composite use, so Compare agrees with the rest of the platform.
     `withheld` (web): indices of not-rated players whose percentiles are not shown (`withhold`);
-    they are left off the radars without a "no percentiles" caption (their line says why)."""
+    they are left off the radars without a "no percentiles" caption (their line says why).
+    `metric_values`, `sc_pcts`, `prev` and `ctx` may each be a `BySeason` (web: one season per
+    slot); `uncolour_mixed` (web): no best / worst colour when `mixed(recs)`."""
     from lofc.dashboard.seasons import season_name_for
     from lofc.dashboard.tabs.players import _sc_pct_series
     names = display_names(recs)
-    pcts = {n: _sc_pct_series(sc_pcts, int(r["player_id"]), int(r["competition_id"]),
-                              int(r["season_id"])) for n, r in zip(names, recs)}
+    pcts = {n: _sc_pct_series(per_season(sc_pcts, r["season_id"]), int(r["player_id"]),
+                              int(r["competition_id"]), int(r["season_id"]))
+            for n, r in zip(names, recs)}
     pcts = withhold(pcts, names, withheld)
     quiet = {names[i] for i in withheld}
-    values = {n: mv_series(metric_values, r) for n, r in zip(names, recs)}
-    rows = [{**compare_row(r, prev, show_money), **summary_extras(r, ctx)} for r in recs]
+    values = {n: mv_series(per_season(metric_values, r["season_id"]), r)
+              for n, r in zip(names, recs)}
+    rows = [{**compare_row(r, per_season(prev, r["season_id"]), show_money),
+             **summary_extras(r, per_season(ctx, r["season_id"]))} for r in recs]
+    ctxs = list(ctx.values()) if isinstance(ctx, BySeason) else [ctx]
+    no_physical = sorted({s_ for c in ctxs for s_ in c["no_physical"]})
+    sc_cols = _columns(sc_pcts)
+    value_cols = _columns(metric_values)
     lens = archetype != cf.DEFAULT_ARCHETYPE
     has_physical = bool(cf.PHYSICAL_METRICS.get(position))
     axes, traces, no_data = ct.radar_inputs(pcts, ct.radar_metrics(position, archetype))
@@ -414,26 +514,34 @@ def compare_view(recs: list, position: str, archetype: str, show_money: bool,
                                        else ([], [], []))
     rated = ct.rating_metrics(position, archetype)
     tiers = dict(rated)
-    value_cols = metric_values.columns if metric_values is not None else []
     other = ct.other_performance_metrics(
-        position, archetype, [m for m in sc_pcts.columns if m in value_cols])
+        position, archetype, [m for m in sc_cols if m in value_cols])
     phys_rows = (ct.build_rows(ct.physical_rating_metrics(position), {}, names, values,
                                pcts, drop_empty=True) if has_physical else [])
+    is_mixed = mixed(recs)
+    paint = uncoloured if (uncolour_mixed and is_mixed) else (lambda rows_: rows_)
     return {
         "names": names, "pcts": pcts, "values": values, "rows": rows,
-        "note": ct.comparison_note([season_name_for(s_) for s_ in ctx["no_physical"]]),
-        "lens": lens, "has_physical": has_physical,
+        "note": ct.comparison_note([season_name_for(s_) for s_ in no_physical]),
+        "lens": lens, "has_physical": has_physical, "mixed": is_mixed,
         "different_leagues": len({int(r["competition_id"]) for r in recs}) > 1,
         "perf_heading": "Performance" + (f" · {archetype}" if lens else ""),
         "radar": {"axes": axes, "traces": traces, "no_data": [n for n in no_data if n not in quiet]},
         "phys_radar": {"axes": phys_keys, "traces": phys_traces,
                        "no_data": [n for n in no_phys if n not in quiet]},
-        "perf_rows": ct.build_rows([m for m, _ in rated], tiers, names, values, pcts),
-        "other_rows": ct.build_rows(other, {}, names, values, pcts, drop_empty=True),
-        "phys_rows": phys_rows,
-        "phys_more": (ct.build_rows(ct.other_physical_metrics(position), {}, names, values,
-                                    pcts, drop_empty=True) if phys_rows else []),
+        "perf_rows": paint(ct.build_rows([m for m, _ in rated], tiers, names, values, pcts)),
+        "other_rows": paint(ct.build_rows(other, {}, names, values, pcts, drop_empty=True)),
+        "phys_rows": paint(phys_rows),
+        "phys_more": paint(ct.build_rows(ct.other_physical_metrics(position), {}, names, values,
+                                         pcts, drop_empty=True) if phys_rows else []),
     }
+
+
+def _columns(frames) -> list:
+    """Column names of a frame, or of every frame of a `BySeason` (first seen order)."""
+    if isinstance(frames, BySeason):
+        return list(dict.fromkeys(c for f in frames.values() if f is not None for c in f.columns))
+    return list(frames.columns) if frames is not None else []
 
 
 # --- packing zones ---------------------------------------------------------------------------
