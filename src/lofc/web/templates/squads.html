@@ -11,7 +11,9 @@
   <div class="filters" id="filters">
     <div class="fl" id="fl-main">
       <div class="f f-league"><label for="f-league">League</label><select class="ctl" id="f-league" name="league"></select></div>
-      <div class="f f-club"><label for="f-club">Club</label><select class="ctl" id="f-club" name="club"></select></div>
+      <div class="f f-club"><label for="f-club">Club</label>
+        <div class="searchbox"><input class="ctl" id="f-club" name="club" type="search" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="club-results" placeholder="Any club, any league…">
+          <div class="results" id="club-results" role="listbox" hidden></div></div></div>
       <div class="f f-view"><label id="lbl-view">View</label><div class="seg" id="f-view" role="group" aria-labelledby="lbl-view"></div></div>
       <div class="f f-player"><label for="f-q">Player</label>
         <input class="ctl" id="f-q" name="q" type="search" placeholder="Search a player…" autocomplete="off"></div>

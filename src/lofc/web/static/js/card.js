@@ -48,8 +48,9 @@ const plainCell = (c, v) => esc(dash(v));
 
 // "vs ours": his percentile minus our position median's, computed by the API (core.card).
 const VS = 'vs ours';
+// his raw value minus our median, in the metric's unit; up = better for him (direction-aware)
 const vsCell = v => v == null ? '<span class="vs">—</span>'
-  : `<span class="vs ${v > 0 ? 'up' : v < 0 ? 'dn' : ''}">${v > 0 ? '+' + v : v < 0 ? '−' + (-v) : '0'}</span>`;
+  : `<span class="vs ${v.kind || ''}">${esc(v.text)}</span>`;
 /** Insert the "vs ours" column after Percentile (only when the API sent the column). */
 function withVs(columns, rows, vs) {
   if (!vs) return [columns, rows];
@@ -418,35 +419,59 @@ function renderSquad(S) {
     return `<tr class="${p.is_target ? 'target' : ''}"><td>${name}</td><td class="n">${p.age == null ? '—' : p.age.toFixed(1)}</td><td>${club}</td><td class="n">${fmtInt(p.minutes)}</td>${mid}<td>${esc(dash(p.contract))}</td></tr>`;
   }).join('');
   h += tw(`<table><thead>${thead(cols)}</thead><tbody>${rows}</tbody></table>`);
-  if (S.not_compared) {
-    // raw SkillCorner values are comparable across leagues: side by side, no rank, no colours
-    const RP = S.raw_physical;
-    if (RP) h += `<b>Physical, raw values</b>` + tw(`<table class="sq-raw"><thead><tr>${RP.columns.map((c, i) => `<th${i > 1 ? ' class="n"' : ''}>${esc(c)}</th>`).join('')}</tr></thead><tbody>${RP.rows.map(r =>
-      `<tr class="${r.is_target ? 'target' : ''}"><td>${esc(r.name)}${r.is_target ? '<span class="tag">Target</span>' : ''}</td><td>${esc(dash(r.source))}</td>`
-      + r.values.map(v => `<td class="n">${esc(dash(v))}</td>`).join('') + '</tr>').join('')}</tbody></table>`);
-    else if (S.raw_physical_note) h += empty(S.raw_physical_note);
-    box.innerHTML = h; return bindSquad();
+  // every metric, player by player: raw values, each in his own league (green best, red worst);
+  // the physical rows can be shown for All phases / In possession / Out of possession
+  const M = S.metrics;
+  let matrix = '';
+  if (M) {
+    const head = '<tr><th>Metric</th>' + M.players.map(p => `<th class="n">${esc(p.short)}${p.is_target ? '<span class="tag">Target</span>' : ''}${p.league_abbr ? `<div class="note" title="${esc(p.league || '')}">${esc(p.league_abbr)}</div>` : ''}</th>`).join('') + '</tr>';
+    matrix = `<details class="sq-matrix"><summary>Every metric, player by player</summary><p class="note">${esc(M.note)}</p><div class="tw"><table><thead>${head}</thead><tbody id="sq-mx">${matrixBody(M, sqPhase)}</tbody></table></div></details>`;
   }
-  if (S.compare_note || !S.radar) { box.innerHTML = h + empty(S.compare_note || ''); return bindSquad(); }
+  if (S.not_compared) { box.innerHTML = h + matrix; return bindSquad(); }
+  if (S.compare_note || !S.radar) { box.innerHTML = h + empty(S.compare_note || '') + matrix; return bindSquad(); }
   const li = it => `<li><span class="${it.kind}">${esc(it.arrow)}</span> ${esc(it.label)} <span class="note">· ${esc(it.detail)}</span></li>`;
   const list = L => `<b>${esc(L.heading)}</b><ul>${L.items.length ? L.items.map(li).join('') : '<li class="note">—</li>'}</ul>`;
   const R = S.radar;
   h += `<div class="sq-cols"><div><b>Performance profile</b> <span class="note">percentile · him vs our median</span>`
     + radarBlock(R.labels, R.target, R.ours_median, R.target_name, R.median_label) + '</div>'
     + `<div class="adds">${list(S.better)}${list(S.worse)}<div class="note">${esc(S.gap_note)}</div></div></div>`;
-  const M = S.metrics;
-  if (M) {
-    const head = '<tr><th>Metric · percentile</th>' + M.players.map(p => `<th>${esc(p.short)}${p.is_target ? '<span class="tag">Target</span>' : ''}</th>`).join('') + '</tr>';
-    const body = M.sections.map(sec => `<tr class="sec"><td colspan="${M.players.length + 1}">${esc(sec.name)}</td></tr>`
-      + sec.rows.map(r => `<tr><td>${esc(r.label)}</td>` + r.cells.map(x =>
-        `<td class="${x.best ? 'best' : ''}">${x.pct == null ? '—' : `<b style="color:${pcol(x.pct)}">${x.pct}</b>`}</td>`).join('') + '</tr>').join('')).join('');
-    h += `<details><summary>Every metric, player by player</summary><div class="tw" style="margin-top:8px"><table><thead>${head}</thead><tbody>${body}</tbody></table></div></details>`;
-  }
+  h += matrix;
   box.innerHTML = h;
   bindSquad();
 }
 
+// the physical part of "Every metric": All phases, or SkillCorner's possession split. Every
+// phase's rows are drawn once; the switch only shows one set (no re-render, nothing detached).
+let sqPhase = 'All phases';
+function matrixBody(M, phase) {
+  const n = M.players.length + 1;
+  const phases = M.phases ? ['All phases', ...Object.keys(M.phases)] : [];
+  const rows = (rs, ph) => rs.map(r => `<tr${ph ? ` data-ph="${esc(ph)}"${ph === phase ? '' : ' hidden'}` : ''}><td>${esc(r.label)}</td>` + r.cells.map(x =>
+    `<td class="n ${x.kind || ''}">${x.value == null ? '—' : esc(x.value)}</td>`).join('') + '</tr>').join('');
+  return M.sections.map(sec => {
+    if (sec.name !== 'Physical' || phases.length < 2)
+      return `<tr class="sec"><td colspan="${n}">${esc(sec.name)}</td></tr>` + rows(sec.rows, null);
+    const sw = ` <span class="seg sq-phase" role="group" aria-label="Phase">${phases.map(ph =>
+      `<button type="button" data-phase="${esc(ph)}" aria-pressed="${ph === phase}" class="${ph === phase ? 'on' : ''}">${esc(ph)}</button>`).join('')}</span>`;
+    const split = Object.keys(M.phases).map(ph => rows(M.phases[ph].rows, ph)
+      + `<tr data-ph="${esc(ph)}"${ph === phase ? '' : ' hidden'}><td colspan="${n}" class="note">Speed and agility have no possession split.</td></tr>`).join('');
+    return `<tr class="sec"><td colspan="${n}">${esc(sec.name)}${sw}</td></tr>` + rows(sec.rows, 'All phases') + split;
+  }).join('');
+}
+
+function showPhase(mx, phase) {
+  sqPhase = phase;
+  mx.querySelectorAll('tr[data-ph]').forEach(tr => { tr.hidden = tr.dataset.ph !== phase; });
+  mx.querySelectorAll('button[data-phase]').forEach(b => {
+    const on = b.dataset.phase === phase; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on);
+  });
+}
+
 function bindSquad() {
+  const mx = $('sq-mx');
+  if (mx) mx.onclick = ev => {
+    const b = ev.target.closest('button[data-phase]'); if (b) showPhase(mx, b.dataset.phase);
+  };
   const seg = $('sq-seg');
   if (!seg) return;
   seg.onclick = ev => {

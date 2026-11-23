@@ -203,16 +203,32 @@ def test_watchlist_rejects_a_non_json_body(fake):
     assert r.status_code == 400
 
 
-def test_card_js_draws_the_not_compared_line_tags_and_raw_physical_table():
-    """Owner decision 2B (2026-11-20): the section draws the API's line, the "Rated in <league>"
-    tag and the raw physical table, and never a verdict when ratings are not compared."""
+def test_card_js_draws_the_not_compared_line_tags_and_raw_matrix():
+    """Owner 2026-11-20: the section draws the API's line and the "Rated in <league>" tag, and
+    the metric-by-metric table of RAW values (green best, red worst) for every target."""
     from pathlib import Path
     import lofc.web
     js = (Path(lofc.web.__file__).parent / "static" / "js" / "card.js").read_text()
     sq = js[js.index("function renderSquad"):js.index("function bindSquad")]
-    for needle in ("S.not_compared", "p.elsewhere", "S.raw_physical", "S.raw_physical_note",
-                   "Physical, raw values"):
+    for needle in ("S.not_compared", "p.elsewhere", "M.note", "x.kind", "x.value"):
         assert needle in sq, needle
-    # the raw table has no colour, percentile bar or band chip
-    raw = sq[sq.index("Physical, raw values"):sq.index("S.raw_physical_note")]
-    assert "pcol(" not in raw and "chip(" not in raw and "bar(" not in raw
+    assert "raw_physical" not in sq and "pcol(" not in sq
+    # the matrix is drawn in the not-compared case too
+    nc = sq[sq.index("if (S.not_compared) { box.innerHTML"):]
+    assert nc.startswith("if (S.not_compared) { box.innerHTML = h + matrix;")
+    css = (Path(lofc.web.__file__).parent / "static" / "css" / "card.css").read_text()
+    assert ".sq-matrix td.best" in css and ".sq-matrix td.worst" in css
+
+
+
+def test_card_js_switches_the_matrix_physical_rows_by_phase():
+    """Owner 2026-11-23: All phases / In possession / Out of possession above the physical rows."""
+    from pathlib import Path
+    import lofc.web
+    js = (Path(lofc.web.__file__).parent / "static" / "js" / "card.js").read_text()
+    body = js[js.index("function matrixBody"):js.index("function bindSquad")]
+    assert "M.phases" in body and "data-phase" in body and "'All phases'" in body
+    assert "Speed and agility have no possession split." in body
+    bind = js[js.index("function bindSquad"):]
+    assert "button[data-phase]" in bind[:600] and "showPhase(" in bind[:600]
+    assert "innerHTML" not in js[js.index("function showPhase"):js.index("function bindSquad")]

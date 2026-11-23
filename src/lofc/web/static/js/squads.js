@@ -6,6 +6,8 @@ import {api, esc, chip, rememberState, restoreState} from './common.js';
 
 const $ = id => document.getElementById(id);
 const DASH = '—';
+// case- and accent-blind match ("Atletico" finds "Atlético")
+const fold = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 let P = null;            // last payload
 let st = null;           // current state (mirrors the URL)
@@ -56,7 +58,7 @@ function fillSelect(id, values, current) {
 function setControls() {
   const o = P.options;
   fillSelect('f-league', o.league, st.league);
-  fillSelect('f-club', o.club, st.club);
+  if (document.activeElement !== $('f-club')) $('f-club').value = clubLabel(st.club);
   fillSelect('f-position', o.position, st.position);
   fillSelect('f-contract', o.contract, st.contract);
   fillSelect('f-loan', o.loan, st.loan);
@@ -65,6 +67,36 @@ function setControls() {
   $('f-view').innerHTML = o.view.map(x =>
     `<button type="button" data-view="${esc(x.code)}" aria-pressed="${x.code === st.view}" class="${x.code === st.view ? 'on' : ''}">${esc(x.label)}</button>`).join('');
   $('f-age').value = st.max_age; $('age-out').textContent = st.max_age >= 40 ? 'Any' : st.max_age;
+}
+
+// ---- Club box: this league's clubs, or type to search every club in every league ----------
+const clubLabel = c => (c === 'All' ? 'All clubs' : c);
+
+function clubList(q) {
+  const o = P.options, key = fold(q.trim());
+  // typed: every league's clubs (name · league); empty: this league's list, as before
+  const items = key
+    ? (o.all_clubs || []).filter(x => fold(x.club).includes(key)).slice(0, 60)
+    : o.club.map(c => ({club: c, league: null}));
+  $('club-results').innerHTML = items.length ? items.map((x, i) =>
+    `<button type="button" role="option" data-club="${esc(x.club)}" data-league="${esc(x.league || '')}" class="${i === 0 ? 'act' : ''}">${esc(clubLabel(x.club))}${x.league ? ` <span class="note">· ${esc(x.league)}</span>` : ''}</button>`).join('')
+    : '<div class="none">No club matches.</div>';
+  $('club-results').hidden = false;
+  $('f-club').setAttribute('aria-expanded', 'true');
+}
+
+function closeClubs() {
+  $('club-results').hidden = true;
+  $('f-club').setAttribute('aria-expanded', 'false');
+}
+
+function pickClub(club, league) {
+  closeClubs();
+  if (league && league !== st.league) { st.league = league; st.position = 'All'; }
+  st.club = club;
+  $('f-club').value = clubLabel(club);
+  $('f-club').blur();
+  commit();
 }
 
 function playerCell(v, link) {
@@ -169,7 +201,26 @@ const debounced = (name, fn, ms = 250) => { clearTimeout(timers[name]); timers[n
 
 function bind() {
   $('f-league').addEventListener('change', e => { st.league = e.target.value; st.club = 'All'; st.position = 'All'; commit(); });
-  $('f-club').addEventListener('change', e => { st.club = e.target.value; commit(); });
+  const cb = $('f-club');
+  cb.addEventListener('focus', () => { cb.select(); clubList(''); });
+  cb.addEventListener('input', () => clubList(cb.value));
+  cb.addEventListener('keydown', e => {
+    const opts = [...$('club-results').querySelectorAll('button')];
+    const i = opts.findIndex(b => b.classList.contains('act'));
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault(); if (!opts.length) return;
+      const j = Math.max(0, Math.min(opts.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)));
+      opts.forEach((b, k) => b.classList.toggle('act', k === j)); opts[j].scrollIntoView({block: 'nearest'});
+    } else if (e.key === 'Enter') {
+      e.preventDefault(); const b = opts[Math.max(0, i)]; if (b) pickClub(b.dataset.club, b.dataset.league);
+    } else if (e.key === 'Escape') { closeClubs(); cb.value = clubLabel(st.club); cb.blur(); }
+  });
+  // mousedown, not click: picks before the input's blur closes the list
+  $('club-results').addEventListener('mousedown', e => {
+    const b = e.target.closest('button[data-club]'); if (!b) return;
+    e.preventDefault(); pickClub(b.dataset.club, b.dataset.league);
+  });
+  cb.addEventListener('blur', () => { closeClubs(); cb.value = clubLabel(st.club); });
   for (const [id, key] of [['f-position', 'position'], ['f-contract', 'contract'], ['f-loan', 'loan'], ['f-foot', 'foot']])
     $(id).addEventListener('change', e => { st[key] = e.target.value; commit(); });
   $('f-q').addEventListener('input', e => { st.q = e.target.value; debounced('q', () => commit({replace: true}), 300); });

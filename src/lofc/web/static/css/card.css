@@ -88,10 +88,10 @@ table.rated th.col-per-90-rate,table.rated th.col-all-phases{min-width:64px}
 table.rated th.col-percentile{min-width:110px}
 table.rated .pb{min-width:96px;gap:8px}
 table.rated th.col-band{min-width:62px}
-table.rated th.col-vs-ours{min-width:58px;white-space:nowrap;cursor:help;text-decoration:underline dotted;text-underline-offset:3px}
+table.rated th.col-vs-ours{min-width:72px;white-space:nowrap;cursor:help;text-decoration:underline dotted;text-underline-offset:3px}
 table.rated tr.sec.wt td{background:transparent;color:var(--muted);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;padding:14px 8px 5px;border-bottom:1px solid var(--line)}
 table.rated tbody tr.sec.wt:first-child td{padding-top:6px}
-.vs{font-weight:700;font-size:14px;color:var(--muted)}
+.vs{font-weight:700;font-size:13px;color:var(--muted);white-space:nowrap}
 .vs.up{color:var(--hi)}.vs.dn{color:var(--lo)}
 /* squad section: radar + better/worse lists, 50/50 */
 .sq-cols{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center}
@@ -135,11 +135,11 @@ table.rated .chip{min-width:0;padding:3px 7px;font-size:13.5px}
 /* ---- physical: the rated table (#ph) and Other physical metrics (#po) share ONE fixed grid
    (colgroup from card.js physGrid), so their columns line up; a clear gap before the bar ---- */
 #ph table.phys,#po table.phys{table-layout:fixed;width:100%}
-.phys col.pc-metric{width:29%}.phys.novs col.pc-metric{width:37%}
+.phys col.pc-metric{width:25%}.phys.novs col.pc-metric{width:37%}
 .phys col.pc-all-phases{width:12.5%}
 .phys col.pc-in-possession,.phys col.pc-out-of-possession{width:13.5%}
 .phys col.pc-percentile{width:14.5%}
-.phys col.pc-vs-ours{width:8%}
+.phys col.pc-vs-ours{width:12%}   /* raw gaps, e.g. "−10.99" */
 .phys col.pc-band{width:9%}
 #ph table.phys td,#ph table.phys th,#po table.phys td,#po table.phys th{padding:8px 5px;min-width:0}
 #ph table.phys th,#po table.phys th{white-space:normal;vertical-align:bottom;line-height:1.25;font-size:12px}
@@ -152,12 +152,13 @@ table.rated .chip{min-width:0;padding:3px 7px;font-size:13.5px}
 #at th.col-vs-ours{white-space:nowrap}
 #ph table.phys .chip{min-width:0;padding:3px 6px;font-size:13.5px}
 @media (max-width:1380px){
-  .phys col.pc-metric{width:25%}.phys.novs col.pc-metric{width:33.5%}
+  .phys col.pc-metric{width:24%}.phys.novs col.pc-metric{width:33.5%}
   .phys col.pc-all-phases{width:13%}
   .phys col.pc-in-possession,.phys col.pc-out-of-possession{width:14.5%}
   .phys col.pc-percentile{width:15.5%}
-  .phys col.pc-vs-ours{width:8.5%}
+  .phys col.pc-vs-ours{width:9.5%}
   .phys col.pc-band{width:9%}
+  #ph .vs,#po .vs{font-size:12px}
   #ph table.phys td,#ph table.phys th,#po table.phys td,#po table.phys th{padding:7px 3px;font-size:13.5px}
   #ph table.phys th,#po table.phys th{font-size:11.5px}
   #ph table.phys tr>td:nth-child(5),#po table.phys tr>td:nth-child(5){padding-left:16px}
@@ -183,5 +184,13 @@ table.sim td:first-child a{font-weight:600}
 table.sim td.sim-why a{font-size:13px;white-space:nowrap}
 .sim-how{margin:10px 0 0;font-size:13.5px}
 /* Against our players, raw physical values (owner 2B 2026-11-20): long headings wrap so it fits. */
-#c-squad table.sq-raw th{white-space:normal;min-width:64px;max-width:96px;vertical-align:bottom;line-height:1.25}
-#c-squad table.sq-raw td{white-space:nowrap}
+/* every metric, player by player: raw values; green best, red worst in each row */
+#c-squad .sq-matrix td.best{background:#E6F2EB;color:var(--hi);font-weight:700}
+#c-squad .sq-matrix td.worst{background:#FBEAE9;color:var(--lo);font-weight:700}
+#c-squad .sq-matrix td{white-space:nowrap}
+#c-squad .sq-matrix th .note{font-weight:400}
+/* the physical part's phase switch (All phases / In possession / Out of possession) */
+#c-squad .sq-phase{margin-left:12px;vertical-align:middle}
+#c-squad .sq-phase button{font:inherit;font-size:12.5px;font-weight:500;padding:3px 10px;border:0;background:#fff;color:var(--ink);cursor:pointer;text-transform:none;letter-spacing:0}
+#c-squad .sq-phase button+button{border-left:1px solid #CDD1D7}
+#c-squad .sq-phase button.on{background:var(--ink);color:#fff}

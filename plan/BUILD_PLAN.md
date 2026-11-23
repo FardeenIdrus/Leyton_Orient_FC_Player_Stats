@@ -1395,6 +1395,17 @@ with "no sideways scrolling" in the same sentence — ask what he means. Not bui
   not in the feed. Top speed stays PSV-99 Top 5.
 - Full dated notes: "2.36 front-end notes" at the end of this work log.
 
+### 2026-11-23 — Squads club search and equal View buttons; phase switch in "Every metric" (built locally, not deployed)
+- Squads: `squad_lists.build_page` options gain `all_clubs` (club + league, squad view, every league); the Club box is a combobox (`squads.js` clubList / pickClub): empty = this league's clubs, typed = every league's, a pick sets league + club. View buttons flex equally (the 2026-11-20 full-width filter bar had stretched the box, not the buttons).
+- Card: `squad.phase_values` reads SkillCorner's In / Out of possession per-90 values (`player_detail_metrics`, phys_tip. / phys_otip.) for him and ours; `metric_matrix` adds `phases`; the page switches rows without re-rendering.
+- Harness: the generic exerciser skips controls inside a closed <details> (Chrome gives them a box, they cannot be clicked).
+
+### 2026-11-20 (evening) — Against our players on raw values; rows at the position; Players More filters (built locally, not deployed)
+- Owner: the 2B build left "Against our players" nearly empty outside League One. Now "Every metric, player by player" shows RAW values (per 90, %, m, km/h) for him and every one of ours, any league, green best / red worst (lower-is-better flipped), for every target; the "Physical, raw values" table it replaces is removed. "vs ours" on the card = his raw value minus our median raw value at the position (`squad.orient_raw_median`), number only. Percentile parts (rank, radar Orient line, better/worse) unchanged (2B).
+- Register N10: `squad.position_rows` / `rated_rows(sid, position)`: every player on his row at the card's position; "Not rated at <position>" otherwise. Compare's Orient line and the card radar use it too.
+- Players "More filters": 4-column grid, labels on one line, controls one height, "Reset filters" (minutes, age, foot, contract, loan, scout, style, strong only, affordability).
+- Tests: full suite 3,274 passed before the filter/CSS work; card 142 + Players 152 browser actions pass.
+
 ### 2026-11-20 (later) — no ranking across leagues on Players, card and Compare; Similar players in the nav (built locally, not deployed)
 
 - **Players (audit HIGH 1, owner: tabs).** One tab per chosen league, each ranked within its

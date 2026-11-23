@@ -320,3 +320,14 @@ def test_preferred_foot_filter_left_or_right_includes_both_and_drops_unknown():
     assert v.foot == "Any" and names(v) == everyone
     assert _page(rows).options["foot"] == ["Any", "Left", "Right"]
     assert "Foot" not in [c["key"] for c in _page(rows).columns]     # filter only, no column
+
+
+def test_every_club_of_every_league_is_offered_for_the_club_search(rows):
+    """Owner 2026-11-23: the Club box also searches every club in every league; a pick switches
+    league and club. The list does not depend on the league chosen."""
+    want = [{"club": "Celtic Glasgow", "league": "Scottish Premiership"},
+            {"club": "FC Reading", "league": "League One"},
+            {"club": "Leyton Orient", "league": "League One"},
+            {"club": "Oxford United", "league": "League One"}]
+    assert _page(rows).options["all_clubs"] == want
+    assert _page(rows, league="Scottish Premiership", club="All").options["all_clubs"] == want

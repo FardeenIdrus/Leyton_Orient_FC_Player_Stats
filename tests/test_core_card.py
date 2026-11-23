@@ -332,38 +332,22 @@ def test_season_output_totals_round_half_up():
 
 
 # --- U15 "vs ours" and U13 weight groups (TASKS 2.36) ---------------------------------------
-def test_gap_to_ours_is_whole_points_half_up_both_signs():
-    assert C.gap_to_ours(72.0, 54.0) == 18
-    assert C.gap_to_ours(40.0, 47.0) == -7
-    assert C.gap_to_ours(50.0, 50.0) == 0
-    assert C.gap_to_ours(60.5, 50.0) == 11          # +10.5 -> 11
-    assert C.gap_to_ours(50.0, 60.5) == -10         # -10.5 -> -10 (half UP)
-    assert C.gap_to_ours(50.0, 56.7) == -7
-    assert C.gap_to_ours(None, 50.0) is None and C.gap_to_ours(50.0, None) is None
-    assert C.gap_to_ours(float("nan"), 50.0) is None and C.gap_to_ours(50.0, np.nan) is None
-
-
-def test_vs_ours_column_blank_for_thin_pool_and_missing_values():
-    prow = pd.Series({"a": 72.0, "b": 40.0, "c": np.nan})
-    orient = {"a": 54.0, "b": 47.0, "c": 50.0}
-    assert C.vs_ours_column(["a", "b", "c", "d"], prow, orient, thin=None) == [18, -7, None, None]
-    assert C.vs_ours_column(["a", "b"], prow, orient, thin=8) == [None, None]
-    assert C.vs_ours_column(["a"], None, orient, thin=None) == [None]
-    assert C.vs_ours_column(["a"], prow, {}, thin=None) == [None]
+def test_vs_ours_column_is_the_raw_gap_in_the_metric_unit():
+    his = {"xg_p90": 0.31, "turnovers_p90": 6.0, "npxg_p90": None}
+    ours = {"xg_p90": 0.2, "turnovers_p90": 8.0, "npxg_p90": 0.1}
+    assert C.vs_ours_column(["xg_p90", "turnovers_p90", "npxg_p90", "x", None], his, ours) == [
+        {"text": "+0.11", "kind": "up"}, {"text": "\u22122.00", "kind": "up"}, None, None, None]
 
 
 def test_vs_ours_help_names_the_median():
-    # owner decision 2B (2026-11-20): the median is over ours rated in HIS league only
-    assert C.vs_ours_help("Centre Forward", 4, "League One") == (
-        "Gap to the median of our current Centre Forwards rated in League One (4 players).")
-    assert C.vs_ours_help("Winger", 1, "League Two") == (
-        "Gap to the median of our current Wingers rated in League Two (1 player).")
-    assert C.vs_ours_help("Winger", 0, "League One") is None
-
-
-def test_vs_ours_none_in_his_league_line():
-    assert C.vs_ours_none_help("Winger", "National League", "2025/26") == (
-        "None of our Wingers was rated in National League in 2025/26.")
+    # owner 2026-11-20: raw values, every one of ours at the position, any league
+    assert C.vs_ours_help("Centre Forward", 4) == (
+        "His value minus the median of our current Centre Forwards (4 players), "
+        "raw values, each in his own league.")
+    assert C.vs_ours_help("Winger", 1) == (
+        "His value minus the median of our current Wingers (1 player), "
+        "raw values, each in his own league.")
+    assert C.vs_ours_help("Winger", 0) is None
 
 
 def test_keys_by_label_maps_each_row_label_back_to_its_metric():

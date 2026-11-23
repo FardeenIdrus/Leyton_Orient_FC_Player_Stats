@@ -392,7 +392,11 @@ def build_page(rows: pd.DataFrame, league: str = ALL, club: str = ALL, view: str
     squad = per_view["squad"]
     tiles = [("Players", len(squad)), ("Played", int((squad["minutes"] > 0).sum())),
              ("Loans in", len(per_view["in"])), ("Loans out", len(per_view["out"]))]
-    options = {"league": leagues, "club": clubs, "position": positions,
+    # every club of every league, for the Club box's search (owner 2026-11-23)
+    pairs = rows.loc[rows["view"] == "squad", ["club", "league"]].dropna().drop_duplicates()
+    all_clubs = [{"club": c, "league": lg} for c, lg in
+                 sorted(zip(pairs["club"], pairs["league"]), key=lambda x: (fold(x[0]), fold(x[1])))]
+    options = {"league": leagues, "club": clubs, "position": positions, "all_clubs": all_clubs,
                "view": [{"code": k, "label": v} for k, v in VIEWS.items()],
                "contract": list(CONTRACT), "loan": list(LOAN), "foot": list(FOOT),
                "max_age": {"min": 16, "max": MAX_AGE, "default": MAX_AGE}}

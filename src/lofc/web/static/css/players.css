@@ -118,3 +118,20 @@ input[type=range]{accent-color:var(--ink);width:100%}
 .pl-tab span{margin-left:7px;font-size:12px;background:var(--soft);border-radius:10px;padding:1px 7px;color:var(--muted)}
 .pl-tab.on{color:var(--ink);font-weight:700;border-bottom-color:var(--red)}
 .pl-tab.on span{background:var(--ink);color:#fff}
+
+/* "More filters": one 4-column grid, every label on one line, every control the same height */
+#more .fl{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 24px;align-items:start}
+#more .fl .f{min-width:0;display:flex;flex-direction:column;gap:6px}
+#more .fl .f > label:first-child{font-size:13px;line-height:18px;min-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0}
+#more .fl .f select.ctl,#more .fl .f input.ctl.num{height:36px;box-sizing:border-box}
+#more .fl .pair{height:36px}
+#more .fl .pair input.ctl.num{width:84px;flex:0 0 84px}
+#more .fl .pair .val{flex:0 0 84px;text-align:right}
+#more .fl .switch{height:36px;display:flex;align-items:center}
+#more .fl .ends{margin-top:-2px}
+#more .fl-money{margin-top:18px;padding-top:18px;border-top:1px solid var(--line)}
+#more .fl-money input.ctl.num.wide{width:100%}
+#more [hidden]{display:none!important}   /* the flex rule above must not un-hide a field */
+.more-foot{display:flex;justify-content:flex-end;margin-top:16px}
+@media (max-width:1100px){#more .fl{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){#more .fl{grid-template-columns:1fr}}

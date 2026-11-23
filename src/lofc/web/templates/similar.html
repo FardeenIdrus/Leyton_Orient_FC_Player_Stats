@@ -22,6 +22,19 @@
   </div>
   <div id="sim-status" class="note" role="status"></div>
 
+  <details class="sim-how" id="sim-how">
+    <summary>How similarity is computed</summary>
+    <ol>
+      <li><b>Who</b> Rated players at the same position and season.</li>
+      <li><b>Each measure against his own league</b> How far above or below his league's average, in standard deviations. <i>Example: 0.40 xG per 90 where the league average is 0.25 (sd 0.10) gives +1.5.</i></li>
+      <li><b>Gap</b> His figure minus the other player's. <i>Example: +1.5 vs +0.5 gives a gap of 1.0.</i></li>
+      <li><b>Weight</b> Each gap counts by the measure's share of the Overall rating.</li>
+      <li><b>Linked measures</b> Measures that move together (e.g. Sprints and Sprint distance) count once, not twice.</li>
+      <li><b>Distance</b> All gaps combined into one number: the smaller, the more alike.</li>
+      <li><b>Similarity %</b> Take every possible pair of <span class="how-pos">wingers</span> this season (any two, all leagues). 85% means these two are more alike than 85% of those pairs.</li>
+    </ol>
+  </details>
+
   <div class="card" id="c-sim-list"{% if not ids.player %} hidden{% endif %}>
     <div class="sf-head"><div><h2>Closest 10</h2><div class="sub" id="sim-sub"></div></div>
       <div class="sim-ctl">

@@ -49,7 +49,7 @@
         <div class="f" id="style-wrap"><label for="f-style">Playing style</label><select class="ctl" id="f-style" name="style"></select></div>
         <div class="f" id="strong-wrap"><label>&nbsp;</label><label class="switch" id="sw-strong"><input type="checkbox" id="f-strong" name="strong_only"><i></i>Strong only</label></div>
       </div>
-      <div class="fl" style="margin-top:16px">
+      <div class="fl fl-money">
         <div class="f"><label>&nbsp;</label><label class="switch" id="sw-money"><input type="checkbox" id="f-money" name="money"><i></i>Show affordability (modelled)</label></div>
         <div class="f f-range money" hidden><label for="f-budget">Transfer budget (€m)</label>
           <div class="pair"><input type="range" id="f-budget" name="budget_slider" aria-label="Transfer budget (€m)"><input class="ctl num" type="number" id="f-budget-num" name="budget" aria-label="…or type it (€m)"></div>
@@ -60,6 +60,7 @@
         <div class="f money" hidden><label for="f-wage">…or type a max weekly wage (£)</label><input class="ctl num wide" type="number" id="f-wage" name="wage" aria-label="…or type a max weekly wage (£)"></div>
       </div>
       <div class="note money" hidden id="money-cap" style="margin-top:8px"></div>
+      <div class="more-foot"><button type="button" class="btn small" id="more-reset">Reset filters</button></div>
     </div>
 
     <div class="more" id="mf">
@@ -70,7 +71,7 @@
       </div>
       <h3 style="margin-top:22px">Performance · minimum percentile in league and position</h3>
       <div class="sliders four" id="pf-sliders"></div>
-      <div style="margin-top:14px"><button type="button" class="btn small" id="mf-reset">Reset metric filters</button></div>
+      <div class="more-foot"><button type="button" class="btn small" id="mf-reset">Reset metric filters</button></div>
     </div>
   </div>
 

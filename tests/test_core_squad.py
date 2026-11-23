@@ -216,23 +216,53 @@ def test_table_rows_blanks_are_none_never_nan():
     assert not any(isinstance(v, float) and v != v for r in rows for v in r.values())
 
 
-def test_metric_matrix_marks_best_and_handles_missing():
-    a = _p("Aaa Target", pct={"m": 50}, is_target=True)
-    b = _p("Bbb Kabia", pct={"m": 80, "p": 40})
-    mm = sf.metric_matrix([a, b], perf=[("m", "Metric M")], phys=[("p", "Phys P")])
+def test_metric_matrix_is_raw_values_green_best_red_worst():
+    a = _p("Aaa Target", is_target=True, league_abbr="NL", league="National League",
+           raw={"xg_p90": 0.31, "turnovers_p90": 9.0})
+    b = _p("Bbb Kabia", league_abbr="L1", raw={"xg_p90": 0.12, "turnovers_p90": 7.0,
+                                              "distance_p90": 10123.4})
+    c = _p("Ccc Mid", raw={"xg_p90": 0.2, "turnovers_p90": 8.0})
+    mm = sf.metric_matrix([a, b, c], perf=[("xg_p90", "xG"), ("turnovers_p90", "Lost")],
+                          phys=[("distance_p90", "Distance")])
+    assert mm["note"] == "Raw values, each in his own league"
     assert [s["name"] for s in mm["sections"]] == ["Performance", "Physical"]
-    perf = mm["sections"][0]["rows"][0]
-    assert perf["label"] == "Metric M"
-    assert [c["best"] for c in perf["cells"]] == [False, True]
-    phys = mm["sections"][1]["rows"][0]["cells"]
-    assert phys[0]["pct"] is None and phys[1]["pct"] == 40 and phys[1]["best"]
-    assert [p["short"] for p in mm["players"]] == ["Target", "Kabia"]
+    xg, lost = mm["sections"][0]["rows"]
+    assert [c["value"] for c in xg["cells"]] == ["0.31", "0.12", "0.20"]
+    assert [c["kind"] for c in xg["cells"]] == ["best", "worst", None]
+    # fewer ball losses is better: the flip
+    assert [c["kind"] for c in lost["cells"]] == ["worst", "best", None]
+    dist = mm["sections"][1]["rows"][0]["cells"]
+    assert [c["value"] for c in dist] == [None, "10,123 m", None]
+    assert [c["kind"] for c in dist] == [None, None, None]     # one value: nothing to colour
+    assert [(p["short"], p["league_abbr"]) for p in mm["players"]] == [
+        ("Target", "NL"), ("Kabia", "L1"), ("Mid", None)]
 
 
-def test_metric_matrix_leaves_out_a_section_with_no_values():
-    a = _p("A B", pct={"m": 50}, is_target=True)
-    mm = sf.metric_matrix([a], perf=[("m", "M")], phys=[("p", "P")])
+def test_metric_matrix_leaves_out_empty_rows_players_and_sections():
+    a = _p("A B", is_target=True, raw={"xg_p90": 0.3})
+    nobody = _p("No Row", raw={})
+    mm = sf.metric_matrix([a, nobody], perf=[("xg_p90", "xG"), ("npxg_p90", "npxG")],
+                          phys=[("distance_p90", "Distance")])
     assert [s["name"] for s in mm["sections"]] == ["Performance"]
+    assert [r["label"] for r in mm["sections"][0]["rows"]] == ["xG"]
+    assert [p["name"] for p in mm["players"]] == ["A B"]
+    a.raw = {}
+    assert sf.metric_matrix([a, nobody], perf=[("xg_p90", "xG")], phys=[]) is None
+
+
+def test_best_worst_ties_as_displayed_stay_plain():
+    assert sf.best_worst("xg_p90", [0.301, 0.304, 0.1]) == [None, None, "worst"]
+    assert sf.best_worst("xg_p90", [0.3, None]) == [None, None]
+
+
+def test_signed_gap_in_the_metric_unit_and_direction():
+    assert sf.signed_gap("xg_p90", 0.31, 0.2) == {"text": "+0.11", "kind": "up"}
+    assert sf.signed_gap("xg_p90", 0.1, 0.2) == {"text": "\u22120.10", "kind": "dn"}
+    assert sf.signed_gap("turnovers_p90", 6.0, 8.0) == {"text": "\u22122.00", "kind": "up"}
+    assert sf.signed_gap("top5_psv99_kmh", 33.26, 32.0) == {"text": "+1.3", "kind": "up"}
+    assert sf.signed_gap("xg_p90", 0.2, 0.2) == {"text": "0.00", "kind": None}
+    assert sf.signed_gap("xg_p90", None, 0.2) is None
+    assert sf.signed_gap("distance_p90", 10500.0, 10000.0) == {"text": "+500", "kind": "up"}
 
 
 # --- orient_median, the card radar's Orient line (data frames patched in) ------------------------
@@ -249,7 +279,7 @@ def _patch_data(monkeypatch, pct_rows, squad_rows):
                        "season_id": 319, "position_group": "Winger",
                        "goals_p90": [r[1] for r in pct_rows]})
     monkeypatch.setattr(sf, "squad", lambda: squad)
-    monkeypatch.setattr(sf, "season_rows", lambda sid: rows)
+    monkeypatch.setattr(sf, "season_rows_all", lambda sid: rows.reset_index())
     monkeypatch.setattr(sf.L, "load_scorecard_percentiles", lambda sid: pf)
     monkeypatch.setattr(sf.L, "load_loans", lambda sid=None: pd.DataFrame())
     monkeypatch.setattr(sf.L, "competition_name_by_id", lambda: {4: "League One"})
@@ -427,30 +457,12 @@ def test_not_compared_line():
         "He has no minutes in 2026/27, so ratings are not compared.")
 
 
-def test_raw_physical_table_values_and_source_per_row():
-    t = _p("Tom Target", is_target=True, league="National League",
-           raw={"distance_p90": 10123.456, "top5_psv99_kmh": 33.04})
-    a = _p("Al Ours", league="League One", raw={"distance_p90": 9800.0, "top5_psv99_kmh": None})
-    b = _p("Bo Ours", league=None, raw={})                     # no row that season
-    got = sf.raw_physical_table([t, a, b], [("distance_p90", "Distance (m)"),
-                                            ("top5_psv99_kmh", "Top speed (km/h)")], "2025/26")
-    assert got["columns"] == ["Player", "Values from", "Distance (m)", "Top speed (km/h)"]
-    assert got["rows"][0] == {"name": "Tom Target", "is_target": True,
-                              "source": "National League · 2025/26", "values": ["10123.5", "33.0"]}
-    assert got["rows"][1]["values"] == ["9800.0", None]
-    assert got["rows"][2] == {"name": "Bo Ours", "is_target": False, "source": None,
-                              "values": [None, None]}
-    # he has no SkillCorner value at all: no table
-    t.raw = {}
-    assert sf.raw_physical_table([t, a], [("distance_p90", "D")], "2025/26") is None
-
-
 def test_orient_median_only_from_ours_in_his_league(monkeypatch):
     _patch_data(monkeypatch, [(1, 20.0), (2, 60.0), (3, 90.0)],
                 [(1, "A", "Winger"), (2, "B", "Winger"), (3, "C", "Winger")])
-    rows = sf.season_rows(319).copy()
-    rows.loc[3, "competition_id"] = 5                          # C played in League Two
-    monkeypatch.setattr(sf, "season_rows", lambda sid: rows)
+    rows = sf.season_rows_all(319).copy()
+    rows.loc[rows["player_id"] == 3, "competition_id"] = 5     # C played in League Two
+    monkeypatch.setattr(sf, "season_rows_all", lambda sid: rows)
     pf = sf.L.load_scorecard_percentiles(319).copy()
     pf.loc[pf["player_id"] == 3, "competition_id"] = 5
     monkeypatch.setattr(sf.L, "load_scorecard_percentiles", lambda sid: pf)
@@ -467,13 +479,16 @@ _PHYS = {"distance_p90": 10000.0, "hsr_distance_p90": 700.0, "sprint_count_p90":
          "top5_psv99_kmh": 32.0}
 
 
-def _section(monkeypatch, target, ours):
+def _section(monkeypatch, target, ours, other_rows=(), phases=None):
     """target / ours: (player_id, name, competition_id or None, overall, percentile, raw-dict).
-    Every metric of a player gets the same percentile, so medians and gaps are easy to read."""
+    Every metric of a player gets the same percentile, so medians and gaps are easy to read.
+    other_rows: (player_id, competition_id, position_group, minutes, overall) rows of the
+    season at OTHER positions (a player can have one per league and position)."""
     from lofc.dashboard import compare_tables as ct
     keys = sorted({*ct.radar_metrics("Winger", "All Metrics"),
                    *(m for m, _ in ct.rating_metrics("Winger", "All Metrics")),
                    *ct.physical_rating_metrics("Winger")})
+    phases = phases or {}
     every = [target] + ours
     squad = pd.DataFrame({"player_id": [o[0] for o in ours], "player_name": [o[1] for o in ours],
                           "position_group": "Winger", "birth_date": pd.NaT,
@@ -489,12 +504,19 @@ def _section(monkeypatch, target, ours):
     pf = pd.DataFrame([{"player_id": p[0], "competition_id": p[2], "season_id": 318,
                         "position_group": "Winger", **{k: p[4] for k in keys}} for p in have])
     raw = {(p[0], p[2], "Winger"): p[5] for p in have}
+    raw.update({(i, c, g): {"distance_p90": 1.0} for i, c, g, _m, _o in other_rows})
+    extra = pd.DataFrame([{"competition_id": c, "position_group": g, "team_name": f"Club {i}",
+                           "minutes": m, "objective_composite": o, "performance_band": o,
+                           "physical_band": o, "peer_count": 40.0} for i, c, g, m, o in other_rows],
+                         index=pd.Index([r[0] for r in other_rows], name="player_id"))
+    every_row = pd.concat([rows, extra]) if len(extra) else rows
     names = {4: "League One", 5: "League Two", 65: "National League"}
     monkeypatch.setattr(sf, "squad", lambda: squad)
-    monkeypatch.setattr(sf, "season_rows", lambda sid: rows)
+    monkeypatch.setattr(sf, "season_rows_all", lambda sid: every_row.reset_index())
     monkeypatch.setattr(sf, "season_options", lambda: [318])
     monkeypatch.setattr(sf, "style_map", lambda sid: {})
-    monkeypatch.setattr(sf, "physical_values", lambda sid, ids: raw)
+    monkeypatch.setattr(sf, "raw_values", lambda sid, ids, metrics: raw)
+    monkeypatch.setattr(sf, "phase_values", lambda sid, ids, metrics: phases)
     monkeypatch.setattr(sf.L, "load_scorecard_percentiles", lambda sid: pf)
     monkeypatch.setattr(sf.L, "load_loans", lambda sid=None: pd.DataFrame())
     monkeypatch.setattr(sf.L, "competition_name_by_id", lambda: names)
@@ -511,10 +533,10 @@ def test_section_league_one_target_against_league_one_ours_is_compared_in_full(m
     assert set(S["radar"]["ours_median"]) == {55.0}
     assert S["radar"]["median_label"] == "Our current wingers' median (2)"
     assert S["better"]["heading"] == "Better than all our Wingers"
-    assert S["not_compared"] is None and S["raw_physical"] is None
-    assert S["raw_physical_note"] is None
-    assert [p["name"] for p in S["metrics"]["players"]] == ["Tom Target", "Al Low", "Bo High"] or \
-        [p["name"] for p in S["metrics"]["players"]] == ["Tom Target", "Bo High", "Al Low"]
+    assert S["not_compared"] is None
+    # same order as the table above it
+    assert [p["name"] for p in S["metrics"]["players"]] == ["Tom Target", "Bo High", "Al Low"]
+    assert S["metrics"]["note"] == "Raw values, each in his own league"
     assert S["subtitle"] == "Leyton Orient's current wingers · only those in his league are compared"
 
 
@@ -534,39 +556,90 @@ def test_section_mixed_squad_ranks_only_ours_in_his_league(monkeypatch):
     assert set(S["radar"]["ours_median"]) == {40.0}
     assert S["radar"]["median_label"] == "Our current League One wingers' median (1)"
     assert S["worse"]["items"] == [] and all("our best 40" in i["detail"] for i in S["better"]["items"])
-    assert [p["name"] for p in S["metrics"]["players"]] == ["Tom Target", "Al Low"]
-    assert S["not_compared"] is None and S["raw_physical"] is None
+    # raw values: every one of ours with a value, whatever the league (Cy has none)
+    assert [p["name"] for p in S["metrics"]["players"]] == ["Tom Target", "Al Low", "Bo Two"]
+    assert S["not_compared"] is None
 
 
-def test_section_national_league_target_gets_the_line_and_raw_physical(monkeypatch):
+def test_section_national_league_target_gets_the_line_and_the_raw_matrix(monkeypatch):
     S = _section(monkeypatch, (9, "Tom Target", 65, 4.2, 90.0,
                                {"distance_p90": 11000.04, "top5_psv99_kmh": 33.26}),
                  [(1, "Al One", 4, 3.0, 40.0, {"distance_p90": 9800.0, "top5_psv99_kmh": 31.0}),
                   (2, "Bo Two", 5, 3.4, 60.0, _PHYS)])
-    assert S["verdict"] is None and S["radar"] is None and S["metrics"] is None
+    assert S["verdict"] is None and S["radar"] is None
     assert S["better"] is None and S["worse"] is None and S["gap_note"] is None
     assert S["not_compared"] == ("None of our wingers was rated in National League in 2025/26, "
                                  "so ratings are not compared.")
     tags = {r["name"]: r["elsewhere"] for r in S["table"]}
     assert tags == {"Tom Target": None, "Al One": "Rated in League One",
                     "Bo Two": "Rated in League Two"}
-    R = S["raw_physical"]
-    from lofc.dashboard import detail_section as ds
-    from lofc.model import club_framework as cf
-    order = [m for m, _ in ds.PHASE_METRICS] + [m for m, _, _ in ds.SPEED_METRICS]
-    labels = dict(ds.PHASE_METRICS) | {m: lbl for m, lbl, _ in ds.SPEED_METRICS}
-    want = [m for m in order if m in cf.PHYSICAL_METRICS["Winger"]]
-    assert R["columns"] == ["Player", "Values from"] + [labels[m] for m in want]
-    assert [(r["name"], r["source"]) for r in R["rows"]] == [
-        ("Tom Target", "National League · 2025/26"), ("Al One", "League One · 2025/26"),
-        ("Bo Two", "League Two · 2025/26")]
-    i = R["columns"].index(labels["distance_p90"]) - 2
-    assert [r["values"][i] for r in R["rows"]] == ["11000.0", "9800.0", "10000.0"]
-    assert S["raw_physical_note"] is None
+    M = S["metrics"]
+    assert [(p["name"], p["league"]) for p in M["players"]] == [
+        ("Tom Target", "National League"), ("Al One", "League One"), ("Bo Two", "League Two")]
+    rows = {r["label"]: r["cells"] for sec in M["sections"] for r in sec["rows"]}
+    from lofc.dashboard import compare_tables as ct
+    dist = rows[ct.row_label("distance_p90")]
+    assert [c["value"] for c in dist] == ["11,000 m", "9,800 m", "10,000 m"]
+    assert [c["kind"] for c in dist] == ["best", "worst", None]
 
 
-def test_section_national_league_target_without_skillcorner_data(monkeypatch):
+def test_section_national_league_target_without_any_raw_value(monkeypatch):
     S = _section(monkeypatch, (9, "Tom Target", 65, 4.2, 90.0, {}),
                  [(1, "Al One", 4, 3.0, 40.0, _PHYS)])
-    assert S["raw_physical"] is None
-    assert S["raw_physical_note"] == "No SkillCorner data for him in 2025/26."
+    assert S["metrics"] is None and S["not_compared"]
+
+
+def test_section_uses_only_rows_at_his_position(monkeypatch):
+    """Ours are compared on their row at the card's position, never on a row at another
+    position with more minutes (Chinedu 2025/26: listed Full Back, most minutes at Centre Back)."""
+    S = _section(monkeypatch, (9, "Tom Target", 4, 3.5, 60.0, _PHYS),
+                 [(1, "Al Low", 4, 3.0, 40.0, _PHYS), (2, "Bo Both", 4, 3.2, 50.0, _PHYS),
+                  (3, "Cy Back", None, None, None, {})],
+                 other_rows=[(2, 4, "Centre Back", 3000.0, 4.9),     # more minutes, other position
+                             (3, 4, "Centre Back", 2500.0, 4.8)])   # no winger row at all
+    by = {r["name"]: r for r in S["table"]}
+    assert by["Bo Both"]["overall"] == 3.2 and by["Bo Both"]["minutes"] == 1500
+    assert by["Cy Back"]["overall"] is None and by["Cy Back"]["minutes"] is None
+    assert by["Cy Back"]["unrated"] == "Not rated at Winger"
+    V = S["verdict"]
+    assert V["rank_text"] == "1st of 3" and V["our_best"] == 3.2
+    assert set(S["radar"]["ours_median"]) == {45.0}
+
+
+def test_orient_median_uses_rows_at_the_position(monkeypatch):
+    _patch_data(monkeypatch, [(1, 20.0), (2, 60.0)],
+                [(1, "A", "Winger"), (2, "B", "Winger")])
+    rows = sf.season_rows_all(319).copy()
+    rows.loc[rows["player_id"] == 2, "position_group"] = "Centre Back"
+    monkeypatch.setattr(sf, "season_rows_all", lambda sid: rows)
+    assert sf.orient_median("Winger", 319) == ({"goals_p90": 20.0}, 1)
+
+
+def test_matrix_physical_rows_per_possession_phase():
+    """Owner 2026-11-23: the physical part can be read for In possession / Out of possession
+    (SkillCorner's split); green and red are worked out within that phase; speed has no split."""
+    a = _p("Aaa Target", is_target=True, raw={"distance_p90": 10000.0, "top5_psv99_kmh": 33.0},
+           phase={"In possession": {"distance_p90": 4000.0},
+                  "Out of possession": {"distance_p90": 4500.0}})
+    b = _p("Bbb Ours", raw={"distance_p90": 10500.0, "top5_psv99_kmh": 32.0},
+           phase={"In possession": {"distance_p90": 3500.0},
+                  "Out of possession": {"distance_p90": 5200.0}})
+    mm = sf.metric_matrix([a, b], perf=[], phys=[("distance_p90", "Distance"),
+                                                  ("top5_psv99_kmh", "Top speed")])
+    assert [r["label"] for r in mm["sections"][0]["rows"]] == ["Distance", "Top speed"]
+    ip, op = mm["phases"]["In possession"], mm["phases"]["Out of possession"]
+    assert [r["label"] for r in ip["rows"]] == ["Distance"]           # no split for speed
+    assert [c["value"] for c in ip["rows"][0]["cells"]] == ["4,000 m", "3,500 m"]
+    assert [c["kind"] for c in ip["rows"][0]["cells"]] == ["best", "worst"]
+    assert [c["kind"] for c in op["rows"][0]["cells"]] == ["worst", "best"]
+    a.phase, b.phase = {}, {}
+    assert sf.metric_matrix([a, b], perf=[], phys=[("distance_p90", "D")])["phases"] is None
+
+
+def test_section_carries_the_phase_split(monkeypatch):
+    S = _section(monkeypatch, (9, "Tom Target", 4, 3.5, 60.0, _PHYS),
+                 [(1, "Al Low", 4, 3.0, 40.0, _PHYS)],
+                 phases={(9, 4): {"In possession": {"distance_p90": 4100.0}},
+                         (1, 4): {"In possession": {"distance_p90": 3900.0}}})
+    ip = S["metrics"]["phases"]["In possession"]["rows"][0]["cells"]
+    assert [c["value"] for c in ip] == ["4,100 m", "3,900 m"]

@@ -37,3 +37,10 @@
 #v-squads tbody tr{cursor:pointer}
 #sq-foot{margin:10px 0 0}
 @media (max-width:1100px){#v-squads .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* the three View buttons share the box equally (owner 2026-11-23: no empty space after Loans out) */
+#v-squads .seg{display:flex;width:100%}
+#v-squads .seg button{flex:1 1 0;text-align:center;min-width:0}
+/* Club box: this league's clubs, or every club when typing */
+#v-squads .f-club .searchbox{display:block}
+#club-results button.act{background:var(--soft)}
+#club-results .note{font-size:12.5px}

@@ -361,6 +361,10 @@ function renderChips() {
     (rm ? `<button type="button" data-remove="${esc(rm)}" aria-label="Remove ${esc(k)} ${esc(v)}">×</button>` : '') + '</span>').join('');
 }
 
+// every control inside "More filters" (Reset filters puts these back; nothing else)
+const MORE_KEYS = ['min_minutes', 'max_age', 'foot', 'contract', 'loan', 'scout', 'style',
+  'strong_only', 'money', 'budget', 'wage', 'signable'];
+
 function removeChip(key) {
   const d = defaults();
   if (key === 'leagues') st.leagues = [];
@@ -466,6 +470,7 @@ function bind() {
   $('mf').addEventListener('change', e => { if (e.target.type === 'range') flush('mf', () => commit()); });
   $('ph-tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) showTab(Number(b.dataset.tab)); });
   $('mf-reset').addEventListener('click', () => { st.pct = {}; st.raw = {}; commit(); });
+  $('more-reset').addEventListener('click', () => { const d = defaults(); MORE_KEYS.forEach(k => { st[k] = d[k]; }); commit(); });
 
   $('active').addEventListener('click', e => { const b = e.target.closest('[data-remove]'); if (b) removeChip(b.dataset.remove); });
 

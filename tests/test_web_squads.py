@@ -149,3 +149,16 @@ def test_preferred_foot_reaches_the_page_state(fake):
                                              "foot": "Left"}).json()
     assert p["state"]["foot"] == "Left"
     assert p["options"]["foot"] == ["Any", "Left", "Right"]
+
+
+def test_club_box_searches_every_league_and_view_buttons_are_equal():
+    """Owner 2026-11-23: the Club box is a search over every club in every league (picking one
+    switches league and club); the three View buttons share the box equally."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "src/lofc/web"
+    html = (root / "templates/squads.html").read_text()
+    js = (root / "static/js/squads.js").read_text()
+    css = (root / "static/css/squads.css").read_text()
+    assert 'id="f-club"' in html and 'role="combobox"' in html and 'id="club-results"' in html
+    assert "o.all_clubs" in js and "st.league = " in js[js.index("function pickClub"):]
+    assert "#v-squads .seg button{flex:1 1 0" in css

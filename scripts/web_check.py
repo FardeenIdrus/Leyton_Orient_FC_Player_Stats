@@ -214,7 +214,10 @@ DISCOVER_JS = r"""
   const main = %(main)s;
   const vis = e => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
     return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'
-      && !e.closest('[hidden],[aria-hidden=true]'); };
+      && !e.closest('[hidden],[aria-hidden=true]')
+      // inside a CLOSED <details> (other than its summary): Chrome still gives it a box, but it
+      // cannot be clicked until the details is opened
+      && !(e.closest('details:not([open])') && !e.closest('summary')); };
   document.querySelectorAll('[data-wc-idx]').forEach(e => e.removeAttribute('data-wc-idx'));
   const out = []; const seen = new Set(); let i = 0;
   const cur = location.pathname;

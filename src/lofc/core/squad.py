@@ -14,10 +14,12 @@ Impect says so, and a player who has left is not.
 No league-strength adjustment is made (owner decision): ratings and percentiles are within league,
 season and position, so he is ranked, gapped and median-lined ONLY against those of ours whose
 row that season is in HIS league (owner decision 2B, 2026-11-20). The rest of ours stay in the
-table, tagged "Rated in <league>"; when none of ours is in his league, nothing is ranked and the
-section shows the position's raw SkillCorner physical values side by side instead (raw values
-are comparable across leagues; ratings are not). A league-position pool below
-MIN_PEERS_FOR_RANKING is never rated here either.
+table, tagged "Rated in <league>"; when none of ours is in his league, nothing is ranked. The
+metric-by-metric table shows RAW values (per 90, km/h) for him and every one of ours, whatever
+the league: raw values share units, percentiles from different leagues do not (owner
+2026-11-20; no league adjustment, director's decision). Every player is taken on his row AT the
+section's position: a row at another position is never compared (register N10). A
+league-position pool below MIN_PEERS_FOR_RANKING is never rated here either.
 
 The pure functions up to the "data" banner take plain values, so tests need no database; the
 loaders below it are version-cached like `loaders.py` (`_versioned`).
@@ -25,6 +27,7 @@ loaders below it are version-cached like `loaders.py` (`_versioned`).
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -216,7 +219,9 @@ class SfPlayer:
     competition_id: int | None = None     # the league of his row that season; None = no row
     row_position: str | None = None       # the position_group of that row
     elsewhere: str | None = None          # "Rated in League Two": rated, not in HIS league
-    raw: dict = field(default_factory=dict)   # raw SkillCorner physical values of that row
+    raw: dict = field(default_factory=dict)   # raw per-90 values of that row
+    unrated_reason: str | None = None     # overrides `unrated_text` ("Not rated at Winger")
+    phase: dict = field(default_factory=dict)  # {"In possession": {metric: raw}, ...}
 
     @property
     def rated(self) -> bool:
@@ -360,55 +365,96 @@ def table_rows(players: list[SfPlayer]) -> list[dict]:
             "physical": _num(p.phys) if p.rated else None,
             "style": (p.style or None) if p.rated else None,
             "contract": p.contract or None,
-            "unrated": None if p.rated else unrated_text(p.minutes),
+            "unrated": None if p.rated else (p.unrated_reason or unrated_text(p.minutes)),
             "elsewhere": p.elsewhere,
         })
     return rows
 
 
-def _one_dp(v) -> str | None:
-    """The card's physical-table format (`card._physical_block`): one decimal place."""
-    return None if v is None or pd.isna(v) else f"{float(v):.1f}"
+def _lower_is_better(metric: str) -> bool:
+    return metric in cf.LOWER_IS_BETTER
 
 
-def raw_physical_table(players: list[SfPlayer], metrics: list[tuple[str, str]],
-                       season_name: str) -> dict | None:
-    """Him and each of ours with the RAW SkillCorner value per physical measure (raw values are
-    comparable across leagues: no percentile, no rank, no "better" colour), each row naming the
-    league and season its values come from. None when he has no value at all."""
-    if not players or not any(_num(players[0].raw.get(k)) is not None for k, _ in metrics):
-        return None
-    return {"columns": ["Player", "Values from"] + [label for _, label in metrics],
-            "rows": [{"name": p.name, "is_target": p.is_target,
-                      "source": f"{p.league} · {season_name}" if p.league else None,
-                      "values": [_one_dp(p.raw.get(k)) for k, _ in metrics]}
-                     for p in players]}
+def best_worst(metric: str, values: list) -> list:
+    """"best" / "worst" / None per player from his RAW value in one row (a lower value is
+    better for `cf.LOWER_IS_BETTER`). Compared as displayed, so a difference the reader cannot
+    see gets no colour; ties and missing values stay plain; needs two different values."""
+    shown = [None if v is None else ct.format_value(metric, v) for v in values]
+    present = [(v, t) for v, t in zip(values, shown) if v is not None]
+    if len({t for _, t in present}) < 2:
+        return [None] * len(values)
+    lo = min(present, key=lambda x: x[0])[1]
+    hi = max(present, key=lambda x: x[0])[1]
+    best, worst = (lo, hi) if _lower_is_better(metric) else (hi, lo)
+    out = []
+    for t in shown:
+        if t is not None and t == best and shown.count(best) == 1:
+            out.append("best")
+        elif t is not None and t == worst and shown.count(worst) == 1:
+            out.append("worst")
+        else:
+            out.append(None)
+    return out
+
+
+MATRIX_NOTE = "Raw values, each in his own league"
+
+
+PHASES = ("In possession", "Out of possession")      # SkillCorner's split (none for speed)
 
 
 def metric_matrix(players: list[SfPlayer], perf: list[tuple[str, str]],
-                  phys: list[tuple[str, str]]) -> dict:
-    """Percentile per metric per player (players with none are left out); the best figure in
-    each row is flagged. A section with no value at all (e.g. no SkillCorner cover in that
-    league/season) is left out."""
+                  phys: list[tuple[str, str]]) -> dict | None:
+    """Every rating metric, player by player, as RAW values (per 90, km/h, ...) from each
+    player's own row at the position -- comparable units, never percentiles from different
+    leagues (owner 2026-11-20). Green the best, red the worst in each row. Players with no
+    value at all are left out; a section with no value is left out; None when nothing is left.
+    `phases`: the physical rows again for In possession and Out of possession (SkillCorner's
+    split; speed and agility have none, so they are not in those lists) -- owner 2026-11-23."""
     keys = [k for k, _ in perf + phys]
-    cols = _with_pct(players, keys)
+    cols = [p for p in players if any(_num(p.raw.get(k)) is not None for k in keys)]
+    if not cols or not cols[0].is_target:
+        return None
 
-    def section(name, metrics):
-        if not metrics or not any(_val(p, k) is not None for p in cols for k, _ in metrics):
-            return None
+    def section(name, metrics, value=lambda p, k: p.raw.get(k)):
         rows = []
         for key, label in metrics:
-            vals = [_val(p, key) for p in cols]
-            top = max((v for v in vals if v is not None), default=None)
+            vals = [_num(value(p, key)) for p in cols]
+            if all(v is None for v in vals):
+                continue
             rows.append({"label": label,
-                         "cells": [{"pct": None if v is None else _round_half_up(v),
-                                    "raw": v, "best": v is not None and v == top}
-                                   for v in vals]})
-        return {"name": name, "rows": rows}
+                         "cells": [{"value": None if v is None else ct.format_value(key, v),
+                                    "raw": v, "kind": k}
+                                   for v, k in zip(vals, best_worst(key, vals))]})
+        return {"name": name, "rows": rows} if rows else None
 
-    return {"players": [{"name": p.name, "short": p.name.split()[-1], "is_target": p.is_target}
-                        for p in cols],
-            "sections": [s for s in (section("Performance", perf), section("Physical", phys)) if s]}
+    sections = [x for x in (section("Performance", perf), section("Physical", phys)) if x]
+    if not sections:
+        return None
+    phases = {ph: s for ph in PHASES
+              if (s := section("Physical", phys, lambda p, k, ph=ph: p.phase.get(ph, {}).get(k)))}
+    return {"note": MATRIX_NOTE,
+            "players": [{"name": p.name, "short": p.name.split()[-1], "is_target": p.is_target,
+                         "league_abbr": p.league_abbr, "league": p.league} for p in cols],
+            "sections": sections,
+            "phases": phases or None}
+
+
+def signed_gap(metric: str, his, ours) -> dict | None:
+    """His raw value minus ours, in the metric's own unit (number only): {"text": "+0.12",
+    "kind": "up"}.
+    "up" = better for him (direction-aware), "dn" = worse; a gap that shows as zero is plain."""
+    his, ours = _num(his), _num(ours)
+    if his is None or ours is None:
+        return None
+    d = his - ours
+    # the number only: the unit is in the row (keeps the narrow column readable)
+    bare = lambda v: re.sub(r" (km/h|m/min|m|s)$", "", ct.format_value(metric, v))
+    zero, mag = bare(0.0), bare(abs(d))
+    if mag == zero:
+        return {"text": mag, "kind": None}
+    better = (d < 0) if _lower_is_better(metric) else (d > 0)
+    return {"text": ("+" if d > 0 else "\u2212") + mag, "kind": "up" if better else "dn"}
 
 
 # =============================== data (cached loaders only) ===================================
@@ -461,11 +507,10 @@ def squad() -> pd.DataFrame:
 
 
 @webcache.versioned(maxsize=8)
-def season_rows(season_id: int) -> pd.DataFrame:
-    """One row per player for a season -- the one with the most minutes (a mid-season mover
-    appears twice in the source) -- with club, league id, minutes and the All Metrics bands.
-    Indexed by player_id."""
-    f = pd.read_sql(
+def season_rows_all(season_id: int) -> pd.DataFrame:
+    """Every row of a season (a player has one per league and position he played), with club,
+    league id, minutes and the All Metrics bands. Not indexed: player_id is a column."""
+    return pd.read_sql(
         "SELECT n.player_id, n.competition_id, n.position_group, n.team_name, n.minutes, "
         "       s.objective_composite, s.performance_band, s.physical_band, s.peer_pool, "
         # the pool he was rated in when stored (midfield fallback), else his position's count
@@ -481,9 +526,26 @@ def season_rows(season_id: int) -> pd.DataFrame:
         "  ON pc.competition_id = n.competition_id AND pc.position_group = n.position_group "
         "WHERE n.season_id = %(s)s",
         L.get_engine(), params={"a": cf.DEFAULT_ARCHETYPE, "s": int(season_id)})
+
+
+def _most_minutes(f: pd.DataFrame) -> pd.DataFrame:
+    """One row per player, the one with the most minutes; indexed by player_id."""
     f = f.assign(_m=pd.to_numeric(f["minutes"], errors="coerce").fillna(0))
-    return (f.sort_values("_m", ascending=False).drop_duplicates("player_id")
+    return (f.sort_values("_m", ascending=False, kind="stable").drop_duplicates("player_id")
             .drop(columns="_m").set_index("player_id"))
+
+
+def season_rows(season_id: int) -> pd.DataFrame:
+    """One row per player for a season -- the one with the most minutes (a mid-season mover
+    appears twice in the source). Indexed by player_id."""
+    return _most_minutes(season_rows_all(season_id))
+
+
+def position_rows(season_id: int, position: str) -> pd.DataFrame:
+    """One row per player for a season AT `position` -- his most-minutes row there. A player
+    whose minutes that season were all at other positions is not in it. Indexed by player_id."""
+    f = season_rows_all(season_id)
+    return _most_minutes(f[f["position_group"] == position])
 
 
 def apply_pool_floor(rows: pd.DataFrame) -> pd.DataFrame:
@@ -515,11 +577,14 @@ def overlay_lens(rows: pd.DataFrame, lens: pd.DataFrame, position: str) -> pd.Da
 
 def rated_rows(season_id: int, position: str | None = None,
                archetype: str = cf.DEFAULT_ARCHETYPE) -> pd.DataFrame:
-    """The season's best-minutes rows with the peer floor applied, scored on `archetype`'s
-    lens for `position` when it is not the default."""
-    if archetype != cf.DEFAULT_ARCHETYPE and position:
+    """The season's most-minutes rows with the peer floor applied. With `position`: each
+    player's row AT that position only (a row at another position is never compared), scored
+    on `archetype`'s lens when it is not the default."""
+    if not position:
+        return apply_pool_floor(season_rows(season_id))
+    if archetype != cf.DEFAULT_ARCHETYPE:
         return _lens_rows(season_id, position, archetype)
-    return apply_pool_floor(season_rows(season_id))
+    return apply_pool_floor(position_rows(season_id, position))
 
 
 @webcache.versioned(maxsize=96)
@@ -527,7 +592,7 @@ def _lens_rows(season_id: int, position: str, archetype: str) -> pd.DataFrame:
     """`rated_rows` on a lens, kept for the data version: the overlay is a Python loop over
     every player at the position (~0.4 s), and Rank as is a click."""
     from lofc.core.card import ranking_for
-    rows = season_rows(season_id)
+    rows = position_rows(season_id, position)
     lens = ranking_for(position, archetype, season_id)
     if not lens.empty:
         rows = overlay_lens(rows, lens, position)
@@ -587,8 +652,11 @@ def _contract(when) -> str | None:
 def make_player(player_id: int, name: str, season_id: int, metrics: list[str] | None,
                 birth=None, contract=None, last_club=None, is_target: bool = False,
                 pf: pd.DataFrame | None = None, styles: dict | None = None,
-                loans: dict | None = None, rows: pd.DataFrame | None = None) -> SfPlayer:
-    """One section row from the cached season frames. `metrics` None = every metric column."""
+                loans: dict | None = None, rows: pd.DataFrame | None = None,
+                position: str | None = None) -> SfPlayer:
+    """One section row from the cached season frames. `metrics` None = every metric column.
+    `position`: `rows` hold rows at that position only; a player who played that season but
+    never there is "Not rated at <position>"."""
     # frames passed in by the callers: a cached frame is copied out of the cache on each call
     rows = rated_rows(season_id) if rows is None else rows
     pf = L.load_scorecard_percentiles(season_id) if pf is None else pf
@@ -611,6 +679,10 @@ def make_player(player_id: int, name: str, season_id: int, metrics: list[str] | 
                               _metric_cols(pf) if metrics is None else metrics)
         if styles is not None and p.rated:
             p.style = styles.get((player_id, comp))
+    elif position:
+        every = season_rows_all(season_id)
+        if (every["player_id"] == player_id).any():
+            p.unrated_reason = f"Not rated at {position}"
     loan = (loans or {}).get(player_id)
     if is_target:
         pass                      # the note describes how one of OURS arrived
@@ -635,11 +707,11 @@ def _ours(position: str, season_id: int, exclude_player_id=None, metrics=None,
     if sq.empty:
         return []
     pf = L.load_scorecard_percentiles(season_id) if pf is None else pf
-    rows = rated_rows(season_id) if rows is None else rows
+    rows = rated_rows(season_id, position) if rows is None else rows
     loans = _loans_to_orient()
     return [make_player(int(r.player_id), str(r.player_name), season_id, metrics,
                         birth=r.birth_date, contract=r.contract_until, last_club=r.last_club,
-                        pf=pf, styles=styles, loans=loans, rows=rows)
+                        pf=pf, styles=styles, loans=loans, rows=rows, position=position)
             for r in sq.itertuples()]
 
 
@@ -664,11 +736,12 @@ def ours_count(position: str, exclude_player_id=None) -> int:
     return len(ours_at(squad(), position, exclude_player_id))
 
 
-def physical_values(season_id: int, ids: list[int]) -> dict:
-    """(player_id, competition_id, position_group) -> {metric: raw value} of the physical
-    measures held in player_metrics_neutral for `ids` in `season_id` (SkillCorner, per 90;
-    top speeds in km/h). Not cached: a handful of rows, and the section's answer is cached."""
-    cols = sorted({m for ms in cf.PHYSICAL_METRICS.values() for m in ms})
+def raw_values(season_id: int, ids: list[int], metrics: list[str]) -> dict:
+    """(player_id, competition_id, position_group) -> {metric: raw value} for `ids` in
+    `season_id`, as held in player_metrics_neutral (per 90; speeds in km/h). Metrics the table
+    does not hold are skipped. Not cached: a handful of rows."""
+    held = set(pd.read_sql("SELECT * FROM player_metrics_neutral LIMIT 0", L.get_engine()).columns)
+    cols = [m for m in dict.fromkeys(metrics) if m in held]
     if not ids or not cols:
         return {}
     f = pd.read_sql(
@@ -680,13 +753,56 @@ def physical_values(season_id: int, ids: list[int]) -> dict:
             for r in f.itertuples()}
 
 
-def physical_measures(position: str) -> list[tuple[str, str]]:
-    """The position's physical rating measures (`cf.PHYSICAL_METRICS`) with the card's own
-    labels and units, in the card's physical-table order."""
-    from lofc.dashboard import detail_section as ds
-    entries = list(ds.PHASE_METRICS) + [(m, label) for m, label, _ in ds.SPEED_METRICS]
-    scored = set(cf.PHYSICAL_METRICS.get(position, []))
-    return [(m, label) for m, label in entries if m in scored]
+def phase_values(season_id: int, ids: list[int], metrics: list[str]) -> dict:
+    """(player_id, competition_id) -> {"In possession": {metric: raw}, "Out of possession": ...}
+    from SkillCorner's possession split (`player_detail_metrics`, phys_tip. / phys_otip.; per 90).
+    Not cached: a handful of players."""
+    if not ids or not metrics:
+        return {}
+    names = [f"phys_{t}.{m}" for t in ("tip", "otip") for m in metrics]
+    f = pd.read_sql(
+        "SELECT player_id, competition_id, metric, value_p90 FROM player_detail_metrics "
+        "WHERE season_id = %(s)s AND player_id = ANY(%(i)s) AND metric = ANY(%(m)s)",
+        L.get_engine(), params={"s": int(season_id), "i": [int(i) for i in ids], "m": names})
+    out: dict = {}
+    for r in f.itertuples():
+        if pd.isna(r.value_p90):
+            continue
+        tag, m = r.metric[len("phys_"):].split(".", 1)
+        ph = PHASES[0] if tag == "tip" else PHASES[1]
+        out.setdefault((int(r.player_id), int(r.competition_id)), {}).setdefault(ph, {})[m] = \
+            float(r.value_p90)
+    return out
+
+
+def attach_raw(players: list[SfPlayer], season_id: int, metrics: list[str],
+               phase_metrics: list[str] | None = None) -> None:
+    """Fill each player's `raw` from his own row (league + position) that season, and `phase`
+    (In / Out of possession) for `phase_metrics`."""
+    have = [p for p in players if p.competition_id is not None]
+    ids = [p.player_id for p in have]
+    raw = raw_values(season_id, ids, metrics) if have else {}
+    ph = phase_values(season_id, ids, phase_metrics or []) if have and phase_metrics else {}
+    for p in players:
+        p.raw = raw.get((p.player_id, p.competition_id, p.row_position), {}) \
+            if p.competition_id is not None else {}
+        p.phase = ph.get((p.player_id, p.competition_id), {}) if p.competition_id is not None else {}
+
+
+def orient_raw_median(position: str, season_id: int, metrics: list[str],
+                      exclude_player_id=None) -> tuple[dict[str, float], int]:
+    """Median RAW value per metric over our current players at `position`, each on his own
+    row at that position that season (any league: raw values share units; no league
+    adjustment, director's decision), and how many players have a value."""
+    ours = _ours(position, season_id, exclude_player_id=exclude_player_id)
+    attach_raw(ours, season_id, metrics)
+    pool = [p for p in ours if any(_num(p.raw.get(m)) is not None for m in metrics)]
+    out = {}
+    for m in metrics:
+        vals = [v for p in pool if (v := _num(p.raw.get(m))) is not None]
+        if vals:
+            out[m] = float(pd.Series(vals).median())
+    return out, len(pool)
 
 
 # --- the section ---------------------------------------------------------------------------
@@ -709,8 +825,7 @@ def section(player_id: int, player_name: str, position: str, season_id: int,
                  "position": position, "season": sid, "seasons": season_choices(),
                  "target_is_ours": target_is_ours, "empty": None, "compare_note": None,
                  "verdict": None, "table": [], "radar": None, "better": None, "worse": None,
-                 "gap_note": None, "metrics": None, "not_compared": None,
-                 "raw_physical": None, "raw_physical_note": None}
+                 "gap_note": None, "metrics": None, "not_compared": None}
 
     radar_keys = ct.radar_metrics(position, archetype)
     perf_keys = [m for m, _t in ct.rating_metrics(position, archetype)]
@@ -728,23 +843,19 @@ def section(player_id: int, player_name: str, position: str, season_id: int,
         return out
 
     target = make_player(pid, player_name, sid, perf_keys + phys_keys, birth=birth,
-                         contract=contract, is_target=True, pf=pf, styles=styles, rows=rows)
+                         contract=contract, is_target=True, pf=pf, styles=styles, rows=rows,
+                         position=position)
     same, elsewhere = split_ours(ours, target.competition_id)
     season_name = seasons_mod.season_name_for(sid)
+    perf_labels = [(m, ct.row_label(m)) for m in perf_keys]
+    phys_labels = [(m, ct.row_label(m)) for m in phys_keys]
     if not any(p.competition_id is not None for p in same):
         # none of ours played in his league that season: nothing is ranked against him
         out["not_compared"] = not_compared_text(position, target.league, season_name)
-        listed = by_minutes(same + elsewhere)
-        out["table"] = table_rows([target] + listed)
-        measures = physical_measures(position)
-        if measures and target.competition_id is not None:
-            raw = physical_values(sid, [pid] + [p.player_id for p in listed])
-            for p in [target] + listed:
-                p.raw = raw.get((p.player_id, p.competition_id, p.row_position), {}) \
-                    if p.competition_id is not None else {}
-            out["raw_physical"] = raw_physical_table([target] + listed, measures, season_name)
-            if out["raw_physical"] is None:
-                out["raw_physical_note"] = no_physical_text(season_name)
+        listed = [target] + by_minutes(same + elsewhere)
+        out["table"] = table_rows(listed)
+        attach_raw(listed, sid, perf_keys + phys_keys, phys_keys)
+        out["metrics"] = metric_matrix(listed, perf_labels, phys_labels)
         return out
 
     league = target.league if elsewhere else None     # named only when some were left out
@@ -758,7 +869,11 @@ def section(player_id: int, player_name: str, position: str, season_id: int,
         "his_league": target.league if target.rated else None,
         "our_best": _num(best.overall) if best else None,
         "our_best_sub": f"{best.name} · {best.league or DASH}" if best else None}
-    out["table"] = table_rows([target] + same + by_minutes(elsewhere))
+    listed = [target] + same + by_minutes(elsewhere)
+    out["table"] = table_rows(listed)
+    # raw values for everyone listed, whatever his league (units are comparable)
+    attach_raw(listed, sid, perf_keys + phys_keys, phys_keys)
+    out["metrics"] = metric_matrix(listed, perf_labels, phys_labels)
 
     better, worse, n_cmp = gap_lists(target, same, radar_keys)
     if not n_cmp:
@@ -779,6 +894,4 @@ def section(player_id: int, player_name: str, position: str, season_id: int,
     out["worse"] = {"heading": "Where one of ours is better",
                     "items": gap_items(worse, ct.row_label)}
     out["gap_note"] = gap_note(n_cmp, position, league)
-    out["metrics"] = metric_matrix([target] + same, [(m, ct.row_label(m)) for m in perf_keys],
-                                   [(m, ct.row_label(m)) for m in phys_keys])
     return out

@@ -27,3 +27,10 @@ table.sim-b tr.unused td{color:var(--muted)}
 #v-similar .results button{display:block;width:100%;text-align:left;font:inherit;font-size:14.5px;padding:9px 12px;border:0;border-bottom:1px solid var(--line);background:#fff;cursor:pointer;color:var(--ink)}
 #v-similar .results button:hover,#v-similar .results button:focus-visible{background:var(--soft)}
 #v-similar .results .none{padding:10px 12px;color:var(--muted);font-size:14px}
+
+/* "How similarity is computed": closed by default, one numbered step per line */
+.sim-how{margin:10px 0 14px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:10px 14px}
+.sim-how summary{cursor:pointer;font-weight:600;font-size:14px}
+.sim-how ol{margin:10px 0 2px;padding-left:22px;display:grid;gap:7px;font-size:14px;line-height:1.45;max-width:880px}
+.sim-how li b{margin-right:6px}
+.sim-how li i{color:var(--muted);font-style:normal}

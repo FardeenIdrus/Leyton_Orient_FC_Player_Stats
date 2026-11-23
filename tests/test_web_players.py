@@ -629,3 +629,24 @@ def test_players_js_keeps_the_tab_in_the_url_and_state():
     assert 'id="pl-tabs"' in (Path(__file__).resolve().parents[1]
                               / "src/lofc/web/templates/players.html").read_text()
     assert "next.league = r.league" in js                     # search: Back returns to his tab
+
+
+def test_more_filters_has_its_own_reset_and_a_grid():
+    """Owner 2026-11-20: "Reset filters" inside More filters puts every More-filters control back
+    to its default (minutes, age, foot, contract, loan, scout, style, strong only, affordability)
+    and leaves season, position, leagues, Rank as and the metric filters alone."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "src/lofc/web"
+    html = (root / "templates/players.html").read_text()
+    js = (root / "static/js/players.js").read_text()
+    css = (root / "static/css/players.css").read_text()
+    more = html[html.index('<div class="more" id="more">'):html.index('<div class="more" id="mf">')]
+    assert 'id="more-reset"' in more and ">Reset filters<" in more
+    keys = js[js.index("const MORE_KEYS"):js.index("];", js.index("const MORE_KEYS"))]
+    for k in ("min_minutes", "max_age", "foot", "contract", "loan", "scout", "style",
+              "strong_only", "money", "budget", "wage", "signable"):
+        assert f"'{k}'" in keys, k
+    for k in ("season", "position", "leagues", "rank_as", "pct", "raw"):
+        assert f"'{k}'" not in keys, k
+    assert "$('more-reset').addEventListener('click'" in js
+    assert "#more .fl{display:grid" in css

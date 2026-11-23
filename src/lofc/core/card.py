@@ -149,27 +149,14 @@ def _half_up(value) -> int:
     return int(float(value) + 0.5)
 
 
-def gap_to_ours(his, ours) -> int | None:
-    """His percentile minus our position median's, in whole points, .5 rounding UP (also
-    for negatives: -10.5 -> -10). None when either is missing."""
-    import math
-    if his is None or ours is None:
-        return None
-    his, ours = float(his), float(ours)
-    if math.isnan(his) or math.isnan(ours):
-        return None
-    return int(math.floor(his - ours + 0.5))
-
-
-def vs_ours_column(metrics, prow, orient: dict, thin) -> list:
-    """The "vs ours" cell per metric (TASKS 2.36 U15): `gap_to_ours` of his scorecard
-    percentile and the Leyton Orient median the radar draws (`squad.orient_median`). All
-    blank for a thin peer pool, whose percentiles are not a rating."""
-    out = []
-    for m in metrics:
-        his = None if thin is not None or prow is None or m not in prow.index else prow[m]
-        out.append(gap_to_ours(his, orient.get(m)) if his is not None else None)
-    return out
+def vs_ours_column(metrics, his_raw: dict, ours: dict) -> list:
+    """The "vs ours" cell per metric: his RAW value minus the median raw value of our current
+    players at the position (`squad.orient_raw_median`), in the metric's own unit, coloured by
+    whether that is better for him (owner 2026-11-20: raw values, every league). None where
+    either side has no value."""
+    from lofc.core import squad
+    return [None if m is None else squad.signed_gap(m, his_raw.get(m), ours.get(m))
+            for m in metrics]
 
 
 def keys_by_label(labels, names: dict) -> list:
@@ -179,18 +166,12 @@ def keys_by_label(labels, names: dict) -> list:
     return [key_of.get(x) for x in labels]
 
 
-def vs_ours_help(position: str, n_orient: int, league: str) -> str | None:
-    """The "vs ours" heading's help: the median is over ours rated in HIS league only
-    (owner decision 2B, 2026-11-20: percentiles from different leagues are not comparable)."""
+def vs_ours_help(position: str, n_orient: int) -> str | None:
+    """The "vs ours" heading's help: raw values, over every one of ours at the position."""
     if not n_orient:
         return None
-    return (f"Gap to the median of our current {position}s rated in {league} "
-            f"({n_orient} player{'' if n_orient == 1 else 's'}).")
-
-
-def vs_ours_none_help(position: str, league: str, season_name: str) -> str:
-    """Why every "vs ours" cell is "—": ours at the position all played in other leagues."""
-    return f"None of our {position}s was rated in {league} in {season_name}."
+    return (f"His value minus the median of our current {position}s "
+            f"({n_orient} player{'' if n_orient == 1 else 's'}), raw values, each in his own league.")
 
 
 def orient_line_label(position: str, n_orient: int, league: str) -> str | None:
@@ -1163,18 +1144,19 @@ def build_card(engine, player_id: int, competition_id: int, season_id: int,
     # --- performance ---
     grand = P._grand_table(row, position, lens, sc_pcts, metric_values)
     full = P._full_stats_table(row, sc_pcts, metric_values)
-    # our median is over ours rated in HIS league that season only (owner decision 2B)
+    # the percentile line on the charts: ours rated in HIS league that season only (2B)
     orient, n_orient = squad.orient_median(position, sid, exclude_player_id=pid,
                                            competition_id=cid)
-    # ours exist at the position but none in his league: every "vs ours" cell is "—"
-    none_here = not n_orient and squad.ours_count(position, exclude_player_id=pid) > 0
-    vs_help = (vs_ours_help(position, n_orient, league) if n_orient
-               else vs_ours_none_help(position, league, season_name) if none_here else None)
+    # "vs ours": raw values, his row at this position against the median of ours (any league)
+    from lofc.dashboard import detail_section as ds
+    raw_keys = list(dict.fromkeys(perf_metrics + list(LABELS) + [m for m, _ in ds.PHASE_METRICS]
+                                  + [m for m, _, _ in ds.SPEED_METRICS]))
+    his_raw = squad.raw_values(sid, [pid], raw_keys).get((pid, cid, position), {})
+    ours_raw, n_raw = squad.orient_raw_median(position, sid, raw_keys, exclude_player_id=pid)
+    vs_help = vs_ours_help(position, n_raw)
 
     def vs_col(keys):
-        if n_orient:
-            return vs_ours_column(keys, prow, orient, thin)
-        return [None] * len(keys) if none_here else None
+        return vs_ours_column(keys, his_raw, ours_raw) if n_raw else None
     chart_metrics = [m for m in perf_metrics if prow is not None and m in prow.index
                      and pd.notna(prow[m])] if not withhold else []
     performance = {

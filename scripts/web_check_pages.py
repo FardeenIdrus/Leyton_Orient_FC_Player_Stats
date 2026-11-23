@@ -127,6 +127,25 @@ def players_layout_widths(s, w):
     s.page.set_viewport_size({"width": w, "height": 900})
 
 
+def players_more_reset(s, w):
+    """Owner 2026-11-20: "Reset filters" clears every More-filters control (minutes, foot, ...)
+    and keeps position and the metric filters; the fields sit on one grid (same tops)."""
+    s.goto("/players?season=318&position=Winger&min_minutes=900&foot=Left&loan=On+loan&pct_ball_wins=40",
+           check=False)
+    _fold(s, "more filters")
+    tops = s.page.evaluate("""() => [...document.querySelectorAll('#more .fl:first-child > .f')]
+        .filter(f => f.offsetParent).map(f => Math.round(f.getBoundingClientRect().top))""")
+    rows = sorted(set(tops))
+    s.note("players: More filters fields line up in rows of four",
+           None if tops and len(rows) <= 2 and all(tops.count(r) <= 4 for r in rows) else f"tops {tops}")
+    s.step("players: Reset filters", lambda p: p.locator("#more-reset").click(timeout=3000))
+    s.page.wait_for_timeout(300)
+    u = s.page.url
+    s.note("players: Reset filters clears minutes, foot and loan only",
+           None if "min_minutes" not in u and "foot=" not in u and "loan=" not in u
+           and "position=Winger" in u and "pct_ball_wins=40" in u else u)
+
+
 def players_fits_card(s, w):
     """The old Scouts column is gone (owner 2026-11-16): the default list fits its card with no
     sideways scroll at 1280 and 1440; the scroll stays only for money on / Rank as < 1380."""
@@ -663,6 +682,38 @@ def card_squad_season(s, w):
            or "to compare with" in s.page.inner_text("#c-squad")
            or "enough minutes" in s.page.inner_text("#c-squad") else "section empty")
     s.step("card: squad season 1", lambda p: s.page.locator("#sq-seg button").nth(0).click(timeout=3000))
+    # owner 2026-11-20: every metric as RAW values, green best / red worst, for every target
+    d = s.page.locator("#c-squad details.sq-matrix")
+    if not d.count():
+        return s.note("card: raw-value matrix", skipped="no matrix for this player")
+    s.page.evaluate("() => { const d = document.querySelector('#c-squad details.sq-matrix'); if (d) d.open = true; }")
+    s.page.wait_for_timeout(150)
+    txt = d.inner_text()
+    vals = s.page.locator("#c-squad .sq-matrix tbody td.n").all_inner_texts()
+    s.note("card: matrix says raw values, has green and red, no percentile colours",
+           None if "Raw values, each in his own league" in txt
+           and s.page.locator("#c-squad .sq-matrix td.best").count()
+           and s.page.locator("#c-squad .sq-matrix td.worst").count()
+           and not s.page.locator("#c-squad .sq-matrix td b[style]").count()
+           else f"note/colours missing: {txt[:80]!r}")
+    s.note("card: matrix cells are values or a dash", None if vals and all(v.strip() for v in vals) else "empty cells")
+    ph = s.page.locator('#c-squad .sq-phase button[data-phase="In possession"]')
+    if ph.count():
+        s.step("card: matrix phase = In possession", lambda p: ph.click(timeout=3000))
+        vis = s.page.evaluate("""() => [...document.querySelectorAll('#sq-mx tr[data-ph]')]
+            .filter(t => !t.hidden).map(t => t.dataset.ph)""")
+        s.note("card: phase switch shows only In possession rows",
+               None if vis and set(vis) == {"In possession"} else str(sorted(set(vis))))
+        try:
+            d.screenshot(path=str(s.out / f"card_squad_matrix_inposs_{w}.png"))
+        except Exception:                                   # noqa: BLE001 -- screenshot only
+            pass
+        s.step("card: matrix phase = All phases",
+               lambda p: s.page.locator('#c-squad .sq-phase button[data-phase="All phases"]').click(timeout=3000))
+    try:
+        d.screenshot(path=str(s.out / f"card_squad_matrix_{w}.png"))
+    except Exception as e:                                  # noqa: BLE001 -- screenshot only
+        s.note("card: matrix screenshot", f"failed: {e}")
 
 
 def card_watchlist(s, w):
@@ -677,7 +728,7 @@ def card_watchlist(s, w):
 
 
 _PHYS_COLS = ["metric", "all-phases", "in-possession", "out-of-possession", "percentile", "vs-ours"]
-_VS_TEXT = re.compile(r"^([+−]\d+|0|—)$")
+_VS_TEXT = re.compile(r"[+\u2212]?[\d,]+(\.\d+)?%?|\u2014")   # raw gap, number only
 
 
 def card_extra_tables(s, w):
@@ -699,9 +750,9 @@ def card_extra_tables(s, w):
                 return {{after: i === pi + 1, v: [...t.tBodies[0].rows].map(r => r.cells[i].textContent.trim())}};
             }}""")
             ok = (th.count() and "median" in (th.get_attribute("data-tip") or "") and cells
-                  and cells["after"] and cells["v"] and all(_VS_TEXT.match(x) for x in cells["v"])
+                  and cells["after"] and cells["v"] and all(_VS_TEXT.fullmatch(x) for x in cells["v"])
                   and any(x != "—" for x in cells["v"]))
-            s.note(f"card: {name} has 'vs ours' after Percentile, whole signed points @{width}",
+            s.note(f"card: {name} has 'vs ours' after Percentile, raw gaps @{width}",
                    None if ok else f"column {th.count()} cells {cells and cells['v'][:6]}")
         geo = s.page.evaluate("""cols => {
             const left = sel => { const t = document.querySelector(sel + ' table'); if (!t) return null;
@@ -824,8 +875,8 @@ def card_rated_tables(s, w):
     s.note("card: no browser title tooltips on headings",
            None if s.page.locator("main th[title]").count() == 0 else "a heading still uses title")
     cells = s.page.locator("#pr .vs").all_inner_texts()
-    s.note("card: 'vs ours' cells are whole signed points",
-           None if cells and all(re.fullmatch(r"[+−]\d+|0|—", c.strip()) for c in cells) else f"cells {cells[:5]}")
+    s.note("card: 'vs ours' cells are raw gaps in the metric's unit",
+           None if cells and all(_VS_TEXT.fullmatch(c.strip()) for c in cells) else f"cells {cells[:5]}")
     z = s.page.locator("#pz .zone[data-tip]").first
     if z.count():
         z.scroll_into_view_if_needed(timeout=3000)
@@ -1809,6 +1860,26 @@ def _sq_col(s, label):
     return s.page.locator(f"#sq-body tr.click td:nth-child({i + 1})").all_inner_texts()
 
 
+def _sq_clubs(s):
+    """This league's clubs, as the Club box lists them when opened without typing."""
+    s.page.locator("#f-club").focus()
+    s.page.wait_for_timeout(100)
+    out = [b.get_attribute("data-club") for b in s.page.locator("#club-results button[data-club]").all()]
+    s.page.locator("#f-club").press("Escape")
+    return [c for c in out if c and c != "All"]
+
+
+def _pick_club(s, club):
+    """Pick a club from the Club box (type its name, click it): returns the click step."""
+    def go(p):
+        box = p.locator("#f-club")
+        box.click(timeout=3000)
+        box.fill(club)
+        p.locator(f'#club-results button[data-club="{club}"]').first.click(timeout=3000)
+        p.wait_for_function("c => new URLSearchParams(location.search).get('club') === c", arg=club, timeout=5000)
+    return go
+
+
 def _sq_non_tm(s):
     """(league, club) in a league with no Transfermarkt data, from the page's own lists."""
     leagues = s.page.locator("#f-league option").all_inner_texts()
@@ -1816,7 +1887,7 @@ def _sq_non_tm(s):
     if not other:
         return None, None
     s.step(f"squads: League = {other[0]}", lambda p: p.locator("#f-league").select_option(value=other[0], timeout=3000))
-    clubs = [x for x in s.page.locator("#f-club option").all_inner_texts() if x != "All"]
+    clubs = _sq_clubs(s)
     return other[0], (clubs[0] if clubs else None)
 
 
@@ -1877,9 +1948,31 @@ def squads_layout_widths(s, w):
         s.goto(SQ_ORIENT, check=False)
         league, club = _sq_non_tm(s)
         if club:
-            s.step(f"squads: Club = {club} @{width}", lambda p: p.locator("#f-club").select_option(value=club, timeout=3000))
+            s.step(f"squads: Club = {club} @{width}", _pick_club(s, club))
             s.shot("non_tm_club", width)
     s.page.set_viewport_size({"width": w, "height": 900})
+
+
+def squads_club_search(s, w):
+    """Owner 2026-11-23: typing in the Club box finds a club in ANY league and switches league and
+    club at once; the three View buttons are the same width."""
+    s.goto(SQ_ORIENT, check=False)
+    widths = s.page.evaluate("() => [...document.querySelectorAll('#f-view button')].map(b => Math.round(b.getBoundingClientRect().width))")
+    box = s.page.evaluate("() => { const g = document.getElementById('f-view').getBoundingClientRect(), b = [...document.querySelectorAll('#f-view button')].pop().getBoundingClientRect(); return Math.round(g.right - b.right); }")
+    s.note("squads: View buttons equal, no space after Loans out",
+           None if widths and max(widths) - min(widths) <= 2 and box <= 2 else f"widths {widths}, gap {box}")
+    s.step("squads: type 'celtic' in Club", lambda p: (p.locator("#f-club").click(timeout=3000), p.locator("#f-club").fill("celtic")))
+    hits = s.page.locator("#club-results button[data-club]")
+    first = hits.first
+    s.note("squads: club search lists another league's club",
+           None if hits.count() and "Scottish" in first.inner_text() else s.page.locator("#club-results").inner_text()[:120])
+    if hits.count():
+        club, league = first.get_attribute("data-club"), first.get_attribute("data-league")
+        s.step("squads: pick it", lambda p: first.click(timeout=3000))
+        s.page.wait_for_timeout(400)
+        q = s.page.evaluate("() => Object.fromEntries(new URLSearchParams(location.search))")
+        s.note("squads: league and club switched together",
+               None if q.get("club") == club and q.get("league") == league and _sq_rows(s) > 0 else str(q))
 
 
 def squads_exercise_controls(s, w):
@@ -1898,15 +1991,15 @@ def squads_league_club(s, w):
     says so and the contract and loan columns are gone."""
     s.goto(SQ_ORIENT, check=False)
     s.step("squads: League = League Two", lambda p: p.locator("#f-league").select_option(value="League Two", timeout=3000))
-    s.note("squads: club resets to All", None if s.page.locator("#f-club").input_value() == "All" else s.page.url)
+    s.note("squads: club resets to All", None if s.page.locator("#f-club").input_value() == "All clubs" else s.page.url)
     s.note("squads: Club column with All clubs", None if _sq_heads(s)[0] == "Club" else str(_sq_heads(s)))
-    clubs = [x for x in s.page.locator("#f-club option").all_inner_texts() if x != "All"]
-    s.step(f"squads: Club = {clubs[0]}", lambda p: p.locator("#f-club").select_option(value=clubs[0], timeout=3000))
+    clubs = _sq_clubs(s)
+    s.step(f"squads: Club = {clubs[0]}", _pick_club(s, clubs[0]))
     s.note("squads: TM league club has contracts", None if "Contract to" in _sq_heads(s) else str(_sq_heads(s)))
     league, club = _sq_non_tm(s)
     if not club:
         return s.note("squads: league with no Transfermarkt data", skipped="every league has TM data")
-    s.step(f"squads: Club = {club}", lambda p: p.locator("#f-club").select_option(value=club, timeout=3000))
+    s.step(f"squads: Club = {club}", _pick_club(s, club))
     s.note(f"squads: {club} lists players", None if _sq_rows(s) > 5 else f"{_sq_rows(s)} rows")
     s.note("squads: no contract or loan columns", None if "Contract to" not in _sq_heads(s)
            and "Loan" not in _sq_heads(s) else str(_sq_heads(s)))
@@ -3728,6 +3821,18 @@ def similar_page(s, w):
     another row selects it (URL match=); All leagues shows the League picker; Open in Compare
     carries both players; no horizontal overflow at 1280 / 1440."""
     s.goto("/similar/52123/4/319", check=True, desc="similar: Wellens")
+    how = s.page.locator("#sim-how")
+    s.note("similar: method dropdown closed by default",
+           None if how.count() and how.get_attribute("open") is None else "missing or open")
+    s.step("similar: open the method dropdown", lambda p: how.locator("summary").click(timeout=3000))
+    s.page.wait_for_timeout(150)
+    s.note("similar: method dropdown names his position and has 7 steps",
+           None if how.locator("li").count() == 7 and "pair of wingers" not in how.inner_text()
+           else how.inner_text()[:120])                     # Wellens is not a winger
+    try:
+        how.screenshot(path=str(s.out / f"similar_how_{w}.png"))
+    except Exception as e:                                  # noqa: BLE001 -- screenshot only
+        s.note("similar: method screenshot", f"failed: {e}")
     rows = s.page.locator("#sim-list table.sim tbody tr")
     try:
         rows.first.wait_for(timeout=10000)
@@ -3765,7 +3870,7 @@ def similar_page(s, w):
 PAGES = {
     "home": {"path": "/", "exercise": False, "scenarios": [home_first_view, nav_no_assess]},
     "players": {"path": "/players", "exercise": False, "scenarios": [
-        players_first_view, players_layout_widths, players_fits_card, players_exercise_controls, players_position_season_open_back,
+        players_first_view, players_layout_widths, players_more_reset, players_fits_card, players_exercise_controls, players_position_season_open_back,
         players_filter_open_back, players_leagues, players_chip_remove,
         players_search_other_position, players_clear_search, players_sort, players_money,
         players_metric_filters, players_scout_verdicts, players_download, players_history_and_url, players_remembers]},
@@ -3786,7 +3891,7 @@ PAGES = {
         report_one_sheet, report_draft, report_remembers]},
     "squads": {"path": "/squads", "exercise": False, "scenarios": [
         squads_first_view, squads_markers, squads_layout_widths, squads_exercise_controls,
-        squads_league_club, squads_open_back, squads_views, squads_filters_url,
+        squads_league_club, squads_club_search, squads_open_back, squads_views, squads_filters_url,
         squads_rating_sort, squads_thin_note, squads_row_message, squads_search,
         squads_scroll_draws_more, squads_download, squads_history_and_url,
         squads_remembers]},

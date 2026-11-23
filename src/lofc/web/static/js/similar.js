@@ -38,6 +38,8 @@ function renderHead(D) {
   if (!P) { $('sim-player').textContent = 'Similar players'; $('sim-meta').textContent = ''; return; }
   $('sim-player').innerHTML = `<a href="${esc(P.href)}">${esc(P.name)}</a>`;
   $('sim-meta').textContent = [P.club, P.league, P.position, D.season].map(dash).join(' · ');
+  // the explainer's position word follows the player shown ("wingers" until one is picked)
+  if (P.position) document.querySelectorAll('.how-pos').forEach(e => { e.textContent = `${P.position.toLowerCase()}s`; });
   document.title = `Similar to ${P.name}`;
 }
 

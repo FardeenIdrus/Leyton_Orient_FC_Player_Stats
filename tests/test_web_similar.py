@@ -157,3 +157,22 @@ def test_page_script_searches_players_without_ids():
     js = (Path(__file__).resolve().parents[1] / "src/lofc/web/static/js/similar.js").read_text()
     assert "/api/report/players" in js and "filterRows" in js
     assert "location.href = `/similar/" in js or "location.assign(`/similar/" in js
+
+
+def test_page_explains_the_method_in_a_closed_dropdown():
+    """Owner 2026-11-20: "How similarity is computed", closed by default, 7 steps with an
+    example; the position word follows the player shown (wingers by default)."""
+    html = _client().get("/similar").text
+    i = html.index('<details class="sim-how" id="sim-how">')
+    how = html[i:html.index("</details>", i)]
+    assert "<summary>How similarity is computed</summary>" in how and " open" not in how[:60]
+    for step in ("Who", "Each measure against his own league", "Gap", "Weight",
+                 "Linked measures", "Distance", "Similarity %"):
+        assert f"<b>{step}</b>" in how, step
+    assert "0.40 xG per 90" in how and "+1.5" in how
+    assert ("Take every possible pair of <span class=\"how-pos\">wingers</span> this season "
+            "(any two, all leagues). 85% means these two are more alike than 85% of those pairs.") in how
+    from pathlib import Path
+    import lofc.web
+    js = (Path(lofc.web.__file__).parent / "static" / "js" / "similar.js").read_text()
+    assert "how-pos" in js
