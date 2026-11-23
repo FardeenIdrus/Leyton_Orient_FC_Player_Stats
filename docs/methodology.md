@@ -624,72 +624,64 @@ percentile; the page only picks, weights by minutes and compares. Code: `src/lof
 Wingers that day used last season's bar: only 3 of this season's top-6 clubs had a rated winger
 yet, so the bar came from 2025/26's top 6 (5 of them had one).
 
-**Gap closed (owner 2026-11-13)**
+**Gap closed (owner 2026-11-13; raw values and gap size owner 2026-11-23)**
 
-How much of our weighted shortfall against the top 6 a player would close. "Ours" = our best
-player's percentiles (the Gap map's player); "bar" = the median percentile of the named top-6
-players. For every metric where bar > ours (the "Every shortfall" set):
+How much of our player's shortfall against the top 6 a player would make up, on **raw values**
+(per 90, %, m, km/h from `player_metrics_neutral`) on every league tab. Raw values share units
+across leagues; percentiles from two leagues do not (owner 2026-11-23). No league-strength
+adjustment is made (director's decision).
 
-* gap = bar − ours; closed = his percentile − ours, kept between 0 and gap (no credit beyond the
-  top-6 level, none for being worse than ours; a metric he has no figure for closes nothing).
-* w = the metric's share of the Overall rating = its weight inside its dimension × that
-  dimension's share. Overall = Performance × 65% + Physical × 35% for outfielders
-  (`DIMENSION_WEIGHTS`); goalkeepers Performance only. Inside Performance: the club's "All Metrics" weights
-  (`performance_weights.py`); inside Physical: equal (1/7 each). Code: `club_vs_league.overall_weights`.
-* **Measures that move together count once (owner 2026-11-20, decision D).** Measures whose
-  percentiles correlate at |r| ≥ 0.8 (this season's rated players at the position, all leagues,
-  20+ pairs; linked pairs chain into one group) share one weight: each member's w is divided by
-  the group's size, then all weights rescaled to sum to 1 (a ratio, so the rescale changes no
-  score). Real 2026/27 groups: e.g. Centre Back {HSR count, HSR distance, sprint count, sprint
-  distance}, {top speed, average match top speed}; in the three midfield positions chaining puts
-  top speed into the running group (6 measures count as one). The fold-out table marks them
-  "linked". Code: `club_vs_league.correlated_groups`, `grouped_weights`.
-* **Gap closed = 100 × Σ w·closed ÷ Σ w·gap**, a whole number (.5 up); "—" if there is no
-  shortfall to close. His percentiles are his own (his league and position), as in the metric
-  columns.
+1. **Shortfall measures.** Where our player's percentile is below the median percentile of the
+   named top-6 players (the "Every shortfall" set; both sides are League One, so percentiles are
+   comparable here). Code: `club_vs_league.gap_profile`.
+2. **Raw profile.** For each of those measures: our player's raw value and the top-6 players'
+   median raw value; kept only when the median is better (lower for `LOWER_IS_BETTER`).
+   Code: `raw_profile`.
+3. **Share closed per measure** = (his raw − ours) ÷ (top 6 − ours), kept between 0 and 1: 0 if he
+   is no better than our player, 1 at or beyond the top-6 level (no extra credit); a measure he
+   has no value for closes nothing. E.g. xA: ours 0.02, top 6 0.08 → a player at 0.05 closes 50%.
+4. **Weight of each measure** = its share of Overall (Performance 65 : Physical 35 for
+   outfielders; inside Performance the club's "All Metrics" weights; Physical equal; goalkeepers
+   Performance only — `overall_weights`) **× the size of its gap in League One spreads** (|top 6 −
+   ours| ÷ the standard deviation of League One's rated players at the position this season;
+   owner decision B, 2026-11-23: a big shortfall counts more than a near-zero one; a measure
+   with no spread is left out — `gap_size`). Measures that move together (|r| ≥ 0.8, decision D)
+   share one weight (`grouped_weights`).
+5. **Gap closed = 100 × Σ weight × share ÷ Σ weight**, a whole number (.5 up); "—" if there is no
+   shortfall to close. Code: `gap_closed`.
+
+*Why gap size (decision B).* Real data, Full Back 2026/27: our gap on Pressures is 0.49 per 90 =
+0.08 League One spreads (almost nothing); on Sprints 6.65 per 90 = 1.92 spreads (large). Without
+the gap size, closing the Pressures gap would count as much as closing the Sprints gap.
 
 By default it counts every shortfall. When the recruiter chooses the metric columns (up to 5),
-it counts only those; if none of them is a shortfall it shows "—". "Rank by: Gap closed" lists
+it counts only those; if none of them is a shortfall it shows "—". "Rank by: Gap closed" orders
 each league's list by it (ties by Overall). "Strong on 2+" always uses the 3 biggest shortfalls.
+The metric columns show his percentile within his own league (display only).
 
-**Minutes and own league (owner 2026-11-16).** Every league tab except League One carries one
-line under the caption: "Gap closed % is relative to his own league." Our compared player (level
-strip, Gap map row) and each named top-6 player (Gap map detail) show this season's minutes
-(`player_metrics_neutral`, the frame the page already reads); under 900 (`LOW_MINUTES`) a small
-"low minutes" marker is added. No rating is recalculated.
+**Minutes (owner 2026-11-16).** Our compared player (level strip, Gap map row) and each named
+top-6 player (Gap map detail) show this season's minutes; under 900 (`LOW_MINUTES`) a small "low
+minutes" marker is added. The old line "Gap closed % is relative to his own league." was removed
+on 2026-11-23 (raw values on every tab).
 
-**On the page (13 Nov 2026).** "How this is worked out" shows Gap closed as a mini table built
-live from the page's own figures: the selected position, the player it is measured against (our
-best, or the picked player) and the first player by Gap closed in the active league tab (his %
-is the list's figure; nothing is worked out twice). Rows: our player's 3 biggest shortfalls by
-weight × gap that the target has a figure for; "Target − Ours" is the raw difference; "Counted"
-keeps it between 0 and the gap ("(capped at the gap)" when it went past). Without a target it
-shows the one-line definition. Code: `club_vs_league.gap_example`.
+**On the page.** "How this is worked out" shows Gap closed as a mini table built live from the
+page's own figures: the player it is measured against and the first player by Gap closed in the
+active league tab (his % is the list's figure). Rows: the 3 shortfall measures that count most
+(weight × gap size) that the target has a value for, in each measure's unit: Ours, Top 6, Gap,
+Target, Target − Ours, Share closed ("100% (capped)" past the top 6). Code: `gap_example`.
 
-When our player is already above the top-6 bar (e.g. a centre forward rated above it), the last
-line reads "… = X% of his remaining shortfalls on these measures." instead.
+*Worked example (real data, 23 Nov 2026, 2026/27): Full Back, League One tab.* Our Charlie
+Wellens 2.47; top-6 bar 3.64. First by Gap closed: Tyrese Noslin, 85%.
 
-*Worked example (real data, 13 Nov 2026, season 2026/27): Full Back, League One tab.* Our best
-full back Charlie Wellens 2.38; top-6 bar 3.67 (gap −1.29). First by Gap closed in League One:
-Ryan Glover (Stockport County).
-
-Gap closed: how much of our player's shortfall a target would make up.
-Scores are out of 100 (100 = best at his position in his league).
-
-| Measure | Ours (Wellens) | Top 6 | Gap (Top 6 − Ours) | Target (Glover) | Target − Ours | Counted |
+| Measure | Ours (Wellens) | Top 6 | Gap | Target (Noslin) | Target − Ours | Share closed |
 |---|---:|---:|---:|---:|---:|---:|
-| Average match top speed | 4 | 79 | 75 | 78 | 73 | 73 |
-| High-speed runs | 8 | 80 | 73 | 99 | 92 | 73 (capped at the gap) |
-| Sprints | 1 | 70 | 69 | 98 | 97 | 69 (capped at the gap) |
-| …and 14 more measures | | | | | | |
+| Dribbles (count) | 1.20 | 4.18 | 2.98 | 4.41 | 3.22 | 100% (capped) |
+| Deep progressions | 6.25 | 12.89 | 6.64 | 12.51 | 6.27 | 94% |
+| Aerial win % | 20% | 51% | 31% | 48% | 28% | 90% |
+| …and 17 more measures | | | | | | |
 
-Gap closed = total Counted ÷ total Gap = 94%. Measures that count more in the Full Back rating
-count more. *Why: it ranks players by how much they fix our weaknesses, not just by how good
-they are.*
-
-Gap, Target − Ours and Counted are worked from the unrounded percentiles (.5 rounded up), as
-"Behind" in the Gap map, so they can differ by 1 from the difference of the rounded figures
-shown (e.g. 78 − 4 above reads 73: unrounded 77.5 − 4.2).
+Gap closed = Share closed on each shortfall, averaged with each measure's weight in the Full Back
+rating and the size of its gap = 85%. Measures that move together count once.
 
 **Measure against any of our players (owner 2026-11-13)**
 

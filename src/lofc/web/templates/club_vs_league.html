@@ -17,7 +17,7 @@
       <li><b>Gap</b>: {{ terms["Gap"] }} "Biggest shortfalls" compares our player's percentiles with the named players'; open a row for every metric we're behind on, biggest first.</li>
       <li>Pick any of our rated players in a position to measure the gap and the list against him.</li>
       <li><b>Players who could close the gap</b>: {{ terms["Players who could close the gap"] }} One list per league, because ratings compare players within their own league; each column is his percentile (green 70+, red below 30). <b>vs our best</b>: {{ terms["vs our best"] }} <b>Top-6 level</b>: {{ terms["Top-6 level"] }}</li>
-      <li id="cv-how-gc"><b>Gap closed</b>: {{ terms["Gap closed"] }} Each metric counts by its weight in the Overall rating; metrics that move together count once.</li>
+      <li id="cv-how-gc"><b>Gap closed</b>: {{ terms["Gap closed"] }} Each shortfall counts by its weight in the Overall rating and by the size of its gap (measured against League One players); metrics that move together count once.</li>
     </ol>
   </details>
 
@@ -57,7 +57,6 @@
       <div class="cv-cols-note" id="cv-cols-note" hidden></div>
       <div class="cv-tabs" id="cv-tabs" role="tablist" aria-label="League"></div>
       <div class="cv-count" id="cv-count"></div>
-      <div class="cv-own" id="cv-own" hidden></div>
       <div class="tw"><table id="cv-rec-t"></table></div>
     </div>
   </div>

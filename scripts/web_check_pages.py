@@ -2662,7 +2662,6 @@ def club_vs_league(s, w):
     cap = s.page.inner_text("#cv-count")
     s.note("club vs league: caption names the league", None if re.match(r"^\d+ centre backs above .+ · ranked within League One$", cap) else cap)
     # owner 2026-11-16: no own-league line on League One; minutes beside our player and the bar players
-    s.note("club vs league: no own-league line on League One", None if not s.page.locator("#cv-own").is_visible() else "shown")
     lvl = s.page.inner_text("#cv-level")
     s.note("club vs league: level strip shows our player's minutes", None if re.search(r"· [\d,]+ min", lvl) else lvl)
     det = s.page.inner_text("#cv-gap-t tr.cv-det:not([hidden])") if s.page.locator("#cv-gap-t tr.cv-det:not([hidden])").count() else ""
@@ -2694,9 +2693,8 @@ def club_vs_league(s, w):
         s.step("club vs league: second league tab", lambda p: tab.click(timeout=3000))
         s.note("club vs league: active league in the URL", None if f"league={tab.get_attribute('data-l')}" in s.page.url else s.page.url)
         s.note("club vs league: active tab bold + underlined", None if tab.evaluate("b => b.classList.contains('on') && getComputedStyle(b).fontWeight >= 600") else "not marked")
-        own = s.page.locator("#cv-own")
-        s.note("club vs league: own-league line on another league's tab",
-               None if own.is_visible() and own.inner_text() == "Gap closed % is relative to his own league." else own.inner_text() or "hidden")
+        s.note("club vs league: no own-league line (raw values on every tab)",
+               None if not s.page.locator("#cv-own").count() else "still there")
         # owner 2026-11-20 (decision A): other leagues have no "vs our best", no Top-6 badge,
         # and are ranked by Gap closed
         heads_o = s.page.locator("#cv-rec-t th.cv-sort").all_inner_texts()
@@ -2786,7 +2784,8 @@ def club_vs_league_gap_closed(s, w):
     order = s.page.evaluate("() => [...document.querySelectorAll('#cv-rec-t thead th')].map(t => t.dataset.sort ?? t.textContent.trim())")
     s.note("club vs league: Gap closed after vs our best", None if "gc" in order and order.index("gc") == order.index("vb") + 1 else str(order))
     tip = th.get_attribute("data-tip") or ""
-    s.note("club vs league: Gap closed help", None if "How much of our player's shortfall vs the top 6 he would make up. 100% = all of it." in tip else tip)
+    s.note("club vs league: Gap closed help", None if ("How much of our player's shortfall vs the top 6 he would make up, "
+                                                      "measure by measure on raw values. 100% = all of it.") in tip else tip)
     cells = [v.strip() for v in s.page.locator("#cv-rec-t tbody td.cv-gc").all_inner_texts()]
     s.note("club vs league: Gap closed cells show %", None if cells and all(re.fullmatch(r"\d+%|—", v) for v in cells) else str(cells[:6]))
     raw, gc = _cv_gc(s)
@@ -2970,12 +2969,12 @@ def club_vs_league_phase_and_example(s, w):
     fb = gc.inner_text()
     who = re.sub(r"\s*·.*$", "", s.page.locator("#cv-gap-t tr.pos[data-g='Full Back'] .cv-who").inner_text().split("\n")[0]).strip()
     heads = gc.locator("table.cv-gx th").all_inner_texts()
-    want = ["Measure", f"Ours ({who.split()[-1]})", "Top 6", "Gap (Top 6 − Ours)", "Target − Ours", "Counted"]
+    want = ["Measure", f"Ours ({who.split()[-1]})", "Top 6", "Gap (Top 6 − Ours)", "Target − Ours", "Share closed"]
     s.note("club vs league: Full Back mini table", None if fb.startswith("Gap closed: how much of our player's shortfall a target would make up.")
            and len(heads) == 7 and [h for i, h in enumerate(heads) if i != 4] == want and heads[4].startswith("Target (")
            and 1 <= gc.locator("table.cv-gx tbody tr:not(.cv-gx-more)").count() <= 3
            and all(r.is_visible() for r in gc.locator("table.cv-gx tbody tr").all())
-           and "Measures that count more in the Full Back rating count more." in fb
+           and "weight in the Full Back rating and the size of its gap" in fb
            and "Why: it ranks players by how much they fix our weaknesses" in fb else fb[:300])
     # the % is the list's figure for the active tab's first player by Gap closed
     pct = re.search(r"= (\d+)%", fb)
@@ -3733,24 +3732,27 @@ def club_vs_league_remembers(s, w):
 
 
 def club_vs_league_gc_one_decimal(s, w):
-    """Owner 2026-11-13: the Gap closed mini table shows one decimal and every row adds up on the
-    numbers shown (Gap = Top 6 - Ours, Target - Ours, Counted); the total keeps the whole %."""
+    """Owner 2026-11-23: the Gap closed mini table shows RAW values in each measure's unit and
+    every row adds up on the numbers shown (Gap = Top 6 - Ours, Target - Ours); Share closed =
+    (Target - Ours) / Gap kept between 0% and 100%; the total keeps the whole %."""
     s.goto("/club-vs-league?group=Full+Back", check=False)
     if not _wait_js(s, "() => document.querySelector('#cv-how-gc table.cv-gx')", timeout=15000):
-        return s.note("club vs league: one-decimal mini table", skipped="no example for Full Back")
+        return s.note("club vs league: raw-value mini table", skipped="no example for Full Back")
     s.step("club vs league: open How this is worked out", lambda p: p.locator("#cv-how summary").click(timeout=3000))
     rows = s.page.evaluate("""() => [...document.querySelectorAll('#cv-how-gc table.cv-gx tbody tr:not(.cv-gx-more)')]
         .map(tr => [...tr.querySelectorAll('td.n')].map(td => td.innerText.trim()))""")
     bad = []
-    num = lambda t: float(t.split()[0].replace("−", "-"))      # noqa: E731
+    num = lambda t: float(re.sub(r"[^\d.\-]", "", t.split()[0].replace("−", "-")))      # noqa: E731
     for r in rows:
-        if len(r) != 6 or not all(re.fullmatch(r"−?\d+\.\d", c.split()[0]) for c in r):
+        if len(r) != 6 or not re.fullmatch(r"\d+% ?(\(capped\))?", r[5]):
             bad.append(r)
             continue
-        o, t6, g, tg, d, c = map(num, r)
-        if abs(g - (t6 - o)) > 0.1 or abs(d - (tg - o)) > 0.1 or abs(c - min(max(d, 0), g)) > 0.1:
+        o, t6, g, tg, d = map(num, r[:5])
+        tol = max(0.011, 0.006 * max(abs(t6), abs(tg), 1))           # each figure rounded on its own
+        share = min(max(d / g, 0.0), 1.0) if g else 0.0
+        if abs(g - (t6 - o)) > tol or abs(d - (tg - o)) > tol or abs(int(r[5].split("%")[0]) - share * 100) > 3:
             bad.append(r)
-    s.note("club vs league: mini table one decimal, rows add up", None if rows and not bad else str(bad or rows)[:200])
+    s.note("club vs league: raw-value mini table rows add up", None if rows and not bad else str(bad or rows)[:200])
     total = s.page.locator("#cv-how-gc").inner_text()
     s.note("club vs league: total keeps the whole %", None if re.search(r"= \d+%", total) else total[-200:])
 

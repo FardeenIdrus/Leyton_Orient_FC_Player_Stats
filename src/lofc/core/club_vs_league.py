@@ -38,9 +38,6 @@ STRENGTH_PCT = 70
 # Owner 2026-11-16: minutes beside our compared player and each named top-6 player; under this
 # many minutes this season a small "low minutes" marker shows (the rating rests on less play).
 LOW_MINUTES = 900
-# Owner 2026-11-16: under the caption on every league tab except League One (Gap closed uses
-# his percentiles within his own league).
-OWN_LEAGUE_NOTE = "Gap closed % is relative to his own league."
 MIDFIELD = ("Defensive Mid", "Central Mid", "Attacking Mid")
 GROUPS = ["Goalkeeper", "Centre Back", "Full Back", "Midfield", "Winger", "Centre Forward"]
 PLURAL = {"Goalkeeper": "goalkeepers", "Centre Back": "centre backs", "Full Back": "full backs",
@@ -63,12 +60,14 @@ TERMS = {
     "vs our best": ("His rating minus our best at this position; the gap is closed when this "
                     "reaches the gap size."),
     # owner 2026-11-13: one plain sentence ("our player" covers a picked one too)
-    "Gap closed": "How much of our player's shortfall vs the top 6 he would make up. 100% = all of it.",
+    # owner 2026-11-23: raw values on every tab (percentiles from two leagues are not comparable)
+    "Gap closed": ("How much of our player's shortfall vs the top 6 he would make up, "
+                   "measure by measure on raw values. 100% = all of it."),
     # owner 2026-11-20 (Decision A): other leagues' ratings are not on our League One scale
     "Players who could close the gap": (
         "League One: players rated above our best, ranked by Overall or Gap closed. Other leagues: "
         "every rated player, ranked by Gap closed. The metric columns show his percentile on each "
-        "chosen measure."),
+        "chosen measure, within his own league."),
 }
 
 
@@ -405,13 +404,48 @@ def grouped_weights(weights: dict, groups: list[list[str]]) -> dict[str, float]:
     return {m: w / total for m, w in out.items()} if total > 0 else out
 
 
-def gap_closed(profile: dict, cand, weights: dict, metrics=None) -> int | None:
-    """"Gap closed": the share (0-100, whole number, .5 up) of our weighted shortfall against
-    the top 6 that this player would close. For each shortfall m in `profile` (restricted to
-    `metrics` when given): gap = top-6 median - ours; closed = his percentile - ours, clipped
-    to [0, gap] (no credit beyond the top-6 level, none for being worse than ours); a missing
-    percentile closes nothing. Score = 100 x sum(w x closed) / sum(w x gap). None when he has
-    no percentiles at all, or there is no weighted shortfall to close."""
+def raw_profile(pct_profile: dict, ours: dict | None, bar_rows: list, lower=None) -> dict:
+    """metric -> (our RAW value, the named top-6 players' median RAW value) for the shortfall
+    measures of `pct_profile` (gap_profile: chosen by percentile inside League One, where our
+    player and the top-6 players all play). Owner 2026-11-23: Gap closed is worked out on raw
+    values, which share units across leagues (percentiles do not). A measure is left out when a
+    raw figure is missing or the raw median is not better than ours. `lower`: lower-is-better
+    measures (default `cf.LOWER_IS_BETTER`)."""
+    if lower is None:
+        from lofc.model import club_framework as cf
+        lower = cf.LOWER_IS_BETTER
+    out = {}
+    if not ours:
+        return out
+    for m in pct_profile:
+        mine = ours.get(m)
+        theirs = [r.get(m) for r in bar_rows if r is not None and not _missing(r.get(m))]
+        if _missing(mine) or not theirs:
+            continue
+        med, mine = float(pd.Series(theirs).median()), float(mine)
+        if (med < mine) if m in lower else (med > mine):
+            out[m] = (mine, med)
+    return out
+
+
+def gap_size(gap: float, spread) -> float | None:
+    """A gap in League One spreads: |gap| / the standard deviation of League One players at the
+    position on that measure (owner 2026-11-23, decision B). None when there is no spread."""
+    if spread is None or _missing(spread) or float(spread) <= 0:
+        return None
+    return abs(float(gap)) / float(spread)
+
+
+def gap_closed(profile: dict, cand, weights: dict, metrics=None, spreads: dict | None = None) -> int | None:
+    """"Gap closed" (0-100, whole number, .5 up): for each shortfall m in `profile` (raw_profile;
+    restricted to `metrics` when given) the share of the gap he closes, (his - ours) / (top 6 -
+    ours), kept between 0 and 1 (no credit beyond the top-6 level, none for being worse than
+    ours; a missing value closes nothing); then those shares averaged with the measures'
+    Overall weights -- times each gap's size in League One spreads when `spreads` is given
+    (owner 2026-11-23, decision B: a big shortfall counts more than a near-zero one; a measure
+    with no spread is left out). Units cancel inside each measure, so measures in different
+    units combine, and lower-is-better measures work the same way. None when he has no values
+    at all, or there is no weighted shortfall to close."""
     if cand is None:
         return None
     keep = set(metrics) if metrics is not None else None
@@ -421,12 +455,17 @@ def gap_closed(profile: dict, cand, weights: dict, metrics=None) -> int | None:
             continue
         w = float(weights.get(m, 0.0))
         gap = med - mine
-        if w <= 0 or gap <= 0:
+        if w <= 0 or gap == 0:
             continue
+        if spreads is not None:
+            size = gap_size(gap, spreads.get(m))
+            if size is None:
+                continue
+            w *= size
         v = cand.get(m) if hasattr(cand, "get") else None
-        closed = 0.0 if _missing(v) else min(max(float(v) - mine, 0.0), gap)
-        num += w * closed
-        den += w * gap
+        share = 0.0 if _missing(v) else min(max((float(v) - mine) / gap, 0.0), 1.0)
+        num += w * share
+        den += w
     return None if den <= 0 else _half_up(100.0 * num / den)
 
 
@@ -472,18 +511,20 @@ def vs_best(overall, level) -> float | None:
 def recommendations(rated: pd.DataFrame, candidates: pd.DataFrame, season_id: int, group: str,
                     level: float | None, exclude_ids, league_names: dict, *, age: str = "",
                     contract: str = "", today=None, pcts: pd.DataFrame | None = None,
+                    raws: pd.DataFrame | None = None,
                     tag_metrics=(), label=str, n: int | None = None, strong2: bool = False,
                     bar: float | None = None, top6_only: bool = False, gap: dict | None = None,
                     weights: dict | None = None, score_metrics=None, strong_metrics=None,
-                    rank: str = "") -> dict:
+                    rank: str = "", spreads: dict | None = None) -> dict:
     """This season's rated players in `group` (not Orient's), ONE LIST PER LEAGUE (ratings
     compare players within their own league), every one of them (owner 2026-11-13: no top-15
     cap; `n` limits it). League One: Overall above our level (and at or above the top-6 bar with
     `top6_only`), by Overall (`rank="gap"`: by Gap closed, ties by Overall). Every other league
     (owner 2026-11-20, Decision A: his Overall is not on our League One scale): every rated
     player, always by Gap closed, no `vs_best`; each list's own `rank` says which. Age band and contract horizon filter the players first. Each row carries his percentile on each metric column (`tag_metrics`, one
-    column each on the page) and `gap_closed` over `gap` (gap_profile; only `score_metrics`
-    when given). "Strong on 2+" uses `strong_metrics` (default: the columns)."""
+    column each on the page) and `gap_closed` over `gap` (raw_profile) on his RAW values from
+    `raws` (only `score_metrics` when given). "Strong on 2+" uses `strong_metrics` (default:
+    the columns)."""
     from lofc.core.physical_page import in_age_band
     from lofc.dashboard import seasons as S
     keys = ["player_id", "competition_id", "season_id"]
@@ -513,11 +554,24 @@ def recommendations(rated: pd.DataFrame, candidates: pd.DataFrame, season_id: in
         lookup = {tuple(r[:4]): dict(zip(sub.columns[4:], r[4:]))
                   for r in sub.itertuples(index=False, name=None)}
 
+    raw_lookup = None
+    if raws is not None and gap:
+        kk = keys + ["position_group"]
+        sub = raws[kk + [m for m in gap if m in raws.columns]].drop_duplicates(kk, keep="first")
+        raw_lookup = {tuple(r[:4]): dict(zip(sub.columns[4:], r[4:]))
+                      for r in sub.itertuples(index=False, name=None)}
+
     def pct_row(r):
         """His percentiles (his own position pool) as a dict, or None."""
         if lookup is None:
             return None
         return lookup.get((r.player_id, r.competition_id, r.season_id, r.position_group))
+
+    def raw_row(r):
+        """His raw values (his row at that position) on our shortfall measures, or None."""
+        if raw_lookup is None:
+            return None
+        return raw_lookup.get((r.player_id, r.competition_id, r.season_id, r.position_group))
 
     def pcts_of(pr, ms) -> list:
         """His percentile on each metric, in order (None where he has no figure)."""
@@ -525,10 +579,11 @@ def recommendations(rated: pd.DataFrame, candidates: pd.DataFrame, season_id: in
             return [None] * len(ms)
         return [None if _missing(pr.get(m)) else pct_int(pr[m]) for m in ms]
     prs = [pct_row(r) for r in f.itertuples()]
-    f = f.assign(_pr=prs, weak_list=[pcts_of(pr, tag_metrics) for pr in prs],
+    rws = [raw_row(r) for r in f.itertuples()]
+    f = f.assign(_pr=prs, _rw=rws, weak_list=[pcts_of(pr, tag_metrics) for pr in prs],
                  strong_list=[pcts_of(pr, strong_metrics) for pr in prs],
-                 gap_closed=[None if not gap else gap_closed(gap, pr, weights or {}, score_metrics)
-                             for pr in prs])
+                 gap_closed=[None if not gap else gap_closed(gap, rw, weights or {}, score_metrics, spreads)
+                             for rw in rws])
     if strong2:
         # owner 2026-11-09: 70th percentile or better on at least 2 of the shortfall metrics
         f = f[f["strong_list"].map(lambda w: sum(v is not None and v >= STRENGTH_PCT for v in w)) >= 2]
@@ -566,19 +621,20 @@ def recommendations(rated: pd.DataFrame, candidates: pd.DataFrame, season_id: in
 def _top_gap(by_gap: pd.DataFrame, gap: dict | None) -> dict | None:
     """The league's first player by Gap closed (the "Rank by: Gap closed" order, over every
     player who passed the filters, not only the shown top n) with his unrounded percentiles on
-    our shortfalls -- the live example's candidate. None when nobody has a Gap closed."""
+    our shortfalls -- the live example's candidate (his RAW values). None when nobody has a Gap
+    closed."""
     if by_gap.empty:
         return None
     r = by_gap.iloc[0]
     if r["gap_closed"] is None or _missing(r["gap_closed"]):
         return None
-    pr = r["_pr"] or {}
+    rw = r["_rw"] or {}
     return {"name": str(r["player_name"]), "club": str(r["team_name"]), "gap_closed": int(r["gap_closed"]),
-            "pcts": {m: float(pr[m]) for m in (gap or {}) if m in pr and not _missing(pr[m])}}
+            "values": {m: float(rw[m]) for m in (gap or {}) if m in rw and not _missing(rw[m])}}
 
 
 GX_HEADING = "Gap closed: how much of our player's shortfall a target would make up."
-GX_SCALE = "Scores are out of 100 (100 = best at his position in his league)."
+GX_SCALE = "Raw values (per 90 unless the measure says otherwise), each player in his own league."
 GX_WHY = "Why: it ranks players by how much they fix our weaknesses, not just by how good they are."
 GX_ROWS = 3
 
@@ -603,35 +659,56 @@ GX_LINKED = "linked"
 GX_GROUPED = " Measures that move together count once."
 
 
+def _gx_value(m: str, v: float) -> str:
+    from lofc.dashboard import compare_tables as ct
+    return ct.format_value(m, v)
+
+
+def _gx_signed(m: str, v: float) -> str:
+    """A raw difference in the measure's unit, with a minus sign as on the page."""
+    from lofc.dashboard import compare_tables as ct
+    mag = ct.format_value(m, abs(v))
+    return mag if abs(v) < 1e-12 or mag == ct.format_value(m, 0.0) else ("−" if v < 0 else "") + mag
+
+
 def gap_example(group: str, player: dict | None, bar_median, profile: dict, top: dict | None,
-                weights: dict, league: str, label=str, metrics=None, groups=None) -> dict | None:
+                weights: dict, league: str, label=str, metrics=None, groups=None,
+                spreads: dict | None = None) -> dict | None:
     """"How this is worked out": Gap closed as a mini table from the page's own figures (owner
-    2026-11-13). `player` = the one the position is measured against (compared_player),
-    `profile` his gap_profile, `top` the active league's first player by Gap closed (_top_gap; his
-    Gap closed is the list's figure, not worked out again). Rows: his GX_ROWS biggest weighted
-    shortfalls (weight x gap) the target has a figure for, among `metrics` when the recruiter
-    chose the columns; "Counted" = Target - Ours kept between 0 and the gap, as gap_closed. None
-    (the page then shows the one-line definition) without a player, bar, shortfall, target or a
-    figure to show. `groups` (correlated_groups, owner 2026-11-20): a row whose measure is in one
-    is tagged GX_LINKED with a tip naming the others, and the total says they count once."""
+    2026-11-13; raw values owner 2026-11-23). `player` = the one the position is measured
+    against (compared_player), `profile` his raw_profile, `top` the active league's first player
+    by Gap closed (_top_gap; his Gap closed is the list's figure, not worked out again). Rows: the
+    GX_ROWS heaviest shortfall measures (Overall weight) the target has a value for, among
+    `metrics` when the recruiter chose the columns; each shows the raw values in the measure's
+    unit and "Share closed" = (Target - Ours) / Gap kept between 0% and 100%, as gap_closed.
+    None (the page then shows the one-line definition) without a player, bar, shortfall, target
+    or a value to show. `groups` (correlated_groups, owner 2026-11-20): a row whose measure is
+    in one is tagged GX_LINKED with a tip naming the others, and the total says they count once."""
     if player is None or bar_median is None or not profile or top is None or top.get("gap_closed") is None:
         return None
     keep = set(metrics) if metrics is not None else None
-    have = top.get("pcts") or {}
-    short = sorted(((float(weights.get(m, 0.0)) * (med - mine), m, mine, med)
-                    for m, (mine, med) in profile.items()
-                    if (keep is None or m in keep) and float(weights.get(m, 0.0)) > 0),
-                   key=lambda t: -t[0])
-    # owner 2026-11-13: one decimal, worked out from the figures shown so every row adds up exactly
+    have = top.get("values") or {}
+    def heft(m, mine, med):
+        """What the measure counts for in Gap closed: weight (x gap size with spreads)."""
+        w = float(weights.get(m, 0.0))
+        if spreads is None:
+            return w
+        size = gap_size(med - mine, spreads.get(m))
+        return 0.0 if size is None else w * size
+    short = [(heft(m, mine, med), i, m, mine, med)
+             for i, (m, (mine, med)) in enumerate(profile.items())
+             if (keep is None or m in keep) and med != mine and heft(m, mine, med) > 0]
+    short.sort(key=lambda t: (-t[0], t[1]))
     linked = {m: g for g in (groups or []) for m in g}
     rows = []
-    for _w, m, mine, med in [t for t in short if t[1] in have][:GX_ROWS]:
-        o, t6, tg = _r1(mine), _r1(med), _r1(have[m])
-        gap, diff = round(t6 - o, 1), round(tg - o, 1)
-        counted = min(max(diff, 0.0), gap)
-        rows.append({"label": label(m), "ours": _d1(o), "top6": _d1(t6), "gap": _d1(gap),
-                     "target": _d1(tg), "diff": _d1(diff),
-                     "counted": f"{_d1(counted)} (capped at the gap)" if diff > gap else _d1(counted)})
+    for _w, _i, m, mine, med in [t for t in short if t[2] in have][:GX_ROWS]:
+        tg = have[m]
+        gap, diff = med - mine, tg - mine
+        raw_share = diff / gap
+        pct = _half_up(100.0 * min(max(raw_share, 0.0), 1.0))
+        rows.append({"label": label(m), "ours": _gx_value(m, mine), "top6": _gx_value(m, med),
+                     "gap": _gx_signed(m, gap), "target": _gx_value(m, tg), "diff": _gx_signed(m, diff),
+                     "counted": f"{pct}% (capped)" if raw_share > 1 else f"{pct}%"})
         if m in linked:
             rows[-1].update(tag=GX_LINKED, tip=f"Moves with {', '.join(label(o) for o in linked[m] if o != m)}: "
                                                "counted once together.")
@@ -642,15 +719,16 @@ def gap_example(group: str, player: dict | None, bar_median, profile: dict, top:
     return {"heading": GX_HEADING, "scale": GX_SCALE, "why": GX_WHY, "league": league,
             "candidate": {"name": top["name"], "club": top["club"]},
             "columns": ["Measure", f"Ours ({surname(player['name'])})", "Top 6", "Gap (Top 6 − Ours)",
-                        f"Target ({surname(top['name'])})", "Target − Ours", "Counted"],
+                        f"Target ({surname(top['name'])})", "Target − Ours", "Share closed"],
             "rows": rows,
             "more": None if n_more <= 0 else f"…and {n_more} more measure{'s' if n_more != 1 else ''}",
             # owner 2026-11-13: already above the bar -> the % is of what is left on these measures
-            "total": (f"Gap closed = total Counted ÷ total Gap = {top['gap_closed']}%"
+            "total": (f"Gap closed = Share closed on each shortfall, averaged with each measure's weight "
+                      f"in the {group} rating" + (" and the size of its gap" if spreads is not None else "")
+                      + f" = {top['gap_closed']}%"
                       + (" of his remaining shortfalls on these measures"
                          if float(bar_median) <= float(player["rating"]) else "")
-                      + f". Measures that count more in the {group} rating count more."
-                      + (GX_GROUPED if any(t[1] in linked for t in short) else ""))}
+                      + "." + (GX_GROUPED if any(t[2] in linked for t in short) else ""))}
 
 
 # --- big picture ----------------------------------------------------------------------------------

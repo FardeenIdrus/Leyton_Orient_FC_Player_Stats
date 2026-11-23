@@ -1395,6 +1395,11 @@ with "no sideways scrolling" in the same sentence — ask what he means. Not bui
   not in the feed. Top speed stays PSV-99 Top 5.
 - Full dated notes: "2.36 front-end notes" at the end of this work log.
 
+### 2026-11-23 (later) — Club vs League One Gap closed on raw values (built locally, not deployed)
+- Owner approved raw values on every tab (other leagues' percentiles were being subtracted from League One's). `club_vs_league.raw_profile` (shortfall measures from the League One percentile comparison, raw ours vs raw top-6 median), `gap_closed` = per-measure share closed (0–1), weighted by Overall weight × `gap_size` (|gap| ÷ League One sd at the position). Decision B (owner 2026-11-23) after real data showed near-zero gaps (Pressures 0.08 sd) counting as much as large ones (Sprints 1.92 sd) under plain weights.
+- API: `raws(season)` source (player_metrics_neutral rating measures), `_spreads`, raw profiles in `_base` and for a picked player. `OWN_LEAGUE_NOTE` and its line removed. Fold-out mini table in raw units, "Share closed" column.
+- Tests: core, web, real-data recomputation from the database (raw values + League One sd); harness checks updated.
+
 ### 2026-11-23 — Squads club search and equal View buttons; phase switch in "Every metric" (built locally, not deployed)
 - Squads: `squad_lists.build_page` options gain `all_clubs` (club + league, squad view, every league); the Club box is a combobox (`squads.js` clubList / pickClub): empty = this league's clubs, typed = every league's, a pick sets league + club. View buttons flex equally (the 2026-11-20 full-width filter bar had stretched the box, not the buttons).
 - Card: `squad.phase_values` reads SkillCorner's In / Out of possession per-90 values (`player_detail_metrics`, phys_tip. / phys_otip.) for him and ours; `metric_matrix` adds `phases`; the page switches rows without re-rendering.

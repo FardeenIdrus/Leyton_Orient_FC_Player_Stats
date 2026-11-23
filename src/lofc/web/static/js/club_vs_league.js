@@ -177,8 +177,6 @@ function drawRec() {
   $('cv-count').innerHTML = l1 ? `${cur.count} ${PL[D.selected] || ''}${who ? ` above ${esc(who)}` : ''} · ranked within ${esc(cur.league)}`
     : `${cur.count} ${PL[D.selected] || ''} · by Gap closed within ${esc(cur.league)}`;
   // owner 2026-11-16: every league tab except League One says Gap closed is within his league
-  $('cv-own').textContent = D.own_league_note;
-  $('cv-own').hidden = cur.competition_id === D.league_one;
   const W = R.weak_metrics || [];
   const valid = [...Object.keys(SORT_FIELD), ...W.map((_, k) => `w${k}`)];
   const key = valid.includes((s.sort || '').replace(/^-/, '')) ? s.sort : '';

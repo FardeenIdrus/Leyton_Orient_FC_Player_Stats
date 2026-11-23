@@ -144,8 +144,11 @@ def test_top6_performance_physical_and_orients_row(page, engine, stored):
 
 def test_gap_closed_matches_a_plain_recomputation(engine):
     """Owner 2026-11-13: Gap closed for Centre Back, recomputed here from the stored season
-    figures: percentiles, the top-6 medians, the Overall weights (Performance 65 : Physical 35, owner 2026-11-16;
-    the club's per-metric Performance weights, Physical equal) and the capped, weighted share."""
+    figures: the shortfall measures by percentile inside League One, then RAW values (owner
+    2026-11-23) -- ours, the top-6 players' median, his -- each measure's share closed kept
+    between 0 and 1, averaged with the Overall weights (Performance 65 : Physical 35; the club's
+    per-metric Performance weights, Physical equal; linked measures count once) times each gap's
+    size in League One spreads (decision B)."""
     from lofc.model import club_framework as cf
     from lofc.model.performance_weights import WEIGHTS
     from lofc.model.scorecard import metric_percentiles
@@ -194,27 +197,64 @@ def test_gap_closed_matches_a_plain_recomputation(engine):
                 for m in merged:
                     group_of[m] = merged
     weight = {m: w / len(group_of.get(m, {m})) for m, w in weight.items()}
-    gaps = {}
+    # the shortfall measures: percentiles inside League One (our player and the top 6)
+    short = []
     for m in weight:
         mine = ours.get(m)
         theirs = [b.get(m) for b in bar if b is not None and pd.notna(b.get(m))]
         if pd.notna(mine) and theirs and float(pd.Series(theirs).median()) > float(mine):
-            gaps[m] = (float(mine), float(pd.Series(theirs).median()))
-    assert set(gaps) == {s["metric"] for s in row["all_shortfalls"]}
+            short.append(m)
+    assert set(short) == {s["metric"] for s in row["all_shortfalls"]}
+    # owner 2026-11-23: Gap closed on RAW values -- ours, the top-6 players' median, his
+    raws = {}
+
+    def raw(pid, comp, season, pos):
+        if season not in raws:
+            raws[season] = pd.read_sql(text("SELECT * FROM player_metrics_neutral WHERE season_id = :s"),
+                                       engine, params={"s": season}).set_index(
+                ["player_id", "competition_id", "season_id", "position_group"])
+        key = (pid, comp, season, pos)
+        return raws[season].loc[key] if key in raws[season].index else None
+    r_ours = raw(L["player_id"], L["competition_id"], L["season_id"], L["position"])
+    r_bar = [raw(p["player_id"], p["competition_id"], p["season_id"], p["position"]) for p in row["bar"]["players"]]
+    lower = cf.LOWER_IS_BETTER
+    gaps = {}
+    for m in short:
+        mine = r_ours.get(m) if r_ours is not None else None
+        theirs = [b.get(m) for b in r_bar if b is not None and pd.notna(b.get(m))]
+        if mine is None or pd.isna(mine) or not theirs:
+            continue
+        med = float(pd.Series(theirs).median())
+        if (med < float(mine)) if m in lower else (med > float(mine)):
+            gaps[m] = (float(mine), med)
+    # owner 2026-11-23 (B): each gap sized in League One spreads -- the sd of League One's rated
+    # centre backs' raw values this season
+    l1 = raws[L_season(row)].reset_index().merge(
+        rated[rated.competition_id == 4], on=["player_id", "competition_id", "season_id", "position_group"])
+    sd = {m: float(pd.to_numeric(l1[m], errors="coerce").std()) for m in gaps}
+    size = {m: abs(b - o) / sd[m] for m, (o, b) in gaps.items() if sd[m] > 0}
     checked = 0
     for lg in page["recommendations"]["leagues"]:
         for r in lg["rows"]:
             p, c, s = r["ids"]
-            cand = pct(p, c, s, r["position"])
+            cand = raw(p, c, s, r["position"])
             if cand is None or not gaps:
                 assert r["gap_closed"] is None
                 continue
-            num = sum(weight[m] * min(max((0.0 if pd.isna(cand.get(m)) else float(cand.get(m))) - o, 0.0), b - o)
-                      for m, (o, b) in gaps.items())
-            den = sum(weight[m] * (b - o) for m, (o, b) in gaps.items())
+            num = den = 0.0
+            for m, (o, b) in gaps.items():
+                if m not in size:
+                    continue
+                v = cand.get(m)
+                share = 0.0 if v is None or pd.isna(v) else min(max((float(v) - o) / (b - o), 0.0), 1.0)
+                num += weight[m] * size[m] * share
+                den += weight[m] * size[m]
             assert abs(r["gap_closed"] - 100 * num / den) <= 0.5 + 1e-6, (r["name"], r["gap_closed"], 100 * num / den)
             checked += 1
     assert checked > 0
+    # the other leagues' tabs are worked out the same way (raw values, no percentiles)
+    assert any(lg["competition_id"] != 4 and any(r["gap_closed"] is not None for r in lg["rows"])
+               for lg in page["recommendations"]["leagues"])
 
 
 def test_full_back_against_our_second_rated_full_back(engine):

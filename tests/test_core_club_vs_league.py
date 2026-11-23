@@ -363,50 +363,91 @@ def test_gap_profile_is_every_shortfall_unrounded():
     assert cv.gap_profile(None, GC_BAR, ["a"]) == {}
 
 
-def test_gap_closed_weights_and_caps_at_the_top6_level():
-    prof = cv.gap_profile(GC_OURS, GC_BAR, ["a", "b", "c"])
-    # a: 50-20 = 30 of 55; b: 90-50 = 40, capped at the gap 15
-    # 100 * (0.1*30 + 0.3*15) / (0.1*55 + 0.3*15) = 100 * 7.5 / 10 = 75
-    assert cv.gap_closed(prof, {"a": 50.0, "b": 90.0, "c": 0.0}, GC_W) == 75
-    # past the bar on both: 100
+def test_gap_closed_is_each_shortfalls_share_closed_weighted():
+    """Owner 2026-11-23 (raw values on every tab): per shortfall measure, the share of the gap
+    he closes = (his - ours) / (top 6 - ours), kept between 0 and 1; Gap closed = those shares
+    averaged with the measures' Overall weights. Units cancel per measure, so raw values in
+    different units (metres, counts, km/h) can be combined."""
+    prof = {"a": (20.0, 75.0), "b": (50.0, 65.0)}                     # gaps 55 and 15
+    # a: 30 of 55 = .545; b: 40 of 15 -> capped at 1. (0.1*.545 + 0.3*1) / 0.4 = .886 -> 89
+    assert cv.gap_closed(prof, {"a": 50.0, "b": 90.0, "c": 0.0}, GC_W) == 89
     assert cv.gap_closed(prof, {"a": 99.0, "b": 99.0}, GC_W) == 100
-    # weighting matters: the same player with a and b's weights swapped
-    # 100 * (0.3*30 + 0.1*15) / (0.3*55 + 0.1*15) = 100 * 10.5 / 18 = 58.33 -> 58
-    assert cv.gap_closed(prof, {"a": 50.0, "b": 90.0}, {"a": 0.3, "b": 0.1}) == 58
+    # weighting matters: (0.3*.545 + 0.1*1) / 0.4 = .659 -> 66
+    assert cv.gap_closed(prof, {"a": 50.0, "b": 90.0}, {"a": 0.3, "b": 0.1}) == 66
+
+
+def test_gap_closed_counts_bigger_gaps_more_with_spreads():
+    """Owner 2026-11-23 (decision B): each shortfall counts by its rating weight x the size of
+    its gap in League One spreads (gap / standard deviation of League One players at the
+    position), so a near-zero gap barely counts and a big one counts a lot."""
+    prof = {"a": (20.0, 75.0), "b": (50.0, 65.0)}                     # gaps 55 and 15
+    w = {"a": 0.5, "b": 0.5}
+    # a: gap 55 / sd 55 = 1.0 spread; b: gap 15 / sd 150 = 0.1 spread
+    sd = {"a": 55.0, "b": 150.0}
+    # closes all of b, none of a: weight .5x0.1 / (.5x1.0 + .5x0.1) = 0.0909 -> 9
+    assert cv.gap_closed(prof, {"a": 20.0, "b": 65.0}, w, spreads=sd) == 9
+    # closes all of a, none of b: .5 / .55 = 0.909 -> 91
+    assert cv.gap_closed(prof, {"a": 75.0, "b": 50.0}, w, spreads=sd) == 91
+    # without spreads: rating weight only (each 50)
+    assert cv.gap_closed(prof, {"a": 20.0, "b": 65.0}, w) == 50
+    # a measure with no spread (sd 0 or missing) cannot be sized: left out
+    assert cv.gap_closed(prof, {"a": 75.0, "b": 50.0}, w, spreads={"a": 55.0, "b": 0.0}) == 100
+    assert cv.gap_closed(prof, {"a": 75.0, "b": 50.0}, w, spreads={"a": 55.0}) == 100
+    assert cv.gap_closed(prof, {"a": 75.0}, w, spreads={}) is None
+
+
+def test_gap_closed_works_on_lower_is_better_measures():
+    # ours 3.2 s, top 6 2.8 s (lower is better): 3.0 s closes half the gap
+    prof = {"t": (3.2, 2.8)}
+    assert cv.gap_closed(prof, {"t": 3.0}, {"t": 1.0}) == 50
+    assert cv.gap_closed(prof, {"t": 3.5}, {"t": 1.0}) == 0          # slower than ours: nothing
+    assert cv.gap_closed(prof, {"t": 2.5}, {"t": 1.0}) == 100        # beyond the top 6: capped
 
 
 def test_gap_closed_gives_no_negative_credit():
-    prof = cv.gap_profile(GC_OURS, GC_BAR, ["a", "b", "c"])
-    # a: 10 < ours 20 -> 0 (not -10); b: 55-50 = 5 -> 100 * (0 + 1.5) / 10 = 15
-    assert cv.gap_closed(prof, {"a": 10.0, "b": 55.0}, GC_W) == 15
+    prof = {"a": (20.0, 75.0), "b": (50.0, 65.0)}
+    # a below ours -> 0; b 5 of 15 -> (0 + 0.3/3) / 0.4 = 25
+    assert cv.gap_closed(prof, {"a": 10.0, "b": 55.0}, GC_W) == 25
     assert cv.gap_closed(prof, {"a": 0.0, "b": 0.0}, GC_W) == 0
 
 
 def test_gap_closed_missing_metric_counts_as_nothing_closed():
-    prof = cv.gap_profile(GC_OURS, GC_BAR, ["a", "b", "c"])
-    # a missing -> 0; b: 65-50 = 15 (the whole gap) -> 100 * 4.5 / 10 = 45
-    assert cv.gap_closed(prof, {"b": 65.0}, GC_W) == 45
-    assert cv.gap_closed(prof, pd.Series({"a": float("nan"), "b": 65.0}), GC_W) == 45
-    assert cv.gap_closed(prof, None, GC_W) is None                    # no percentiles at all
+    prof = {"a": (20.0, 75.0), "b": (50.0, 65.0)}
+    assert cv.gap_closed(prof, {"b": 65.0}, GC_W) == 75               # 0.3 / 0.4
+    assert cv.gap_closed(prof, pd.Series({"a": float("nan"), "b": 65.0}), GC_W) == 75
+    assert cv.gap_closed(prof, None, GC_W) is None                    # no values at all
 
 
 def test_gap_closed_none_without_shortfalls_or_weights():
     assert cv.gap_closed({}, {"a": 50.0}, GC_W) is None
-    prof = cv.gap_profile(GC_OURS, GC_BAR, ["a", "b", "c"])
-    assert cv.gap_closed(prof, {"a": 50.0}, {}) is None               # no weight on any shortfall
+    assert cv.gap_closed({"a": (20.0, 75.0)}, {"a": 50.0}, {}) is None
+    assert cv.gap_closed({"a": (20.0, 20.0)}, {"a": 50.0}, {"a": 1.0}) is None   # no gap
 
 
 def test_gap_closed_over_chosen_metrics_only():
-    prof = cv.gap_profile(GC_OURS, GC_BAR, ["a", "b", "c"])
-    # only b chosen: 55-50 = 5 of 15 -> 33.3 -> 33
+    prof = {"a": (20.0, 75.0), "b": (50.0, 65.0)}
     assert cv.gap_closed(prof, {"a": 99.0, "b": 55.0}, GC_W, metrics=["b", "c"]) == 33
-    # none of the chosen metrics is a shortfall -> None
     assert cv.gap_closed(prof, {"c": 99.0}, GC_W, metrics=["c"]) is None
 
 
 def test_gap_closed_rounds_half_up():
     prof = {"a": (0.0, 8.0)}
     assert cv.gap_closed(prof, {"a": 1.0}, {"a": 1.0}) == 13          # 12.5 -> 13
+
+
+def test_raw_profile_is_the_shortfall_measures_on_raw_values():
+    """The shortfall measures come from the percentile comparison inside League One (our player
+    and the top-6 players are all League One); Gap closed then uses their RAW values: ours and
+    the top-6 players' median. A measure without raw figures, or where the raw median is not
+    better than ours, is left out."""
+    pct = {"a": (20.0, 75.0), "b": (50.0, 65.0), "t": (30.0, 60.0), "x": (1.0, 2.0)}
+    ours = {"a": 0.10, "b": 9800.0, "t": 3.2}
+    bar = [{"a": 0.30, "b": 10400.0, "t": 2.9}, {"a": 0.20, "b": 10000.0, "t": 2.7}, None,
+           {"a": None, "b": 10600.0, "t": None}]
+    got = cv.raw_profile(pct, ours, bar, lower={"t"})
+    assert got == {"a": (0.10, 0.25), "b": (9800.0, 10400.0), "t": (3.2, 2.8)}
+    assert cv.raw_profile(pct, {"a": 0.4}, bar, lower=set()) == {}     # raw median not better
+    assert cv.raw_profile(pct, None, bar) == {}
 
 
 def test_overall_weights_are_each_metrics_share_of_overall():
@@ -447,7 +488,7 @@ def _gc_setup():
 
 def test_recommendations_carry_gap_closed_and_rank_by_it():
     rated, cands, pcts, prof = _gc_setup()
-    kw = dict(pcts=pcts, tag_metrics=["a", "b", "c"], label=str, gap=prof, weights=GC_W)
+    kw = dict(pcts=pcts, raws=pcts, tag_metrics=["a", "b", "c"], label=str, gap=prof, weights=GC_W)
     rec = cv.recommendations(rated, cands, CUR, "Winger", 3.0, set(), {4: "League One"}, **kw)
     rows = rec["leagues"][0]["rows"]
     # Half: a 27.5 of 55, b 7.5 of 15 -> 100 * (2.75 + 2.25) / 10 = 50
@@ -461,7 +502,7 @@ def test_recommendations_carry_gap_closed_and_rank_by_it():
 
 def test_rank_by_gap_closed_picks_the_top_n_by_it():
     rated, cands, pcts, prof = _gc_setup()
-    kw = dict(pcts=pcts, tag_metrics=["a"], label=str, gap=prof, weights=GC_W, n=1)
+    kw = dict(pcts=pcts, raws=pcts, tag_metrics=["a"], label=str, gap=prof, weights=GC_W, n=1)
     by = cv.recommendations(rated, cands, CUR, "Winger", 3.0, set(), {4: "League One"}, rank="gap", **kw)
     assert [r["name"] for r in by["leagues"][0]["rows"]] == ["All closed"] and by["leagues"][0]["count"] == 5
 
@@ -469,7 +510,7 @@ def test_rank_by_gap_closed_picks_the_top_n_by_it():
 def test_chosen_columns_set_the_score_and_strong_keeps_the_default_three():
     rated, cands, pcts, prof = _gc_setup()
     pcts = pcts.assign(d=[90.0, 90.0, 10.0, 90.0])
-    kw = dict(pcts=pcts, label=str, gap=prof, weights=GC_W)
+    kw = dict(pcts=pcts, raws=pcts, label=str, gap=prof, weights=GC_W)
     # columns b and d: the score counts b only (d is not a shortfall): Half 7.5 of 15 -> 50
     rec = cv.recommendations(rated, cands, CUR, "Winger", 3.0, set(), {4: "League One"},
                              tag_metrics=["b", "d"], score_metrics=["b", "d"], **kw)
@@ -552,13 +593,12 @@ def test_recommendations_against_a_non_best_player_list_everyone_above_him():
     him = pd.Series({"a": 70.0, "b": 10.0, "c": 20.0})
     prof = cv.gap_detail(him, GC_BAR, ["a", "b", "c"], str)["profile"]
     rec = cv.recommendations(rated, cands, CUR, "Winger", 2.5, set(), {4: "League One"}, pcts=pcts,
-                             tag_metrics=["b", "c"], label=str, gap=prof, weights=GC_W)
+                             raws=pcts, tag_metrics=["b", "c"], label=str, gap=prof, weights=GC_W)
     rows = rec["leagues"][0]["rows"]
     assert [r["name"] for r in rows] == ["Above both", "Between"]           # above 2.5, not 3.0
     assert [r["vs_best"] for r in rows] == [0.9, 0.3]                       # vs him
-    # Between: a missing -> 0 of 5; b 27.5 of 55; c 0 of 55
-    # 100 * (0.3*27.5) / (0.1*5 + 0.3*55 + 0.6*55) = 8.25 / 50 = 16.5 -> 17
-    assert rows[1]["gap_closed"] == 17
+    # Between: a missing -> 0; b 27.5 of 55 = .5; c 0 -> (0.3 * .5) / (0.1 + 0.3 + 0.6) = 15
+    assert rows[1]["gap_closed"] == 15
 
 
 def test_vs_terms_name_him():
@@ -566,7 +606,7 @@ def test_vs_terms_name_him():
     assert t["vs him"] == ("His rating minus James Morris's; the gap is closed when this reaches "
                            "the gap size.")
     # owner 2026-11-13: one sentence for both ("our player" covers the picked one)
-    assert t["Gap closed"] == "How much of our player's shortfall vs the top 6 he would make up. 100% = all of it."
+    assert t["Gap closed"] == cv.TERMS["Gap closed"]
 
 
 # --- owner 2026-11-13: Big picture physical by phase ----------------------------------------------
@@ -627,63 +667,69 @@ GX_LEVEL = {"name": "Charlie Wellens", "rating": 2.38, "position": "Full Back", 
 
 def test_recommendations_carry_each_leagues_top_player_by_gap_closed():
     rated, cands, pcts, prof = _gc_setup()
-    kw = dict(pcts=pcts, tag_metrics=["a"], label=str, gap=prof, weights=GC_W, n=2)
+    kw = dict(pcts=pcts, raws=pcts, tag_metrics=["a"], label=str, gap=prof, weights=GC_W, n=2)
     rec = cv.recommendations(rated, cands, CUR, "Winger", 3.0, set(), {4: "League One"}, **kw)
     top = rec["leagues"][0]["top_gap"]
     # by Overall the list shows "None closed" and "Tie high"; the top by Gap closed is still found
     assert top["name"] == "All closed" and top["club"] == "T" and top["gap_closed"] == 100
-    assert top["pcts"] == {"a": 80.0, "b": 80.0}            # his percentiles on our shortfalls
+    assert top["values"] == {"a": 80.0, "b": 80.0}          # his raw values on our shortfalls
     none = cv.recommendations(rated, cands, CUR, "Winger", 3.0, set(), {4: "League One"},
                               pcts=pcts, tag_metrics=["a"], label=str)
     assert none["leagues"][0]["top_gap"] is None             # no shortfall -> no Gap closed
 
 
-# ours / top 6: a 20/75, b 50/65, d 10/35, e 40/60, f 30/50; weighted gap a 5.5, d 5.0, b 4.5, f 2.0, e 1.0
+# ours / top 6 (raw): a 20/75, b 50/65, d 10/35, e 40/60, f 30/50; weights b .3, d .2, a .1, f .1, e .05
 GX_PROF = {"a": (20.0, 75.0), "b": (50.0, 65.0), "d": (10.0, 35.0), "e": (40.0, 60.0), "f": (30.0, 50.0)}
 GX_W = {"a": 0.1, "b": 0.3, "d": 0.2, "e": 0.05, "f": 0.1}
-# the target: a 47.5 (makes up 27.5), b 90 (40, capped at 15), d none, e 70 (30, capped 20), f 20 (-10 -> 0)
-# Gap closed = 100 x (.1x27.5 + .3x15 + .05x20 + 0) / 18 = 45.8 -> 46 (the list's figure is passed in)
+# the target: a 47.5 (27.5 of 55 = 50%), b 90 (capped 100%), d none, e 70 (capped 100%), f 20 (0%)
 GX_TOP = {"name": "Sam Silvera", "club": "Milton Keynes Dons", "gap_closed": 46,
-          "pcts": {"a": 47.5, "b": 90.0, "e": 70.0, "f": 20.0}}
+          "values": {"a": 47.5, "b": 90.0, "e": 70.0, "f": 20.0}}
 
 
-def test_gap_example_mini_table_with_hand_numbers():
+def test_gap_example_mini_table_on_raw_values():
+    """Owner 2026-11-23: the worked example uses raw values in each measure's unit and shows the
+    share of each shortfall the target closes; rows = the heaviest measures he has a value for."""
     ex = cv.gap_example("Full Back", GX_LEVEL, 3.67, GX_PROF, GX_TOP, GX_W, "League One",
                         label={"a": "Sprints", "b": "Distance", "f": "Crosses"}.get)
     assert ex["heading"] == "Gap closed: how much of our player's shortfall a target would make up."
-    assert ex["scale"] == "Scores are out of 100 (100 = best at his position in his league)."
+    assert ex["scale"] == "Raw values (per 90 unless the measure says otherwise), each player in his own league."
     assert ex["columns"] == ["Measure", "Ours (Wellens)", "Top 6", "Gap (Top 6 − Ours)", "Target (Silvera)",
-                             "Target − Ours", "Counted"]
-    # his 3 biggest weighted shortfalls the target has a figure for: a, b, f (d: no figure)
-    # owner 2026-11-13: one decimal, so every row adds up exactly
+                             "Target − Ours", "Share closed"]
+    # heaviest measures with a target value: b (.3), then a and f (.1 each, in profile order); d has none
     assert ex["rows"] == [
-        {"label": "Sprints", "ours": "20.0", "top6": "75.0", "gap": "55.0", "target": "47.5", "diff": "27.5", "counted": "27.5"},
-        {"label": "Distance", "ours": "50.0", "top6": "65.0", "gap": "15.0", "target": "90.0", "diff": "40.0", "counted": "15.0 (capped at the gap)"},
-        {"label": "Crosses", "ours": "30.0", "top6": "50.0", "gap": "20.0", "target": "20.0", "diff": "−10.0", "counted": "0.0"}]
+        {"label": "Distance", "ours": "50.00", "top6": "65.00", "gap": "15.00", "target": "90.00", "diff": "40.00",
+         "counted": "100% (capped)"},
+        {"label": "Sprints", "ours": "20.00", "top6": "75.00", "gap": "55.00", "target": "47.50", "diff": "27.50",
+         "counted": "50%"},
+        {"label": "Crosses", "ours": "30.00", "top6": "50.00", "gap": "20.00", "target": "20.00", "diff": "−10.00",
+         "counted": "0%"}]
     assert ex["more"] == "…and 2 more measures"                          # d and e
-    assert ex["total"] == ("Gap closed = total Counted ÷ total Gap = 46%. Measures that count more in "
-                           "the Full Back rating count more.")
+    assert ex["total"] == ("Gap closed = Share closed on each shortfall, averaged with each measure's "
+                           "weight in the Full Back rating = 46%.")
     assert ex["why"] == "Why: it ranks players by how much they fix our weaknesses, not just by how good they are."
     assert ex["candidate"] == {"name": "Sam Silvera", "club": "Milton Keynes Dons"} and ex["league"] == "League One"
 
 
-def test_gap_example_one_decimal_rows_add_up_exactly():
-    """Owner 2026-11-13: Ours, Top 6, Gap, Target, Target − Ours and Counted to one decimal;
-    each row adds up exactly on the numbers shown (4.2 | 79.0 | 74.8 | 77.5 | 73.3 | 73.3)."""
-    prof = {"a": (4.24, 79.04), "b": (33.35, 61.26)}
-    top = dict(GX_TOP, pcts={"a": 77.46, "b": 12.05})
-    ex = cv.gap_example("Winger", GX_LEVEL, 3.67, prof, top, {"a": 0.5, "b": 0.5}, "League One")
-    a, b = ex["rows"]
-    assert (a["ours"], a["top6"], a["gap"], a["target"], a["diff"], a["counted"]) == \
-        ("4.2", "79.0", "74.8", "77.5", "73.3", "73.3")
-    assert (b["ours"], b["top6"], b["gap"], b["target"], b["diff"], b["counted"]) == \
-        ("33.4", "61.3", "27.9", "12.1", "−21.3", "0.0")
-    for r in ex["rows"]:
-        f = lambda k: float(r[k].replace("−", "-").split()[0])      # noqa: E731
-        assert abs(f("gap") - (f("top6") - f("ours"))) < 1e-9
-        assert abs(f("diff") - (f("target") - f("ours"))) < 1e-9
-        assert f("counted") == min(max(f("diff"), 0.0), f("gap"))
-    assert "= 46%." in ex["total"]                                   # the total keeps the whole %
+def test_gap_example_with_spreads_orders_by_weight_times_gap_and_says_so():
+    sd = {"a": 55.0, "b": 150.0, "d": 25.0, "e": 20.0, "f": 20.0}
+    # weight x gap/sd: a .1x1 = .10, b .3x.1 = .03, d .2x1 = .20, e .05x1 = .05, f .1x1 = .10
+    ex = cv.gap_example("Full Back", GX_LEVEL, 3.67, GX_PROF, GX_TOP, GX_W, "League One",
+                        label={"a": "Sprints", "b": "Distance", "f": "Crosses"}.get, spreads=sd)
+    # d has no target value; then a and f (.10 each, profile order), then e (.05)
+    assert [r["label"] for r in ex["rows"]] == ["Sprints", "Crosses", None]
+    assert ex["total"] == ("Gap closed = Share closed on each shortfall, averaged with each measure's "
+                           "weight in the Full Back rating and the size of its gap = 46%.")
+
+
+def test_gap_example_lower_is_better_and_units():
+    from lofc.dashboard import compare_tables as ct
+    m = sorted(ct.LOWER_IS_BETTER_PHYSICAL)[0]
+    prof = {m: (3.2, 2.8), "distance_p90": (9800.0, 10400.0)}
+    top = dict(GX_TOP, values={m: 3.0, "distance_p90": 10100.0})
+    ex = cv.gap_example("Winger", GX_LEVEL, 3.67, prof, top, {m: 0.5, "distance_p90": 0.5}, "League One")
+    by = {r["label"]: r for r in ex["rows"]}
+    assert by[m]["ours"] == "3.20 s" and by[m]["gap"] == "−0.40 s" and by[m]["counted"] == "50%"
+    assert by["distance_p90"]["ours"] == "9,800 m" and by["distance_p90"]["counted"] == "50%"
 
 
 def test_gap_example_no_more_row_and_one_more():
@@ -705,19 +751,27 @@ def test_gap_example_falls_back_to_none():
                  ("Winger", None, 3.67, GX_PROF, GX_TOP),                   # no player of ours
                  ("Winger", GX_LEVEL, None, GX_PROF, GX_TOP),               # no bar
                  ("Winger", GX_LEVEL, 3.67, {}, GX_TOP),                    # no shortfall
-                 ("Winger", GX_LEVEL, 3.67, GX_PROF, dict(GX_TOP, pcts={"c": 50.0})),     # no figure on any
+                 ("Winger", GX_LEVEL, 3.67, GX_PROF, dict(GX_TOP, values={"c": 50.0})),   # no figure on any
                  ("Winger", GX_LEVEL, 3.67, GX_PROF, dict(GX_TOP, gap_closed=None))):
         assert cv.gap_example(*args, GX_W, "League One") is None, args
 
 
 def test_gap_example_above_the_bar_says_remaining_shortfalls():
-    """Owner 2026-11-13: when our player is already above the top-6 bar, the % is of his
-    remaining shortfalls on these measures, not of a rating gap."""
     above = dict(GX_LEVEL, rating=3.76)
     ex = cv.gap_example("Centre Forward", above, 3.13, GX_PROF, GX_TOP, GX_W, "League One")
-    assert ex["total"] == ("Gap closed = total Counted ÷ total Gap = 46% of his remaining shortfalls on "
-                           "these measures. Measures that count more in the Centre Forward rating count more.")
+    assert ex["total"] == ("Gap closed = Share closed on each shortfall, averaged with each measure's "
+                           "weight in the Centre Forward rating = 46% of his remaining shortfalls on these measures.")
     assert len(ex["rows"]) == 3
+
+
+def test_no_own_league_note_and_terms_say_raw():
+    assert not hasattr(cv, "OWN_LEAGUE_NOTE")
+    assert cv.TERMS["Gap closed"] == ("How much of our player's shortfall vs the top 6 he would make up, "
+                                      "measure by measure on raw values. 100% = all of it.")
+    assert cv.TERMS["Players who could close the gap"] == (
+        "League One: players rated above our best, ranked by Overall or Gap closed. Other leagues: "
+        "every rated player, ranked by Gap closed. The metric columns show his percentile on each "
+        "chosen measure, within his own league.")
 
 
 # --- owner 2026-11-20 (Decision A): other leagues are not compared with our League One level ---
@@ -736,7 +790,7 @@ def _two_leagues():
                          "season_id": CUR, "position_group": "Winger",
                          "a": [20.0, 75.0, 47.5, 80.0, 10.0, 47.5], "b": [50.0, 65.0, 57.5, 80.0, 10.0, 57.5]})
     prof = cv.gap_profile(GC_OURS, GC_BAR, ["a", "b", "c"])
-    kw = dict(pcts=pcts, tag_metrics=["a"], label=str, gap=prof, weights=GC_W)
+    kw = dict(pcts=pcts, raws=pcts, tag_metrics=["a"], label=str, gap=prof, weights=GC_W)
     return rated, cands, kw
 
 
@@ -830,10 +884,11 @@ def test_gap_example_tags_grouped_measures_and_rows_still_add_up():
     assert by["Sprints"]["tip"] == "Moves with Distance: counted once together."
     assert all(r.get("tag") is None for r in ex["rows"] if r["label"] not in ("Sprints", "Distance"))
     for r in ex["rows"]:
-        f = lambda k: float(r[k].replace("−", "-").split()[0])      # noqa: E731
-        assert abs(f("gap") - (f("top6") - f("ours"))) < 1e-9
-        assert abs(f("diff") - (f("target") - f("ours"))) < 1e-9
-        assert f("counted") == min(max(f("diff"), 0.0), f("gap"))
+        f = lambda k: float(r[k].replace("−", "-").replace(",", "").split()[0])      # noqa: E731
+        assert abs(f("gap") - (f("top6") - f("ours"))) < 1e-6
+        assert abs(f("diff") - (f("target") - f("ours"))) < 1e-6
+        share = min(max(f("diff") / f("gap"), 0.0), 1.0)
+        assert int(r["counted"].split("%")[0]) == int(share * 100 + 0.5)
     assert ex["total"].endswith("Measures that move together count once.")
     plain = cv.gap_example("Full Back", GX_LEVEL, 3.67, GX_PROF, GX_TOP, GX_W, "League One")
     assert "move together" not in plain["total"] and all(r.get("tag") is None for r in plain["rows"])

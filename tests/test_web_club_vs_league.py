@@ -41,6 +41,7 @@ def _src(cards, neutral):
         seasons=lambda: (CUR, PREV), season_name=lambda s: {CUR: "2026/27", PREV: "2025/26"}[s],
         cards=lambda: cards, neutral=lambda: neutral, squad=lambda: squad,
         pcts=lambda s: pcts[pcts.season_id == s],
+        raws=lambda s: pcts[pcts.season_id == s],          # raw values: the same numbers will do
         candidates=lambda s: cards[cards.season_id == s][keys].assign(age=24.0, contract_until=pd.NaT),
         league_names=lambda: {3: "Championship", 4: "League One", 5: "League Two"},
         metrics=lambda pos: ["sprint_count_p90"], physical=["sprint_count_p90"],
@@ -163,7 +164,7 @@ def test_the_recommendations_help_is_the_owners_sentence(fake):
     assert cv.TERMS["Players who could close the gap"] == (
         "League One: players rated above our best, ranked by Overall or Gap closed. Other leagues: "
         "every rated player, ranked by Gap closed. The metric columns show his percentile on each "
-        "chosen measure.")   # owner 2026-11-13, other leagues 2026-11-20
+        "chosen measure, within his own league.")   # owner 2026-11-13, other leagues 2026-11-20, 11-23
     html = _client().get("/club-vs-league").text
     assert "Strong where we are weak" not in html
 
@@ -273,6 +274,7 @@ def two_metrics(fake):
         return f.assign(sprint_count_p90=sprint,
                         distance_p90=f["player_id"].map(lambda p: 80.0 if p in ours else 50.0))
     fake.pcts = pcts
+    fake.raws = pcts                                                  # Gap closed reads raw values
     fake.label = lambda m: {"sprint_count_p90": "Sprints", "distance_p90": "Distance"}.get(m, m)
     api.clear()
     return fake
@@ -342,13 +344,14 @@ def test_strong_keeps_the_default_shortfalls_when_columns_change(two_metrics):
 
 
 def test_gap_closed_wording(fake):
-    assert cv.TERMS["Gap closed"] == "How much of our player's shortfall vs the top 6 he would make up. 100% = all of it."
+    assert cv.TERMS["Gap closed"] == ("How much of our player's shortfall vs the top 6 he would make up, "
+                                      "measure by measure on raw values. 100% = all of it.")
     html = _client().get("/club-vs-league").text
     how = html.split('id="cv-how"')[1].split("</details>")[0]
     from markupsafe import escape
     assert ("<b>Gap closed</b>: " + str(escape(cv.TERMS["Gap closed"]))
-            + " Each metric counts by its weight in the Overall rating; metrics that move together "
-            "count once.") in how                                    # owner 2026-11-20
+            + " Each shortfall counts by its weight in the Overall rating and by the size of its gap "
+            "(measured against League One players); metrics that move together count once.") in how  # owner 2026-11-23
     assert 'id="cv-cols"' in html and ">Metric columns<" in html and 'id="cv-rank"' in html
 
 
@@ -382,6 +385,7 @@ def second(monkeypatch):
         dist = pid.map(lambda p: 30.0 if p == SECOND_W else 80.0 if p in ours else 50.0)
         return f.assign(sprint_count_p90=sprint, distance_p90=dist)
     src.pcts = pcts
+    src.raws = pcts                                                  # Gap closed reads raw values
     monkeypatch.setattr(api, "_sources", lambda: src)
     api.clear()
     yield src
@@ -426,8 +430,15 @@ def test_vs_lists_players_above_him_with_his_columns_and_gap_closed(second):
     assert all(r["vs_best"] == cv.vs_best(r["overall"], 2.0) for r in l1)
     assert rec["level"] == 2.0
     assert [w["metric"] for w in rec["weak_metrics"]] == ["sprint_count_p90", "distance_p90"]
+    # owner 2026-11-23 (B): gaps sized in League One spreads -- the sd of League One's rated
+    # wingers' values this season, worked out here from the fixture's own frames
+    c = second.cards()
+    l1 = c[(c.season_id == CUR) & (c.competition_id == 4) & (c.position_group == "Winger")]
+    vals = second.raws(CUR).merge(l1[["player_id", "competition_id", "season_id", "position_group"]])
+    sd = {m: float(vals[m].std()) for m in ("sprint_count_p90", "distance_p90")}
     want = cv.gap_closed({"sprint_count_p90": (20.0, 60.0), "distance_p90": (30.0, 50.0)},
-                         {"sprint_count_p90": 50.0, "distance_p90": 50.0}, cv.overall_weights("Winger"))
+                         {"sprint_count_p90": 50.0, "distance_p90": 50.0}, cv.overall_weights("Winger"),
+                         spreads=sd)
     assert next(r for r in rows if r["name"] == "L2 star")["gap_closed"] == want
     assert next(r for r in _rows(base) if r["name"] == "L2 star")["gap_closed"] == 50
     # "Strong on 2+" uses his biggest shortfalls: sprints 60 and distance 50 -> nobody at 70 on 2
@@ -483,7 +494,7 @@ def test_big_picture_without_phase_data_still_works(fake):
 def test_gap_closed_example_per_league_from_the_pages_figures(two_metrics):
     d = _client().get("/api/club-vs-league?group=Winger").json()
     by = {l["league"]: l for l in d["recommendations"]["leagues"]}
-    assert all("top_gap" not in l for l in by.values())               # raw percentiles stay server-side
+    assert all("top_gap" not in l for l in by.values())               # unrounded values stay server-side
     l1 = by["League One"]["example"]
     top = max(by["League One"]["rows"], key=lambda r: (r["gap_closed"], r["overall"]))
     w = _winger(d)
@@ -491,12 +502,14 @@ def test_gap_closed_example_per_league_from_the_pages_figures(two_metrics):
     assert l1["columns"][1] == f"Ours ({w['level']['name'].split()[-1]})"
     assert l1["columns"][4] == f"Target ({top['name'].split()[-1]})"
     # ours sprints 40 vs top 6 60; every League One winger sprints 60 -> the whole gap
-    assert l1["rows"] == [{"label": "Sprints", "ours": "40.0", "top6": "60.0", "gap": "20.0", "target": "60.0", "diff": "20.0", "counted": "20.0"}]
+    # owner 2026-11-23: raw values in the measure's unit; the share of the gap he closes
+    assert l1["rows"] == [{"label": "Sprints", "ours": "40.00", "top6": "60.00", "gap": "20.00", "target": "60.00",
+                           "diff": "20.00", "counted": "100%"}]
     assert l1["more"] is None
-    assert l1["total"] == ("Gap closed = total Counted ÷ total Gap = 100%. Measures that count more in "
-                           "the Winger rating count more.")
+    assert l1["total"] == ("Gap closed = Share closed on each shortfall, averaged with each measure's "
+                           "weight in the Winger rating and the size of its gap = 100%.")
     l2 = by["League Two"]["example"]
-    assert l2["rows"][0]["target"] == "50.0" and l2["rows"][0]["counted"] == "10.0" and "= 50%." in l2["total"]
+    assert l2["rows"][0]["target"] == "50.00" and l2["rows"][0]["counted"] == "50%" and "= 50%." in l2["total"]
 
 
 def test_full_list_every_player_above_our_player(two_metrics):
@@ -510,7 +523,8 @@ def test_gap_closed_example_follows_the_compared_player(second):
     d = _client().get(f"/api/club-vs-league?group=Winger&vs={SECOND_W}").json()
     ex = next(l for l in d["recommendations"]["leagues"] if l["league"] == "League One")["example"]
     assert ex["columns"][1] == "Ours (Winger)"                         # "Second Winger"
-    assert [r["label"] for r in ex["rows"]] == ["Sprints", "Distance"] and ex["rows"][0]["ours"] == "20.0"
+    assert sorted(r["label"] for r in ex["rows"]) == ["Distance", "Sprints"]
+    assert next(r for r in ex["rows"] if r["label"] == "Sprints")["ours"] == "20.00"
 
 
 def test_gap_closed_example_none_without_a_shortfall(fake):
@@ -520,23 +534,24 @@ def test_gap_closed_example_none_without_a_shortfall(fake):
     assert 'id="cv-how-gc"' in how                                     # the line the page fills in
 
 
-def test_minutes_confidence_and_own_league_note_in_the_payload(fake):
-    """Owner 2026-11-16: (1) a line under the caption on every league tab except League One;
-    (2) minutes beside our compared player and each named top-6 player, "low minutes" under 900."""
+def test_minutes_confidence_in_the_payload_and_no_own_league_note(fake):
+    """Owner 2026-11-16: minutes beside our compared player and each named top-6 player, "low
+    minutes" under 900. Owner 2026-11-23: Gap closed is on raw values on every tab, so the
+    "relative to his own league" line is gone."""
     d = _client().get("/api/club-vs-league").json()
-    assert d["own_league_note"] == "Gap closed % is relative to his own league."
+    assert "own_league_note" not in d
     assert d["league_one"] == 4 and d["low_minutes"] == 900
     first = d["gaps"][0]
     assert first["level"]["minutes"] == 900.0
     assert all(p["minutes"] == 900.0 for p in first["bar"]["players"])
 
 
-def test_page_script_draws_minutes_and_the_own_league_line(fake):
+def test_page_script_draws_minutes_and_no_own_league_line(fake):
     html = _client().get("/club-vs-league").text
-    assert 'id="cv-own"' in html
+    assert 'id="cv-own"' not in html
     import pathlib
     js = (pathlib.Path(api.__file__).parents[1] / "static" / "js" / "club_vs_league.js").read_text()
-    assert "D.own_league_note" in js and "D.low_minutes" in js and "low minutes" in js
+    assert "own_league_note" not in js and "D.low_minutes" in js and "low minutes" in js
 
 
 # --- owner 2026-11-20 (Decision A): other leagues are not compared with our League One level ---
@@ -558,6 +573,7 @@ def low_l2(two_metrics):
                                            "position_group": ["Winger"], "sprint_count_p90": [60.0],
                                            "distance_p90": [50.0]})], ignore_index=True)
     two_metrics.cards, two_metrics.neutral, two_metrics.pcts = (lambda: c), (lambda: n), pcts
+    two_metrics.raws = pcts
     api.clear()
     return two_metrics
 

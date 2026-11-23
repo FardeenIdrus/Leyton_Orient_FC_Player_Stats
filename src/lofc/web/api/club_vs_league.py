@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import types
 
+import pandas as pd
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -82,6 +84,16 @@ def _sources():
         return pd.concat(out, ignore_index=True) if out else pd.DataFrame(
             columns=["player_id", "competition_id", "season_id", "metric", "value_p90"])
 
+    def raws(season):
+        """Every player's RAW values on the rating measures for one season, one row per player,
+        league and position (player_metrics_neutral: per 90, %, km/h) -- Gap closed works on
+        these (owner 2026-11-23: raw values share units across leagues; percentiles do not)."""
+        held = set(pd.read_sql("SELECT * FROM player_metrics_neutral LIMIT 0", L.get_engine()).columns)
+        need = sorted({m for g in cv.GROUPS for pos in cv.positions_in(g) for m in cv.overall_weights(pos)} & held)
+        cols = ", ".join(["player_id", "competition_id", "season_id", "position_group"] + need)
+        return pd.read_sql(text(f"SELECT {cols} FROM player_metrics_neutral WHERE season_id = :s"),
+                           L.get_engine(), params={"s": int(season)})
+
     def metrics(position):
         from lofc.dashboard.tabs import players as P
         return list(P._club_metrics_for(position, cf.DEFAULT_ARCHETYPE)[0]) + list(cf.PHYSICAL_METRICS.get(position, []))
@@ -96,7 +108,7 @@ def _sources():
 
     return types.SimpleNamespace(
         seasons=seasons, season_name=season_name_for, cards=cards, neutral=neutral,
-        squad=squad.squad, pcts=L.load_scorecard_percentiles, candidates=cmp._candidates,
+        squad=squad.squad, pcts=L.load_scorecard_percentiles, raws=raws, candidates=cmp._candidates,
         league_names=league_names, metrics=metrics, physical=phys, picture=picture, sections=sections,
         label=label, watched=watched, phase_detail=phase_detail)
 
@@ -107,6 +119,21 @@ def _pct_row(pcts, key):
     for k, v in zip(keys, key):
         hit = hit[hit[k] == v]
     return None if hit.empty else hit.iloc[0]
+
+
+def _raw_row(raws, key) -> dict | None:
+    """One row of `raws` (player, league, season, position) as a dict, or None."""
+    r = _pct_row(raws, key) if raws is not None else None
+    return None if r is None else r.to_dict()
+
+
+def _raw_profile(src, b: dict, player: dict | None, pct_profile: dict, group: str) -> dict:
+    """Gap closed's profile on RAW values (cv.raw_profile): the shortfall measures of
+    `pct_profile`, our player's raw values and the named top-6 players' (owner 2026-11-23)."""
+    if player is None or not pct_profile:
+        return {}
+    mine = _raw_row(b["raws"][b["cur"]], (player["player_id"], player["competition_id"], player["season_id"], player["position"]))
+    return cv.raw_profile(pct_profile, mine, b["bar_raws"].get(group, []))
 
 
 def _detail(src, pcts_cur, player: dict, theirs: list) -> dict:
@@ -132,18 +159,25 @@ def _base() -> dict:
     clubs = cv.club_ratings(rated, cur)
     gaps = cv.gap_map(rated, ours, cur, prev, names)
     pc = {cur: src.pcts(cur), prev: src.pcts(prev)}
-    profiles, bar_rows = {}, {}
+    rw = {cur: src.raws(cur), prev: src.raws(prev)}
+    profiles, bar_rows, bar_raws = {}, {}, {}
     for g in gaps:
         lvl, b = g["level"], g["bar"]
         g["shortfalls"], g["all_shortfalls"] = [], []
-        profiles[g["group"]], bar_rows[g["group"]] = {}, []
+        profiles[g["group"]], bar_rows[g["group"]], bar_raws[g["group"]] = {}, [], []
         if lvl is None or not b["players"]:
             continue
         bar_rows[g["group"]] = [_pct_row(pc[b["season_id"]], (p["player_id"], p["competition_id"], p["season_id"], p["position"]))
                                 for p in b["players"]]
+        bar_raws[g["group"]] = [_raw_row(rw[b["season_id"]], (p["player_id"], p["competition_id"], p["season_id"], p["position"]))
+                                for p in b["players"]]
         d = _detail(src, pc[cur], lvl, bar_rows[g["group"]])
         g["shortfalls"], g["all_shortfalls"], profiles[g["group"]] = d["shortfalls"], d["all_shortfalls"], d["profile"]
+    out = {"raws": rw, "bar_raws": bar_raws, "cur": cur}
+    raw_profiles = {g["group"]: _raw_profile(src, out, g["level"], profiles[g["group"]], g["group"]) for g in gaps}
     return {"corr_groups": _corr_groups(rated, pc[cur], cur), "profiles": profiles, "bar_rows": bar_rows, "pcts_cur": pc[cur],
+            "raws": rw, "bar_raws": bar_raws, "raw_profiles": raw_profiles,
+            "spreads": _spreads(rated, rw[cur], cur),
             "cur": cur, "prev": prev, "names": names, "rated": rated, "ours": ours,
             "squad_ids": {int(i) for i in squad["player_id"]},
             "top6": [_club_out(r) for r in clubs.head(cv.TOP_N).to_dict("records")],
@@ -151,6 +185,23 @@ def _base() -> dict:
             "orient": cv._rank_text(table), "clubs": int(len(table)), "gaps": gaps,
             "big_picture": cv.big_picture(rated, neutral, cur, prev, getattr(src, "picture", src.physical),
                                           src.label, getattr(src, "sections", None), phases=_phases(src, neutral))}
+
+
+def _spreads(rated, raws_cur, cur) -> dict:
+    """position -> {measure: standard deviation of the RAW values of League One's rated players
+    at that position this season} -- the yardstick for a gap's size in Gap closed (owner
+    2026-11-23, decision B)."""
+    keys = ["player_id", "competition_id", "season_id", "position_group"]
+    pool = rated.loc[(rated["season_id"] == cur) & (rated["competition_id"] == cv.LEAGUE_ONE), keys].drop_duplicates()
+    have = raws_cur.merge(pool, on=keys, how="inner") if raws_cur is not None and len(raws_cur) else None
+    out = {}
+    for grp in cv.GROUPS:
+        for pos in cv.positions_in(grp):
+            f = have[have["position_group"] == pos] if have is not None else None
+            out[pos] = {} if f is None or f.empty else {
+                m: float(pd.to_numeric(f[m], errors="coerce").std())
+                for m in cv.overall_weights(pos) if m in f.columns}
+    return out
 
 
 def _corr_groups(rated, pcts_cur, cur) -> dict:
@@ -214,11 +265,13 @@ def page_json(group=None, age=None, contract=None, strong=None, top6=None, cols=
     gaps = [cv.measure_against(g, None, None) for g in gaps]
     i = groups.index(sel)
     him = cv.compared_player(b["ours"], sel, vs)
-    profile = b["profiles"].get(sel, {})
+    # Gap closed works on RAW values (owner 2026-11-23); the shortfall lists stay percentiles
+    # (our player and the top-6 players are all League One)
+    profile = b["raw_profiles"].get(sel, {})
     if him is not None and gaps[i]["level"] is not None and him["player_id"] != gaps[i]["level"]["player_id"]:
         d = _detail(src, b["pcts_cur"], him, b["bar_rows"].get(sel, [])) if b["bar_rows"].get(sel) else None
         gaps[i] = cv.measure_against(gaps[i], him, d)
-        profile = d["profile"] if d else {}
+        profile = _raw_profile(src, b, him, d["profile"], sel) if d else {}
     row = gaps[i]
     level = row["level"]["rating"] if row["level"] else None
     # owner 2026-11-13: the metric columns -- the 3 biggest shortfalls, or the recruiter's own
@@ -238,9 +291,11 @@ def page_json(group=None, age=None, contract=None, strong=None, top6=None, cols=
     weights = cv.grouped_weights(cv.overall_weights(position), groups)
     rec = cv.recommendations(b["rated"], src.candidates(b["cur"]), b["cur"], sel, level, b["squad_ids"],
                              src.league_names(), age=age, contract=contract, pcts=src.pcts(b["cur"]),
+                             raws=b["raws"][b["cur"]],
                              tag_metrics=columns, label=wl, strong2=strong, bar=row["bar"]["median"],
                              top6_only=top6, gap=profile, weights=weights,
-                             score_metrics=columns if custom else None, strong_metrics=default, rank=rank)
+                             score_metrics=columns if custom else None, strong_metrics=default, rank=rank,
+                             spreads=b["spreads"].get(position, {}))
     rec["metric_options"] = [{"metric": m, "label": wl(m)} for m in options]
     rec["gap_closed"] = {"custom": custom,
                          "note": NO_SHORTFALL if custom and not set(columns) & set(profile) else None}
@@ -248,7 +303,7 @@ def page_json(group=None, age=None, contract=None, strong=None, top6=None, cols=
     for lg in rec["leagues"]:
         lg["example"] = cv.gap_example(sel, row["level"], row["bar"]["median"], profile, lg.pop("top_gap", None),
                                        weights, lg["league"], label=wl, metrics=columns if custom else None,
-                                       groups=groups)
+                                       groups=groups, spreads=b["spreads"].get(position, {}))
     watched = src.watched()
     for lg in rec["leagues"]:
         for r in lg["rows"]:
@@ -273,7 +328,7 @@ def page_json(group=None, age=None, contract=None, strong=None, top6=None, cols=
                         "ages": [{"key": k, "label": l} for k, l in AGE_BANDS],
                         "contracts": [k for k in S.CONTRACT_HORIZONS if k != "Any"]},
             "big_picture": b["big_picture"], "terms": cv.TERMS,
-            "own_league_note": cv.OWN_LEAGUE_NOTE, "league_one": cv.LEAGUE_ONE,
+            "league_one": cv.LEAGUE_ONE,
             "low_minutes": cv.LOW_MINUTES}
 
 
