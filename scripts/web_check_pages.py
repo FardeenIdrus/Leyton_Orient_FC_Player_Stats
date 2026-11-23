@@ -507,7 +507,7 @@ def card_game_performances(s, w):
         box.wait_for(state="visible", timeout=8000)
     except Exception:
         return s.note("card: game performances", skipped="no match data for this player here")
-    dots = s.page.locator("#gp svg circle").count()
+    dots = s.page.locator("#gp svg circle:not(.gp-hit)").count()
     pcts = s.page.locator("#gp svg .gp-pct").count()
     s.note("card: a % above every dot", None if dots and pcts == dots else f"{dots} dots, {pcts} %")
     s.note("card: Top / Average / Low counts", None if all(k in s.page.inner_text("#gp-counts") for k in ("Top", "Average", "Low"))
@@ -515,6 +515,29 @@ def card_game_performances(s, w):
     s.note("card: note says match totals", None if s.page.inner_text("#gp-note").startswith("Match totals, as in Impect (not scaled to 90).")
            else s.page.inner_text("#gp-note"))
     pct_text = "() => [...document.querySelectorAll('#gp svg .gp-pct')].map(t => t.textContent)"
+    # owner 2026-11-24: drawn at real size -- the same height at every width (and zoomed out),
+    # no overlapping labels, and a hover tip on every dot
+    for width in (1280, 1920, 2560):
+        s.page.set_viewport_size({"width": width, "height": 900})
+        s.page.wait_for_timeout(350)
+        h = s.page.evaluate("() => document.querySelector('#gp svg')?.getBoundingClientRect().height || 0")
+        s.note(f"card: game chart a fixed height @{width}", None if 0 < h <= 300 else f"{h:.0f}px")
+        clash = s.page.evaluate("""() => { const t = [...document.querySelectorAll('#gp svg .gp-opp')].map(e => e.getBoundingClientRect());
+            for (let i = 0; i < t.length; i++) for (let j = i + 1; j < t.length; j++) { const a = t[i], b = t[j];
+              if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) return [i, j]; }
+            return null; }""")
+        s.note(f"card: game chart labels do not overlap @{width}", None if not clash else str(clash))
+    s.page.set_viewport_size({"width": w, "height": 900})
+    s.page.wait_for_timeout(350)
+    hit = s.page.locator("#gp svg .gp-hit").first
+    hit.scroll_into_view_if_needed()
+    s.page.wait_for_timeout(200)
+    bb = hit.bounding_box()
+    s.page.mouse.move(bb["x"] + bb["width"] / 2 - 3, bb["y"] + bb["height"] / 2)
+    s.page.mouse.move(bb["x"] + bb["width"] / 2, bb["y"] + bb["height"] / 2)
+    s.page.wait_for_timeout(150)
+    tip = s.page.evaluate("() => { const t = document.querySelector('.tip'); return t && !t.hidden ? t.textContent : ''; }")
+    s.note("card: hovering a dot names the game", None if "better than" in tip and "min" in tip else repr(tip))
     before = s.page.evaluate(pct_text)
     s.step("card: Offensive", lambda p: p.locator('#gp-tabs [data-gp="offensive"]').click(timeout=3000))
     after = s.page.evaluate(pct_text)

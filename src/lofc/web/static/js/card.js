@@ -642,26 +642,37 @@ function drawGames() {
   box.hidden = false;
   $('gp-tabs').innerHTML = Object.entries(GP.labels).map(([k, l]) =>
     `<button type="button" data-gp="${k}" class="${k === gpScore ? 'on' : ''}" aria-pressed="${k === gpScore}">${esc(l)}</button>`).join('');
-  const g = GP.games, W = 760, H = 230, x0 = 80, x1 = W - 46, top = 30;
-  const y = p => top + (100 - p) * (H - top - 14) / 100;
+  // Drawn at the card's real width in pixels (owner 2026-11-24: a scaled drawing grew the text
+  // with the page, so the chart was huge on wide screens and when zoomed out). Fixed height and
+  // fixed text sizes; opponent names on two staggered rows when the games sit close together.
+  const g = GP.games, W = Math.max(520, Math.round($('gp').clientWidth || 760)), PH = 200;
+  const x0 = 78, x1 = W - 40, top = 26;
+  const y = p => top + (100 - p) * (PH - top - 8) / 100;
   const step = g.length > 1 ? (x1 - x0) / (g.length - 1) : 0;
-  let svg = `<svg viewBox="0 0 ${W} ${H + 44}" class="gp-svg" role="img" aria-label="Game performances">`
+  const rows = g.length > 1 && step < 96 ? 2 : 1;
+  const H = PH + (rows === 2 ? 58 : 44);
+  let svg = `<svg width="${W}" height="${H}" class="gp-svg" role="img" aria-label="Game performances">`
     + `<rect x="${x0 - 14}" y="${y(100)}" width="${x1 - x0 + 28}" height="${y(80) - y(100)}" class="gp-bt"/>`
     + `<rect x="${x0 - 14}" y="${y(20)}" width="${x1 - x0 + 28}" height="${y(0) - y(20)}" class="gp-bl"/>`
     + [80, 20].map(v => `<line x1="${x0 - 14}" x2="${x1 + 14}" y1="${y(v)}" y2="${y(v)}" class="gp-ln"/>`).join('')
     + `<text x="4" y="${y(90) + 4}" class="gp-lbl">Top</text><text x="4" y="${y(50) + 4}" class="gp-lbl">Average</text><text x="4" y="${y(10) + 4}" class="gp-lbl">Low</text>`;
   g.forEach((m, i) => {
     const x = g.length > 1 ? x0 + i * step : (x0 + x1) / 2, sc = m.scores[gpScore];
-    const lab = `<text x="${x}" y="${H + 10}" class="gp-opp" text-anchor="middle"><title>${esc((m.home ? 'v ' : '@ ') + m.opponent)}</title>${esc((m.home ? '' : '@ ') + shortClub(m.opponent))}</text>`
-      + `<text x="${x}" y="${H + 26}" class="gp-min" text-anchor="middle">${esc(m.date)} · ${m.minutes ?? '—'}'</text>`;
-    if (sc.pct == null) { svg += lab; return; }
+    const row = rows === 2 ? i % 2 : 0, ly = PH + 14 + row * 14;
+    const where = (m.home ? 'v ' : '@ ') + m.opponent;
+    const tip = `${where} · ${m.date} · ${m.minutes ?? '—'} min` + (sc.pct == null ? '' :
+      ` · better than ${sc.pct}% (${sc.level})` + (m.counted ? '' : ' · under 45 min, not counted'));
+    svg += `<text x="${x}" y="${ly}" class="gp-opp" text-anchor="middle" data-tip="${esc(where)}">${esc((m.home ? '' : '@ ') + shortClub(m.opponent))}</text>`
+      + `<text x="${x}" y="${PH + 14 + rows * 14}" class="gp-min" text-anchor="middle">${esc(m.date)}</text>`;
+    if (sc.pct == null) return;
     const cls = !m.counted ? 'gp-sub' : sc.level === 'Top' ? 'gp-t' : sc.level === 'Low' ? 'gp-l' : 'gp-a';
-    svg += `<circle cx="${x}" cy="${y(sc.pct)}" r="${m.counted ? 8 : 6}" class="${cls}"><title>${esc(m.opponent)} · ${m.minutes ?? '—'} min · better than ${sc.pct}%${m.counted ? '' : ' · under 45 min, not counted'}</title></circle>`
-      + `<text x="${x}" y="${y(sc.pct) - 13}" class="gp-pct" text-anchor="middle">${sc.pct}%</text>` + lab;
+    svg += `<text x="${x}" y="${y(sc.pct) - 12}" class="gp-pct" text-anchor="middle">${sc.pct}%</text>`
+      + `<circle cx="${x}" cy="${y(sc.pct)}" r="${m.counted ? 7 : 5.5}" class="${cls}"/>`
+      + `<circle cx="${x}" cy="${y(sc.pct)}" r="14" class="gp-hit" data-tip="${esc(tip)}" tabindex="0"/>`;
   });
   $('gp').innerHTML = svg + '</svg>';
   const c = GP.counts[gpScore];
-  $('gp-counts').innerHTML = `<span class="c t">${c.Top} Top</span><span class="c a">${c.Average} Average</span><span class="c l">${c.Low} Low</span><span class="note">last ${g.length} games</span>`;
+  $('gp-counts').innerHTML = `<span class="c t">${c.Top} Top</span><span class="c a">${c.Average} Average</span><span class="c l">${c.Low} Low</span><span class="note">last ${g.length} games · hover a dot for the game</span>`;
   $('gp-note').textContent = GP.note;
 }
 async function loadGames() {
@@ -753,3 +764,6 @@ document.addEventListener('click', e => {
   const b = e.target.closest('#gp-tabs [data-gp]'); if (!b) return;
   gpScore = b.dataset.gp; drawGames();
 });
+// redrawn at the new width (the chart is drawn in real pixels)
+let gpResize = null;
+addEventListener('resize', () => { clearTimeout(gpResize); gpResize = setTimeout(() => { if (GP) drawGames(); }, 150); });

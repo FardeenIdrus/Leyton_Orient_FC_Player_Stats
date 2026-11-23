@@ -261,4 +261,6 @@ def test_card_js_draws_game_performances_with_a_percent_on_every_dot():
     js = (root / "static" / "js" / "card.js").read_text()
     body = js[js.index("function drawGames"):js.index("async function loadGames")]
     assert 'class="gp-pct"' in body and "${sc.pct}%" in body and "gp-sub" in body
+    # owner 2026-11-24: real pixel size (no scaling viewBox), the site's own hover tip
+    assert "viewBox" not in body and "clientWidth" in body and 'data-tip="${esc(tip)}"' in body
     assert "/games" in js and 'id="c-games"' in (root / "templates" / "card.html").read_text()
