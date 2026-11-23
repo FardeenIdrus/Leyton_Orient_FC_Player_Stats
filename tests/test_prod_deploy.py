@@ -84,3 +84,17 @@ def test_deploy_restarts_itself_when_the_pull_changed_it():
 def test_switch_script_behaviour():
     r = subprocess.run(["bash", str(ROOT / "scripts" / "test_web_switch.sh")], capture_output=True, text=True)
     assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_deploy_stops_at_once_when_nothing_new_unless_forced():
+    """Owner 2026-11-23: a re-run with nothing new pushed stops straight away instead of a
+    10-minute rebuild + warm-up; `--force` still does the full sequence (repairing a
+    half-finished deploy)."""
+    text = (ROOT / "scripts" / "deploy.sh").read_text()
+    body = "\n".join(l for l in text.splitlines() if not l.strip().startswith("#"))
+    skip = body.index('if [ "$before" = "$after" ]')
+    build = body.index('docker compose -f "$COMPOSE_FILE" build')
+    assert skip < build                                   # decided before any build
+    block = body[skip:body.index("fi", skip)]
+    assert "--force" in block and "exit 0" in block
+    assert 'FORCE=0' in body and '"--force"' in body       # the flag is parsed

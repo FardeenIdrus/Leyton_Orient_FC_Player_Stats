@@ -82,7 +82,8 @@ Caddy routes `orient-matchanalysis.duckdns.org` to it (see `Caddyfile`). Our `.e
 |---|---|
 | `git pull --ff-only` | Nothing reaches the server by itself |
 | If the pull changed `deploy.sh`, re-run the new version once (`LOFC_DEPLOY_REEXEC` guard) | bash keeps reading the file it started with; on 2026-11-10 the old steps started Caddy without its upstream file and took every domain down for ~5–10 min |
-| `docker compose build` (always, even if the commit did not move) | The image bakes the code in; build first, restart second |
+| Nothing new pulled → stop at once (owner 2026-11-23); `deploy.sh --force` rebuilds anyway (repairs a deploy that stopped half-way) | An accidental re-run otherwise took ~10 minutes for nothing |
+| `docker compose build` | The image bakes the code in; build first, restart second |
 | Create `caddy/web_upstream.caddy` if missing (points at `web-blue:8600`) | Caddy must never start without it |
 | `up -d db app caddy` | Never a plain `up -d --build`, which would recreate the serving web container cold |
 | `alembic upgrade head` | A schema change is live the moment the code that needs it is |

@@ -14,10 +14,18 @@
 # sys.modules.) This script always rebuilds.
 #
 # Run ON THE SERVER:  /opt/lofc/scripts/deploy.sh
+#   --force   rebuild and switch even when nothing new was pulled (repairs a deploy that
+#             stopped half-way). Without it, a run with nothing new stops at once (owner
+#             2026-11-23: an accidental re-run took ~10 minutes for nothing).
 #
 # Exit codes: 0 deployed (or already current), 1 something failed -- read the output.
 
 set -euo pipefail
+
+FORCE=0
+for arg in "$@"; do
+    [ "$arg" = "--force" ] && FORCE=1
+done
 
 REPO_ROOT="${LOFC_REPO_ROOT:-/opt/lofc}"
 COMPOSE_FILE="${LOFC_COMPOSE_FILE:-$REPO_ROOT/docker-compose.prod.yml}"
@@ -33,7 +41,11 @@ git pull --ff-only
 
 after=$(git rev-parse --short HEAD)
 if [ "$before" = "$after" ]; then
-    say "already up to date at $after — rebuilding anyway, in case a previous deploy stopped short"
+    if [ "$FORCE" != 1 ]; then
+        say "already up to date at $after -- nothing new to deploy. (To rebuild anyway, e.g. after a deploy that stopped half-way: $0 --force)"
+        exit 0
+    fi
+    say "already up to date at $after -- rebuilding anyway (--force)"
 else
     say "updated: $before -> $after"
     git --no-pager log --oneline "$before..$after"
@@ -48,8 +60,8 @@ if [ -z "${LOFC_DEPLOY_REEXEC:-}" ] && ! git diff --quiet "$before" "$after" -- 
     LOFC_DEPLOY_REEXEC=1 exec "$REPO_ROOT/scripts/deploy.sh" "$@"
 fi
 
-# ALWAYS rebuild, even when the commit did not move: a half-finished earlier deploy is
-# exactly the state this script exists to recover from, and a no-op rebuild is cheap.
+# Rebuild whenever new code was pulled, or with --force when the commit did not move (a
+# half-finished earlier deploy is the state --force exists to recover from).
 # Build FIRST, restart second: the web containers are switched separately below, so a plain
 # `up -d --build` (which would recreate the serving web container cold) is never used.
 say "building images..."
