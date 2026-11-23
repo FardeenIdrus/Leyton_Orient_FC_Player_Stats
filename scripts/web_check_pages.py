@@ -508,6 +508,11 @@ def card_game_performances(s, w):
         box.wait_for(state="visible", timeout=8000)
     except Exception:
         return s.note("card: game performances", skipped="no match data for this player here")
+    # owner 2026-11-23: on first open the chart was drawn while the page was hidden (tiny)
+    s.page.wait_for_timeout(400)
+    fit = s.page.evaluate("() => { const b = document.querySelector('#gp'), v = b.querySelector('svg');"
+                          " return v ? [Math.round(v.getBoundingClientRect().width), b.clientWidth] : [0, b.clientWidth]; }")
+    s.note("card: game chart opens at the card's full width", None if fit[0] and abs(fit[0] - max(520, fit[1])) <= 2 else str(fit))
     rated = "#gp svg circle.gp-t, #gp svg circle.gp-a, #gp svg circle.gp-l"
     tabs = s.page.inner_text("#gp-tabs")
     s.note("card: Overall / Performance / Physical / Impect tabs",

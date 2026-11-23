@@ -637,7 +637,7 @@ const shortClub = n => { const t = String(n || '').replace(/\b(A?FC|Glasgow)\b/g
 // Top above 80 / Low below 20, as in Impect. Hollow dot = under 45 minutes (not counted).
 // Owner 2026-11-23 (N21): the club's own Overall / Performance / Physical per game beside
 // Impect's scores; click a game for every metric behind it; Excel holds every game.
-let GP = null, gpTab = 'overall', gpImp = 'impect', gpSel = null;
+let GP = null, gpTab = 'overall', gpImp = 'impect', gpSel = null, gpW = 0;
 const GP_TABS = [['overall', 'Overall'], ['performance', 'Performance'], ['physical', 'Physical'], ['impect', 'Impect']];
 const GP_IMP = [['impect', 'IMPECT'], ['offensive', 'Offensive'], ['defensive', 'Defensive']];
 const gpKey = () => gpTab === 'impect' ? gpImp : gpTab;
@@ -648,8 +648,10 @@ function drawGames() {
   if (!GP) { box.hidden = true; return; }
   box.hidden = false;
   if (!GP.has_club && gpClub(gpTab)) gpTab = 'impect';
-  const tabs = GP.has_club ? GP_TABS : [['impect', 'Impect']];
-  $('gp-tabs').innerHTML = tabs.map(([k, l]) =>
+  // With Impect's scores only, the one switch is IMPECT / Offensive / Defensive (owner
+  // 2026-11-23: an "Impect" tab above its own switch read as a duplicate).
+  $('gp-tabs').hidden = !GP.has_club;
+  $('gp-tabs').innerHTML = (GP.has_club ? GP_TABS : []).map(([k, l]) =>
     `<button type="button" data-gp="${k}" class="${k === gpTab ? 'on' : ''}" aria-pressed="${k === gpTab}">${esc(l)}</button>`).join('');
   $('gp-imp').hidden = gpTab !== 'impect';
   $('gp-imp').innerHTML = GP_IMP.map(([k, l]) =>
@@ -660,7 +662,12 @@ function drawGames() {
   // Drawn at the card's real width in pixels (owner 2026-11-24: a scaled drawing grew the text
   // with the page, so the chart was huge on wide screens and when zoomed out). Fixed height and
   // fixed text sizes; opponent names on two staggered rows when the games sit close together.
-  const g = GP.games, W = Math.max(520, Math.round($('gp').clientWidth || 760)), PH = 200;
+  // The box has no width while the page is still hidden (loading): draw nothing then -- the
+  // ResizeObserver below draws it the moment it gets its real width (owner 2026-11-23: it was
+  // drawn at a small fallback width and never redrawn).
+  const cw = Math.round($('gp').clientWidth);
+  gpW = cw;
+  const g = GP.games, W = Math.max(520, cw), PH = 200;
   const x0 = 78, x1 = W - 40, top = 26;
   const y = p => top + (100 - p) * (PH - top - 8) / 100;
   const step = g.length > 1 ? (x1 - x0) / (g.length - 1) : 0;
@@ -700,11 +707,11 @@ function drawGames() {
       + (m.match_id === gpSel ? `<circle cx="${x}" cy="${y(sc.pct)}" r="11" class="gp-ring"/>` : '')
       + `<circle cx="${x}" cy="${y(sc.pct)}" r="14" class="gp-hit" data-g="${m.match_id}" data-tip="${esc(tip)}" tabindex="0"/>`;
   });
-  $('gp').innerHTML = svg + '</svg>';
+  $('gp').innerHTML = cw ? svg + '</svg>' : '';
   const c = GP.counts[key];
   $('gp-counts').innerHTML = `<span class="c t">${c.Top} Top</span><span class="c a">${c.Average} Average</span><span class="c l">${c.Low} Low</span>`
     + (short ? `<span class="c s">${short} under 45 min</span>` : '')
-    + `<span class="note">last ${g.length} games${GP.has_club ? ' · click a dot for the game' : ' · hover a dot for the game'}</span>`;
+    + `<span class="note">last ${g.length} games · click a dot for the game</span>`;
   $('gp-sub').textContent = gpClub(key) ? `Club ${name.toLowerCase()} score per game` : `Impect ${name} per game`;
   $('gp-note').textContent = gpClub(key) ? GP.club_note : GP.note;
   drawGameDetail();
@@ -718,7 +725,7 @@ const gpRow = r => {
 };
 async function drawGameDetail() {
   const box = $('gd');
-  const m = GP && GP.has_club ? GP.games.find(x => x.match_id === gpSel) : null;
+  const m = GP ? GP.games.find(x => x.match_id === gpSel) : null;
   if (!m) { box.hidden = true; return; }
   box.hidden = false;
   const head = `${m.home ? 'v' : '@'} ${esc(m.opponent)} (${m.home ? 'H' : 'A'}) · ${esc(m.date)} · ${m.minutes ?? '—'} min · ${esc(m.position || '')}`;
@@ -735,6 +742,7 @@ async function drawGameDetail() {
       `<br>Offensive ${s.offensive.pct ?? '—'}% · Defensive ${s.defensive.pct ?? '—'}%`)
     + `</div><p class="note">Overall = Performance 65% + Physical 35%. Band 1–5 = 3 + (% − 50) ÷ 20.</p>`;
   if (!m.counted) h += `<p class="note">No rating: under 45 min. Values shown, not compared.</p>`;
+  if (!GP.has_club) { box.innerHTML = h + '<p class="note">Club scores for this game are not in yet.</p>'; return; }
   box.innerHTML = h + '<div id="gd-t" class="muted">Loading the game…</div>';
   let d = gpDetail.get(m.match_id);
   if (!d) {
@@ -844,12 +852,17 @@ document.addEventListener('click', e => {
   const t = e.target.closest('#gd [data-gt]');
   if (t) { gpTab = t.dataset.gt; drawGames(); return; }
   const d = e.target.closest('#gp [data-g]');
-  if (d && GP && GP.has_club) { gpSel = +d.dataset.g; drawGames(); }
+  if (d && GP) { gpSel = +d.dataset.g; drawGames(); }
 });
 document.addEventListener('keydown', e => {
   const d = e.target.closest && e.target.closest('#gp [data-g]');
-  if (d && GP && GP.has_club && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); gpSel = +d.dataset.g; drawGames(); }
+  if (d && GP && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); gpSel = +d.dataset.g; drawGames(); }
 });
 // redrawn at the new width (the chart is drawn in real pixels)
+// Redrawn whenever its box changes width: the page appearing after loading, a window resize,
+// zoom (the chart is drawn in real pixels).
 let gpResize = null;
-addEventListener('resize', () => { clearTimeout(gpResize); gpResize = setTimeout(() => { if (GP) drawGames(); }, 150); });
+new ResizeObserver(() => {
+  clearTimeout(gpResize);
+  gpResize = setTimeout(() => { const w = Math.round($('gp').clientWidth); if (GP && w && w !== gpW) drawGames(); }, 60);
+}).observe($('gp'));

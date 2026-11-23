@@ -308,3 +308,28 @@ def test_card_js_has_the_club_tabs_and_the_game_panel():
     assert "/games/${m.match_id}" in js and "games.xlsx" in js and "no rating: under 45 min" in js
     html = (root / "templates" / "card.html").read_text()
     assert 'id="gd"' in html and 'id="gp-imp"' in html and 'id="gp-xl"' in html
+
+
+def test_game_chart_redraws_when_its_box_gets_its_real_width():
+    """Owner 2026-11-23: the chart was drawn while the page was still hidden (width 0 -> a
+    small fallback) and never redrawn, so it opened tiny. It now follows its box's width."""
+    from pathlib import Path
+    import lofc.web
+    js = (Path(lofc.web.__file__).parent / "static" / "js" / "card.js").read_text()
+    assert "new ResizeObserver" in js and "observe($('gp'))" in js
+    body = js[js.index("function drawGames"):js.index("const gpRow")]
+    assert "clientWidth || 760" not in body                 # no silent fallback width
+
+
+def test_without_club_scores_one_switch_and_the_game_still_opens():
+    """Owner 2026-11-23: with Impect scores only, "Impect" sat above its own IMPECT / Offensive /
+    Defensive switch, and clicking a game did nothing. One switch; a click opens the game and
+    says the club scores are not in yet."""
+    from pathlib import Path
+    import lofc.web
+    js = (Path(lofc.web.__file__).parent / "static" / "js" / "card.js").read_text()
+    body = js[js.index("function drawGames"):js.index("const gpRow")]
+    assert "$('gp-tabs').hidden = !GP.has_club" in body
+    assert "Club scores for this game are not in yet." in js
+    click = js[js.index("document.addEventListener('click'"):]
+    assert "if (d && GP) {" in click

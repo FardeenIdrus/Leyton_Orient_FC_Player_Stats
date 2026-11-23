@@ -203,7 +203,7 @@ table.sim td.sim-why a{font-size:13px;white-space:nowrap}
 #gp-tabs button,#gp-imp button{font:inherit;font-size:13px;padding:5px 12px;border:0;background:#fff;cursor:pointer;color:var(--ink)}
 #gp-imp button{font-size:12px;padding:3px 10px}
 #gp-tabs button+button,#gp-imp button+button{border-left:1px solid #CDD1D7}#gp-tabs button.on,#gp-imp button.on{background:var(--ink);color:#fff}
-#gp-imp[hidden],#gp-xl[hidden]{display:none}
+#gp-tabs[hidden],#gp-imp[hidden],#gp-xl[hidden]{display:none}
 .gp-sel{fill:#E9ECF0}.gp-opp.on{font-weight:700}
 .gp-svg circle.gp-ring{fill:none;stroke:var(--ink);stroke-width:2;pointer-events:none}
 .gp-counts .s{background:var(--soft);color:var(--muted)}
