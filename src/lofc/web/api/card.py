@@ -126,6 +126,21 @@ async def squad_json(player_id: int, competition_id: int, season_id: int, reques
     return Response(body, media_type="application/json")
 
 
+@router.get("/api/card/{player_id}/{competition_id}/{season_id}/games")
+async def games_json(player_id: int, competition_id: int, season_id: int,
+                     user: WebUser = Depends(current_user)):
+    """"Game performances" (owner 2026-11-23, phase 4): his last games this season with each
+    game's IMPECT / Offensive / Defensive percentile and level (`core.game_performances`).
+    {"block": null} when there are none. Monitoring only."""
+    def build():
+        from lofc.core import game_performances as gp
+        from lofc.dashboard import loaders as L
+        return gp.block(gp.load(get_engine(), [player_id], season_id), L._competition_name_by_id())
+    data = await run_in_threadpool(build)
+    from lofc.core.card import clean
+    return JSONResponse({"block": clean(data) if data else None})
+
+
 @router.get("/api/card/{player_id}/{competition_id}/{season_id}/similar")
 async def similar_json(player_id: int, competition_id: int, season_id: int, request: Request,
                        user: WebUser = Depends(current_user)):

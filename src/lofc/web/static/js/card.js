@@ -629,12 +629,53 @@ function prefetchLenses() {
   urls.reduce((p, u) => p.then(() => fetch(u, {headers: {'X-LOFC-Prefetch': '1', 'Accept': 'application/json'},
     credentials: 'same-origin'}).then(r => r.text()).catch(() => {})), Promise.resolve());
 }
+// ---- game performances (owner 2026-11-23, phase 4) ----------------------------------------
+// a short club name under the dot (the full one on hover): no "FC", at most 11 characters
+const shortClub = n => { const t = String(n || '').replace(/\b(A?FC|Glasgow)\b/g, '').replace(/\s+/g, ' ').trim();
+  return t.length > 11 ? t.slice(0, 10).trim() + '…' : t; };
+// Each of his last games: better than X% of that position's games in his league (45+ minutes),
+// Top above 80 / Low below 20, as in Impect. Hollow dot = under 45 minutes (not counted).
+let GP = null, gpScore = 'impect';
+function drawGames() {
+  const box = $('c-games');
+  if (!GP) { box.hidden = true; return; }
+  box.hidden = false;
+  $('gp-tabs').innerHTML = Object.entries(GP.labels).map(([k, l]) =>
+    `<button type="button" data-gp="${k}" class="${k === gpScore ? 'on' : ''}" aria-pressed="${k === gpScore}">${esc(l)}</button>`).join('');
+  const g = GP.games, W = 760, H = 230, x0 = 80, x1 = W - 46, top = 30;
+  const y = p => top + (100 - p) * (H - top - 14) / 100;
+  const step = g.length > 1 ? (x1 - x0) / (g.length - 1) : 0;
+  let svg = `<svg viewBox="0 0 ${W} ${H + 44}" class="gp-svg" role="img" aria-label="Game performances">`
+    + `<rect x="${x0 - 14}" y="${y(100)}" width="${x1 - x0 + 28}" height="${y(80) - y(100)}" class="gp-bt"/>`
+    + `<rect x="${x0 - 14}" y="${y(20)}" width="${x1 - x0 + 28}" height="${y(0) - y(20)}" class="gp-bl"/>`
+    + [80, 20].map(v => `<line x1="${x0 - 14}" x2="${x1 + 14}" y1="${y(v)}" y2="${y(v)}" class="gp-ln"/>`).join('')
+    + `<text x="4" y="${y(90) + 4}" class="gp-lbl">Top</text><text x="4" y="${y(50) + 4}" class="gp-lbl">Average</text><text x="4" y="${y(10) + 4}" class="gp-lbl">Low</text>`;
+  g.forEach((m, i) => {
+    const x = g.length > 1 ? x0 + i * step : (x0 + x1) / 2, sc = m.scores[gpScore];
+    const lab = `<text x="${x}" y="${H + 10}" class="gp-opp" text-anchor="middle"><title>${esc((m.home ? 'v ' : '@ ') + m.opponent)}</title>${esc((m.home ? '' : '@ ') + shortClub(m.opponent))}</text>`
+      + `<text x="${x}" y="${H + 26}" class="gp-min" text-anchor="middle">${esc(m.date)} · ${m.minutes ?? '—'}'</text>`;
+    if (sc.pct == null) { svg += lab; return; }
+    const cls = !m.counted ? 'gp-sub' : sc.level === 'Top' ? 'gp-t' : sc.level === 'Low' ? 'gp-l' : 'gp-a';
+    svg += `<circle cx="${x}" cy="${y(sc.pct)}" r="${m.counted ? 8 : 6}" class="${cls}"><title>${esc(m.opponent)} · ${m.minutes ?? '—'} min · better than ${sc.pct}%${m.counted ? '' : ' · under 45 min, not counted'}</title></circle>`
+      + `<text x="${x}" y="${y(sc.pct) - 13}" class="gp-pct" text-anchor="middle">${sc.pct}%</text>` + lab;
+  });
+  $('gp').innerHTML = svg + '</svg>';
+  const c = GP.counts[gpScore];
+  $('gp-counts').innerHTML = `<span class="c t">${c.Top} Top</span><span class="c a">${c.Average} Average</span><span class="c l">${c.Low} Low</span><span class="note">last ${g.length} games</span>`;
+  $('gp-note').textContent = GP.note;
+}
+async function loadGames() {
+  try { GP = (await api(`/api/card/${KEY}/games`)).block; } catch { GP = null; }
+  drawGames();
+}
+
 async function loadCard({squad = true} = {}) {
   const mine = ++cardReq;
   const url = `/api/card/${KEY}${query({rank_as: state.rank_as, money: state.money})}`;
   // The squad section is its own request and needs nothing from the card's answer (the
   // server resolves the lens the same way), so both are asked for at once.
   if (squad) loadSquad();
+  if (squad) loadGames();
   try {
     const c = await api(url);
     if (mine !== cardReq) return;
@@ -707,3 +748,8 @@ function init() {
   loadCard();
 }
 init();
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('#gp-tabs [data-gp]'); if (!b) return;
+  gpScore = b.dataset.gp; drawGames();
+});

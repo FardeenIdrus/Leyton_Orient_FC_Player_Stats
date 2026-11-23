@@ -98,11 +98,11 @@ def test_group_rows_by_position_with_our_best_for_reference():
 
 
 def test_tiles():
-    rows = [dict(stage="Shortlisted", months_left=4, new_report=True),
-            dict(stage="Watching", months_left=None, new_report=False),
-            dict(stage="Dropped", months_left=2, new_report=True)]
+    rows = [dict(stage="Shortlisted", in_form=True, new_report=True),
+            dict(stage="Watching", in_form=False, new_report=False),
+            dict(stage="Dropped", in_form=True, new_report=True)]
     assert wp.tiles(rows) == [
         {"key": "active", "label": "On the list", "value": 2},
         {"key": "Shortlisted", "label": "Shortlisted", "value": 1},
-        {"key": "expiring", "label": "Contract ≤ 6 months", "value": 1},
+        {"key": "inform", "label": "In form (3+ Top in last 5)", "value": 1},   # owner 2026-11-23
         {"key": "newrep", "label": "New scout report (14 days)", "value": 1}]

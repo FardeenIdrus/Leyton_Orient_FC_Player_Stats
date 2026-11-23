@@ -497,6 +497,35 @@ CARD_PLAYERS = [
 ]
 
 
+def card_game_performances(s, w):
+    """Owner 2026-11-23 (phase 4): "Game performances" -- a % on every dot, IMPECT / Offensive /
+    Defensive switch, Top / Average / Low counts, the note saying these are match totals."""
+    path = "/player/18630/901/319"            # a Scottish Premiership winger with 14 games (local data)
+    s.goto(path, check=False)
+    box = s.page.locator("#c-games")
+    try:
+        box.wait_for(state="visible", timeout=8000)
+    except Exception:
+        return s.note("card: game performances", skipped="no match data for this player here")
+    dots = s.page.locator("#gp svg circle").count()
+    pcts = s.page.locator("#gp svg .gp-pct").count()
+    s.note("card: a % above every dot", None if dots and pcts == dots else f"{dots} dots, {pcts} %")
+    s.note("card: Top / Average / Low counts", None if all(k in s.page.inner_text("#gp-counts") for k in ("Top", "Average", "Low"))
+           else s.page.inner_text("#gp-counts"))
+    s.note("card: note says match totals", None if s.page.inner_text("#gp-note").startswith("Match totals, as in Impect (not scaled to 90).")
+           else s.page.inner_text("#gp-note"))
+    pct_text = "() => [...document.querySelectorAll('#gp svg .gp-pct')].map(t => t.textContent)"
+    before = s.page.evaluate(pct_text)
+    s.step("card: Offensive", lambda p: p.locator('#gp-tabs [data-gp="offensive"]').click(timeout=3000))
+    after = s.page.evaluate(pct_text)
+    s.note("card: switch redraws the dots", None if before != after else "same")
+    box.scroll_into_view_if_needed()
+    try:
+        box.screenshot(path=str(s.out / f"card_game_performances_{w}.png"))
+    except Exception:                                   # noqa: BLE001 -- screenshot only
+        pass
+
+
 def card_other_players(s, w):
     """Every case above loads clean: no console error, no None/nan, nothing past its card."""
     for label, path in CARD_PLAYERS:
@@ -2439,11 +2468,11 @@ def watchlist_first_view(s, w):
     if not _wl_ready(s):
         return s.note("watchlist: rows", skipped="watchlist empty in this database")
     tiles = s.page.locator("#wl-tiles .tile .k").all_inner_texts()
-    s.note("watchlist: four tiles", None if tiles == ["On the list", "Shortlisted", "Contract ≤ 6 months",
+    s.note("watchlist: four tiles", None if tiles == ["On the list", "Shortlisted", "In form (3+ Top in last 5)",
                                                       "New scout report (14 days)"] else str(tiles))
-    heads = s.page.locator("#wl-groups table.wl-t").first.locator("th").all_inner_texts()
-    s.note("watchlist: columns", None if heads == ["Player", "Overall", "Stage", "Scout verdict", "Next step",
-                                                   "Due", "Contract"] else str(heads))
+    heads = [h.replace("ⓘ", "").strip() for h in s.page.locator("#wl-groups table.wl-t").first.locator("th").all_inner_texts()]
+    s.note("watchlist: columns", None if heads == ["Player", "Overall", "Last 5", "Stage", "Scout verdict",
+                                                   "Next step", "Due"] else str(heads))
     body = s.page.inner_text("#v-watchlist")
     s.note("watchlist: no Market value, no assessment", None if "Market value" not in body
            and "Not yet assessed" not in body and "Assessed" not in body else "still shown")
@@ -2549,7 +2578,7 @@ def watchlist_download(s, w):
     href = s.page.locator("#wl-dl").get_attribute("href") or ""
     got = s.page.evaluate("(h) => fetch(h).then(r => r.text().then(t => [r.status, t.split('\\n')[0]]))", href)
     s.note("watchlist: CSV downloads with today's header",
-           None if got[0] == 200 and got[1].startswith("Player,Club,League,Position,Age,Overall,Stage,Scout verdict")
+           None if got[0] == 200 and got[1].startswith("Player,Club,League,Position,Age,Overall,Last 5,Stage,Scout verdict")
            and "Market value" not in got[1] else str(got))
 
 
@@ -3917,7 +3946,7 @@ PAGES = {
     "card": {"path": "/player/39154/5/318", "exercise": True, "scenarios": [
         card_no_assess, card_back_link, card_money_switch, card_rank_as, card_zones, card_squad_season,
         card_watchlist, card_radars, card_rated_tables, card_extra_tables, card_strengths_no_overlap,
-        card_other_players, card_similar]},
+        card_other_players, card_similar, card_game_performances]},
     "compare": {"path": "/compare?season=318&position=Winger", "exercise": True, "scenarios": [
         compare_three_players_every_width, compare_defaults_fill_the_url,
         compare_position_season_back_forward, compare_pick_from_pool_list,

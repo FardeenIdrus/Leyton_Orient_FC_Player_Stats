@@ -438,6 +438,24 @@ page orders, subtracts or colours "best" across leagues:
   decide): Physical squad Excel and band sort, Scout reports "Data agrees/disagrees", Watchlist
   and Scout reports rating sort.
 
+## 6e. Game performances (per-match Impect scores; owner 2026-11-23) — monitoring only
+
+Never part of a rating (register P11). Code: `ingest/impect_matches.py`, `core/game_performances.py`.
+
+| Step | Rule |
+|---|---|
+| Leagues | Championship, League One, League Two, National League, Premier League 2 — the season being played |
+| Data | Impect's per-match player scores: IMPECT, Offensive IMPECT and Defensive IMPECT (packing), **raw match totals** (Impect's default view, not scaled to 90; owner 2026-11-23). Positions summed; his position = the one played longest |
+| Percentile | Per score, per game: the share of the OTHER games of 45+ minutes at that position (our position groups) in that league season with a strictly lower score — "better than X%" |
+| Level | On the whole-number % shown: Top above 80, Low below 20, Average between (Impect's bands). A game under 45 minutes is shown hollow and not counted |
+| Player page | Last 10 games, % on every dot, IMPECT / Offensive / Defensive switch, Top / Average / Low counts |
+| Watchlist | "Last 5" = IMPECT % of his last five counted games, newest on the right; "In form" = Top in 3 or more of them |
+| Linking | Impect player ids → ours with the same linkage as every other Impect step; unlinked players kept with no player_id |
+
+*Check against Impect (23 Nov 2026):* Lyall Cameron (Dundee United, Scottish Premiership), the six
+games Impect's "Game performances" plots: our level matches Impect's on all six; the % differ by
+2–10 points (Impect does not publish its comparison pool).
+
 ## 7. Season shown
 
 The Players page **opens on the newest season held, the one being played (2026/27)**

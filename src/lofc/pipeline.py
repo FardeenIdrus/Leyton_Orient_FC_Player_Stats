@@ -102,6 +102,12 @@ def build_steps() -> list[tuple[str, list[str]]]:
     # landed averages files and the same linkage. No API call. DISPLAY ONLY (Squads & loans).
     steps.append(("Squad minutes: minutes per club (display only)",
                   [sys.executable, "-m", "lofc.model.squad_minutes"]))
+    # Per-match IMPECT / Offensive / Defensive for the English leagues (owner 2026-11-23): the
+    # fixture lists and only the matches not pulled yet (~55 calls a week). After the steps
+    # above: it reuses the same player linkage. MONITORING ONLY -- never scoring (P11).
+    if settings.impect_authenticated:
+        steps.append(("Match scores: per-match IMPECT, English leagues (monitoring only)",
+                      [sys.executable, "-m", "lofc.ingest.impect_matches"]))
 
     # 5. Transfermarkt market values (the valuation target).
     if comp_ids & set(LEAGUE_CODE):

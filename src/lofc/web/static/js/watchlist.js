@@ -19,7 +19,7 @@ const opt = (v, label, cur) => `<option value="${esc(v)}"${String(v) === String(
 function readSt() {
   const q = readState();
   st = {stage: q.stage || '', pos: q.pos || '', owner: q.owner || '', q: q.q || '', sugg: q.sugg === 'all' ? 'all' : '',
-        open: q.open || ''};
+        form: q.form === '1' ? '1' : '', open: q.open || ''};
 }
 
 function save(patch, {replace = true} = {}) {
@@ -32,8 +32,8 @@ function save(patch, {replace = true} = {}) {
 // ---- drawing ------------------------------------------------------------------------------
 function drawTiles() {
   $('wl-tiles').innerHTML = D.tiles.map(t => {
-    const on = (t.key === 'Shortlisted' && st.stage === 'Shortlisted');
-    const click = t.key === 'Shortlisted' || t.key === 'active';
+    const on = (t.key === 'Shortlisted' && st.stage === 'Shortlisted') || (t.key === 'inform' && st.form === '1');
+    const click = t.key === 'Shortlisted' || t.key === 'active' || t.key === 'inform';
     return `<div class="tile${on ? ' on' : ''}${click ? ' click' : ''}" data-tile="${esc(t.key)}"><div class="k">${esc(t.label)}</div><div class="v">${t.value}</div></div>`;
   }).join('');
 }
@@ -55,6 +55,7 @@ function drawSugg() {
 
 function rowMatches(r) {
   if (st.stage && r.stage !== st.stage) return false;
+  if (st.form === '1' && !r.in_form) return false;
   if (st.owner === 'none' ? r.owner_id != null : (st.owner && String(r.owner_id) !== st.owner)) return false;
   if (st.q && !`${r.name} ${r.club || ''}`.toLowerCase().includes(st.q.toLowerCase())) return false;
   return true;
@@ -87,16 +88,21 @@ function row(r) {
       <td class="pc"><span class="chev">${open ? '▾' : '▸'}</span>${r.href ? `<a class="plink" href="${href(r.href)}"><b>${esc(r.name)}</b></a>` : `<b>${esc(r.name)}</b>`}
         <div class="note">${esc(r.club || '—')}${lg(r)} · ${esc(r.position || '—')}${r.age != null ? ' · ' + r.age : ''}</div></td>
       <td class="c">${r.overall == null ? '<span class="note">—</span>' : chip(r.overall)}</td>
+      <td>${last5(r)}</td>
       <td>${stageSelect(r)}</td>
       <td>${verdict(r.verdict)}</td>
       <td class="nx">${r.next_step ? esc(r.next_step) : '<span class="note">—</span>'}<div class="note">${esc(r.owner || '')}</div></td>
-      <td class="${r.overdue ? 'due over' : 'due'}">${esc(r.due_text || '—')}</td>
-      <td class="note">${esc(r.contract || '—')}</td></tr>` + (open ? detail(r) : '');
+      <td class="${r.overdue ? 'due over' : 'due'}">${esc(r.due_text || '—')}</td></tr>` + (open ? detail(r) : '');
 }
 
 // the same fixed columns in every group, so the groups line up under each other
-const COLS = '<colgroup><col class="c-pl"><col class="c-ov"><col class="c-st"><col class="c-vd"><col class="c-nx"><col class="c-du"><col class="c-co"></colgroup>';
-const HEAD = COLS + '<thead><tr><th>Player</th><th class="c">Overall</th><th>Stage</th><th>Scout verdict</th><th>Next step</th><th>Due</th><th>Contract</th></tr></thead>';
+const COLS = '<colgroup><col class="c-pl"><col class="c-ov"><col class="c-l5"><col class="c-st"><col class="c-vd"><col class="c-nx"><col class="c-du"></colgroup>';
+const HEAD = COLS + '<thead><tr><th>Player</th><th class="c">Overall</th><th title="IMPECT, better than X% of his position\'s games in his league; newest on the right">Last 5</th><th>Stage</th><th>Scout verdict</th><th>Next step</th><th>Due</th></tr></thead>';
+// Last 5: each game's IMPECT percentile, coloured by level (phase 4)
+const LCLS = {Top: 't', Average: 'a', Low: 'l'};
+const last5 = r => r.last5 && r.last5.length
+  ? `<span class="l5">${r.last5.map((p, i) => `<b class="${LCLS[r.last5_levels[i]] || ''}">${p}</b>`).join('<i>·</i>')}</span>`
+  : '<span class="note">—</span>';
 
 function drawList() {
   const groups = D.groups.filter(g => !st.pos || g.group === st.pos)
@@ -170,7 +176,8 @@ function bind() {
     const t = e.target.closest('[data-tile]'); if (!t) return;
     const key = t.dataset.tile;
     if (key === 'Shortlisted') save({stage: st.stage === 'Shortlisted' ? '' : 'Shortlisted'}, {replace: false});
-    else if (key === 'active') save({stage: ''}, {replace: false});
+    else if (key === 'inform') save({form: st.form === '1' ? '' : '1'}, {replace: false});
+    else if (key === 'active') save({stage: '', form: ''}, {replace: false});
     else return;
     draw();
   });

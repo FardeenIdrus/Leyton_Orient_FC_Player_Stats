@@ -297,13 +297,12 @@ def group_rows(rows: list[dict], our_best: dict) -> tuple[list[dict], list[dict]
 
 
 def tiles(rows: list[dict]) -> list[dict]:
-    """On the list (active) · Shortlisted · Contract ≤ 6 months · New scout report (14 days)."""
+    """On the list (active) · Shortlisted · In form (3+ Top in his last 5 games; owner 2026-11-23,
+    phase 4 -- it replaced "Contract ≤ 6 months") · New scout report (14 days)."""
     active = [r for r in rows if r.get("stage") not in CLOSED]
-    m = lambda r: r.get("months_left")                     # noqa: E731
     return [
         {"key": "active", "label": "On the list", "value": len(active)},
         {"key": "Shortlisted", "label": "Shortlisted", "value": sum(r.get("stage") == "Shortlisted" for r in active)},
-        {"key": "expiring", "label": "Contract ≤ 6 months",
-         "value": sum(m(r) is not None and not pd.isna(m(r)) and 0 <= m(r) < EXPIRING_MONTHS for r in active)},
+        {"key": "inform", "label": "In form (3+ Top in last 5)", "value": sum(bool(r.get("in_form")) for r in active)},
         {"key": "newrep", "label": "New scout report (14 days)", "value": sum(bool(r.get("new_report")) for r in active)},
     ]

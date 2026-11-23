@@ -26,7 +26,9 @@ table.wl-t th.n,table.wl-t td.n{text-align:right}
 table.wl-t th.c,table.wl-t td.c{text-align:center}
 /* the list's groups share one fixed column grid */
 #wl-groups table.wl-t,#wl-closed table.wl-t{table-layout:fixed}
-.c-pl{width:27%}.c-ov{width:8%}.c-st{width:16%}.c-vd{width:13%}.c-nx{width:18%}.c-du{width:8%}.c-co{width:10%}
+.c-pl{width:25%}.c-ov{width:8%}.c-l5{width:15%}.c-st{width:15%}.c-vd{width:12%}.c-nx{width:17%}.c-du{width:8%}
+.l5{font-variant-numeric:tabular-nums;white-space:nowrap}.l5 b{font-size:13px}.l5 i{color:var(--mid);font-style:normal;margin:0 3px}
+.l5 .t{color:var(--hi)}.l5 .a{color:#9A7B00}.l5 .l{color:var(--lo)}
 #wl-groups td,#wl-closed td{overflow:hidden;text-overflow:ellipsis}
 #wl-groups td .note{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 table.wl-t td.pc{min-width:0}

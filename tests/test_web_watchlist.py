@@ -67,6 +67,14 @@ def _live():
                         index=pd.Index([1, 2, 3], name="player_id"))
 
 
+def _games():
+    """Player 1's six games this season (phase 4): the last five counted -> 85 · 90 · 50 · 95 · 81."""
+    d = pd.date_range("2026-10-01", periods=7, freq="7D")
+    return pd.DataFrame({"player_id": 1, "match_id": range(7), "scheduled_at": d,
+                         "minutes": [90, 90, 90, 90, 90, 20, 90],
+                         "impect_pct": [10, 85, 90, 50, 95, 99, 81.2]})
+
+
 def _reports():
     return pd.DataFrame([
         dict(id=10, player_id=1, verdict="Sign", scout="Scout A", fixture_date="2026-11-15", submitted_at="2026-11-16",
@@ -87,7 +95,8 @@ def fake(monkeypatch, db):
         names={5: "League Two", 901: "Scottish Premiership"}, openable={(1, 5, 319), (3, 5, 319)}, now=NOW,
         live_rows=_live, current_clubs=lambda: pd.DataFrame({"player_id": [1], "current_club": ["Gills"]}),
         reports=_reports, users=lambda: [{"id": 1, "name": "Ann Scout"}, {"id": 7, "name": "Head of Rec"}],
-        our_best=lambda: {"Winger": {"name": "Yusuf Akhamrich", "rating": 3.10}})
+        our_best=lambda: {"Winger": {"name": "Yusuf Akhamrich", "rating": 3.10}},
+        games=lambda ids, season: _games())
     monkeypatch.setattr(api, "_sources", lambda: src)
     monkeypatch.setattr(card_api, "_watchlist", lambda: store)
     monkeypatch.setattr(card_api, "get_engine", lambda: db)
@@ -113,7 +122,9 @@ def test_page_shell_is_the_new_layout(fake):
 def test_groups_tiles_our_best_and_rows(fake):
     d = _client().get("/api/watchlist").json()
     assert d["stages"] == store.STAGES and d["users"][1] == {"id": 7, "name": "Head of Rec"}
-    assert [t["value"] for t in d["tiles"]] == [2, 1, 1, 1]          # Al: contract Mar 2027 (3 months)
+    assert [t["label"] for t in d["tiles"]] == ["On the list", "Shortlisted", "In form (3+ Top in last 5)",
+                                                "New scout report (14 days)"]
+    assert [t["value"] for t in d["tiles"]] == [2, 1, 1, 1]          # Al: 4 Top in his last 5
     groups = {g["group"]: g for g in d["groups"]}
     assert list(groups) == ["Midfield", "Winger"]
     assert groups["Winger"]["our_best"] == {"name": "Yusuf Akhamrich", "rating": 3.10, "league": "L1"}
@@ -121,6 +132,9 @@ def test_groups_tiles_our_best_and_rows(fake):
     assert (al["name"], al["club"], al["league"], al["overall"], al["stage"], al["verdict"]) == \
         ("Al <One>", "Gills", "League Two", 3.41, "Watching", "Sign")
     assert al["href"] == "/player/1/5/319" and al["new_report"] is True
+    # phase 4: his last five counted games (20 minutes not counted), newest last
+    assert al["last5"] == [85, 90, 50, 95, 81] and al["in_form"] is True
+    assert al["last5_levels"] == ["Top", "Top", "Average", "Top", "Top"]
     bo = groups["Midfield"]["rows"][0]
     assert bo["overall"] is None and bo["href"] is None and bo["stage"] == "Shortlisted"
 
@@ -214,3 +228,4 @@ def test_page_script_saves_as_you_go_and_keeps_filters_in_the_url():
     assert "'/api/watchlist/' + p" in js and "/api/watchlist/suggestions/" in js
     assert "Reason (optional)" in js and "data-field=\"drop_reason\"" in js
     assert "Market value" not in js
+    assert "Last 5" in js and ">Contract<" not in js                  # owner 2026-11-23: Contract column dropped

@@ -194,3 +194,19 @@ table.sim td.sim-why a{font-size:13px;white-space:nowrap}
 #c-squad .sq-phase button{font:inherit;font-size:12.5px;font-weight:500;padding:3px 10px;border:0;background:#fff;color:var(--ink);cursor:pointer;text-transform:none;letter-spacing:0}
 #c-squad .sq-phase button+button{border-left:1px solid #CDD1D7}
 #c-squad .sq-phase button.on{background:var(--ink);color:#fff}
+
+/* Game performances (owner 2026-11-23): % on every dot, Top / Average / Low as in Impect */
+#c-games{margin-top:14px}
+.gp-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+#gp-tabs{display:inline-flex;border:1px solid #CDD1D7;border-radius:8px;overflow:hidden}
+#gp-tabs button{font:inherit;font-size:13px;padding:5px 12px;border:0;background:#fff;cursor:pointer;color:var(--ink)}
+#gp-tabs button+button{border-left:1px solid #CDD1D7}#gp-tabs button.on{background:var(--ink);color:#fff}
+.gp-svg{width:100%;height:auto;display:block;margin-top:6px}
+.gp-bt{fill:#EEF7F1}.gp-bl{fill:#FCEFEE}.gp-ln{stroke:#9AA0A8;stroke-dasharray:4 3}
+.gp-lbl{font-size:12px;fill:var(--muted);font-weight:600}.gp-opp{font-size:11px;fill:var(--ink)}.gp-min{font-size:10.5px;fill:var(--muted)}
+.gp-pct{font-size:11.5px;font-weight:700;fill:var(--ink)}
+.gp-svg circle{stroke:#fff;stroke-width:2;cursor:help}.gp-t{fill:var(--hi)}.gp-a{fill:#C9A227}.gp-l{fill:var(--lo)}
+.gp-sub{fill:#fff;stroke:#9AA0A8!important;stroke-width:2}
+.gp-counts{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px}
+.gp-counts .c{font-weight:700;font-size:13px;border-radius:5px;padding:2px 8px}
+.gp-counts .t{background:#E7F2EC;color:var(--hi)}.gp-counts .a{background:#F6EFD9;color:#7A5B00}.gp-counts .l{background:#FBEAE9;color:var(--lo)}

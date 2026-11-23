@@ -1395,6 +1395,11 @@ with "no sideways scrolling" in the same sentence — ask what he means. Not bui
   not in the feed. Top speed stays PSV-99 Top 5.
 - Full dated notes: "2.36 front-end notes" at the end of this work log.
 
+### 2026-11-23 (night) — per-match Impect scores; Game performances; Watchlist Last 5 (built locally, not deployed)
+- Migration f3a9d2c6b814. `ingest/impect_matches.py`: one call per league for the fixtures, one per played match not pulled yet (or recalculated since); scores IMPECT_SCORE_PACKING / OFFENSIVE_… / DEFENSIVE_…; raw match totals (owner A); percentile = share of the other 45+ minute games at that position in that league season strictly lower; level on the whole number shown. Linking via `position_shares._linked_ids`. Pipeline step "Match scores". Mac: Scottish Premiership 2026/27 pulled for the check only (81 calls; local rows).
+- Check vs Impect's own chart (owner's screenshot, Lyall Cameron): levels 6/6, % within 2–10 points.
+- `core/game_performances.py`; card endpoint `/api/card/…/games` + section; Watchlist Last 5 / In form (Contract column dropped, owner).
+
 ### 2026-11-23 (evening) — Watchlist redesign; old Streamlit site retired (built locally, not deployed)
 - Migration e7b2c4d9f031 (nullable columns + watchlist_dismissed; statuses renamed; no rows merged or deleted). `store.watchlist`: one entry per player (`load` keeps each player's latest row; `add` refuses a player already on the list; `update` edits the latest row and stamps stage / note changes; `remove` takes every row of the player); `dismiss` / `dismissed_report_ids`.
 - `core.watchlist_page`: latest_reports, suggestions (latest verdict Sign / Monitor Priority, not watched, not dismissed; 30 days default — 187 players qualified on the Mac copy, 45 in 30 days), changes (scout report after he was added, rating ±0.10 vs the snapshot, club move, injured now, contract < 6 months), group_rows (our best from the Club vs League One level, L1, reference only), tiles. API and page rewritten; Market value switch removed; card's Add records the user and a snapshot.

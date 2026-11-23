@@ -1130,3 +1130,51 @@ class ImpectDefinition(Base):
     context_name: Mapped[str | None] = mapped_column(String, nullable=True)
     context_label: Mapped[str | None] = mapped_column(String, nullable=True)
     context_definition: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+
+class ImpectMatch(Base):
+    """One Impect fixture (played or not) in a league season (owner 2026-11-23, phase 4).
+    Filled by `lofc.ingest.impect_matches`. Display / monitoring only."""
+
+    __tablename__ = "impect_matches"
+
+    match_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    iteration_id: Mapped[int] = mapped_column(Integer)
+    competition_id: Mapped[int] = mapped_column(Integer, index=True)
+    season_id: Mapped[int] = mapped_column(Integer)
+    scheduled_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    home_squad_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    away_squad_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    home_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    away_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    home_goals: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    away_goals: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    available: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    last_calculated_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    scores_pulled_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class PlayerMatchScore(Base):
+    """A player's IMPECT, Offensive and Defensive IMPECT in one match -- raw match totals (owner
+    2026-11-23: Impect's default view) -- and each game's percentile within league + season +
+    position over games of 45+ minutes. MONITORING ONLY: never read by scoring (P11)."""
+
+    __tablename__ = "player_match_scores"
+    __table_args__ = (UniqueConstraint("match_id", "impect_player_id", name="uq_player_match_scores"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    match_id: Mapped[int] = mapped_column(Integer)
+    impect_player_id: Mapped[int] = mapped_column(Integer)
+    player_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    competition_id: Mapped[int] = mapped_column(Integer)
+    season_id: Mapped[int] = mapped_column(Integer)
+    squad_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    position_group: Mapped[str | None] = mapped_column(String, nullable=True)
+    minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
+    impect: Mapped[float | None] = mapped_column(Float, nullable=True)
+    offensive: Mapped[float | None] = mapped_column(Float, nullable=True)
+    defensive: Mapped[float | None] = mapped_column(Float, nullable=True)
+    impect_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    offensive_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    defensive_pct: Mapped[float | None] = mapped_column(Float, nullable=True)

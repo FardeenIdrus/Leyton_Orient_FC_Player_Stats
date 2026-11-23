@@ -236,3 +236,29 @@ def test_card_js_switches_the_matrix_physical_rows_by_phase():
     bind = js[js.index("function bindSquad"):]
     assert "button[data-phase]" in bind[:600] and "showPhase(" in bind[:600]
     assert "innerHTML" not in js[js.index("function showPhase"):js.index("function bindSquad")]
+
+
+def test_games_endpoint_returns_the_block_or_null(fake, monkeypatch):
+    """Owner 2026-11-23 (phase 4): /games -> his last games with % and level; null without any."""
+    import pandas as pd
+    from lofc.core import game_performances as gp
+    rows = pd.DataFrame({"match_id": [1], "scheduled_at": [pd.Timestamp("2026-11-21")], "squad_id": [10],
+                         "home_squad_id": [10], "home_name": ["Orient"], "away_name": ["Bolton"], "competition_id": [4],
+                         "position_group": ["Winger"], "minutes": [90.0], "impect": [1.2], "offensive": [1.0],
+                         "defensive": [0.2], "impect_pct": [91.4], "offensive_pct": [50.0], "defensive_pct": [10.0]})
+    monkeypatch.setattr(gp, "load", lambda engine, ids, season: rows)
+    b = _client().get(KEY + "/games").json()["block"]
+    assert b["games"][0]["opponent"] == "Bolton" and b["games"][0]["scores"]["impect"] == {"pct": 91, "level": "Top"}
+    assert b["counts"]["defensive"] == {"Top": 0, "Average": 0, "Low": 1}
+    monkeypatch.setattr(gp, "load", lambda engine, ids, season: rows.head(0))
+    assert _client().get(KEY + "/games").json() == {"block": None}
+
+
+def test_card_js_draws_game_performances_with_a_percent_on_every_dot():
+    from pathlib import Path
+    import lofc.web
+    root = Path(lofc.web.__file__).parent
+    js = (root / "static" / "js" / "card.js").read_text()
+    body = js[js.index("function drawGames"):js.index("async function loadGames")]
+    assert 'class="gp-pct"' in body and "${sc.pct}%" in body and "gp-sub" in body
+    assert "/games" in js and 'id="c-games"' in (root / "templates" / "card.html").read_text()

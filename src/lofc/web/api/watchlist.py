@@ -80,7 +80,18 @@ def _sources():
         injuries_for=L.load_injuries_for_players, scorecards_for=_season_scorecards,
         names=L._competition_name_by_id(), openable=Openable(), now=None,
         live_rows=lambda: squad.rated_rows(settings.live_season_id),
-        current_clubs=L.load_current_clubs, reports=reports, users=people, our_best=_our_best)
+        current_clubs=L.load_current_clubs, reports=reports, users=people, our_best=_our_best,
+        games=lambda ids, season: _games(ids, season))
+
+
+def _games(ids, season):
+    """His game rows this season (phase 4: per-match Impect scores), for Last 5 and In form."""
+    from lofc.core import game_performances as gp
+    from lofc.dashboard import loaders as L
+    try:
+        return gp.load(L.get_engine(), ids, season)
+    except Exception:                                           # noqa: BLE001 -- table not there yet
+        return pd.DataFrame()
 
 
 def _num(v):
@@ -141,6 +152,8 @@ def build(sugg_all: bool = False) -> dict:
                             current_form=src.current_form, injuries_for=src.injuries_for,
                             scorecards_for=src.scorecards_for, now=src.now)
     df = wp.apply_pool_floor(df, wp.thin_sizes(df, src.scorecards_for))
+    from lofc.core import game_performances as gp
+    games = src.games([int(p) for p in df["player_id"]], int(src.live_season_id)) if src.live_season_id else pd.DataFrame()
     rows, now_rows = [], {}
     for r in df.to_dict("records"):
         pid = int(r["player_id"])
@@ -158,8 +171,10 @@ def build(sugg_all: bool = False) -> dict:
         note_by = r.get("note_updated_by")
         note_at = pd.to_datetime(r.get("note_updated_at"), errors="coerce")
         owner = None if pd.isna(r.get("owner_user_id")) else int(r["owner_user_id"])
+        last5 = gp.last_five(games[games["player_id"] == pid]) if len(games) else []
         rows.append({
             "player_id": pid, "name": r["player_name"], "club": cur_club.get(pid) or club,
+            "last5": last5, "last5_levels": [gp.level(p) for p in last5], "in_form": gp.in_form(last5),
             "league": league, "league_abbr": _abbr(league), "position": pos,
             "age": None if pd.isna(r.get("age")) else int(r["age"]), "overall": overall,
             "stage": r["status"] if r["status"] in src.store.STAGES else src.store.OLD_TO_NEW.get(r["status"], "Watching"),
@@ -198,7 +213,7 @@ async def watchlist_json(request: Request, user: WebUser = Depends(current_user)
     return JSONResponse(data)
 
 
-CSV_COLUMNS = ["Player", "Club", "League", "Position", "Age", "Overall", "Stage", "Scout verdict",
+CSV_COLUMNS = ["Player", "Club", "League", "Position", "Age", "Overall", "Last 5", "Stage", "Scout verdict",
                "Next step", "Owner", "Due", "Contract", "Drop reason", "Note", "Added"]
 
 
@@ -210,7 +225,8 @@ async def watchlist_csv(request: Request, user: WebUser = Depends(current_user))
         if not rows:
             return None
         f = pd.DataFrame([[r["name"], r["club"], r["league"], r["position"], r["age"],
-                           None if r["overall"] is None else f"{r['overall']:.2f}", r["stage"], r["verdict"],
+                           None if r["overall"] is None else f"{r['overall']:.2f}",
+                           " · ".join(str(p) for p in r["last5"]) or None, r["stage"], r["verdict"],
                            r["next_step"], r["owner"], r["due"], r["contract"], r["drop_reason"] or None,
                            r["note"] or None, r["added"]] for r in rows], columns=CSV_COLUMNS)
         return f.fillna(DASH)
