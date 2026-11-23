@@ -182,3 +182,128 @@ def apply_pool_floor(df: pd.DataFrame, thin: pd.Series) -> pd.DataFrame:
     for c in RATING_COLUMNS:
         out[c] = pd.to_numeric(out[c], errors="coerce").mask(mask)
     return out
+
+
+# ================= Watchlist redesign (owner 2026-11-23) =========================================
+# One shared list, one entry per player; grouped by position with our best (League One) shown
+# for reference only -- a watched player's Overall is rated in his own league, never compared
+# with ours. Pure functions over plain frames: the web API passes the data in.
+SUGGEST_VERDICTS = ("Sign", "Monitor Priority")
+CHANGES_MAX = 12
+EMPTY_REDESIGN = "No players on the watchlist yet. Add one from his player page, or from the suggestions above."
+SUGGEST_DAYS = 30
+NEW_REPORT_DAYS = 14
+RATING_STEP = 0.10                      # a rating move smaller than this is not a change
+EXPIRING_MONTHS = 6
+GROUP_ORDER = ["Goalkeeper", "Centre Back", "Full Back", "Midfield", "Winger", "Centre Forward", "Other"]
+GROUP_LABEL = {"Midfield": "Midfielders", "Other": "Other"}
+CLOSED = ("Signed", "Dropped")
+
+
+def _report_date(r) -> pd.Timestamp:
+    d = pd.to_datetime(r.get("fixture_date"), errors="coerce")
+    return d if pd.notna(d) else pd.to_datetime(r.get("submitted_at"), errors="coerce")
+
+
+def _short_date(d) -> str:
+    return "" if d is None or pd.isna(d) else pd.Timestamp(d).strftime("%-d %b")
+
+
+def latest_reports(reports: pd.DataFrame) -> pd.DataFrame:
+    """Each matched player's latest live scout report (by match date, then when submitted),
+    indexed by player_id. Reports gone from the sheet (`missing_since`) are left out."""
+    if reports is None or reports.empty:
+        return pd.DataFrame(columns=["id", "verdict", "scout", "date"]).rename_axis("player_id")
+    f = reports[reports["player_id"].notna() & reports["missing_since"].isna()].copy()
+    f["date"] = [_report_date(r) for r in f.to_dict("records")]
+    f["_sub"] = pd.to_datetime(f["submitted_at"], errors="coerce")
+    f = f.sort_values(["date", "_sub", "id"], kind="stable")
+    f["player_id"] = f["player_id"].astype("int64")
+    return f.groupby("player_id").tail(1).set_index("player_id").drop(columns="_sub")
+
+
+def suggestions(latest: pd.DataFrame, watched: set, dismissed: set, now, days: int | None = SUGGEST_DAYS) -> list[dict]:
+    """"Suggested from scout reports": players whose LATEST report is Sign or Monitor Priority,
+    not on the list, report not dismissed; within `days` of `now` (None = all). Newest first."""
+    now = pd.Timestamp(now)
+    out = []
+    for pid, r in latest.iterrows():
+        if r["verdict"] not in SUGGEST_VERDICTS or int(pid) in watched or int(r["id"]) in dismissed:
+            continue
+        if days is not None and (pd.isna(r["date"]) or r["date"] < now - pd.Timedelta(days=days)):
+            continue
+        out.append({"report_id": int(r["id"]), "player_id": int(pid), "verdict": r["verdict"],
+                    "date": r["date"], "report": f"{r['scout']} · {_short_date(r['date'])}",
+                    "name": r.get("player_name"), "club": r.get("club_name")})
+    out.sort(key=lambda x: (x["date"] if pd.notna(x["date"]) else pd.Timestamp.min), reverse=True)
+    return out
+
+
+def changes(rows: pd.DataFrame, now_rows: dict, latest: pd.DataFrame, reports: pd.DataFrame, now) -> list[dict]:
+    """"What changed since added", per watched player (`rows`: player_id, player_name,
+    created_at, added_rating, added_club, months_left, injury_status; `now_rows`: player_id ->
+    {"rating", "club"} today). Kinds, in this order per player: a scout report after he was
+    added (the latest), rating moved by RATING_STEP or more (vs when added), club moved,
+    injured now, contract under EXPIRING_MONTHS. Unknown snapshots are skipped, never guessed."""
+    out = []
+    for r in rows.to_dict("records"):
+        pid, name = int(r["player_id"]), r.get("player_name")
+        added = pd.to_datetime(r.get("created_at"), errors="coerce")
+        cur = now_rows.get(pid) or {}
+        if pid in latest.index:
+            rep = latest.loc[pid]
+            if pd.notna(added) and pd.notna(rep["date"]) and rep["date"] >= added.normalize():
+                out.append({"player_id": pid, "name": name, "kind": "report", "date": rep["date"],
+                            "verdict": rep["verdict"],
+                            "text": f"new scout report: {rep['verdict']} ({rep['scout']}, {_short_date(rep['date'])})"})
+        a, b = r.get("added_rating"), cur.get("rating")
+        if a is not None and b is not None and not pd.isna(a) and not pd.isna(b) \
+                and abs(float(b) - float(a)) >= RATING_STEP - 1e-9:
+            out.append({"player_id": pid, "name": name, "kind": "rating", "dir": "up" if b > a else "dn",
+                        "text": f"rating {float(a):.2f} → {float(b):.2f}"})
+        a, b = r.get("added_club"), cur.get("club")
+        if isinstance(a, str) and isinstance(b, str) and a and b and a != b:
+            out.append({"player_id": pid, "name": name, "kind": "club", "text": f"moved: {a} → {b}"})
+        inj = r.get("injury_status")
+        if isinstance(inj, str) and inj.lower().startswith("currently injured"):
+            out.append({"player_id": pid, "name": name, "kind": "injury", "text": inj})
+        m = r.get("months_left")
+        if m is not None and not pd.isna(m) and 0 <= float(m) < EXPIRING_MONTHS:
+            out.append({"player_id": pid, "name": name, "kind": "contract",
+                        "text": f"contract ends in {int(m)} month{'s' if int(m) != 1 else ''}"})
+    return out
+
+
+def group_of(position) -> str:
+    from lofc.core.club_vs_league import group_of as g
+    return g(position) if isinstance(position, str) and position else "Other"
+
+
+def group_rows(rows: list[dict], our_best: dict) -> tuple[list[dict], list[dict]]:
+    """(groups, closed): active players by position group (GROUP_ORDER), each group with our
+    best player there (League One) for reference only; Signed / Dropped apart."""
+    closed = [r for r in rows if r.get("stage") in CLOSED]
+    active = [r for r in rows if r.get("stage") not in CLOSED]
+    groups = []
+    for g in GROUP_ORDER:
+        mine = [r for r in active if group_of(r.get("position")) == g]
+        if not mine:
+            continue
+        best = our_best.get(g)
+        groups.append({"group": g, "label": GROUP_LABEL.get(g, g + "s"), "rows": mine,
+                       "our_best": None if not best else {"name": best["name"], "rating": best["rating"],
+                                                          "league": "L1"}})
+    return groups, closed
+
+
+def tiles(rows: list[dict]) -> list[dict]:
+    """On the list (active) · Shortlisted · Contract ≤ 6 months · New scout report (14 days)."""
+    active = [r for r in rows if r.get("stage") not in CLOSED]
+    m = lambda r: r.get("months_left")                     # noqa: E731
+    return [
+        {"key": "active", "label": "On the list", "value": len(active)},
+        {"key": "Shortlisted", "label": "Shortlisted", "value": sum(r.get("stage") == "Shortlisted" for r in active)},
+        {"key": "expiring", "label": "Contract ≤ 6 months",
+         "value": sum(m(r) is not None and not pd.isna(m(r)) and 0 <= m(r) < EXPIRING_MONTHS for r in active)},
+        {"key": "newrep", "label": "New scout report (14 days)", "value": sum(bool(r.get("new_report")) for r in active)},
+    ]

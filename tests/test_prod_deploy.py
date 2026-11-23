@@ -1,6 +1,6 @@
 """Production set-up for the new web front end (owner 2026-11-09): two web containers
 (blue/green) so a deploy never serves a cold one; Caddy's main domain follows the active one
-(an imported upstream file), the old Streamlit dashboard stays on a second domain as a fallback;
+(an imported upstream file); the old Streamlit dashboard was retired on 2026-11-23 (owner);
 deploy.sh builds first and switches only once the new container is warm (scripts/web_switch.sh)."""
 import subprocess
 from pathlib import Path
@@ -30,18 +30,28 @@ def test_web_containers_run_production_uvicorn(name):
     assert svc["restart"] == "unless-stopped"
 
 
-def test_caddy_reads_the_upstream_file_and_the_fallback_domain():
-    caddy = _compose()["services"]["caddy"]
+def test_caddy_reads_the_upstream_file_and_no_fallback_domain():
+    """Owner 2026-11-23: the old Streamlit site is retired -- no fallback domain, no service."""
+    compose = _compose()
+    caddy = compose["services"]["caddy"]
     assert "./caddy:/etc/caddy/site:ro" in caddy["volumes"]
     env = caddy["environment"]
-    assert "OLD_DASHBOARD_DOMAIN" in env and "DASHBOARD_DOMAIN" in env
+    assert "DASHBOARD_DOMAIN" in env and "OLD_DASHBOARD_DOMAIN" not in env
+    assert "dashboard" not in compose["services"] and "depends_on" not in caddy
 
 
-def test_caddyfile_routes_main_domain_to_web_and_old_domain_to_streamlit():
+def test_caddyfile_routes_main_domain_to_web_and_has_no_streamlit():
     from test_caddyfile import _blocks
     t = _blocks()
     assert "{$DASHBOARD_DOMAIN} {\n\timport /etc/caddy/site/web_upstream.caddy\n}" in t
-    assert "{$OLD_DASHBOARD_DOMAIN} {\n\treverse_proxy dashboard:8501\n}" in t
+    assert "OLD_DASHBOARD_DOMAIN" not in t and "dashboard:8501" not in t
+
+
+def test_deploy_no_longer_starts_the_streamlit_dashboard():
+    text = (ROOT / "scripts" / "deploy.sh").read_text()
+    body = "\n".join(l for l in text.splitlines() if not l.strip().startswith("#"))
+    assert "up -d db app caddy" in body and "dashboard" not in body
+    assert 'echo "reverse_proxy web-blue:8600"' in body
 
 
 def test_upstream_file_is_not_committed():

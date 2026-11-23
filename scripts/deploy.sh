@@ -55,13 +55,13 @@ fi
 say "building images..."
 docker compose -f "$COMPOSE_FILE" build
 
-# Caddy imports caddy/web_upstream.caddy; before the first switch it names the Streamlit
-# dashboard (web_switch.sh writes it from then on).
+# Caddy imports caddy/web_upstream.caddy (web_switch.sh writes it); a fresh server starts on
+# web-blue. The old Streamlit dashboard was retired on 2026-11-23 (owner).
 mkdir -p caddy
-[ -f caddy/web_upstream.caddy ] || echo "reverse_proxy dashboard:8501" > caddy/web_upstream.caddy
+[ -f caddy/web_upstream.caddy ] || echo "reverse_proxy web-blue:8600" > caddy/web_upstream.caddy
 
-say "restarting the database, pipeline helper, Streamlit dashboard and Caddy..."
-docker compose -f "$COMPOSE_FILE" up -d db app dashboard caddy
+say "restarting the database, pipeline helper and Caddy..."
+docker compose -f "$COMPOSE_FILE" up -d db app caddy
 
 # Migrations are idempotent and the pipeline applies them too, but running them here means a
 # schema change is live the moment the code that needs it is -- not at 04:15 on Monday.

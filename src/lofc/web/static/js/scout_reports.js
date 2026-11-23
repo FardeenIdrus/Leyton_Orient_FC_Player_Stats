@@ -98,6 +98,7 @@ function drawTable(d, s) {
   }).join('') + '</tr>').join('');
   $('sr-none').hidden = d.rows.length > 0;
   $('sr-tw').hidden = d.rows.length === 0;
+  fitList();
 }
 
 function drawActivity(d) {
@@ -131,10 +132,35 @@ function draw(d, s) {
   loadDetail(d.tab === 'activity' ? '' : s.open, d);
 }
 
+// ---- list height (owner 2026-11-23) --------------------------------------------------------
+// No report open: the list reaches the bottom of the screen. A report open: the list shrinks to
+// OPEN_SHARE of the screen and the report sits below it, both in view.
+const OPEN_SHARE = 0.4;
+const MIN_LIST = 240;
+function fitList() {
+  const tw = $('sr-tw');
+  if (!tw || tw.hidden) return;
+  const open = !!$('sr-detail').firstElementChild;
+  if (open) { tw.style.maxHeight = `${Math.max(MIN_LIST, Math.round(innerHeight * OPEN_SHARE))}px`; return; }
+  // from the list's top (as on the page, unscrolled) to the bottom of the screen, less the
+  // card's own padding and the note under it
+  const top = tw.getBoundingClientRect().top + scrollY;
+  const below = $('sr-card').getBoundingClientRect().bottom - tw.getBoundingClientRect().bottom;
+  tw.style.maxHeight = `${Math.max(MIN_LIST, Math.round(innerHeight - top - below - 12))}px`;
+}
+
+/** After a report opens: list and report in view, the clicked row still visible in the list. */
+function showOpen(tr) {
+  fitList();
+  const tw = $('sr-tw');
+  if (tr) tw.scrollTop = Math.max(0, tr.offsetTop - tw.clientHeight / 3);
+  $('sr-card').scrollIntoView({block: 'start', behavior: 'smooth'});
+}
+
 // ---- detail ------------------------------------------------------------------------------
 async function loadDetail(id, d, {scroll = false} = {}) {
   const box = $('sr-detail'), mine = ++detailSeq;
-  if (!id || !(d.rows || []).some(r => r.id === id)) { box.innerHTML = ''; return; }
+  if (!id || !(d.rows || []).some(r => r.id === id)) { box.innerHTML = ''; fitList(); return; }
   try {
     const r = await api('/api/scout-reports/report/' + encodeURIComponent(id));
     if (mine !== detailSeq) return;
@@ -156,7 +182,8 @@ async function loadDetail(id, d, {scroll = false} = {}) {
     const below = box.querySelector('.sr-below');
     if (r.open) below.innerHTML = `<a class="btn primary" href="${esc(r.open.href + backQ())}">${esc(r.open.label)}</a>`;
     else below.innerHTML = `<p class="note">${esc(r.caption)}</p>`;
-    if (scroll) box.scrollIntoView({block: 'nearest'});
+    if (scroll) showOpen(document.querySelector('#sr-body tr.me'));
+    else fitList();
   } catch (e) {
     if (mine === detailSeq) box.innerHTML = `<div class="warn">Could not load the report (${esc(e.message)}).</div>`;
   }
@@ -218,7 +245,9 @@ function init() {
     push({open: ''});
     document.querySelectorAll('#sr-body tr.me').forEach(x => x.classList.remove('me'));
     $('sr-detail').innerHTML = '';
+    fitList();
   };
+  addEventListener('resize', () => fitList());
   $('sr-refresh').onclick = async () => {
     const b = $('sr-refresh'), msg = $('sr-sync-msg');
     b.disabled = true; msg.textContent = 'Reading the scouting sheet…';

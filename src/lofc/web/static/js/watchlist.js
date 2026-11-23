@@ -1,186 +1,223 @@
-// Watchlist page (mockup v5 v-watchlist). Draws what /api/watchlist sends: every value, count and
-// label comes from the API (the Streamlit page's own functions). The URL holds the Market value
-// switch, the sort and the open row (the assessment status filter was retired 2026-11-16). Notes
-// are free text: they only reach the page through esc() or .value / textContent.
-import {api, esc, dash, rememberState, restoreState} from './common.js';
+// Watchlist page (owner 2026-11-23 redesign). Fetches /api/watchlist and draws it; computes no
+// number. One shared list, one entry per player, grouped by position with our best (League One)
+// for reference only. Edits save as they are made (stage, owner, next step, due date, notes,
+// optional drop reason). Filters and the open player live in the URL.
+import {api, esc, chip, readState, writeState, rememberState, restoreState} from './common.js';
 
 const $ = id => document.getElementById(id);
-let seq = 0, last = null;
+let D = null;                     // last payload
+let st = {};                      // stage, pos, owner, q, sugg, open
 
-// ---- state <-> URL -----------------------------------------------------------------------
-function state() {
-  const q = new URLSearchParams(location.search);
-  return {money: q.get('money') === '1', sort: q.get('sort') || '', dir: q.get('dir') || '',
-    open: q.get('open') || ''};
-}
-function toQuery(s, {forApi = false} = {}) {
-  const q = new URLSearchParams();
-  if (s.money) q.set('money', '1');
-  if (!forApi) {
-    if (s.sort) q.set('sort', s.sort);
-    if (s.dir) q.set('dir', s.dir);
-    if (s.open) q.set('open', s.open);
-  }
-  const t = q.toString();
-  return t ? '?' + t : '';
-}
-function commit(s, {replace = false} = {}) {
-  const url = location.pathname + toQuery(s);
-  if (url !== location.pathname + location.search) history[replace ? 'replaceState' : 'pushState']({}, '', url);
-  remember();
-}
+const VCLS = {'Sign': 'sign', 'Monitor Priority': 'pri', 'Monitor': 'mon', "Don't sign": 'no'};
+const verdict = v => v ? `<span class="vd ${VCLS[v] || ''}">${esc(v)}</span>` : '<span class="note">—</span>';
+const lg = r => r.league_abbr ? `<span class="lg" title="${esc(r.league || '')}">${esc(r.league_abbr)}</span>` : '';
+// a player link carries the way back to this list (the card's "← Back")
 const backQ = () => '?back=' + encodeURIComponent('/watchlist' + location.search);
+const href = h => esc(h + backQ());
+const opt = (v, label, cur) => `<option value="${esc(v)}"${String(v) === String(cur) ? ' selected' : ''}>${esc(label)}</option>`;
 
-// ---- drawing -----------------------------------------------------------------------------
-const chipFor = (text, v) => v == null ? '<span class="chip c0">—</span>'
-  : `<span class="chip ${v >= 4 ? 'c4' : v >= 3 ? 'c3' : v >= 2 ? 'c2' : 'c1'}">${esc(text)}</span>`;
-const NUM = new Set(['Age', 'Market value', 'Months left']);
-const CUT = new Set(['Club', 'League', 'Injury', 'Note']);
-
-function drawFilters(d) {
-  $('f-money').checked = d.money;
-  $('sw-money').classList.toggle('on', d.money);
+function readSt() {
+  const q = readState();
+  st = {stage: q.stage || '', pos: q.pos || '', owner: q.owner || '', q: q.q || '', sugg: q.sugg === 'all' ? 'all' : '',
+        open: q.open || ''};
 }
 
-function sortRows(rows, s) {
-  if (!s.sort) return rows;
-  const dir = s.dir === 'desc' ? -1 : 1;
-  const val = (r, k) => k === 'Note' ? (r.note || '—') : (r.cells[k] ?? '—');
-  const cmp = (a, b) => {
-    const x = val(a, s.sort), y = val(b, s.sort);
-    if (x === '—' && y === '—') return 0;
-    if (x === '—') return 1;
-    if (y === '—') return -1;
-    return dir * x.localeCompare(y, 'en', {numeric: true, sensitivity: 'base'});
-  };
-  return rows.map((r, i) => [r, i]).sort((p, q) => cmp(p[0], q[0]) || p[1] - q[1]).map(p => p[0]);
+function save(patch, {replace = true} = {}) {
+  Object.assign(st, patch);
+  const keep = Object.fromEntries(Object.entries(st).map(([k, v]) => [k, v || null]));
+  writeState(keep, {replace});
+  rememberState('watchlist', {drop: ['open']});
 }
 
-function drawTable(d, s) {
-  const cols = d.columns;
-  $('wl-thead').innerHTML = '<tr>' + cols.map(c => {
-    const on = s.sort === c, arrow = on ? (s.dir === 'desc' ? ' ▼' : ' ▲') : '';
-    const tip = d.help[c] ? ` title="${esc(d.help[c])}"` : '';
-    const cls = [on ? 'sorted' : '', NUM.has(c) ? 'n' : '', ['Composite', 'Performance', 'Physical'].includes(c) ? 'c' : ''].join(' ').trim();
-    if (c === 'Transfermarkt') return `<th>${esc(c)}</th>`;
-    return `<th class="${cls}"${tip}><button type="button" data-sort="${esc(c)}" aria-label="Sort by ${esc(c)}">${esc(c)}${arrow}</button></th>`;
-  }).join('') + '</tr>';
-  $('wl-body').innerHTML = sortRows(d.rows, s).map(r => `<tr data-row="${esc(r.key)}" class="click${r.key === s.open ? ' me' : ''}">` + cols.map(c => {
-    if (c === 'Player') {
-      const name = `<span class="pname">${esc(dash(r.cells.Player))}</span>`;
-      const nr = (r.not_rated ? `<div class="note wl-nr">${esc(r.not_rated)}</div>` : '')
-        + (r.pool_tag ? `<span class="pill grey pool-tag">${esc(r.pool_tag)}</span>` : '');
-      return `<td class="pcell">${r.href ? `<a class="plink" href="${esc(r.href + backQ())}">${name}</a>` : name}${nr}</td>`;
-    }
-    if (['Composite', 'Performance', 'Physical'].includes(c)) return `<td class="c">${chipFor(r.cells[c], r.ratings[c])}</td>`;
-    if (c === 'Transfermarkt') return `<td>${r.tm ? `<a href="${esc(r.tm)}" target="_blank" rel="noopener noreferrer">Open profile ↗</a>` : '—'}</td>`;
-    const v = c === 'Note' ? (r.note || '—') : dash(r.cells[c]);
-    if (CUT.has(c)) return `<td class="cut" title="${esc(v)}">${esc(v)}</td>`;
-    return `<td class="${NUM.has(c) ? 'n' : ''}">${esc(v)}</td>`;
-  }).join('') + '</tr>').join('');
+// ---- drawing ------------------------------------------------------------------------------
+function drawTiles() {
+  $('wl-tiles').innerHTML = D.tiles.map(t => {
+    const on = (t.key === 'Shortlisted' && st.stage === 'Shortlisted');
+    const click = t.key === 'Shortlisted' || t.key === 'active';
+    return `<div class="tile${on ? ' on' : ''}${click ? ' click' : ''}" data-tile="${esc(t.key)}"><div class="k">${esc(t.label)}</div><div class="v">${t.value}</div></div>`;
+  }).join('');
 }
 
-function draw(d, s) {
-  last = d;
-  if (d.empty) {
-    $('wl-empty').hidden = false; $('wl-empty').textContent = d.text; $('wl-main').hidden = true;
-    return;
-  }
-  $('wl-empty').hidden = true; $('wl-main').hidden = false;
-  drawFilters(d);
-  const any = d.rows.length > 0;
-  $('wl-tiles').hidden = !any; $('wl-card').hidden = !any;
-  $('wl-tiles').innerHTML = d.tiles.map(t =>
-    `<div class="tile"><div class="k">${esc(t.label)}${t.help ? ` <span class="hlp" title="${esc(t.help)}">?</span>` : ''}</div><div class="v">${esc(t.value)}</div></div>`).join('');
-  $('wl-dl').href = '/api/watchlist/csv' + toQuery(s, {forApi: true});
-  drawTable(d, s);
-  openEditor(d.rows.find(r => r.key === s.open) || null, d);
+function drawSugg() {
+  const S = D.suggestions;
+  $('wl-sugg').hidden = !S.count_all;
+  $('wl-sugg-win').innerHTML = [['', `Last 30 days (${S.count_30})`], ['all', `All (${S.count_all})`]]
+    .map(([k, l]) => `<button type="button" data-win="${k}" class="${(st.sugg || '') === k ? 'on' : ''}" aria-pressed="${(st.sugg || '') === k}">${esc(l)}</button>`).join('');
+  $('wl-sugg-body').innerHTML = S.rows.length ? S.rows.map(r => `<tr>
+      <td class="pc">${r.href ? `<a class="plink" href="${href(r.href)}"><b>${esc(r.name)}</b></a>` : `<b>${esc(r.name)}</b>`}
+        <div class="note">${esc(r.club || '—')}${lg(r)}${r.position ? ' · ' + esc(r.position) : ''}</div></td>
+      <td class="n">${r.overall == null ? '<span class="note">—</span>' : chip(r.overall)}</td>
+      <td>${verdict(r.verdict)}</td><td class="note">${esc(r.report)}</td>
+      <td class="n act"><button type="button" class="btn small primary" data-add="${r.report_id}">Add</button>
+        <button type="button" class="btn small" data-dismiss="${r.report_id}">Dismiss</button></td></tr>`).join('')
+    : `<tr><td class="note">Nothing new in the last 30 days.</td></tr>`;
 }
 
-// ---- editor ------------------------------------------------------------------------------
-function openEditor(row, d) {
-  const box = $('wl-edit');
-  $('e-msg').textContent = '';
-  if (!row) { box.hidden = true; box.dataset.key = ''; return; }
-  const sameRow = box.dataset.key === row.key && !box.hidden;
-  box.hidden = false; box.dataset.key = row.key;
-  $('e-title').textContent = dash(row.cells.Player);
-  $('e-sub').textContent = dash(row.cells.Club);
-  if (!sameRow) {
-    $('e-note').value = row.note || '';
-    const opts = d.manual_statuses.includes(row.status) ? d.manual_statuses : [...d.manual_statuses, row.status];
-    $('e-status').innerHTML = opts.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('');
-    $('e-status').value = row.status;
-  }
-}
-const openKey = () => $('wl-edit').dataset.key || '';
-
-async function write(fn, okText) {
-  const msg = $('e-msg'), btns = ['e-save', 'e-remove'].map($);
-  btns.forEach(b => { b.disabled = true; });
-  try {
-    await fn();
-    const s = state(); s.open = ''; commit(s);          // Streamlit closes the dialog on save
-    await load();
-    msg.textContent = '';
-    $('wl-count').textContent = okText;
-  } catch (e) {
-    msg.textContent = `Not saved (${e.status === 404 ? 'no longer on the watchlist' : e.message}).`;
-  } finally { btns.forEach(b => { b.disabled = false; }); }
+function rowMatches(r) {
+  if (st.stage && r.stage !== st.stage) return false;
+  if (st.owner === 'none' ? r.owner_id != null : (st.owner && String(r.owner_id) !== st.owner)) return false;
+  if (st.q && !`${r.name} ${r.club || ''}`.toLowerCase().includes(st.q.toLowerCase())) return false;
+  return true;
 }
 
-// ---- loading -----------------------------------------------------------------------------
+function stageSelect(r) {
+  return `<select class="ctl stage st-${esc(r.stage.replace(/\s+/g, '-').toLowerCase())}" data-field="stage" aria-label="Stage for ${esc(r.name)}">`
+    + D.stages.map(s => opt(s, s, r.stage)).join('') + '</select>';
+}
+
+function detail(r) {
+  const users = [opt('', '—', r.owner_id ?? ''), ...D.users.map(u => opt(u.id, u.name, r.owner_id ?? ''))].join('');
+  return `<tr class="wl-det" data-p="${r.player_id}"><td colspan="7"><div class="wl-dgrid">
+      <div class="f"><label>Owner</label><select class="ctl" data-field="owner">${users}</select></div>
+      <div class="f"><label>Next step</label><input class="ctl" data-field="next_step" value="${esc(r.next_step || '')}" placeholder="e.g. Watch vs Crewe" maxlength="120"></div>
+      <div class="f"><label>Due</label><input class="ctl" type="date" data-field="due" value="${esc(r.due || '')}"></div>
+      ${r.stage === 'Dropped' ? `<div class="f"><label>Reason (optional)</label><input class="ctl" data-field="drop_reason" value="${esc(r.drop_reason)}" maxlength="120"></div>` : '<div></div>'}
+      <div class="f wide"><label>Notes <span class="note">· shared with the department${r.note_meta ? ' · last edit ' + esc(r.note_meta) : ''}</span></label>
+        <textarea class="ctl" data-field="note" rows="3" placeholder="What to check, who saw him…">${esc(r.note)}</textarea></div>
+      <div class="wl-dfoot"><span class="note">Added ${esc(r.added)}${r.contract ? ' · contract to ' + esc(r.contract) : ''}</span>
+        <span class="wl-saved note" aria-live="polite"></span>
+        ${r.href ? `<a class="btn small" href="${href(r.href)}">Open player page →</a>` : ''}
+        <button type="button" class="btn small" data-remove="${r.player_id}">Remove from list</button></div>
+    </div></td></tr>`;
+}
+
+function row(r) {
+  const open = String(r.player_id) === st.open;
+  return `<tr class="wr${open ? ' open' : ''}" data-p="${r.player_id}">
+      <td class="pc"><span class="chev">${open ? '▾' : '▸'}</span>${r.href ? `<a class="plink" href="${href(r.href)}"><b>${esc(r.name)}</b></a>` : `<b>${esc(r.name)}</b>`}
+        <div class="note">${esc(r.club || '—')}${lg(r)} · ${esc(r.position || '—')}${r.age != null ? ' · ' + r.age : ''}</div></td>
+      <td class="c">${r.overall == null ? '<span class="note">—</span>' : chip(r.overall)}</td>
+      <td>${stageSelect(r)}</td>
+      <td>${verdict(r.verdict)}</td>
+      <td class="nx">${r.next_step ? esc(r.next_step) : '<span class="note">—</span>'}<div class="note">${esc(r.owner || '')}</div></td>
+      <td class="${r.overdue ? 'due over' : 'due'}">${esc(r.due_text || '—')}</td>
+      <td class="note">${esc(r.contract || '—')}</td></tr>` + (open ? detail(r) : '');
+}
+
+// the same fixed columns in every group, so the groups line up under each other
+const COLS = '<colgroup><col class="c-pl"><col class="c-ov"><col class="c-st"><col class="c-vd"><col class="c-nx"><col class="c-du"><col class="c-co"></colgroup>';
+const HEAD = COLS + '<thead><tr><th>Player</th><th class="c">Overall</th><th>Stage</th><th>Scout verdict</th><th>Next step</th><th>Due</th><th>Contract</th></tr></thead>';
+
+function drawList() {
+  const groups = D.groups.filter(g => !st.pos || g.group === st.pos)
+    .map(g => ({...g, rows: g.rows.filter(rowMatches)})).filter(g => g.rows.length);
+  $('wl-empty').hidden = !!groups.length;
+  $('wl-empty').textContent = D.empty ? D.text : 'No players match these filters.';
+  $('wl-groups').innerHTML = groups.map(g => `<div class="wl-gh"><b>${esc(g.label)} <span class="note">${g.rows.length}</span></b>`
+      + (g.our_best ? `<span class="note">Our best: ${esc(g.our_best.name)} ${chip(g.our_best.rating)} <span class="lg">L1</span></span>` : '')
+      + `</div><div class="tw"><table class="wl-t">${HEAD}<tbody>${g.rows.map(row).join('')}</tbody></table></div>`).join('');
+  const closed = D.closed.filter(rowMatches);
+  $('wl-closed').hidden = !D.closed.length;
+  $('wl-closed-h').textContent = `Dropped and signed (${D.closed.length})`;
+  $('wl-closed-body').innerHTML = closed.map(row).join('');
+  $('wl-closed-body').closest('table').querySelector('colgroup') || $('wl-closed-body').insertAdjacentHTML('beforebegin', COLS);
+}
+
+function drawFeed() {
+  $('wl-feed').innerHTML = D.changes.length ? D.changes.map(c =>
+    `<li><span class="ic ${esc(c.kind)}"></span><span><b>${esc(c.name)}</b> ${c.kind === 'rating'
+      ? esc(c.text.split(' ')[0]) + ` <span class="${c.dir === 'up' ? 'up' : 'dn'}">${esc(c.text.split(' ').slice(1).join(' '))}</span>`
+      : esc(c.text)}</span></li>`).join('')
+    : '<li class="note">Nothing new since the players were added.</li>';
+}
+
+function drawFilters() {
+  $('f-stage').innerHTML = opt('', 'All active', st.stage) + D.active_stages.map(s => opt(s, s, st.stage)).join('');
+  $('f-pos').innerHTML = opt('', 'All', st.pos) + D.groups.map(g => opt(g.group, g.label, st.pos)).join('');
+  $('f-owner').innerHTML = opt('', 'Anyone', st.owner) + opt('none', 'Unassigned', st.owner)
+    + D.users.map(u => opt(u.id, u.name, st.owner)).join('');
+  if (document.activeElement !== $('f-q')) $('f-q').value = st.q;
+}
+
+function draw() {
+  drawTiles(); drawSugg(); drawFilters(); drawList(); drawFeed();
+}
+
 async function load() {
-  const s = state(), mine = ++seq;
+  D = await api('/api/watchlist' + (st.sugg === 'all' ? '?sugg=all' : ''));
+  draw();
+}
+
+// ---- saving -------------------------------------------------------------------------------
+function flash(p, text) {
+  const el = document.querySelector(`tr.wl-det[data-p="${p}"] .wl-saved`);
+  if (el) { el.textContent = text; setTimeout(() => { if (el.textContent === text) el.textContent = ''; }, 1600); }
+}
+
+async function saveField(p, field, value) {
+  const body = {[field]: field === 'owner' ? (value ? Number(value) : null) : value};
   try {
-    const d = await api('/api/watchlist' + toQuery(s, {forApi: true}));
-    if (mine === seq) { $('wl-count').textContent = ''; draw(d, s); remember(); }
+    await api('/api/watchlist/' + p, {json: body});
+    if (field === 'note' || field === 'next_step' || field === 'drop_reason' || field === 'due' || field === 'owner') {
+      const keep = document.activeElement;
+      D = await api('/api/watchlist' + (st.sugg === 'all' ? '?sugg=all' : ''));
+      drawTiles(); drawList(); drawFeed();
+      if (keep && keep.dataset && keep.dataset.field) {
+        const again = document.querySelector(`tr.wl-det[data-p="${p}"] [data-field="${keep.dataset.field}"]`);
+        if (again && again !== keep) again.focus();
+      }
+    } else {
+      await load();
+    }
+    flash(p, 'Saved');
   } catch (e) {
-    if (mine === seq) { $('wl-empty').hidden = false; $('wl-empty').textContent = `Could not load the watchlist (${e.message}).`; }
+    flash(p, `Not saved (${e.status || e.message})`);
   }
 }
 
-// owner 2026-11-13: the nav link (a bare URL) reopens the last filters and sort; the open row
-// is a one-off and is not kept
-const remember = () => rememberState('watchlist', {drop: ['open']});
+function bind() {
+  $('wl-tiles').addEventListener('click', e => {
+    const t = e.target.closest('[data-tile]'); if (!t) return;
+    const key = t.dataset.tile;
+    if (key === 'Shortlisted') save({stage: st.stage === 'Shortlisted' ? '' : 'Shortlisted'}, {replace: false});
+    else if (key === 'active') save({stage: ''}, {replace: false});
+    else return;
+    draw();
+  });
+  $('wl-sugg-win').addEventListener('click', e => {
+    const b = e.target.closest('[data-win]'); if (!b) return;
+    save({sugg: b.dataset.win}, {replace: false}); load();
+  });
+  $('wl-sugg-body').addEventListener('click', async e => {
+    const a = e.target.closest('[data-add]'), d = e.target.closest('[data-dismiss]');
+    const id = (a || d) && (a || d).dataset[a ? 'add' : 'dismiss'];
+    if (!id) return;
+    (a || d).disabled = true;
+    try { await api('/api/watchlist/suggestions/' + id, {json: {action: a ? 'add' : 'dismiss'}}); } catch { /* reload shows the state */ }
+    load();
+  });
+  for (const [id, key] of [['f-stage', 'stage'], ['f-pos', 'pos'], ['f-owner', 'owner']])
+    $(id).addEventListener('change', e => { save({[key]: e.target.value}, {replace: false}); drawList(); });
+  $('f-q').addEventListener('input', e => { save({q: e.target.value}); drawList(); });
 
-function init() {
-  restoreState('watchlist');
-  $('f-money').onchange = ev => { const s = state(); s.money = ev.target.checked; commit(s); load(); };
-  $('wl-thead').onclick = ev => {
-    const b = ev.target.closest('[data-sort]');
-    if (!b || !last) return;
-    const s = state(), k = b.dataset.sort;
-    if (s.sort !== k) { s.sort = k; s.dir = ''; } else if (s.dir !== 'desc') s.dir = 'desc'; else { s.sort = ''; s.dir = ''; }
-    commit(s);
-    drawTable(last, s);
-  };
-  $('wl-body').onclick = ev => {
-    if (ev.target.closest('a')) return;                        // name -> card, Transfermarkt -> new tab
-    const tr = ev.target.closest('tr[data-row]');
-    if (!tr || !last) return;
-    const s = state(); s.open = tr.dataset.row; commit(s);
-    document.querySelectorAll('#wl-body tr.me').forEach(x => x.classList.remove('me'));
-    tr.classList.add('me');
-    openEditor(last.rows.find(r => r.key === s.open), last);
-    $('wl-edit').scrollIntoView({block: 'nearest'});
-  };
-  $('e-close').onclick = () => {
-    const s = state(); s.open = ''; commit(s);
-    document.querySelectorAll('#wl-body tr.me').forEach(x => x.classList.remove('me'));
-    openEditor(null, last);
-  };
-  $('e-save').onclick = () => {
-    const k = openKey(); if (!k) return;
-    write(() => api('/api/watchlist/' + k.split('-').join('/'),
-      {json: {note: $('e-note').value, status: $('e-status').value}}), 'Saved.');
-  };
-  $('e-remove').onclick = () => {
-    const k = openKey(); if (!k) return;
-    write(() => api('/api/card/' + k.split('-').join('/') + '/watchlist', {json: {action: 'remove'}}),
-      'Removed from the watchlist.');
-  };
-  window.addEventListener('popstate', load);
+  const list = e => e.target.closest('#wl-groups, #wl-closed-body');
+  document.addEventListener('click', e => {
+    if (!list(e)) return;
+    const rm = e.target.closest('[data-remove]');
+    if (rm) return remove(rm.dataset.remove);
+    const tr = e.target.closest('tr.wr');
+    if (!tr || e.target.closest('a, select, button, input, textarea')) return;
+    save({open: st.open === tr.dataset.p ? '' : tr.dataset.p}, {replace: false});
+    drawList();
+  });
+  document.addEventListener('change', e => {
+    if (!list(e)) return;
+    const f = e.target.closest('[data-field]'); if (!f) return;
+    const p = f.closest('tr[data-p]').dataset.p;
+    saveField(p, f.dataset.field, f.value);
+  });
+}
+
+async function remove(p) {
+  const r = [...D.groups.flatMap(g => g.rows), ...D.closed].find(x => String(x.player_id) === String(p));
+  const ids = r && r.href ? r.href.split('/').slice(2) : [p, 0, 0];
+  try { await api(`/api/card/${ids.join('/')}/watchlist`, {json: {action: 'remove'}}); } catch { /* reload shows it */ }
+  save({open: ''});
   load();
 }
-init();
+
+restoreState('watchlist');
+readSt();
+bind();
+load();
+window.addEventListener('popstate', () => { readSt(); draw(); });

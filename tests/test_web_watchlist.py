@@ -1,16 +1,22 @@
-"""Web front end: the Watchlist page shell, API and writes (no database: the watchlist store and
-every loader are faked). Real-database parity: test_web_scout_watchlist_parity.py."""
+"""Web front end: the redesigned Watchlist (owner 2026-11-23) -- page shell, API and writes. The
+store is the real `lofc.store.watchlist` over an in-memory sqlite database; every loader is
+faked. One shared list, one entry per player, grouped by position with our best (League One)
+for reference only; stages, owner, next step, due date, notes, optional drop reason;
+"Suggested from scout reports"; "What changed since added"."""
 import types
 
 import pandas as pd
 import pytest
+from sqlalchemy import create_engine
 
+from lofc.store import watchlist as store
+from lofc.store.models import Base, PlayerMetricNeutral
 from lofc.web.api import card as card_api
 from lofc.web.api import watchlist as api
 from web_fakes import FakeStore, login, make
 
 H = {"X-LOFC-Request": "1"}
-KEY = "/api/watchlist/1/5/318"
+NOW = pd.Timestamp("2026-11-23")
 
 
 def _client(role="scout"):
@@ -21,229 +27,190 @@ def _client(role="scout"):
     return c
 
 
-class FakeWatch:
-    """`lofc.store.watchlist` over a list of rows."""
-    WATCHLIST_STATUSES = ["Watching", "Scout sent", "Contact agent", "Dropped"]
-
-    def __init__(self):
-        self.rows = {(1, 5, 318): dict(note="Watch his <b>first</b> touch", status="Watching",
-                                       created_at="2026-09-14 11:05", player_name="Al <One>",
-                                       contract_until="2027-03-01", tm_player_id=123.0,
-                                       team_name="Gills", position_group="Winger", age=24.04),
-                     (2, 901, 319): dict(note=None, status="Scout sent",
-                                         created_at="2026-10-12 15:14", player_name="Bo Two",
-                                         contract_until=None, tm_player_id=None,
-                                         team_name="Celtic", position_group="Attacking Mid",
-                                         age=None)}
-        self.calls = []
-
-    def load(self, engine):
-        recs = [{"player_id": k[0], "competition_id": k[1], "season_id": k[2],
-                 "competition_name": None, "performance_score": None, "fit_score": None,
-                 "market_value_eur": None, **v} for k, v in self.rows.items()]
-        cols = ["player_id", "competition_id", "season_id", "note", "status", "created_at",
-                "player_name", "contract_until", "tm_player_id", "team_name", "position_group",
-                "competition_name", "performance_score", "fit_score", "market_value_eur", "age"]
-        df = pd.DataFrame(recs, columns=cols)
-        df["created_at"] = pd.to_datetime(df["created_at"])
-        return df
-
-    def is_watched(self, engine, p, c, s):
-        return (p, c, s) in self.rows
-
-    def set_note(self, engine, p, c, s, note):
-        self.calls.append(("note", p, c, s, note)); self.rows[(p, c, s)]["note"] = note
-
-    def set_status(self, engine, p, c, s, status):
-        if status not in self.WATCHLIST_STATUSES:
-            raise ValueError(status)
-        self.calls.append(("status", p, c, s, status)); self.rows[(p, c, s)]["status"] = status
-
-    def add(self, engine, p, c, s):
-        self.calls.append(("add", p, c, s)); self.rows.setdefault((p, c, s), dict(status="Watching"))
-
-    def remove(self, engine, p, c, s):
-        self.calls.append(("remove", p, c, s)); self.rows.pop((p, c, s), None)
-
-
-def _scorecards(sid):
-    if sid == 318:      # a 10-strong League Two winger pool
-        return pd.DataFrame({"player_id": [1] + list(range(100, 109)), "competition_id": [5] * 10,
-                             "season_id": [318] * 10, "position_group": ["Winger"] * 10,
-                             "objective_composite": [3.41] + [3.0] * 9,
-                             "performance_band": [3.2] + [3.0] * 9,
-                             "physical_band": [3.7] + [3.0] * 9})
-    return pd.DataFrame({"player_id": [2, 8], "competition_id": [901, 901], "season_id": [319] * 2,
-                         "position_group": ["Attacking Mid"] * 2, "objective_composite": [4.49, 3.1],
-                         "performance_band": [4.6, 3.0], "physical_band": [4.2, 3.0]})
+def _full(table, partial):
+    row = dict(partial)
+    for col in table.columns:
+        if col.name not in row and not col.nullable and col.name != "id":
+            row[col.name] = 0
+    return row
 
 
 @pytest.fixture
-def fake(monkeypatch):
-    wl = FakeWatch()
-    live = pd.DataFrame({"player_id": [1], "competition_id": [5], "season_id": [319],
-                         "minutes": [455.0], "goals_p90": [0.4], "assists_p90": [0.2]})
-    src = types.SimpleNamespace(
-        engine=object(), store=wl,
-        assessment=pd.DataFrame(columns=["player_id", "competition_id", "season_id",
-                                         "assessment_status"]),
-        live_season_id=319, current_form=lambda: live,
-        injuries_for=lambda ids: pd.DataFrame(columns=["player_id", "date_from", "date_until",
-                                                       "injury_category", "injury_type_raw",
-                                                       "days_out", "games_missed"]),
-        scorecards_for=_scorecards, names={5: "League Two", 901: "Scottish Premiership"},
-        valuations=lambda ids: pd.DataFrame({"player_id": [1], "season_id": [317],
-                                             "market_value_eur": [1.5e6]}),
-        openable={(1, 5, 318)}, now=pd.Timestamp("2026-11-09"))
-    monkeypatch.setattr(api, "_sources", lambda: src)
-    monkeypatch.setattr(card_api, "_watchlist", lambda: wl)
-    monkeypatch.setattr(card_api, "get_engine", lambda: object())
+def db():
+    # one shared in-memory database across the API's worker threads
+    from sqlalchemy.pool import StaticPool
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(eng)
+    pd.DataFrame([{"player_id": 1, "player_name": "Al <One>", "contract_until": "2027-03-01", "birth_date": "2002-01-01"},
+                  {"player_id": 2, "player_name": "Bo Two", "contract_until": None, "birth_date": None},
+                  {"player_id": 3, "player_name": "Cy Three", "contract_until": None, "birth_date": None}]).to_sql(
+        "players", eng, index=False, if_exists="append")
+    pd.DataFrame([_full(PlayerMetricNeutral.__table__, dict(player_id=p, competition_id=c, season_id=319,
+                                                            player_name=n, team_name=t, position_group=g,
+                                                            minutes=900.0, rankable=True))
+                  for p, c, n, t, g in [(1, 5, "Al <One>", "Gills", "Winger"),
+                                        (2, 901, "Bo Two", "Celtic", "Attacking Mid"),
+                                        (3, 5, "Cy Three", "Crewe", "Winger")]]).to_sql(
+        "player_metrics_neutral", eng, index=False, if_exists="append")
+    import datetime as dt
+    with eng.begin() as conn:
+        conn.execute(store._TABLE.insert().values(player_id=1, competition_id=5, season_id=319, status="Watching",
+                                                  added_rating=3.10, added_club="Old FC", created_at=dt.datetime(2026, 11, 1)))
+        conn.execute(store._TABLE.insert().values(player_id=2, competition_id=901, season_id=319, status="Shortlisted",
+                                                  created_at=dt.datetime(2026, 11, 2)))
+    return eng
 
-    class NoCard:
-        def card_row(self, p, c, s, rank_as=None):
-            return None, "All Metrics", "not_found"
-    monkeypatch.setattr(card_api, "_core", lambda: NoCard())
-    return wl
+
+def _live():
+    return pd.DataFrame({"competition_id": [5, 901, 5], "position_group": ["Winger", "Attacking Mid", "Winger"],
+                         "team_name": ["Gills", "Celtic", "Crewe"], "objective_composite": [3.41, None, 3.7]},
+                        index=pd.Index([1, 2, 3], name="player_id"))
+
+
+def _reports():
+    return pd.DataFrame([
+        dict(id=10, player_id=1, verdict="Sign", scout="Scout A", fixture_date="2026-11-15", submitted_at="2026-11-16",
+             missing_since=None, player_name="Al <One>", club_name="Gills"),
+        dict(id=30, player_id=3, verdict="Monitor Priority", scout="Scout B", fixture_date="2026-11-20",
+             submitted_at="2026-11-20", missing_since=None, player_name="Cy Three", club_name="Crewe")])
+
+
+@pytest.fixture
+def fake(monkeypatch, db):
+    src = types.SimpleNamespace(
+        engine=db, store=store, live_season_id=319, current_form=lambda: pd.DataFrame(
+            columns=["player_id", "competition_id", "season_id", "minutes", "goals_p90", "assists_p90"]),
+        injuries_for=lambda ids: pd.DataFrame(columns=["player_id", "date_from", "date_until", "injury_category",
+                                                       "injury_type_raw", "days_out", "games_missed"]),
+        scorecards_for=lambda sid: pd.DataFrame(columns=["player_id", "competition_id", "season_id", "position_group",
+                                                         "objective_composite", "performance_band", "physical_band"]),
+        names={5: "League Two", 901: "Scottish Premiership"}, openable={(1, 5, 319), (3, 5, 319)}, now=NOW,
+        live_rows=_live, current_clubs=lambda: pd.DataFrame({"player_id": [1], "current_club": ["Gills"]}),
+        reports=_reports, users=lambda: [{"id": 1, "name": "Ann Scout"}, {"id": 7, "name": "Head of Rec"}],
+        our_best=lambda: {"Winger": {"name": "Yusuf Akhamrich", "rating": 3.10}})
+    monkeypatch.setattr(api, "_sources", lambda: src)
+    monkeypatch.setattr(card_api, "_watchlist", lambda: store)
+    monkeypatch.setattr(card_api, "get_engine", lambda: db)
+    return src
 
 
 def test_page_and_api_need_a_session(fake):
     c, *_ = make(FakeStore())
     assert c.get("/watchlist").status_code == 303
     assert c.get("/api/watchlist").status_code == 401
-    assert c.post(KEY, json={"note": "x", "status": "Watching"}).status_code == 401
+    assert c.post("/api/watchlist/1", json={"stage": "Watching"}).status_code == 401
 
 
-def test_page_shell(fake):
+def test_page_shell_is_the_new_layout(fake):
     r = _client().get("/watchlist")
     assert r.status_code == 200 and 'id="v-watchlist"' in r.text
-    assert "/js/watchlist.js" in r.text and "Currently building" not in r.text
-    assert 'id="e-assess"' not in r.text and "Assess this player" not in r.text
+    for i in ("wl-tiles", "wl-sugg", "f-stage", "f-pos", "f-owner", "f-q", "wl-groups", "wl-closed", "wl-feed"):
+        assert f'id="{i}"' in r.text, i
+    assert "Market value" not in r.text and 'id="f-money"' not in r.text
+    assert "News feed not connected yet." in r.text
 
 
-def test_rows_tiles_and_columns(fake):
+def test_groups_tiles_our_best_and_rows(fake):
     d = _client().get("/api/watchlist").json()
-    assert d["empty"] is False
-    assert [t["label"] for t in d["tiles"]] == ["On the list", "Contract ≤ 6 months",
-                                                "Currently injured"]     # "Not yet assessed" retired
-    assert [t["value"] for t in d["tiles"]] == [2, 1, 0]
-    assert "Assessed" not in d["columns"] and "Assessed" not in d["help"]
-    for gone in ("statuses", "chosen", "status_help", "none_match"):
-        assert gone not in d
-    assert d["columns"][:8] == ["Player", "Club", "League", "Position", "Age", "Composite",
-                                "Performance", "Physical"]
-    assert "Market value" not in d["columns"]
-    al = d["rows"][0]
-    assert al["key"] == "1-5-318" and al["cells"]["Player"] == "Al <One>"
-    assert al["cells"]["Composite"] == "3.41" and al["ratings"]["Composite"] == 3.41
-    assert al["cells"]["This season (2026/27)"].startswith("455 min")
-    assert al["href"] == "/player/1/5/318"
-    assert "assess_href" not in al                          # Assess retired (2026-11-16)
-    assert al["note"] == "Watch his <b>first</b> touch" and al["status"] == "Watching"
-    assert al["tm"] == "https://www.transfermarkt.com/-/profil/spieler/123"
-    assert d["manual_statuses"] == FakeWatch.WATCHLIST_STATUSES
+    assert d["stages"] == store.STAGES and d["users"][1] == {"id": 7, "name": "Head of Rec"}
+    assert [t["value"] for t in d["tiles"]] == [2, 1, 1, 1]          # Al: contract Mar 2027 (3 months)
+    groups = {g["group"]: g for g in d["groups"]}
+    assert list(groups) == ["Midfield", "Winger"]
+    assert groups["Winger"]["our_best"] == {"name": "Yusuf Akhamrich", "rating": 3.10, "league": "L1"}
+    al = groups["Winger"]["rows"][0]
+    assert (al["name"], al["club"], al["league"], al["overall"], al["stage"], al["verdict"]) == \
+        ("Al <One>", "Gills", "League Two", 3.41, "Watching", "Sign")
+    assert al["href"] == "/player/1/5/319" and al["new_report"] is True
+    bo = groups["Midfield"]["rows"][0]
+    assert bo["overall"] is None and bo["href"] is None and bo["stage"] == "Shortlisted"
 
 
-def test_thin_pool_shows_no_rating_and_the_note(fake):
-    bo = _client().get("/api/watchlist").json()["rows"][1]
-    assert bo["cells"]["Composite"] == "—" and bo["ratings"]["Composite"] is None
-    assert bo["not_rated"] == ("Not rated: only 2 Attacking Mids in Scottish Premiership with "
-                               "450+ minutes (needs 10).")
-    assert bo["pool_tag"] is None
-    assert bo["href"] is None                                   # no card for him
+def test_suggestions_and_changes(fake):
+    d = _client().get("/api/watchlist").json()
+    s = d["suggestions"]
+    assert (s["count_30"], s["count_all"], s["window"]) == (1, 1, "30")
+    assert s["rows"][0]["name"] == "Cy Three" and s["rows"][0]["overall"] == 3.7 and s["rows"][0]["href"] == "/player/3/5/319"
+    texts = [(c["name"], c["text"]) for c in d["changes"]]
+    assert ("Al <One>", "new scout report: Sign (Scout A, 15 Nov)") in texts
+    assert ("Al <One>", "rating 3.10 → 3.41") in texts
+    assert ("Al <One>", "moved: Old FC → Gills") in texts
+    assert texts[0][1].startswith("new scout report")              # dated first
 
 
-def test_no_blank_reaches_the_page(fake):
-    for r in _client().get("/api/watchlist?money=1").json()["rows"]:
-        for k, v in r["cells"].items():
-            if k != "Note":
-                assert v not in (None, "", "nan", "None", "NaN"), k
+def test_save_needs_the_header(fake):
+    assert _client().post("/api/watchlist/1", json={"stage": "Shortlisted"}).status_code == 403
 
 
-def test_money_adds_market_value(fake):
-    d = _client().get("/api/watchlist?money=1").json()
-    cols = d["columns"]
-    assert cols.index("Market value") == cols.index("Contract") - 1
-    assert d["rows"][0]["cells"]["Market value"] == "€1.5m"
+@pytest.mark.parametrize("role", ["scout", "head_of_recruitment", "admin"])
+def test_save_stage_owner_next_step_due_note_any_role(fake, role):
+    c = _client(role)
+    assert c.post("/api/watchlist/1", json={"stage": "Shortlisted", "owner": 7, "next_step": "Watch vs Crewe",
+                                            "due": "2026-12-02", "note": " quick "}, headers=H).json() == {"ok": True}
+    r = next(r for g in c.get("/api/watchlist").json()["groups"] for r in g["rows"] if r["name"] == "Al <One>")
+    assert (r["stage"], r["owner"], r["next_step"], r["due"], r["note"]) == \
+        ("Shortlisted", "Head of Rec", "Watch vs Crewe", "2026-12-02", "quick")
+    assert r["note_meta"] is not None
+    # dropping needs no reason (owner 2026-11-23); it moves to "Dropped and signed"
+    assert c.post("/api/watchlist/1", json={"stage": "Dropped"}, headers=H).status_code == 200
+    d = c.get("/api/watchlist").json()
+    assert [r["name"] for r in d["closed"]] == ["Al <One>"] and d["tiles"][0]["value"] == 1
+    assert c.post("/api/watchlist/1", json={"drop_reason": "Level", "owner": None, "due": ""}, headers=H).status_code == 200
+    r = c.get("/api/watchlist").json()["closed"][0]
+    assert r["drop_reason"] == "Level" and r["owner"] is None and r["due"] is None
 
 
-def test_assessment_status_filter_retired_old_links_show_everyone(fake):
-    """scout_assessments is not used (owner 2026-11-16): an old ?status= link lists every row."""
+@pytest.mark.parametrize("body", [{"stage": "Signed!!"}, {"owner": 99}, {"owner": "7"}, {"due": "2/12/26"},
+                                  {"note": 5}, {"player_id": 2}, []])
+def test_save_rejects_a_bad_body(fake, body):
+    assert _client().post("/api/watchlist/1", json=body, headers=H).status_code == 400
+
+
+def test_save_unknown_player_is_404(fake):
+    assert _client().post("/api/watchlist/99", json={"note": "x"}, headers=H).status_code == 404
+
+
+def test_suggestion_add_and_dismiss(fake):
     c = _client()
-    for q in ("status=Not%20assessed", "status=Signed%20off", "status="):
-        assert len(c.get("/api/watchlist?" + q).json()["rows"]) == 2
-        assert len(c.get("/api/watchlist/csv?" + q).text.strip().splitlines()) == 3
+    assert c.post("/api/watchlist/suggestions/30", json={"action": "add"}, headers=H).json() == {"ok": True}
+    d = c.get("/api/watchlist").json()
+    assert d["suggestions"]["count_all"] == 0
+    cy = next(r for g in d["groups"] for r in g["rows"] if r["name"] == "Cy Three")
+    assert cy["stage"] == "Watching"
+    row = store.load(fake.engine).set_index("player_id").loc[3]
+    assert (row["added_rating"], row["added_club"], row["added_by_user_id"]) == (3.7, "Crewe", 1)
+    # dismiss: report 30's player is now watched, so check dismiss on its own
+    store.remove(fake.engine, 3)
+    assert c.post("/api/watchlist/suggestions/30", json={"action": "dismiss"}, headers=H).status_code == 200
+    assert c.get("/api/watchlist").json()["suggestions"]["count_all"] == 0
+    assert c.post("/api/watchlist/suggestions/30", json={"action": "nuke"}, headers=H).status_code == 400
+    assert c.post("/api/watchlist/suggestions/999", json={"action": "add"}, headers=H).status_code == 404
 
 
-def test_web_watchlist_does_not_read_scout_assessments():
-    """The web path never loads the assessment statuses (Streamlit's own page still may)."""
-    import inspect
-    src = inspect.getsource(api)
-    assert "webcache.assessment_status" not in src and "AS.STATUSES" not in src
+def test_all_window_in_the_api(fake):
+    d = _client().get("/api/watchlist?sugg=all").json()
+    assert d["suggestions"]["window"] == "all"
 
 
-def test_page_shell_has_no_assessment_filter(fake):
-    html = _client().get("/watchlist").text
-    for gone in ("Assessment status", 'id="wl-status"', "Assessed records", "Scout sent” is your note"):
-        assert gone not in html
+def test_csv_is_the_list(fake):
+    r = _client().get("/api/watchlist/csv")
+    assert r.status_code == 200
+    lines = r.text.splitlines()
+    assert lines[0] == ",".join(api.CSV_COLUMNS) and len(lines) == 3
 
 
 def test_empty_list(fake):
-    fake.rows.clear()
+    store.remove(fake.engine, 1)
+    store.remove(fake.engine, 2)
     d = _client().get("/api/watchlist").json()
-    assert d["empty"] is True and d["text"].startswith("No players on the watchlist yet.")
+    assert d["empty"] is True and d["groups"] == [] and "No players on the watchlist yet" in d["text"]
+    assert _client().get("/api/watchlist/csv").status_code == 404
 
 
-def test_csv_is_the_table(fake):
-    r = _client().get("/api/watchlist/csv?money=1")
-    assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
-    assert "lofc_watchlist.csv" in r.headers["content-disposition"]
-    head = r.text.splitlines()[0]
-    assert head.startswith("Player,Club,League,Position,Age,Composite") and "Market value" in head
-    assert "Assessed" not in head.split(",")
-
-
-# --- writes ----------------------------------------------------------------------------------
-def test_save_needs_the_header(fake):
-    assert _client().post(KEY, json={"note": "x", "status": "Watching"}).status_code == 403
-    assert fake.calls == []
-
-
-@pytest.mark.parametrize("role", ["scout", "medical", "head_of_recruitment", "admin"])
-def test_save_note_and_status_any_role_as_streamlit(fake, role):
-    r = _client(role).post(KEY, json={"note": "  Seen twice  ", "status": "Scout sent"}, headers=H)
-    assert r.status_code == 200 and r.json() == {"ok": True}
-    assert fake.calls == [("note", 1, 5, 318, "Seen twice"), ("status", 1, 5, 318, "Scout sent")]
-
-
-def test_save_blank_note_stores_none(fake):
-    _client().post(KEY, json={"note": "   ", "status": "Watching"}, headers=H)
-    assert fake.calls[0] == ("note", 1, 5, 318, None)
-
-
-@pytest.mark.parametrize("body", [{"note": "x", "status": "Bogus"}, {"note": 5, "status": "Watching"},
-                                  {"status": "Watching"}, {"note": "x"}, []])
-def test_save_rejects_a_bad_body(fake, body):
-    r = _client().post(KEY, json=body, headers=H)
-    assert r.status_code == 400 and fake.calls == []
-
-
-def test_save_404_when_not_on_the_list(fake):
-    r = _client().post("/api/watchlist/9/5/318", json={"note": "x", "status": "Watching"}, headers=H)
-    assert r.status_code == 404 and fake.calls == []
-
-
-def test_remove_reuses_the_card_post_even_without_a_card(fake):
-    """A watched row whose card cannot open (e.g. under 450 minutes) is still removable."""
-    r = _client().post("/api/card/2/901/319/watchlist", json={"action": "remove"}, headers=H)
-    assert r.status_code == 200 and r.json() == {"ok": True, "watched": False}
-    assert ("remove", 2, 901, 319) in fake.calls
-
-
-def test_card_add_still_404_without_a_card(fake):
-    r = _client().post("/api/card/9/5/318/watchlist", json={"action": "add"}, headers=H)
-    assert r.status_code == 404 and fake.calls == []
-
-
-def test_card_remove_404_when_neither_card_nor_watched(fake):
-    r = _client().post("/api/card/9/5/318/watchlist", json={"action": "remove"}, headers=H)
-    assert r.status_code == 404 and fake.calls == []
+def test_page_script_saves_as_you_go_and_keeps_filters_in_the_url():
+    from pathlib import Path
+    root = Path(api.__file__).parents[1] / "static"
+    js = (root / "js" / "watchlist.js").read_text()
+    assert "rememberState('watchlist', {drop: ['open']})" in js
+    assert "'/api/watchlist/' + p" in js and "/api/watchlist/suggestions/" in js
+    assert "Reason (optional)" in js and "data-field=\"drop_reason\"" in js
+    assert "Market value" not in js

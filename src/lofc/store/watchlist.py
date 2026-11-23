@@ -8,69 +8,134 @@ runs identically on the production Postgres and the sqlite used in tests.
 from __future__ import annotations
 
 import pandas as pd
-from sqlalchemy import and_, select
+import datetime
+
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from lofc.config import SEASON_REF_DATE
-from lofc.store.models import WatchlistEntry
+from lofc.store.models import WatchlistDismissed, WatchlistEntry
 
-WATCHLIST_STATUSES = ["Watching", "Scout sent", "Contact agent", "Dropped"]
+# owner 2026-11-23 (Watchlist redesign): stages, one entry per player
+STAGES = ["Watching", "Scout to watch", "Shortlisted", "Agent contacted", "Signed", "Dropped"]
+ACTIVE_STAGES = STAGES[:4]
+OLD_TO_NEW = {"Watching": "Watching", "Scout sent": "Scout to watch",
+              "Contact agent": "Agent contacted", "Dropped": "Dropped"}
+WATCHLIST_STATUSES = STAGES          # the name the older callers use
+# fields a user can edit on the page (`update`)
+EDITABLE = ("status", "owner_user_id", "next_step", "due_date", "note", "drop_reason")
 
 _TABLE = WatchlistEntry.__table__
+_DISMISSED = WatchlistDismissed.__table__
 
 
-def _key_clause(player_id: int, competition_id: int, season_id: int):
-    return and_(_TABLE.c.player_id == player_id,
-                _TABLE.c.competition_id == competition_id,
-                _TABLE.c.season_id == season_id)
+def _now() -> datetime.datetime:
+    return datetime.datetime.now()
 
 
-def is_watched(engine, player_id: int, competition_id: int, season_id: int) -> bool:
+def _latest_id(conn, player_id: int):
+    """The id of the player's latest row (the one the page shows and edits), or None."""
+    row = conn.execute(select(_TABLE.c.id).where(_TABLE.c.player_id == player_id)
+                       .order_by(_TABLE.c.created_at.desc(), _TABLE.c.id.desc())).first()
+    return None if row is None else row[0]
+
+
+def is_watched(engine, player_id: int, competition_id: int | None = None,
+               season_id: int | None = None) -> bool:
+    """Is the PLAYER on the list (any league or season)? `competition_id`/`season_id` are
+    accepted for older callers and ignored (owner 2026-11-23: one entry per player)."""
     with engine.connect() as conn:
-        found = conn.execute(select(_TABLE.c.id)
-                             .where(_key_clause(player_id, competition_id, season_id))).first()
-    return found is not None
+        return _latest_id(conn, player_id) is not None
 
 
-def add(engine, player_id: int, competition_id: int, season_id: int) -> bool:
-    """Add one player season-row. True = added, False = was already on the list."""
+def add(engine, player_id: int, competition_id: int, season_id: int,
+        user_id: int | None = None, snapshot: dict | None = None) -> bool:
+    """Put a player on the list from one of his rows. True = added, False = he was already on it
+    (from any row). `snapshot` = {"rating", "club", "competition_id"} when added, for "What
+    changed since added"."""
+    snap = snapshot or {}
     try:
         with engine.begin() as conn:
-            exists = conn.execute(select(_TABLE.c.id)
-                                  .where(_key_clause(player_id, competition_id, season_id))).first()
-            if exists:
+            if _latest_id(conn, player_id) is not None:
                 return False
             conn.execute(_TABLE.insert().values(
-                player_id=player_id, competition_id=competition_id, season_id=season_id))
+                player_id=player_id, competition_id=competition_id, season_id=season_id,
+                status="Watching", added_by_user_id=user_id, stage_changed_at=_now(),
+                added_rating=snap.get("rating"), added_club=snap.get("club"),
+                added_competition_id=snap.get("competition_id")))
         return True
     except IntegrityError:  # raced with another add; the unique constraint held
         return False
 
 
-def remove(engine, player_id: int, competition_id: int, season_id: int) -> bool:
-    """Remove one entry. True = a row was deleted."""
+def remove(engine, player_id: int, competition_id: int | None = None,
+           season_id: int | None = None) -> bool:
+    """Take the player off the list (every row of his). True = something was removed. A user's
+    own action from the card; the page's "Dropped" stage keeps him on record instead."""
     with engine.begin() as conn:
-        result = conn.execute(_TABLE.delete()
-                              .where(_key_clause(player_id, competition_id, season_id)))
+        result = conn.execute(_TABLE.delete().where(_TABLE.c.player_id == player_id))
     return result.rowcount > 0
+
+
+def update(engine, player_id: int, user_id: int | None = None, **fields) -> bool:
+    """Edit the player's latest row: any of EDITABLE. Blank text, None or "" clears a field.
+    A stage change stamps `stage_changed_at`; a note change stamps who and when. A drop reason
+    is optional (owner 2026-11-23). False when the player is not on the list."""
+    bad = set(fields) - set(EDITABLE)
+    if bad:
+        raise ValueError(f"cannot edit {sorted(bad)}; expected some of {EDITABLE}")
+    if "status" in fields and fields["status"] not in STAGES:
+        raise ValueError(f"unknown stage {fields['status']!r}; expected one of {STAGES}")
+    values = {}
+    for k, v in fields.items():
+        if isinstance(v, str):
+            v = v.strip() or None
+        values[k] = v
+    with engine.begin() as conn:
+        rid = _latest_id(conn, player_id)
+        if rid is None:
+            return False
+        cur = conn.execute(select(_TABLE.c.status, _TABLE.c.note).where(_TABLE.c.id == rid)).first()
+        if "status" in values and values["status"] != cur.status:
+            values["stage_changed_at"] = _now()
+        if "note" in values and values["note"] != cur.note:
+            values.update(note_updated_by=user_id, note_updated_at=_now())
+        if values:
+            conn.execute(_TABLE.update().where(_TABLE.c.id == rid).values(**values))
+    return True
 
 
 def set_note(engine, player_id: int, competition_id: int, season_id: int,
              note: str | None) -> None:
-    with engine.begin() as conn:
-        conn.execute(_TABLE.update()
-                     .where(_key_clause(player_id, competition_id, season_id))
-                     .values(note=note))
+    update(engine, player_id, note=note)
 
 
 def set_status(engine, player_id: int, competition_id: int, season_id: int,
                status: str) -> None:
-    if status not in WATCHLIST_STATUSES:
-        raise ValueError(f"unknown watchlist status {status!r}; expected one of {WATCHLIST_STATUSES}")
-    with engine.begin() as conn:
-        conn.execute(_TABLE.update()
-                     .where(_key_clause(player_id, competition_id, season_id))
-                     .values(status=status))
+    update(engine, player_id, status=status)
+
+
+def row_count(engine) -> int:
+    """Every stored row, duplicates included (the page shows one per player)."""
+    with engine.connect() as conn:
+        return int(conn.execute(select(func.count()).select_from(_TABLE)).scalar())
+
+
+def dismiss(engine, report_id: int, player_id: int | None, user_id: int | None) -> None:
+    """Hide one "Suggested from scout reports" entry (its report). Twice is harmless."""
+    try:
+        with engine.begin() as conn:
+            if conn.execute(select(_DISMISSED.c.id).where(_DISMISSED.c.report_id == report_id)).first():
+                return
+            conn.execute(_DISMISSED.insert().values(report_id=report_id, player_id=player_id,
+                                                    user_id=user_id))
+    except IntegrityError:
+        return
+
+
+def dismissed_report_ids(engine) -> set[int]:
+    with engine.connect() as conn:
+        return {int(r[0]) for r in conn.execute(select(_DISMISSED.c.report_id))}
 
 
 def load(engine) -> pd.DataFrame:
@@ -95,7 +160,10 @@ def load(engine) -> pd.DataFrame:
     age only when no birth date is on file.
     """
     query = """
-        SELECT w.player_id, w.competition_id, w.season_id, w.note, w.status, w.created_at,
+        SELECT w.id AS row_id, w.player_id, w.competition_id, w.season_id, w.note, w.status,
+               w.created_at, w.drop_reason, w.owner_user_id, w.next_step, w.due_date,
+               w.added_by_user_id, w.stage_changed_at, w.note_updated_by, w.note_updated_at,
+               w.added_rating, w.added_club, w.added_competition_id,
                p.player_name, p.contract_until, p.tm_player_id, p.birth_date,
                COALESCE(n.team_name, m.team_name) AS team_name,
                COALESCE(n.position_group, m.position_group) AS position_group,
@@ -131,4 +199,6 @@ def load(engine) -> pd.DataFrame:
     # `dashboard/loaders.py::load_candidates` for the identical fix, same reasoning.
     fallback_age = pd.to_numeric(frame["valuation_age"], errors="coerce")
     frame["age"] = dob_age.where(dob_age.notna(), fallback_age)
+    # owner 2026-11-23 (decision A): one entry per player -- his latest row (newest first)
+    frame = frame.drop_duplicates("player_id", keep="first").reset_index(drop=True)
     return frame.drop(columns=["birth_date", "valuation_age"])

@@ -230,7 +230,10 @@ DISCOVER_JS = r"""
       || e.getAttribute('data-action') || e.name || e.id || e.tagName) + '').trim()
       .replace(/\s+/g, ' ').slice(0, 40);
     e.setAttribute('data-wc-idx', i);
-    out.push(Object.assign({idx: i++, kind, label, tag: e.tagName.toLowerCase()}, extra || {}));
+    // a control inside [data-writes] saves as soon as it is used (e.g. the Watchlist's stage
+    // dropdowns): a write, pressed only with --allow-writes
+    out.push(Object.assign({idx: i++, kind, label, tag: e.tagName.toLowerCase(),
+                            writes: !!e.closest('[data-writes]')}, extra || {}));
   };
   main.querySelectorAll('select').forEach(e => add(e, 'select', {
     options: [...e.options].filter(o => !o.disabled).map(o => ({value: o.value, text: o.text.trim()})),
@@ -688,8 +691,9 @@ class Session:
         self.goto(path, check=False)
         controls = self.page.evaluate(DISCOVER_JS)
         n_all = len(controls)
-        skip_d = [c for c in controls if c["kind"] in ("button", "link", "row")
-                  and (is_external(c["label"]) or (not self.allow_writes and is_destructive(c["label"])))]
+        skip_d = [c for c in controls if (c.get("writes") and not self.allow_writes)
+                  or (c["kind"] in ("button", "link", "row")
+                      and (is_external(c["label"]) or (not self.allow_writes and is_destructive(c["label"]))))]
         controls = [c for c in controls if c not in skip_d]
         cap = min(self.max_actions, 20 if self.quick else 60)
         chosen = sample_controls(controls, per_group=1 if self.quick else 2, max_total=cap)

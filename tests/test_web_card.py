@@ -56,8 +56,9 @@ class FakeWatchlist:
     def __init__(self):
         self.watched, self.calls = False, []
 
-    def add(self, engine, p, c, s):
+    def add(self, engine, p, c, s, user_id=None, snapshot=None):
         self.calls.append(("add", p, c, s)); self.watched = True
+        self.added = (user_id, snapshot)
 
     def remove(self, engine, p, c, s):
         self.calls.append(("remove", p, c, s)); self.watched = False
@@ -173,6 +174,9 @@ def test_watchlist_add_then_remove_with_the_header(fake):
     r = c.post(KEY + "/watchlist", json={"action": "remove"}, headers=h)
     assert r.json() == {"ok": True, "watched": False}
     assert fake[1].calls == [("add", 39154, 5, 318), ("remove", 39154, 5, 318)]
+    # owner 2026-11-23: who added him and a snapshot for "What changed since added"
+    who, snap = fake[1].added
+    assert isinstance(who, int) and snap["competition_id"] == 5 and set(snap) == {"rating", "club", "competition_id"}
 
 
 @pytest.mark.parametrize("body", [{"action": "nuke"}, {}, {"action": None}])

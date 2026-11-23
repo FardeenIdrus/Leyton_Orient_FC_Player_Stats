@@ -238,3 +238,19 @@ def test_squad_role_filter_and_options(monkeypatch):
     assert [r["id"] for r in d["rows"]] == ["s1", "s3"]
     assert d["caption"].startswith("2 of 4 reports")
     assert "f-role" in c.get("/scout-reports").text
+
+
+def test_list_fills_the_screen_and_shrinks_when_a_report_opens():
+    """Owner 2026-11-23: the list reaches the bottom of the screen; opening a report shrinks it
+    to about 40% of the screen with the report below; closing it fills the screen again."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "src/lofc/web/static"
+    js = (root / "js/scout_reports.js").read_text()
+    fit = js[js.index("function fitList"):]
+    fit = fit[:fit.index("\n}\n") + 2]
+    assert "OPEN_SHARE" in fit and "innerHeight" in fit and "maxHeight" in fit
+    assert "const OPEN_SHARE = 0.4" in js
+    # called when the list is drawn, on resize, and when a report opens or closes
+    assert js.count("fitList(") >= 4 and "addEventListener('resize'" in js
+    css = (root / "css/scout_reports.css").read_text()
+    assert "max-height:min(680px" not in css

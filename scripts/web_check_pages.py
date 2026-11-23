@@ -2310,6 +2310,49 @@ def scout_tabs(s, w):
     s.note("scout reports: back restores the tab", None if "tab=disagree" in s.page.url else s.page.url)
 
 
+def scout_list_height(s, w):
+    """Owner 2026-11-23: no report open, the list reaches the bottom of the screen; a report open,
+    the list is about 40% of the screen with the report below it in view; closing it fills the
+    screen again."""
+    s.page.set_viewport_size({"width": 1440, "height": 900})
+    s.goto(SR_PATH, check=False)
+    rows = _sr_rows(s)
+    if not rows.count():
+        return s.note("scout reports: list height", skipped="no reports")
+    s.page.wait_for_timeout(300)
+    geo = lambda: s.page.evaluate("""() => { const t = document.getElementById('sr-tw').getBoundingClientRect();
+        const d = document.querySelector('#sr-detail .sr-report');
+        return {bottom: t.bottom + scrollY, h: t.height, vh: innerHeight, scrollH: document.getElementById('sr-tw').scrollHeight,
+                rep: d ? d.getBoundingClientRect().top : null}; }""")
+    g = geo()
+    full = g["scrollH"] <= g["h"] + 1                     # a short list ends where its rows end
+    s.note("scout reports: list reaches the bottom of the screen",
+           None if full or g["vh"] - 40 <= g["bottom"] <= g["vh"] + 2 else str(g))
+    s.step("scout reports: open a report (height)", lambda p: rows.nth(min(5, rows.count() - 1)).locator("td").nth(0).click(timeout=3000))
+    try:
+        s.page.locator("#sr-detail .sr-report").wait_for(timeout=4000)
+    except Exception:
+        return s.note("scout reports: list shrinks", "no report card")
+    s.page.wait_for_timeout(700)                          # smooth scroll + height transition
+    g = geo()
+    s.note("scout reports: list about 40% of the screen with a report open",
+           None if abs(g["h"] - 0.4 * g["vh"]) <= 30 or (full and g["h"] < 0.4 * g["vh"]) else str(g))
+    s.note("scout reports: report in view below the list",
+           None if g["rep"] is not None and 0 < g["rep"] < g["vh"] - 60 else str(g))
+    me = s.page.evaluate("""() => { const tr = document.querySelector('#sr-body tr.me'), tw = document.getElementById('sr-tw');
+        if (!tr) return false; const a = tr.getBoundingClientRect(), b = tw.getBoundingClientRect();
+        return a.top >= b.top - 1 && a.bottom <= b.bottom + 1; }""")
+    s.note("scout reports: the clicked row stays visible", None if me else "scrolled out of the list")
+    s.shot("report_open_list", 1440)
+    s.step("scout reports: close the report", lambda p: p.locator("[data-action=close-report]").click(timeout=3000))
+    s.page.evaluate("() => scrollTo(0, 0)")
+    s.page.wait_for_timeout(400)
+    g = geo()
+    s.note("scout reports: list fills the screen again after closing",
+           None if full or g["vh"] - 40 <= g["bottom"] <= g["vh"] + 2 else str(g))
+    s.page.set_viewport_size({"width": w, "height": 900})
+
+
 def scout_open_report(s, w):
     """A row opens the full report below the table; it is in the URL; a fresh load reopens it;
     nothing overflows at any width."""
@@ -2376,108 +2419,118 @@ WL_PATH = "/watchlist"
 
 
 def _wl_rows(s):
-    return s.page.locator("#wl-body tr[data-row]")
+    return s.page.locator("#wl-groups tr.wr")
 
 
 def _wl_ready(s):
+    """The list (or its empty line) has drawn."""
     try:
-        s.page.locator("#wl-main:not([hidden]), #wl-empty:not([hidden])").first.wait_for(timeout=6000)
-        return s.page.locator("#wl-main:not([hidden])").count() > 0
+        s.page.locator("#wl-groups tr.wr, #wl-empty:not([hidden])").first.wait_for(timeout=8000)
+        return _wl_rows(s).count() > 0
     except Exception:
         return False
 
 
 def watchlist_first_view(s, w):
+    """Owner 2026-11-23 redesign: four tiles, one list grouped by position, each group naming our
+    best (League One) for reference, a clean row (no Market value, no Assessed), feed and News
+    below the list."""
     s.goto(WL_PATH, check=True, desc="watchlist: first view")
     if not _wl_ready(s):
         return s.note("watchlist: rows", skipped="watchlist empty in this database")
-    s.note("watchlist: three tiles", None if s.page.locator("#wl-tiles .tile").count() == 3 else
-           str(s.page.locator("#wl-tiles .tile .k").all_inner_texts()))
-    big = s.page.locator("#wl-tiles .tile .v").first.evaluate("e => parseFloat(getComputedStyle(e).fontSize)")
-    s.note("watchlist: tile numbers large", None if big >= 22 else f"{big}px")
-    s.note("watchlist: rows drawn", None if _wl_rows(s).count() > 0 else "no rows")
-    heads = s.page.inner_text("#wl-thead")
-    s.note("watchlist: columns", None if all(h in heads for h in ("Composite", "Injury", "Months left", "Note"))
-           else heads)
-
-
-def watchlist_no_assessment(s, w):
-    """Assessment status retired on the web (owner 2026-11-16): no filter, no Assessed column, no
-    "Not yet assessed" tile; an old ?status= link lists everyone."""
-    s.goto(WL_PATH, check=False)
-    if not _wl_ready(s):
-        return s.note("watchlist: no assessment status", skipped="watchlist empty")
-    n = _wl_rows(s).count()
+    tiles = s.page.locator("#wl-tiles .tile .k").all_inner_texts()
+    s.note("watchlist: four tiles", None if tiles == ["On the list", "Shortlisted", "Contract ≤ 6 months",
+                                                      "New scout report (14 days)"] else str(tiles))
+    heads = s.page.locator("#wl-groups table.wl-t").first.locator("th").all_inner_texts()
+    s.note("watchlist: columns", None if heads == ["Player", "Overall", "Stage", "Scout verdict", "Next step",
+                                                   "Due", "Contract"] else str(heads))
     body = s.page.inner_text("#v-watchlist")
-    s.note("watchlist: no Assessment status filter",
-           None if not s.page.locator("#wl-status").count() and "Assessment status" not in body else "shown")
-    s.note("watchlist: no Assessed column", None if "Assessed" not in s.page.inner_text("#wl-thead") else "shown")
-    s.note("watchlist: no Not yet assessed tile", None if "Not yet assessed" not in body else "shown")
-    s.shot("no_assessment", w)
-    s.goto(WL_PATH + "?status=Signed%20off", check=False)
-    _wl_ready(s)
-    s.note("watchlist: old status link lists everyone", None if _wl_rows(s).count() == n else f"{n} -> {_wl_rows(s).count()}")
+    s.note("watchlist: no Market value, no assessment", None if "Market value" not in body
+           and "Not yet assessed" not in body and "Assessed" not in body else "still shown")
+    gh = s.page.locator(".wl-gh").all_inner_texts()
+    s.note("watchlist: groups name our best (L1) for reference",
+           None if gh and any("Our best:" in g and "L1" in g for g in gh) else str(gh[:3]))
+    side = s.page.evaluate("""() => { const l = document.getElementById('wl-card').getBoundingClientRect(),
+        f = document.querySelector('.wl-side').getBoundingClientRect(); return [l.bottom <= f.top + 1, l.width]; }""")
+    s.note("watchlist: What changed and News below the list, list full width", None if side[0] else str(side))
+    s.shot("first_view", w, full=True)
 
 
-def watchlist_money(s, w):
+def watchlist_filters(s, w):
+    """Stage, Position, Owner and search narrow the list and go into the URL."""
     s.goto(WL_PATH, check=False)
     if not _wl_ready(s):
-        return s.note("watchlist: market value", skipped="watchlist empty")
-    sw = s.page.locator("#f-money")
-    s.step("watchlist: Market value on", lambda p: sw.check(timeout=3000))
-    s.note("watchlist: Market value column", None if "Market value" in s.page.inner_text("#wl-thead") else "no column")
-    s.note("watchlist: money in the URL", None if "money=1" in s.page.url else s.page.url)
-    s.shot("money", w, full=True)
-    s.step("watchlist: Market value off", lambda p: sw.uncheck(timeout=3000))
-    s.note("watchlist: column gone", None if "Market value" not in s.page.inner_text("#wl-thead") else "still shown")
+        return s.note("watchlist: filters", skipped="watchlist empty")
+    n = _wl_rows(s).count()
+    pos = s.page.locator("#f-pos option").nth(1).get_attribute("value")
+    s.step("watchlist: Position filter", lambda p: p.select_option("#f-pos", pos, timeout=3000))
+    s.note("watchlist: position in the URL", None if "pos=" in s.page.url else s.page.url)
+    s.note("watchlist: one group shown", None if s.page.locator(".wl-gh").count() == 1 else str(s.page.locator(".wl-gh").count()))
+    s.step("watchlist: Position all", lambda p: p.select_option("#f-pos", "", timeout=3000))
+    first = _wl_rows(s).first.locator("b").first.inner_text()
+    s.step("watchlist: search", lambda p: p.fill("#f-q", first[:5]))
+    s.page.wait_for_timeout(200)
+    s.note("watchlist: search narrows", None if 0 < _wl_rows(s).count() <= n else str(_wl_rows(s).count()))
+    s.step("watchlist: clear search", lambda p: p.fill("#f-q", ""))
+    s.step("watchlist: Owner Unassigned", lambda p: p.select_option("#f-owner", "none", timeout=3000))
+    s.note("watchlist: owner in the URL", None if "owner=none" in s.page.url else s.page.url)
+    s.step("watchlist: Owner anyone", lambda p: p.select_option("#f-owner", "", timeout=3000))
 
 
 def watchlist_editor(s, w):
-    """A row opens the editor (note, status, Save / Remove / Close); in the URL; a fresh
-    load reopens it. Save / Remove write: only with --allow-writes, and the note and status are
-    put back as they were."""
+    """A row opens its details inline (owner, next step, due, notes); in the URL; a fresh load
+    reopens it. Writes only with --allow-writes, and they are put back."""
     s.goto(WL_PATH, check=False)
     if not _wl_ready(s):
-        return s.note("watchlist: editor", skipped="watchlist empty")
+        return s.note("watchlist: details", skipped="watchlist empty")
     s.step("watchlist: open a row", lambda p: _wl_rows(s).first.locator("td").nth(1).click(timeout=3000))
-    ed = s.page.locator("#wl-edit")
-    s.note("watchlist: editor shown", None if ed.is_visible() else "editor hidden")
+    det = s.page.locator("tr.wl-det")
+    s.note("watchlist: details open in the row", None if det.count() == 1 and det.is_visible() else "not shown")
     s.note("watchlist: open row in the URL", None if "open=" in s.page.url else s.page.url)
-    s.note("watchlist: editor has its controls",
-           None if all(s.page.locator(f"#{i}").is_visible() for i in ("e-note", "e-status", "e-save", "e-remove", "e-close"))
-           else "a control is missing")
-    s.note("watchlist: no Assess link (retired)", None if not s.page.locator("#e-assess").count() else "shown")
+    s.note("watchlist: details have owner, next step, due and notes",
+           None if all(det.locator(f'[data-field="{f}"]').count() for f in ("owner", "next_step", "due", "note"))
+           else "a field is missing")
+    s.note("watchlist: no drop reason unless Dropped",
+           None if not det.locator('[data-field="drop_reason"]').count() else "shown")
     url = s.page.url
-    for width in (1280, 1440, 1920):
-        s.page.set_viewport_size({"width": width, "height": 900})
-        s.goto(urlparse(url).path + "?" + urlparse(url).query, check=True, desc=f"watchlist: editor @{width}")
-        try:                     # the editor opens once the list's JSON has arrived
-            ed.wait_for(state="visible", timeout=3000)
-        except Exception:
-            pass
-        s.shot("editor", width, full=True)
-        s.note(f"watchlist: editor reopens from the URL @{width}", None if ed.is_visible() else "not reopened")
-    s.page.set_viewport_size({"width": w, "height": 900})
-    s.step("watchlist: Close", lambda p: s.page.locator("#e-close").click(timeout=3000))
-    s.note("watchlist: closed", None if ed.is_hidden() else "still open")
+    s.goto(urlparse(url).path + "?" + urlparse(url).query, check=True, desc="watchlist: details from the URL")
+    _wl_ready(s)
+    s.note("watchlist: details reopen from the URL", None if s.page.locator("tr.wl-det").count() == 1 else "not reopened")
+    s.shot("details", w, full=True)
     if not s.allow_writes:
-        return s.note("watchlist: Save / Remove", skipped="write control (use --allow-writes)")
-    s.step("watchlist: reopen", lambda p: _wl_rows(s).first.locator("td").nth(1).click(timeout=3000))
-    note, status = s.page.locator("#e-note").input_value(), s.page.locator("#e-status").input_value()
-    s.page.locator("#e-note").fill(note + " [webcheck]")
-    s.step("watchlist: Save", lambda p: s.page.locator("#e-save").click(timeout=3000))
-    s.note("watchlist: saved note shown", None if "[webcheck]" in s.page.inner_text("#wl-body") else "note not shown")
-    s.step("watchlist: reopen to restore", lambda p: _wl_rows(s).first.locator("td").nth(1).click(timeout=3000))
-    s.page.locator("#e-note").fill(note)
-    s.page.locator("#e-status").select_option(value=status)
-    s.step("watchlist: Save the original back", lambda p: s.page.locator("#e-save").click(timeout=3000))
+        return s.note("watchlist: save", skipped="write control (use --allow-writes)")
+    box = s.page.locator('tr.wl-det [data-field="next_step"]')
+    before = box.input_value()
+    box.fill("webcheck step"); box.press("Tab")
+    s.page.wait_for_timeout(800)
+    s.note("watchlist: next step saved and shown", None if "webcheck step" in s.page.inner_text("#wl-groups") else "not shown")
+    box = s.page.locator('tr.wl-det [data-field="next_step"]')
+    box.fill(before); box.press("Tab")
+    s.page.wait_for_timeout(800)
+
+
+def watchlist_suggestions(s, w):
+    """"Suggested from scout reports": last 30 days by default, "All" in the URL; Add / Dismiss
+    buttons (writes only with --allow-writes)."""
+    s.goto(WL_PATH, check=False)
+    _wl_ready(s)
+    box = s.page.locator("#wl-sugg")
+    if box.is_hidden():
+        return s.note("watchlist: suggestions", skipped="no suggestions in this database")
+    s.note("watchlist: suggestion rows have Add and Dismiss",
+           None if s.page.locator("#wl-sugg-body [data-add]").count() == s.page.locator("#wl-sugg-body [data-dismiss]").count()
+           else "buttons missing")
+    s.step("watchlist: suggestions All", lambda p: p.locator('#wl-sugg-win [data-win="all"]').click(timeout=3000))
+    s.page.wait_for_timeout(800)
+    s.note("watchlist: All in the URL", None if "sugg=all" in s.page.url else s.page.url)
+    s.shot("suggestions_all", w)
 
 
 def watchlist_name_opens_card(s, w):
     s.goto(WL_PATH, check=False)
     if not _wl_ready(s):
         return s.note("watchlist: name link", skipped="watchlist empty")
-    link = s.page.locator("#wl-body a.plink").first
+    link = s.page.locator("#wl-groups a.plink").first
     if not link.count():
         return s.note("watchlist: name link", skipped="no openable card")
     _go_card(s, "watchlist: a name opens his card with a way back", lambda: link.click(timeout=3000))
@@ -2490,25 +2543,14 @@ def watchlist_name_opens_card(s, w):
 
 
 def watchlist_download(s, w):
-    s.goto(WL_PATH + "?money=1", check=False)
+    s.goto(WL_PATH, check=False)
     if not _wl_ready(s):
         return s.note("watchlist: CSV", skipped="watchlist empty")
     href = s.page.locator("#wl-dl").get_attribute("href") or ""
-    s.note("watchlist: CSV link carries the switch", None if "money=1" in href else href)
     got = s.page.evaluate("(h) => fetch(h).then(r => r.text().then(t => [r.status, t.split('\\n')[0]]))", href)
     s.note("watchlist: CSV downloads with today's header",
-           None if got[0] == 200 and got[1].startswith("Player,Club,League,Position,Age,Composite") and "Market value" in got[1]
-           else str(got))
-
-
-def watchlist_sort(s, w):
-    s.goto(WL_PATH, check=False)
-    if not _wl_ready(s):
-        return s.note("watchlist: sort", skipped="watchlist empty")
-    s.step("watchlist: sort by Composite", lambda p: s.page.locator("#wl-thead [data-sort=Composite]").click(timeout=3000))
-    vals = [v for v in s.page.locator("#wl-body td.c:nth-of-type(6)").all_inner_texts() if v != "—"]
-    s.note("watchlist: Composite ascending", None if vals == sorted(vals) else vals)
-    s.note("watchlist: sort in the URL", None if "sort=Composite" in s.page.url else s.page.url)
+           None if got[0] == 200 and got[1].startswith("Player,Club,League,Position,Age,Overall,Stage,Scout verdict")
+           and "Market value" not in got[1] else str(got))
 
 
 # -- Physical ---------------------------------------------------------------------------------
@@ -3681,26 +3723,22 @@ def scout_remembers(s, w):
 
 
 def watchlist_remembers(s, w):
+    """Filters are remembered by the nav link; the open row is not; an explicit URL wins."""
     s.goto(WL_PATH, check=False)
     if not _wl_ready(s):
         return s.note("watchlist: remembered", skipped="watchlist empty")
-    s.step("watchlist: Market value on", lambda p: p.locator("#f-money").check(timeout=3000))
+    s.step("watchlist: Owner Unassigned", lambda p: p.select_option("#f-owner", "none", timeout=3000))
     row = _wl_rows(s).first
     if row.count():
         s.step("watchlist: open a row", lambda p: row.locator("td").nth(1).click(timeout=3000))
     url = s.page.url
     _nav_round_trip(s, "watchlist", WL_PATH)
-    s.note("watchlist: Market value restored",
-           None if _wait_js(s, "() => document.querySelector('#f-money')?.checked") and "money=1" in s.page.url
-           else f"{url} -> {s.page.url}")
+    s.note("watchlist: filter restored", None if "owner=none" in s.page.url else f"{url} -> {s.page.url}")
     s.note("watchlist: open row not restored", None if "open=" not in s.page.url else s.page.url)
-    s.goto(WL_PATH + "?sort=Age", check=False)
+    s.goto(WL_PATH + "?stage=Watching", check=False)
     _wl_ready(s)
-    s.note("watchlist: explicit URL wins", None if "money=" not in s.page.url and
-           _wait_js(s, "() => !document.querySelector('#f-money')?.checked") else s.page.url)
-    _nav_round_trip(s, "watchlist", WL_PATH)
-    s.note("watchlist: explicit URL becomes the remembered one",
-           None if "sort=Age" in s.page.url and "money=" not in s.page.url else s.page.url)
+    s.note("watchlist: explicit URL wins", None if "owner=" not in s.page.url else s.page.url)
+    s.goto(WL_PATH, check=False)
 
 
 def report_remembers(s, w):
@@ -3898,11 +3936,11 @@ PAGES = {
         squads_scroll_draws_more, squads_download, squads_history_and_url,
         squads_remembers]},
     "scout-reports": {"path": "/scout-reports", "exercise": True, "scenarios": [
-        scout_first_view, scout_filters_url, scout_squad_role, scout_search_and_age, scout_tabs, scout_open_report,
+        scout_first_view, scout_filters_url, scout_squad_role, scout_search_and_age, scout_tabs, scout_list_height, scout_open_report,
         scout_name_opens_card, scout_sort, scout_remembers]},
     "watchlist": {"path": "/watchlist", "exercise": True, "scenarios": [
-        watchlist_first_view, watchlist_no_assessment, watchlist_money, watchlist_editor,
-        watchlist_name_opens_card, watchlist_download, watchlist_sort, watchlist_remembers]},
+        watchlist_first_view, watchlist_filters, watchlist_editor, watchlist_suggestions,
+        watchlist_name_opens_card, watchlist_download, watchlist_remembers]},
     "physical": {"path": "/physical", "exercise": False, "scenarios": [
         physical_first_view, physical_exercise_controls, physical_layout_widths, physical_filters_back_forward,
         physical_no_data_season, physical_thin_pool, physical_show_all_and_orient,

@@ -177,7 +177,12 @@ async def watchlist_toggle(player_id: int, competition_id: int, season_id: int, 
                                 and wl.is_watched(engine, player_id, competition_id, season_id)):
             return None
         if action == "add":
-            wl.add(engine, player_id, competition_id, season_id)
+            # owner 2026-11-23: who added him, and a snapshot for "What changed since added"
+            rating = row.get("objective_composite") if row is not None else None
+            snap = {"rating": None if rating is None or rating != rating else float(rating),
+                    "club": row.get("team_name") if row is not None else None,
+                    "competition_id": competition_id}
+            wl.add(engine, player_id, competition_id, season_id, user_id=user.id, snapshot=snap)
         else:
             wl.remove(engine, player_id, competition_id, season_id)
         return bool(wl.is_watched(engine, player_id, competition_id, season_id))

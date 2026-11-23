@@ -2,8 +2,8 @@
 
 > **What this is.** The live server: what runs where, the schedules, backups, how to deploy,
 > and how to work on the Mac without breaking anything. **Current state:** the new web front
-> end serves the main address; the old Streamlit site is on a fallback address until it is
-> retired (`plan/TASKS.md`, Next X1). A code-only change needs only `/opt/lofc/scripts/deploy.sh`.
+> end serves the main address; the old Streamlit site was retired on 2026-11-23 (owner). A
+> code-only change needs only `/opt/lofc/scripts/deploy.sh`.
 
 ---
 
@@ -12,9 +12,9 @@
 | | |
 |---|---|
 | Main address | https://lofc-recruitment.duckdns.org — the new web front end (`DASHBOARD_DOMAIN`). A `leytonorient.com` name is pending with club IT. Which DuckDNS account holds this name is not known (owner, 2026-11-10/13: ask the colleague; not urgent) |
-| Fallback address | https://lofc-recruitment-old.duckdns.org — the old Streamlit dashboard (`OLD_DASHBOARD_DOMAIN`, created 2026-11-10). Retirement planned, not done |
+| Fallback address | Retired 2026-11-23 (owner): the old Streamlit dashboard, its Caddy block, `OLD_DASHBOARD_DOMAIN` and the `dashboard` service are gone |
 | Host | DigitalOcean droplet `lofc-platform`, London, Ubuntu 24.04, **4 vCPU / 8 GB RAM** (resized 2026-11-10, snapshot taken first), disk 80 GB, IP 165.22.122.157 |
-| Code | `/opt/lofc`, branch `main`, `docker-compose.prod.yml`: `db`, `app`, `dashboard` (Streamlit), `web-blue` / `web-green` (new site), `caddy` |
+| Code | `/opt/lofc`, branch `main`, `docker-compose.prod.yml`: `db`, `app`, `web-blue` / `web-green` (the site), `caddy` |
 | Network | DigitalOcean Cloud Firewall `lofc-platform-fw`: inbound TCP 22/80/443 only. Postgres is not exposed |
 | Docker logs | Capped in `/etc/docker/daemon.json` (json-file, 10 MB × 3 per container) |
 | Database connections | Every engine uses `pool_pre_ping=True`: the site heals by itself after a database restart (2026-11-10) |
@@ -68,7 +68,7 @@ Caddy routes `orient-matchanalysis.duckdns.org` to it (see `Caddyfile`). Our `.e
 | | |
 |---|---|
 | Main domain (`DASHBOARD_DOMAIN`) | The web front end (FastAPI, `lofc.web.app`), served by **one** of two identical containers, `web-blue` / `web-green` |
-| Fallback domain (`OLD_DASHBOARD_DOMAIN`) | The old Streamlit dashboard. To retire it: remove its Caddy block, the variable and the `dashboard` service — see TASKS X1 for what must be decided first |
+| Fallback domain (`OLD_DASHBOARD_DOMAIN`) | Retired 2026-11-23 (owner). The variable is no longer read |
 | Which container serves | `caddy/web_upstream.caddy` (not committed), e.g. `reverse_proxy web-green:8600`; written by `scripts/web_switch.sh`, applied with a graceful `caddy reload` |
 | Health | `GET /healthz` → `{"status": "ok", "warm": true/false}` (always 200); `GET /readyz` → 200 once every start-up warm-up is done, 503 before |
 | Process | `uvicorn … --workers 1 --proxy-headers`, no reloader; page caches live in the process |
@@ -83,16 +83,13 @@ Caddy routes `orient-matchanalysis.duckdns.org` to it (see `Caddyfile`). Our `.e
 | `git pull --ff-only` | Nothing reaches the server by itself |
 | If the pull changed `deploy.sh`, re-run the new version once (`LOFC_DEPLOY_REEXEC` guard) | bash keeps reading the file it started with; on 2026-11-10 the old steps started Caddy without its upstream file and took every domain down for ~5–10 min |
 | `docker compose build` (always, even if the commit did not move) | The image bakes the code in; build first, restart second |
-| Create `caddy/web_upstream.caddy` if missing (points at `dashboard:8501`) | Caddy must never start without it |
-| `up -d db app dashboard caddy` | Never a plain `up -d --build`, which would recreate the serving web container cold |
+| Create `caddy/web_upstream.caddy` if missing (points at `web-blue:8600`) | Caddy must never start without it |
+| `up -d db app caddy` | Never a plain `up -d --build`, which would recreate the serving web container cold |
 | `alembic upgrade head` | A schema change is live the moment the code that needs it is |
 | `scripts/web_switch.sh` | Start the idle colour from the new image → wait for `/readyz` → point Caddy at it → `caddy reload` → stop the old colour. If it never gets warm or the reload fails, nothing switches, the old one keeps serving and the deploy exits 1 |
 
-**Roll back to the Streamlit dashboard on the main domain** (seconds, no rebuild):
-```bash
-cd /opt/lofc && echo "reverse_proxy dashboard:8501" > caddy/web_upstream.caddy
-docker compose -f docker-compose.prod.yml exec -T caddy caddy reload --config /etc/caddy/Caddyfile
-```
+**Roll back** (the Streamlit fallback is retired): check out the previous commit on the server
+and run `scripts/deploy.sh` again — it builds that code and switches the web colour as usual.
 
 ### Two machines, two jobs
 
@@ -336,10 +333,8 @@ removed — see "Why no Caddy basic-auth" below.)
    SKILLCORNER_USERNAME=
    SKILLCORNER_PASSWORD=
 
-   # Public domain for the web front end (Caddy issues HTTPS for it automatically), and the
-   # fallback domain for the old Streamlit dashboard (required while that Caddy block exists):
+   # Public domain for the web front end (Caddy issues HTTPS for it automatically):
    DASHBOARD_DOMAIN=recruitment.yourclub.com
-   OLD_DASHBOARD_DOMAIN=recruitment-old.yourclub.com
 
    # Server only: Transfermarkt blocks datacentre IPs (section 1 above).
    SKIP_TRANSFERMARKT_SCRAPE=true

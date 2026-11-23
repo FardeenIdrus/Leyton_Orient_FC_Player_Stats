@@ -1395,6 +1395,12 @@ with "no sideways scrolling" in the same sentence — ask what he means. Not bui
   not in the feed. Top speed stays PSV-99 Top 5.
 - Full dated notes: "2.36 front-end notes" at the end of this work log.
 
+### 2026-11-23 (evening) — Watchlist redesign; old Streamlit site retired (built locally, not deployed)
+- Migration e7b2c4d9f031 (nullable columns + watchlist_dismissed; statuses renamed; no rows merged or deleted). `store.watchlist`: one entry per player (`load` keeps each player's latest row; `add` refuses a player already on the list; `update` edits the latest row and stamps stage / note changes; `remove` takes every row of the player); `dismiss` / `dismissed_report_ids`.
+- `core.watchlist_page`: latest_reports, suggestions (latest verdict Sign / Monitor Priority, not watched, not dismissed; 30 days default — 187 players qualified on the Mac copy, 45 in 30 days), changes (scout report after he was added, rating ±0.10 vs the snapshot, club move, injured now, contract < 6 months), group_rows (our best from the Club vs League One level, L1, reference only), tiles. API and page rewritten; Market value switch removed; card's Add records the user and a snapshot.
+- Harness: controls inside `[data-writes]` count as writes (an auto-saving stage dropdown changed the Mac copy's watchlist during a check run before this rule — Mac only; restore commands given to the owner).
+- Old site: Caddy block, OLD_DASHBOARD_DOMAIN, `dashboard` service and deploy.sh's start of it removed; DEPLOY.md updated (rollback = previous commit + deploy.sh).
+
 ### 2026-11-23 (later) — Club vs League One Gap closed on raw values (built locally, not deployed)
 - Owner approved raw values on every tab (other leagues' percentiles were being subtracted from League One's). `club_vs_league.raw_profile` (shortfall measures from the League One percentile comparison, raw ours vs raw top-6 median), `gap_closed` = per-measure share closed (0–1), weighted by Overall weight × `gap_size` (|gap| ÷ League One sd at the position). Decision B (owner 2026-11-23) after real data showed near-zero gaps (Pressures 0.08 sd) counting as much as large ones (Sprints 1.92 sd) under plain weights.
 - API: `raws(season)` source (player_metrics_neutral rating measures), `_spreads`, raw profiles in `_base` and for a picked player. `OWN_LEAGUE_NOTE` and its line removed. Fold-out mini table in raw units, "Share closed" column.

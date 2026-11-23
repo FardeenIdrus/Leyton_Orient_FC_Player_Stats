@@ -514,10 +514,38 @@ class WatchlistEntry(Base):
     competition_id: Mapped[int] = mapped_column(Integer, index=True)
     season_id: Mapped[int] = mapped_column(Integer)
     note: Mapped[str | None] = mapped_column(String, nullable=True)
-    status: Mapped[str] = mapped_column(String, server_default="Watching")
+    status: Mapped[str] = mapped_column(String, server_default="Watching")   # the stage
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now(),
                                                           onupdate=func.now())
+    # owner 2026-11-23 (Watchlist redesign): one shared department list, one entry per player
+    # (the page shows a player's latest row; older rows are kept, never merged)
+    drop_reason: Mapped[str | None] = mapped_column(String, nullable=True)        # optional
+    owner_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    next_step: Mapped[str | None] = mapped_column(String, nullable=True)
+    due_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    added_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    stage_changed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    note_updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    note_updated_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    # a snapshot when added, for "What changed since added"
+    added_rating: Mapped[float | None] = mapped_column(Float, nullable=True)
+    added_club: Mapped[str | None] = mapped_column(String, nullable=True)
+    added_competition_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class WatchlistDismissed(Base):
+    """A "Suggested from scout reports" entry someone dismissed (owner 2026-11-23). Keyed by the
+    scout report: a newer Sign / Monitor Priority report for the player is suggested again.
+    USER DATA: never written or cleared by the pipeline."""
+
+    __tablename__ = "watchlist_dismissed"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    report_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    player_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dismissed_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class User(Base):

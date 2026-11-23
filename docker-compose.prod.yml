@@ -3,8 +3,8 @@
 #   docker compose -f docker-compose.prod.yml up -d --build
 #   docker compose -f docker-compose.prod.yml exec app python -m lofc.pipeline
 #
-# Only the web front end (DASHBOARD_DOMAIN) and, as a fallback, the old Streamlit dashboard
-# (OLD_DASHBOARD_DOMAIN) are public, via Caddy (automatic HTTPS). Access control is the
+# Only the web front end (DASHBOARD_DOMAIN) is public, via Caddy (automatic HTTPS); the old
+# Streamlit dashboard was retired on 2026-11-23 (owner). Access control is the
 # platform's OWN login (real accounts, scrypt-hashed passwords, lockout, 12-hour
 # sessions) -- there is no separate Caddy basic-auth layer; see DEPLOY.md, "Why no
 # Caddy basic-auth". The database, the app container and the admin tools are NOT
@@ -47,25 +47,6 @@ services:
     command: ["tail", "-f", "/dev/null"]   # idle helper; run the pipeline via `exec`
     restart: unless-stopped
 
-  dashboard:
-    build: .
-    depends_on:
-      db:
-        condition: service_healthy
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL}
-    volumes:
-      # The Refresh button reads the scouting sheet directly, so the dashboard
-      # needs the key as well as the app container. Read-only mount, and the
-      # key itself carries only the spreadsheets.readonly scope.
-      - ./secrets:/app/secrets:ro
-    command: ["streamlit", "run", "src/lofc/dashboard/app.py",
-              "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
-    restart: unless-stopped
-    # No host port: Caddy reaches it over the internal network and serves it publicly.
-
   # The new web front end (docs/frontend.md), served on DASHBOARD_DOMAIN. Two identical
   # containers, blue and green: a deploy starts the idle one from the new image and Caddy
   # switches to it only once its warm-up is done (scripts/web_switch.sh), so no user ever meets
@@ -103,16 +84,11 @@ services:
 
   caddy:
     image: caddy:2.8-alpine
-    depends_on:
-      - dashboard
     ports:
       - "80:80"
       - "443:443"
     environment:
       DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN:?set DASHBOARD_DOMAIN in .env}
-      # The old Streamlit dashboard stays reachable here as a fallback for about two weeks after
-      # the switch to the new front end (owner, 2026-11-09). A DuckDNS name for this server.
-      OLD_DASHBOARD_DOMAIN: ${OLD_DASHBOARD_DOMAIN:?set OLD_DASHBOARD_DOMAIN in .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # caddy/web_upstream.caddy names the web container that serves DASHBOARD_DOMAIN; written by

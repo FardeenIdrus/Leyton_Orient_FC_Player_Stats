@@ -64,10 +64,10 @@ def test_is_watched(engine):
 def test_note_and_status_round_trip(engine):
     watchlist.add(engine, 1, 4, 318)
     watchlist.set_note(engine, 1, 4, 318, "send a scout to the next home game")
-    watchlist.set_status(engine, 1, 4, 318, "Scout sent")
+    watchlist.set_status(engine, 1, 4, 318, "Scout to watch")
     row = watchlist.load(engine).iloc[0]
     assert row["note"] == "send a scout to the next home game"
-    assert row["status"] == "Scout sent"
+    assert row["status"] == "Scout to watch"
 
 
 def test_set_status_rejects_unknown(engine):
@@ -124,12 +124,83 @@ def test_load_age_falls_back_to_valuation_when_birth_date_missing(engine):
     assert row["age"] == 24.0
 
 
-def test_same_player_in_two_leagues_coexists(engine):
-    # A mid-season mover is watched per league row, independently.
+# --- owner 2026-11-23: one shared list, one entry per PLAYER (decision A) ----------------------
+def _raw_insert(engine, **row):
+    from lofc.store.models import WatchlistEntry
+    with engine.begin() as conn:
+        conn.execute(WatchlistEntry.__table__.insert().values(**row))
+
+
+def test_a_player_is_on_the_list_once_whatever_the_league_or_season(engine):
     assert watchlist.add(engine, 1, 4, 318) is True
-    assert watchlist.add(engine, 1, 65, 318) is True
-    assert len(watchlist.load(engine)) == 2
-    watchlist.remove(engine, 1, 4, 318)
-    remaining = watchlist.load(engine)
-    assert len(remaining) == 1
-    assert int(remaining.iloc[0]["competition_id"]) == 65
+    assert watchlist.add(engine, 1, 65, 319) is False             # already watched
+    assert watchlist.is_watched(engine, 1, 65, 319) is True
+    assert len(watchlist.load(engine)) == 1
+
+
+def test_old_duplicate_rows_show_once_latest_wins_and_are_not_deleted(engine):
+    import datetime as dt
+    _raw_insert(engine, player_id=1, competition_id=4, season_id=318, status="Watching",
+                note="old", created_at=dt.datetime(2026, 1, 1))
+    _raw_insert(engine, player_id=1, competition_id=4, season_id=319, status="Shortlisted",
+                note="new", created_at=dt.datetime(2026, 9, 1))
+    got = watchlist.load(engine)
+    assert len(got) == 1 and got.iloc[0]["note"] == "new" and int(got.iloc[0]["season_id"]) == 319
+    assert watchlist.row_count(engine) == 2                       # nothing deleted
+    # an edit goes to the latest row
+    watchlist.update(engine, 1, user_id=7, status="Agent contacted")
+    assert watchlist.load(engine).iloc[0]["status"] == "Agent contacted"
+
+
+def test_add_keeps_who_and_a_snapshot_for_what_changed(engine):
+    watchlist.add(engine, 1, 4, 318, user_id=3,
+                  snapshot={"rating": 3.41, "club": "Testville", "competition_id": 4})
+    r = watchlist.load(engine).iloc[0]
+    assert (r["added_by_user_id"], r["added_rating"], r["added_club"], r["added_competition_id"]) == (3, 3.41, "Testville", 4)
+    assert r["status"] == "Watching" and pd.notna(r["stage_changed_at"])
+
+
+def test_update_stage_owner_next_step_due_note_and_optional_drop_reason(engine):
+    import datetime as dt
+    watchlist.add(engine, 1, 4, 318)
+    watchlist.update(engine, 1, user_id=5, status="Shortlisted", owner_user_id=5,
+                     next_step="Watch vs Crewe", due_date=dt.date(2026, 12, 2), note="quick")
+    r = watchlist.load(engine).iloc[0]
+    assert (r["status"], r["owner_user_id"], r["next_step"], r["note"]) == ("Shortlisted", 5, "Watch vs Crewe", "quick")
+    assert pd.Timestamp(r["due_date"]).date() == dt.date(2026, 12, 2)
+    assert r["note_updated_by"] == 5 and pd.notna(r["note_updated_at"])
+    # owner 2026-11-23: dropping needs no reason
+    watchlist.update(engine, 1, user_id=5, status="Dropped")
+    assert watchlist.load(engine).iloc[0]["status"] == "Dropped"
+    watchlist.update(engine, 1, user_id=5, drop_reason="Level")
+    assert watchlist.load(engine).iloc[0]["drop_reason"] == "Level"
+    # blanks clear; unknown stage or field refused
+    watchlist.update(engine, 1, user_id=5, next_step="", due_date=None, owner_user_id=None)
+    r = watchlist.load(engine).iloc[0]
+    assert r["next_step"] is None and pd.isna(r["due_date"]) and pd.isna(r["owner_user_id"])
+    with pytest.raises(ValueError):
+        watchlist.update(engine, 1, user_id=5, status="Signed!!")
+    with pytest.raises(ValueError):
+        watchlist.update(engine, 1, user_id=5, added_rating=9.0)
+    assert watchlist.update(engine, 99, user_id=5, note="x") is False   # not on the list
+
+
+def test_remove_takes_the_player_off_every_row(engine):
+    watchlist.add(engine, 1, 4, 318)
+    assert watchlist.remove(engine, 1, 65, 319) is True          # any league / season
+    assert watchlist.load(engine).empty
+
+
+def test_stages_and_the_old_names_map(engine):
+    assert watchlist.STAGES == ["Watching", "Scout to watch", "Shortlisted", "Agent contacted",
+                                "Signed", "Dropped"]
+    assert watchlist.ACTIVE_STAGES == ["Watching", "Scout to watch", "Shortlisted", "Agent contacted"]
+    assert watchlist.OLD_TO_NEW == {"Watching": "Watching", "Scout sent": "Scout to watch",
+                                    "Contact agent": "Agent contacted", "Dropped": "Dropped"}
+
+
+def test_dismissed_suggestions(engine):
+    assert watchlist.dismissed_report_ids(engine) == set()
+    watchlist.dismiss(engine, report_id=11, player_id=1, user_id=5)
+    watchlist.dismiss(engine, report_id=11, player_id=1, user_id=5)    # twice: no error
+    assert watchlist.dismissed_report_ids(engine) == {11}
