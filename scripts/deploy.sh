@@ -14,9 +14,13 @@
 # sys.modules.) This script always rebuilds.
 #
 # Run ON THE SERVER:  /opt/lofc/scripts/deploy.sh
-#   --force   rebuild and switch even when nothing new was pulled (repairs a deploy that
-#             stopped half-way). Without it, a run with nothing new stops at once (owner
-#             2026-11-23: an accidental re-run took ~10 minutes for nothing).
+#   --force   rebuild and switch even when the site already runs the latest commit.
+#             Without it, a run stops at once when the site already runs the latest commit
+#             (owner 2026-11-23: an accidental re-run took ~10 minutes for nothing).
+#
+# "Already runs" = the commit in .deployed_commit, written only after a deploy finished in
+# full. Not "git pull found nothing": the code on disk can be current while the site is not
+# (owner 2026-11-23, N20 -- the chart fix sat on disk unbuilt).
 #
 # Exit codes: 0 deployed (or already current), 1 something failed -- read the output.
 
@@ -40,13 +44,7 @@ say "pulling..."
 git pull --ff-only
 
 after=$(git rev-parse --short HEAD)
-if [ "$before" = "$after" ]; then
-    if [ "$FORCE" != 1 ]; then
-        say "already up to date at $after -- nothing new to deploy. (To rebuild anyway, e.g. after a deploy that stopped half-way: $0 --force)"
-        exit 0
-    fi
-    say "already up to date at $after -- rebuilding anyway (--force)"
-else
+if [ "$before" != "$after" ]; then
     say "updated: $before -> $after"
     git --no-pager log --oneline "$before..$after"
 fi
@@ -60,8 +58,20 @@ if [ -z "${LOFC_DEPLOY_REEXEC:-}" ] && ! git diff --quiet "$before" "$after" -- 
     LOFC_DEPLOY_REEXEC=1 exec "$REPO_ROOT/scripts/deploy.sh" "$@"
 fi
 
-# Rebuild whenever new code was pulled, or with --force when the commit did not move (a
-# half-finished earlier deploy is the state --force exists to recover from).
+# Stop at once only when the site already runs this commit (checked after the re-run above,
+# so a re-run of a changed deploy.sh still builds).
+STATE="$REPO_ROOT/.deployed_commit"
+deployed=$(cat "$STATE" 2>/dev/null || true)
+if [ "$deployed" = "$after" ]; then
+    if [ "$FORCE" != 1 ]; then
+        say "the site already runs $after -- nothing new to deploy. (To rebuild anyway: $0 --force)"
+        exit 0
+    fi
+    say "the site already runs $after -- rebuilding anyway (--force)"
+else
+    say "the site runs ${deployed:-an unrecorded commit}; deploying $after"
+fi
+
 # Build FIRST, restart second: the web containers are switched separately below, so a plain
 # `up -d --build` (which would recreate the serving web container cold) is never used.
 say "building images..."
@@ -89,4 +99,5 @@ LOFC_REPO_ROOT="$REPO_ROOT" LOFC_COMPOSE_FILE="$COMPOSE_FILE" "$REPO_ROOT/script
 say "container status:"
 docker compose -f "$COMPOSE_FILE" ps
 
+echo "$after" > "$STATE"
 say "deployed at $after"

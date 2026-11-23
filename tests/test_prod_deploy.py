@@ -86,15 +86,68 @@ def test_switch_script_behaviour():
     assert r.returncode == 0, r.stdout + r.stderr
 
 
-def test_deploy_stops_at_once_when_nothing_new_unless_forced():
-    """Owner 2026-11-23: a re-run with nothing new pushed stops straight away instead of a
-    10-minute rebuild + warm-up; `--force` still does the full sequence (repairing a
-    half-finished deploy)."""
-    text = (ROOT / "scripts" / "deploy.sh").read_text()
-    body = "\n".join(l for l in text.splitlines() if not l.strip().startswith("#"))
-    skip = body.index('if [ "$before" = "$after" ]')
-    build = body.index('docker compose -f "$COMPOSE_FILE" build')
-    assert skip < build                                   # decided before any build
-    block = body[skip:body.index("fi", skip)]
-    assert "--force" in block and "exit 0" in block
-    assert 'FORCE=0' in body and '"--force"' in body       # the flag is parsed
+def _deploy_env(tmp_path):
+    """A throwaway server: a bare origin, a clone holding the real deploy.sh, a stub `docker`
+    that only logs its calls and a stub web_switch.sh."""
+    import os
+    real = (ROOT / "scripts" / "deploy.sh").read_text()
+    origin, work, srv = tmp_path / "origin.git", tmp_path / "work", tmp_path / "srv"
+    git = lambda *a, cwd: subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True)
+    git("init", "-q", "--bare", "-b", "main", str(origin), cwd=tmp_path)
+    git("clone", "-q", str(origin), str(work), cwd=tmp_path)
+    (work / "scripts").mkdir()
+    (work / "scripts" / "deploy.sh").write_text(real)
+    (work / "scripts" / "web_switch.sh").write_text("#!/usr/bin/env bash\necho switched >> \"$LOG\"\n")
+    for f in ("deploy.sh", "web_switch.sh"):
+        (work / "scripts" / f).chmod(0o755)
+    (work / ".gitignore").write_text("caddy/\n.deployed_commit\n")
+    for a in (("add", "-A"), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "one"), ("push", "-q", "origin", "main")):
+        git(*a, cwd=work)
+    git("clone", "-q", str(origin), str(srv), cwd=tmp_path)
+    bin_ = tmp_path / "bin"; bin_.mkdir()
+    (bin_ / "docker").write_text("#!/usr/bin/env bash\necho \"docker $*\" >> \"$LOG\"\n"); (bin_ / "docker").chmod(0o755)
+    log = tmp_path / "log"
+    env = {**os.environ, "PATH": f"{bin_}:{os.environ['PATH']}", "LOG": str(log),
+           "LOFC_REPO_ROOT": str(srv), "LOFC_COMPOSE_FILE": "x.yml"}
+
+    def run(*args):
+        log.write_text("")
+        r = subprocess.run(["bash", str(srv / "scripts" / "deploy.sh"), *args], env=env, capture_output=True, text=True)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return "build" in log.read_text().split(), r.stdout
+
+    def push(name, change_script=False):
+        if change_script:
+            s = work / "scripts" / "deploy.sh"; s.write_text(s.read_text() + "\n# changed\n")
+        (work / name).write_text(name)
+        for a in (("add", "-A"), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", name), ("push", "-q", "origin", "main")):
+            git(*a, cwd=work)
+    return run, push, srv
+
+
+@pytest.mark.skipif(__import__("shutil").which("git") is None, reason="needs git (run on the Mac)")
+def test_deploy_skips_only_when_the_running_build_is_current(tmp_path):
+    """Owner 2026-11-23 (N20): the skip compares HEAD with the commit that was last DEPLOYED in
+    full, not with what `git pull` found -- the code on disk being current does not mean the
+    site is (the live chart fix sat on disk unbuilt)."""
+    run, push, srv = _deploy_env(tmp_path)
+    built, _ = run()                                       # never deployed: builds
+    assert built and (srv / ".deployed_commit").exists()
+    built, out = run()                                     # nothing new: stops at once
+    assert not built and "nothing new" in out
+    push("a.txt")
+    subprocess.run(["git", "pull", "-q", "--ff-only"], cwd=srv, check=True, capture_output=True)
+    built, _ = run()                                       # pulled by hand, never built: builds
+    assert built
+    built, _ = run("--force")                              # --force always builds
+    assert built
+
+
+@pytest.mark.skipif(__import__("shutil").which("git") is None, reason="needs git (run on the Mac)")
+def test_deploy_builds_when_it_restarts_itself(tmp_path):
+    """A pull that changes deploy.sh re-runs the new script; that re-run must still build."""
+    run, push, srv = _deploy_env(tmp_path)
+    run()
+    push("b.txt", change_script=True)
+    built, out = run()
+    assert built and "restarting with the new version" in out

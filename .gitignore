@@ -103,3 +103,4 @@ club_docs/
 
 # Written by scripts/web_switch.sh on the server: which web container Caddy serves.
 caddy/web_upstream.caddy
+.deployed_commit
