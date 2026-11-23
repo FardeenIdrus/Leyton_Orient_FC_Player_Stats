@@ -76,3 +76,46 @@ def test_a_pool_of_one_has_no_percentile():
                                        (19.9, "Low"), (None, None)])
 def test_level(pct, level):
     assert im.level(pct) == level
+
+
+class _Resp:
+    status_code = 200
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"data": [1]}
+
+
+class _Session:
+    def __init__(self, fails, exc):
+        self.fails, self.exc, self.headers, self.n = fails, exc, {}, 0
+
+    def get(self, url, timeout):
+        self.n += 1
+        if self.n <= self.fails:
+            raise self.exc("slow")
+        return _Resp()
+
+
+def _api(monkeypatch, fails, exc):
+    monkeypatch.setattr(im.time, "sleep", lambda s: None)
+    api = im.Api.__new__(im.Api)
+    api.s, api.calls = _Session(fails, exc), 0
+    return api
+
+
+@pytest.mark.parametrize("exc_name", ["Timeout", "ConnectionError"])
+def test_a_slow_or_dropped_answer_is_retried(monkeypatch, exc_name):
+    import requests
+    api = _api(monkeypatch, 3, getattr(requests, exc_name))
+    assert api.get("/x") == [1] and api.s.n == 4
+
+
+def test_gives_up_after_four_tries(monkeypatch):
+    import requests
+    api = _api(monkeypatch, 4, requests.Timeout)
+    with pytest.raises(requests.Timeout):
+        api.get("/x")
+    assert api.s.n == 4

@@ -135,7 +135,8 @@ def level(pct) -> str | None:
 
 # ---- API + database ---------------------------------------------------------------------------
 class Api:
-    """A tiny Impect client: bearer token, a gap between calls, a retry on 429 / 5xx."""
+    """A tiny Impect client: bearer token, a gap between calls, a retry on 429 / 5xx and on a
+    timed-out or dropped connection (owner 2026-11-23: one slow answer stopped the first pull)."""
 
     def __init__(self, token: str):
         import requests
@@ -144,10 +145,17 @@ class Api:
         self.calls = 0
 
     def get(self, path: str):
+        import requests
         for attempt in range(4):
             time.sleep(CALL_GAP)
-            r = self.s.get(HOST + path, timeout=60)
             self.calls += 1
+            try:
+                r = self.s.get(HOST + path, timeout=60)
+            except (requests.Timeout, requests.ConnectionError):
+                if attempt == 3:
+                    raise
+                time.sleep(2 ** attempt)
+                continue
             if r.status_code in (429, 500, 502, 503, 504) and attempt < 3:
                 time.sleep(2 ** attempt)
                 continue
