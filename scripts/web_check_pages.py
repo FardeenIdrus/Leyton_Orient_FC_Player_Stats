@@ -523,7 +523,15 @@ def card_game_performances(s, w):
            else s.page.inner_text("#gp-counts"))
     s.note("card: club note on the club tabs", None if s.page.inner_text("#gp-note").startswith("Our club formula applied to one game")
            else s.page.inner_text("#gp-note"))
-    # the latest game's panel is open with both tables filled
+    # owner 2026-11-23: the metric tables are closed until asked for
+    s.note("card: game metric tables closed on open",
+           None if s.page.locator("#gd .gd-tbl").count() == 0 and s.page.locator("#gd-more").count() == 1
+           else "tables shown or no button")
+    try:
+        box.screenshot(path=str(s.out / f"card_game_performances_closed_{w}.png"))
+    except Exception:                                   # noqa: BLE001 -- screenshot only
+        pass
+    s.step("card: Show all metrics", lambda p: p.locator("#gd-more").click(timeout=3000))
     try:
         s.page.locator("#gd .gd-tbl tbody tr").first.wait_for(timeout=6000)
         n = s.page.locator("#gd .gd-tbl").count()
@@ -562,6 +570,11 @@ def card_game_performances(s, w):
     s.step("card: click the first game", lambda p: hit.click(timeout=3000))
     s.page.wait_for_timeout(400)
     s.note("card: clicking a dot opens that game", None if s.page.inner_text("#gd .gd-h") != first_head else "same game")
+    try:
+        s.page.locator("#gd .gd-tbl tbody tr").first.wait_for(timeout=6000)
+        s.note("card: metrics stay open on another game", None)
+    except Exception as e:                              # noqa: BLE001
+        s.note("card: metrics stay open on another game", str(e).splitlines()[0][:120])
     before = s.page.evaluate(pct_text)
     s.step("card: Impect tab", lambda p: p.locator('#gp-tabs [data-gp="impect"]').click(timeout=3000))
     s.note("card: Impect note says match totals", None if s.page.inner_text("#gp-note").startswith("Match totals, as in Impect (not scaled to 90).")

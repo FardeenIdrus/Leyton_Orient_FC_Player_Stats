@@ -643,6 +643,8 @@ const GP_IMP = [['impect', 'IMPECT'], ['offensive', 'Offensive'], ['defensive', 
 const gpKey = () => gpTab === 'impect' ? gpImp : gpTab;
 const gpClub = k => ['overall', 'performance', 'physical'].includes(k);
 const gpDetail = new Map();
+// owner 2026-11-23: the metric tables open only when asked for; kept open/closed across games
+let gdOpen = false;
 function drawGames() {
   const box = $('c-games');
   if (!GP) { box.hidden = true; return; }
@@ -743,7 +745,10 @@ async function drawGameDetail() {
     + `</div><p class="note">Overall = Performance 65% + Physical 35%. Band 1–5 = 3 + (% − 50) ÷ 20.</p>`;
   if (!m.counted) h += `<p class="note">No rating: under 45 min. Values shown, not compared.</p>`;
   if (!GP.has_club) { box.innerHTML = h + '<p class="note">Club scores for this game are not in yet.</p>'; return; }
-  box.innerHTML = h + '<div id="gd-t" class="muted">Loading the game…</div>';
+  const more = `<button type="button" id="gd-more" class="gd-more" aria-expanded="${gdOpen}" aria-controls="gd-t">`
+    + `${gdOpen ? 'Hide all metrics' : 'Show all metrics'} <span aria-hidden="true">${gdOpen ? '▴' : '▾'}</span></button>`;
+  box.innerHTML = h + more + (gdOpen ? '<div id="gd-t" class="muted">Loading the game…</div>' : '');
+  if (!gdOpen) return;
   let d = gpDetail.get(m.match_id);
   if (!d) {
     try { d = await api(`/api/card/${KEY}/games/${m.match_id}`); gpDetail.set(m.match_id, d); }
@@ -851,6 +856,7 @@ document.addEventListener('click', e => {
   if (i) { gpImp = i.dataset.gpi; drawGames(); return; }
   const t = e.target.closest('#gd [data-gt]');
   if (t) { gpTab = t.dataset.gt; drawGames(); return; }
+  if (e.target.closest('#gd-more')) { gdOpen = !gdOpen; drawGameDetail(); return; }
   const d = e.target.closest('#gp [data-g]');
   if (d && GP) { gpSel = +d.dataset.g; drawGames(); }
 });

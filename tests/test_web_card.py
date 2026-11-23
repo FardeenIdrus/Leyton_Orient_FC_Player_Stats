@@ -333,3 +333,19 @@ def test_without_club_scores_one_switch_and_the_game_still_opens():
     assert "Club scores for this game are not in yet." in js
     click = js[js.index("document.addEventListener('click'"):]
     assert "if (d && GP) {" in click
+
+
+def test_game_metric_tables_are_closed_until_asked_for():
+    """Owner 2026-11-23: the full metric breakdown of a game takes a lot of room. The chart and
+    the game's score tiles stay; the two tables open only from a "Show all metrics" button
+    (and are only fetched then). Open or closed is kept while clicking between games."""
+    from pathlib import Path
+    import lofc.web
+    js = (Path(lofc.web.__file__).parent / "static" / "js" / "card.js").read_text()
+    body = js[js.index("async function drawGameDetail"):js.index("async function loadGames")]
+    assert "let gdOpen = false" in js
+    assert 'aria-expanded="${gdOpen}"' in body and "Show all metrics" in body and "Hide all metrics" in body
+    # nothing is fetched while closed
+    assert body.index("if (!gdOpen) return") < body.index("await api(")
+    click = js[js.index("document.addEventListener('click'"):]
+    assert "#gd-more" in click and "gdOpen = !gdOpen" in click
