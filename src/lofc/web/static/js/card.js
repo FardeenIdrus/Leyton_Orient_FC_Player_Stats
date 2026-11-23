@@ -635,13 +635,28 @@ const shortClub = n => { const t = String(n || '').replace(/\b(A?FC|Glasgow)\b/g
   return t.length > 11 ? t.slice(0, 10).trim() + '…' : t; };
 // Each of his last games: better than X% of that position's games in his league (45+ minutes),
 // Top above 80 / Low below 20, as in Impect. Hollow dot = under 45 minutes (not counted).
-let GP = null, gpScore = 'impect';
+// Owner 2026-11-23 (N21): the club's own Overall / Performance / Physical per game beside
+// Impect's scores; click a game for every metric behind it; Excel holds every game.
+let GP = null, gpTab = 'overall', gpImp = 'impect', gpSel = null;
+const GP_TABS = [['overall', 'Overall'], ['performance', 'Performance'], ['physical', 'Physical'], ['impect', 'Impect']];
+const GP_IMP = [['impect', 'IMPECT'], ['offensive', 'Offensive'], ['defensive', 'Defensive']];
+const gpKey = () => gpTab === 'impect' ? gpImp : gpTab;
+const gpClub = k => ['overall', 'performance', 'physical'].includes(k);
+const gpDetail = new Map();
 function drawGames() {
   const box = $('c-games');
   if (!GP) { box.hidden = true; return; }
   box.hidden = false;
-  $('gp-tabs').innerHTML = Object.entries(GP.labels).map(([k, l]) =>
-    `<button type="button" data-gp="${k}" class="${k === gpScore ? 'on' : ''}" aria-pressed="${k === gpScore}">${esc(l)}</button>`).join('');
+  if (!GP.has_club && gpClub(gpTab)) gpTab = 'impect';
+  const tabs = GP.has_club ? GP_TABS : [['impect', 'Impect']];
+  $('gp-tabs').innerHTML = tabs.map(([k, l]) =>
+    `<button type="button" data-gp="${k}" class="${k === gpTab ? 'on' : ''}" aria-pressed="${k === gpTab}">${esc(l)}</button>`).join('');
+  $('gp-imp').hidden = gpTab !== 'impect';
+  $('gp-imp').innerHTML = GP_IMP.map(([k, l]) =>
+    `<button type="button" data-gpi="${k}" class="${k === gpImp ? 'on' : ''}" aria-pressed="${k === gpImp}">${esc(l)}</button>`).join('');
+  $('gp-xl').href = `/api/card/${KEY}/games.xlsx`;
+  $('gp-xl').hidden = !GP.has_club;
+  const key = gpKey(), name = GP.labels[key];
   // Drawn at the card's real width in pixels (owner 2026-11-24: a scaled drawing grew the text
   // with the page, so the chart was huge on wide screens and when zoomed out). Fixed height and
   // fixed text sizes; opponent names on two staggered rows when the games sit close together.
@@ -651,29 +666,90 @@ function drawGames() {
   const step = g.length > 1 ? (x1 - x0) / (g.length - 1) : 0;
   const rows = g.length > 1 && step < 96 ? 2 : 1;
   const H = PH + (rows === 2 ? 58 : 44);
+  if (gpSel == null || !g.some(m => m.match_id === gpSel)) gpSel = g.length ? g[g.length - 1].match_id : null;
+  const xs = i => g.length > 1 ? x0 + i * step : (x0 + x1) / 2;
+  const si = g.findIndex(m => m.match_id === gpSel), sw = Math.min(step || 68, 68);
   let svg = `<svg width="${W}" height="${H}" class="gp-svg" role="img" aria-label="Game performances">`
+    + (si >= 0 ? `<rect x="${xs(si) - sw / 2}" y="${top - 18}" width="${sw}" height="${PH + rows * 14 + 22 - top}" rx="6" class="gp-sel"/>` : '')
     + `<rect x="${x0 - 14}" y="${y(100)}" width="${x1 - x0 + 28}" height="${y(80) - y(100)}" class="gp-bt"/>`
     + `<rect x="${x0 - 14}" y="${y(20)}" width="${x1 - x0 + 28}" height="${y(0) - y(20)}" class="gp-bl"/>`
     + [80, 20].map(v => `<line x1="${x0 - 14}" x2="${x1 + 14}" y1="${y(v)}" y2="${y(v)}" class="gp-ln"/>`).join('')
     + `<text x="4" y="${y(90) + 4}" class="gp-lbl">Top</text><text x="4" y="${y(50) + 4}" class="gp-lbl">Average</text><text x="4" y="${y(10) + 4}" class="gp-lbl">Low</text>`;
+  let short = 0;
   g.forEach((m, i) => {
-    const x = g.length > 1 ? x0 + i * step : (x0 + x1) / 2, sc = m.scores[gpScore];
+    const x = xs(i), sc = m.scores[key];
     const row = rows === 2 ? i % 2 : 0, ly = PH + 14 + row * 14;
     const where = (m.home ? 'v ' : '@ ') + m.opponent;
-    const tip = `${where} · ${m.date} · ${m.minutes ?? '—'} min` + (sc.pct == null ? '' :
-      ` · better than ${sc.pct}% (${sc.level})` + (m.counted ? '' : ' · under 45 min, not counted'));
-    svg += `<text x="${x}" y="${ly}" class="gp-opp" text-anchor="middle" data-tip="${esc(where)}">${esc((m.home ? '' : '@ ') + shortClub(m.opponent))}</text>`
+    svg += `<text x="${x}" y="${ly}" class="gp-opp${m.match_id === gpSel ? ' on' : ''}" text-anchor="middle" data-tip="${esc(where)}">${esc((m.home ? '' : '@ ') + shortClub(m.opponent))}</text>`
       + `<text x="${x}" y="${PH + 14 + rows * 14}" class="gp-min" text-anchor="middle">${esc(m.date)}</text>`;
-    if (sc.pct == null) return;
+    const base = `${where} · ${m.date} · ${m.minutes ?? '—'} min`;
+    if (sc.pct == null) {
+      // a club score is not given for a game under 45 minutes: shown, never rated
+      if (gpClub(key) && !m.counted) {
+        short++;
+        svg += `<circle cx="${x}" cy="${y(50)}" r="5.5" class="gp-sub"/>`
+          + `<circle cx="${x}" cy="${y(50)}" r="14" class="gp-hit" data-g="${m.match_id}" data-tip="${esc(base + ' · no rating: under 45 min')}" tabindex="0"/>`;
+      }
+      return;
+    }
+    const val = gpClub(key) && sc.value != null ? ` · ${name} ${sc.value.toFixed(2)}` : '';
+    const tip = base + val + ` · better than ${sc.pct}% (${sc.level})` + (m.counted ? '' : ' · under 45 min, not counted');
     const cls = !m.counted ? 'gp-sub' : sc.level === 'Top' ? 'gp-t' : sc.level === 'Low' ? 'gp-l' : 'gp-a';
     svg += `<text x="${x}" y="${y(sc.pct) - 12}" class="gp-pct" text-anchor="middle">${sc.pct}%</text>`
       + `<circle cx="${x}" cy="${y(sc.pct)}" r="${m.counted ? 7 : 5.5}" class="${cls}"/>`
-      + `<circle cx="${x}" cy="${y(sc.pct)}" r="14" class="gp-hit" data-tip="${esc(tip)}" tabindex="0"/>`;
+      + (m.match_id === gpSel ? `<circle cx="${x}" cy="${y(sc.pct)}" r="11" class="gp-ring"/>` : '')
+      + `<circle cx="${x}" cy="${y(sc.pct)}" r="14" class="gp-hit" data-g="${m.match_id}" data-tip="${esc(tip)}" tabindex="0"/>`;
   });
   $('gp').innerHTML = svg + '</svg>';
-  const c = GP.counts[gpScore];
-  $('gp-counts').innerHTML = `<span class="c t">${c.Top} Top</span><span class="c a">${c.Average} Average</span><span class="c l">${c.Low} Low</span><span class="note">last ${g.length} games · hover a dot for the game</span>`;
-  $('gp-note').textContent = GP.note;
+  const c = GP.counts[key];
+  $('gp-counts').innerHTML = `<span class="c t">${c.Top} Top</span><span class="c a">${c.Average} Average</span><span class="c l">${c.Low} Low</span>`
+    + (short ? `<span class="c s">${short} under 45 min</span>` : '')
+    + `<span class="note">last ${g.length} games${GP.has_club ? ' · click a dot for the game' : ' · hover a dot for the game'}</span>`;
+  $('gp-sub').textContent = gpClub(key) ? `Club ${name.toLowerCase()} score per game` : `Impect ${name} per game`;
+  $('gp-note').textContent = gpClub(key) ? GP.club_note : GP.note;
+  drawGameDetail();
+}
+const gpRow = r => {
+  const pct = r.pct == null ? '' : `<div class="pb"><div class="t"><i style="width:${r.pct}%;background:${r.pct > 80 ? 'var(--hi)' : r.pct < 20 ? 'var(--lo)' : '#C9A227'}"></i></div><b>${r.pct}</b></div>`;
+  const p90 = r.per90 == null ? '—' : Math.abs(r.per90) >= 100
+    ? Math.round(r.per90).toLocaleString('en-GB') : r.per90.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  return `<td class="n g">${esc(r.game ?? '—')}</td><td class="n">${p90}</td>`
+    + `<td>${r.out ? '' : pct}</td><td class="c">${r.out || r.band == null ? '—' : chip(r.band)}</td>`;
+};
+async function drawGameDetail() {
+  const box = $('gd');
+  const m = GP && GP.has_club ? GP.games.find(x => x.match_id === gpSel) : null;
+  if (!m) { box.hidden = true; return; }
+  box.hidden = false;
+  const head = `${m.home ? 'v' : '@'} ${esc(m.opponent)} (${m.home ? 'H' : 'A'}) · ${esc(m.date)} · ${m.minutes ?? '—'} min · ${esc(m.position || '')}`;
+  const s = m.scores;
+  const tile = (k, label, v, sc, extra = '') => `<div class="gd-tile${(gpTab === k || (k === 'impect' && gpTab === 'impect')) ? ' on' : ''}" data-gt="${k}">
+      <div class="k">${label}</div><div class="v">${v}${sc.pct == null ? '' : `<small>${sc.pct}%</small>`}</div>
+      <div class="x">${sc.level ? `<span class="lv ${sc.level}">${sc.level}</span>` : '<span class="lv">no rating</span>'}${extra}</div></div>`;
+  const cv = sc => sc.value == null ? '—' : sc.value.toFixed(2);
+  let h = `<div class="gd-h"><b>${head}</b></div><div class="gd-tiles">`
+    + tile('overall', 'Overall', cv(s.overall), s.overall)
+    + tile('performance', 'Performance', cv(s.performance), s.performance)
+    + tile('physical', 'Physical', cv(s.physical), s.physical)
+    + tile('impect', 'Impect', s.impect.pct == null ? '—' : `${s.impect.pct}%`, {pct: null, level: s.impect.level},
+      `<br>Offensive ${s.offensive.pct ?? '—'}% · Defensive ${s.defensive.pct ?? '—'}%`)
+    + `</div><p class="note">Overall = Performance 65% + Physical 35%. Band 1–5 = 3 + (% − 50) ÷ 20.</p>`;
+  if (!m.counted) h += `<p class="note">No rating: under 45 min. Values shown, not compared.</p>`;
+  box.innerHTML = h + '<div id="gd-t" class="muted">Loading the game…</div>';
+  let d = gpDetail.get(m.match_id);
+  if (!d) {
+    try { d = await api(`/api/card/${KEY}/games/${m.match_id}`); gpDetail.set(m.match_id, d); }
+    catch { if ($('gd-t')) $('gd-t').textContent = 'Could not load this game.'; return; }
+  }
+  if (gpSel !== m.match_id || !$('gd-t')) return;
+  const perf = d.perf.map(r => `<tr class="${r.out ? 'out' : ''}"><td>${esc(r.label)}${r.lower_better ? ' <span class="lib">lower is better</span>' : ''}</td>`
+    + gpRow(r) + `<td>${esc(r.weight || '')}</td><td class="kpi">${esc(r.source)}</td></tr>`).join('');
+  const phys = d.phys.map(r => `<tr class="${r.out ? 'out' : ''}"><td>${esc(r.label)}</td>`
+    + gpRow(r) + `<td class="kpi">${esc(r.source)}</td></tr>`).join('');
+  $('gd-t').outerHTML = `<h3>Performance <span class="lib">Impect</span></h3><div class="tw"><table class="gd-tbl">
+      <thead><tr><th>Metric</th><th class="n">This game</th><th class="n">Per 90</th><th>% vs games</th><th class="c">Band</th><th>Weight</th><th>Impect KPI</th></tr></thead><tbody>${perf}</tbody></table></div>`
+    + (phys ? `<h3>Physical <span class="lib">SkillCorner</span></h3><div class="tw"><table class="gd-tbl">
+      <thead><tr><th>Metric</th><th class="n">This game</th><th class="n">Per 90</th><th>% vs games</th><th class="c">Band</th><th>SkillCorner column</th></tr></thead><tbody>${phys}</tbody></table></div>` : '');
 }
 async function loadGames() {
   try { GP = (await api(`/api/card/${KEY}/games`)).block; } catch { GP = null; }
@@ -761,8 +837,18 @@ function init() {
 init();
 
 document.addEventListener('click', e => {
-  const b = e.target.closest('#gp-tabs [data-gp]'); if (!b) return;
-  gpScore = b.dataset.gp; drawGames();
+  const b = e.target.closest('#gp-tabs [data-gp]');
+  if (b) { gpTab = b.dataset.gp; drawGames(); return; }
+  const i = e.target.closest('#gp-imp [data-gpi]');
+  if (i) { gpImp = i.dataset.gpi; drawGames(); return; }
+  const t = e.target.closest('#gd [data-gt]');
+  if (t) { gpTab = t.dataset.gt; drawGames(); return; }
+  const d = e.target.closest('#gp [data-g]');
+  if (d && GP && GP.has_club) { gpSel = +d.dataset.g; drawGames(); }
+});
+document.addEventListener('keydown', e => {
+  const d = e.target.closest && e.target.closest('#gp [data-g]');
+  if (d && GP && GP.has_club && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); gpSel = +d.dataset.g; drawGames(); }
 });
 // redrawn at the new width (the chart is drawn in real pixels)
 let gpResize = null;

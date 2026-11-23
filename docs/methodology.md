@@ -456,6 +456,22 @@ Never part of a rating (register P11). Code: `ingest/impect_matches.py`, `core/g
 games Impect's "Game performances" plots: our level matches Impect's on all six; the % differ by
 2–10 points (Impect does not publish its comparison pool).
 
+## 6f. Club score per game (owner 2026-11-23, N21) — display only
+
+The club's own formula (§4–5) applied to ONE game, beside Impect's scores, so staff can see and
+check each game on the club's terms. Never part of a rating or the ranking (register P11).
+Code: `model/game_scoring.py`, `ingest/impect_matches.py` (step 4), `core/game_performances.py`.
+
+| Step | Rule |
+|---|---|
+| Data | Impect `/matches/{id}/player-kpis` (game totals; a KPI not listed = none happened) and SkillCorner `get_physical` without `group_by` (one row per player per game; rows failing SkillCorner's physical check are left out). SkillCorner rows join on our player + game date |
+| Metrics | Every Performance and Physical metric of his position, built as the season metric is (`impect_map`, `skillcorner_map`): rates per 90 of that game; ratios from that game's counts. A ratio with nothing to divide by (no aerial duels) and top-5 peak speed (no per-game value) are left out — never estimated |
+| Pool | Every game of 45+ minutes at that position (the midfield fallback as in §5) in that league season |
+| Bands | Metric percentile (mid-rank, as the season scoring) → 1–5 band → the club's weights → Performance, Physical; Overall = Performance 65 : Physical 35 |
+| Shown % | "Better than X%" of the other pool games, as for Impect's scores; Top above 80, Low below 20 |
+| Under 45 min | Values shown, no rating |
+| Player page | Overall / Performance / Physical / Impect tabs; click a game → every metric: game value, per 90, %, band, weight, source; Excel: every game this season + a Sources sheet |
+
 ## 7. Season shown
 
 The Players page **opens on the newest season held, the one being played (2026/27)**

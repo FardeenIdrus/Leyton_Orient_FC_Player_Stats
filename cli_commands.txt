@@ -561,5 +561,8 @@ docker compose exec -T app python -m lofc.model.club_crosswalk
 # MONITORING ONLY (never scoring). Needs the migration (deploy.sh applies it). Pipeline step "Match scores"
 # runs it after every refresh (only matches not pulled yet, ~55 calls a week). First pull ~800 calls.
 # --dry-run: fixture lists only (5 calls), prints how many matches would be pulled. --iteration N: one league.
+# Also (owner 2026-11-23, N21) the club score per game: each game's Impect player-kpis (one call per game,
+# ~750 once, then ~55 a week) + SkillCorner per-match physical (one call per league) -> player_match_club.
+# The dry run prints kpis_to_pull too.
 docker compose exec -T app python -m lofc.ingest.impect_matches --dry-run
 docker compose exec -T app python -m lofc.ingest.impect_matches

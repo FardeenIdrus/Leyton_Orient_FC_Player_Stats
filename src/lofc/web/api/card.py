@@ -141,6 +141,46 @@ async def games_json(player_id: int, competition_id: int, season_id: int,
     return JSONResponse({"block": clean(data) if data else None})
 
 
+@router.get("/api/card/{player_id}/{competition_id}/{season_id}/games.xlsx")
+async def games_xlsx(player_id: int, competition_id: int, season_id: int,
+                     user: WebUser = Depends(current_user)):
+    """Every game this season with the club's per-game scores, Impect's, and each metric's
+    game value, per 90, % and band, plus a Sources sheet (owner 2026-11-23, N21)."""
+    def build():
+        from lofc.core import game_performances as gp
+        from lofc.dashboard import loaders as L
+        g = gp.load_club(get_engine(), player_id, season_id)
+        if g.empty:
+            return None
+        name = str(g["player_name"].dropna().iloc[0]) if "player_name" in g and g["player_name"].notna().any() else "Player"
+        league = L._competition_name_by_id().get(int(g.iloc[-1]["competition_id"]), "")
+        return gp.games_xlsx(g, name, league), f"{name} - games.xlsx"
+    got = await run_in_threadpool(build)
+    if got is None:
+        raise HTTPException(status_code=404, detail="nothing_to_download")
+    data, filename = got
+    from lofc.core.card import csv_disposition
+    return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": csv_disposition(filename)})
+
+
+@router.get("/api/card/{player_id}/{competition_id}/{season_id}/games/{match_id}")
+async def game_detail_json(player_id: int, competition_id: int, season_id: int, match_id: int,
+                           user: WebUser = Depends(current_user)):
+    """One game's Performance and Physical tables (`core.game_performances.detail_tables`)."""
+    def build():
+        from lofc.core import game_performances as gp
+        g = gp.load_club(get_engine(), player_id, season_id, match_id)
+        if g.empty:
+            return None
+        return gp.detail_tables(g.iloc[0].to_dict())
+    data = await run_in_threadpool(build)
+    if data is None:
+        raise HTTPException(status_code=404, detail="no_such_game")
+    from lofc.core.card import clean
+    return JSONResponse(clean(data))
+
+
 @router.get("/api/card/{player_id}/{competition_id}/{season_id}/similar")
 async def similar_json(player_id: int, competition_id: int, season_id: int, request: Request,
                        user: WebUser = Depends(current_user)):

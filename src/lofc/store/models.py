@@ -1153,6 +1153,7 @@ class ImpectMatch(Base):
     available: Mapped[bool] = mapped_column(Boolean, server_default="false")
     last_calculated_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     scores_pulled_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    kpis_pulled_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class PlayerMatchScore(Base):
@@ -1178,3 +1179,32 @@ class PlayerMatchScore(Base):
     impect_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     offensive_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     defensive_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class PlayerMatchClub(Base):
+    """The club's own per-game Performance / Physical / Overall (owner 2026-11-23, N21;
+    `lofc.model.game_scoring`). perf / phys: {metric: {"v": value scored, "n": game total,
+    "d": denominator}}; metric_pcts: {metric: percentile in the pool of 45+ minute games at
+    the position}. DISPLAY ONLY -- nothing in scoring reads it (P11)."""
+
+    __tablename__ = "player_match_club"
+    __table_args__ = (UniqueConstraint("match_id", "impect_player_id", name="uq_player_match_club"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    match_id: Mapped[int] = mapped_column(Integer)
+    impect_player_id: Mapped[int] = mapped_column(Integer)
+    player_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    competition_id: Mapped[int] = mapped_column(Integer)
+    season_id: Mapped[int] = mapped_column(Integer)
+    position_group: Mapped[str | None] = mapped_column(String, nullable=True)
+    minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
+    phys_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
+    perf: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    phys: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    metric_pcts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    performance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    physical: Mapped[float | None] = mapped_column(Float, nullable=True)
+    overall: Mapped[float | None] = mapped_column(Float, nullable=True)
+    performance_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    physical_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    overall_pct: Mapped[float | None] = mapped_column(Float, nullable=True)

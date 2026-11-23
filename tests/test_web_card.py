@@ -264,3 +264,47 @@ def test_card_js_draws_game_performances_with_a_percent_on_every_dot():
     # owner 2026-11-24: real pixel size (no scaling viewBox), the site's own hover tip
     assert "viewBox" not in body and "clientWidth" in body and 'data-tip="${esc(tip)}"' in body
     assert "/games" in js and 'id="c-games"' in (root / "templates" / "card.html").read_text()
+
+
+def _club_games():
+    import pandas as pd
+    perf = {"pass_completion_pct": {"v": 0.75, "n": 30.0, "d": 40.0}}
+    phys = {"distance_p90": {"v": 10400.0, "n": 10400.0, "d": None}}
+    return pd.DataFrame({"match_id": [1], "scheduled_at": [pd.Timestamp("2026-11-21")], "squad_id": [10],
+                         "home_squad_id": [10], "home_name": ["Orient"], "away_name": ["Bolton"],
+                         "competition_id": [4], "position_group": ["Central Mid"], "minutes": [90.0],
+                         "impect_pct": [91.4], "offensive_pct": [50.0], "defensive_pct": [10.0],
+                         "overall": [3.8], "performance": [3.6], "physical": [4.1], "overall_pct": [78.0],
+                         "performance_pct": [71.0], "physical_pct": [86.0], "perf": [perf], "phys": [phys],
+                         "metric_pcts": [{"pass_completion_pct": 71.0, "distance_p90": 60.0}]})
+
+
+def test_one_games_tables_endpoint(fake, monkeypatch):
+    """Owner 2026-11-23 (N21): click a game -> every metric behind its club scores."""
+    from lofc.core import game_performances as gp
+    monkeypatch.setattr(gp, "load_club", lambda engine, p, s, m=None: _club_games())
+    d = _client().get(KEY + "/games/1").json()
+    pc = next(r for r in d["perf"] if r["metric"] == "pass_completion_pct")
+    assert pc["game"] == "30 of 40 (75%)" and pc["pct"] == 71
+    assert next(r for r in d["phys"] if r["metric"] == "distance_p90")["game"] == "10,400 m"
+    monkeypatch.setattr(gp, "load_club", lambda engine, p, s, m=None: _club_games().head(0))
+    assert _client().get(KEY + "/games/1").status_code == 404
+
+
+def test_games_workbook_endpoint(fake, monkeypatch):
+    from lofc.core import game_performances as gp
+    monkeypatch.setattr(gp, "load_club", lambda engine, p, s, m=None: _club_games())
+    r = _client().get(KEY + "/games.xlsx")
+    assert r.status_code == 200 and r.content[:2] == b"PK"
+    assert "games.xlsx" in r.headers["content-disposition"]
+
+
+def test_card_js_has_the_club_tabs_and_the_game_panel():
+    from pathlib import Path
+    import lofc.web
+    root = Path(lofc.web.__file__).parent
+    js = (root / "static" / "js" / "card.js").read_text()
+    assert "['overall', 'Overall'], ['performance', 'Performance'], ['physical', 'Physical'], ['impect', 'Impect']" in js
+    assert "/games/${m.match_id}" in js and "games.xlsx" in js and "no rating: under 45 min" in js
+    html = (root / "templates" / "card.html").read_text()
+    assert 'id="gd"' in html and 'id="gp-imp"' in html and 'id="gp-xl"' in html

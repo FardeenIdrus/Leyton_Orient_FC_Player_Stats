@@ -498,8 +498,9 @@ CARD_PLAYERS = [
 
 
 def card_game_performances(s, w):
-    """Owner 2026-11-23 (phase 4): "Game performances" -- a % on every dot, IMPECT / Offensive /
-    Defensive switch, Top / Average / Low counts, the note saying these are match totals."""
+    """Owner 2026-11-23 (phase 4 + N21): "Game performances" -- Overall / Performance / Physical
+    / Impect tabs (Impect: IMPECT / Offensive / Defensive), a % on every rated dot, Top /
+    Average / Low counts, the right note per tab; click a dot -> that game's tables; Excel."""
     path = "/player/18630/901/319"            # a Scottish Premiership winger with 14 games (local data)
     s.goto(path, check=False)
     box = s.page.locator("#c-games")
@@ -507,13 +508,23 @@ def card_game_performances(s, w):
         box.wait_for(state="visible", timeout=8000)
     except Exception:
         return s.note("card: game performances", skipped="no match data for this player here")
-    dots = s.page.locator("#gp svg circle:not(.gp-hit)").count()
-    pcts = s.page.locator("#gp svg .gp-pct").count()
-    s.note("card: a % above every dot", None if dots and pcts == dots else f"{dots} dots, {pcts} %")
+    rated = "#gp svg circle.gp-t, #gp svg circle.gp-a, #gp svg circle.gp-l"
+    tabs = s.page.inner_text("#gp-tabs")
+    s.note("card: Overall / Performance / Physical / Impect tabs",
+           None if all(k in tabs for k in ("Overall", "Performance", "Physical", "Impect")) else tabs)
+    dots, pcts = s.page.locator(rated).count(), s.page.locator("#gp svg .gp-pct").count()
+    s.note("card: a % above every rated dot", None if dots and pcts >= dots else f"{dots} dots, {pcts} %")
     s.note("card: Top / Average / Low counts", None if all(k in s.page.inner_text("#gp-counts") for k in ("Top", "Average", "Low"))
            else s.page.inner_text("#gp-counts"))
-    s.note("card: note says match totals", None if s.page.inner_text("#gp-note").startswith("Match totals, as in Impect (not scaled to 90).")
+    s.note("card: club note on the club tabs", None if s.page.inner_text("#gp-note").startswith("Our club formula applied to one game")
            else s.page.inner_text("#gp-note"))
+    # the latest game's panel is open with both tables filled
+    try:
+        s.page.locator("#gd .gd-tbl tbody tr").first.wait_for(timeout=6000)
+        n = s.page.locator("#gd .gd-tbl").count()
+        s.note("card: the open game shows Performance and Physical tables", None if n == 2 else f"{n} tables")
+    except Exception as e:                              # noqa: BLE001
+        s.note("card: the open game shows Performance and Physical tables", str(e).splitlines()[0][:120])
     pct_text = "() => [...document.querySelectorAll('#gp svg .gp-pct')].map(t => t.textContent)"
     # owner 2026-11-24: drawn at real size -- the same height at every width (and zoomed out),
     # no overlapping labels, and a hover tip on every dot
@@ -527,9 +538,12 @@ def card_game_performances(s, w):
               if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) return [i, j]; }
             return null; }""")
         s.note(f"card: game chart labels do not overlap @{width}", None if not clash else str(clash))
+        over = s.page.evaluate("() => { const c = document.querySelector('#c-games'); return c.scrollWidth - c.clientWidth; }")
+        s.note(f"card: game panel fits its card @{width}", None if over <= 1 else f"{over}px wider")
     s.page.set_viewport_size({"width": w, "height": 900})
     s.page.wait_for_timeout(350)
-    hit = s.page.locator("#gp svg .gp-hit").first
+    hits = s.page.locator("#gp svg .gp-hit")
+    hit = hits.first
     hit.scroll_into_view_if_needed()
     s.page.wait_for_timeout(200)
     bb = hit.bounding_box()
@@ -537,11 +551,24 @@ def card_game_performances(s, w):
     s.page.mouse.move(bb["x"] + bb["width"] / 2, bb["y"] + bb["height"] / 2)
     s.page.wait_for_timeout(150)
     tip = s.page.evaluate("() => { const t = document.querySelector('.tip'); return t && !t.hidden ? t.textContent : ''; }")
-    s.note("card: hovering a dot names the game", None if "better than" in tip and "min" in tip else repr(tip))
+    s.note("card: hovering a dot names the game", None if "min" in tip and ("better than" in tip or "no rating" in tip) else repr(tip))
+    # clicking the first game opens it
+    first_head = s.page.inner_text("#gd .gd-h")
+    s.step("card: click the first game", lambda p: hit.click(timeout=3000))
+    s.page.wait_for_timeout(400)
+    s.note("card: clicking a dot opens that game", None if s.page.inner_text("#gd .gd-h") != first_head else "same game")
     before = s.page.evaluate(pct_text)
-    s.step("card: Offensive", lambda p: p.locator('#gp-tabs [data-gp="offensive"]').click(timeout=3000))
+    s.step("card: Impect tab", lambda p: p.locator('#gp-tabs [data-gp="impect"]').click(timeout=3000))
+    s.note("card: Impect note says match totals", None if s.page.inner_text("#gp-note").startswith("Match totals, as in Impect (not scaled to 90).")
+           else s.page.inner_text("#gp-note"))
+    s.step("card: Offensive", lambda p: p.locator('#gp-imp [data-gpi="offensive"]').click(timeout=3000))
     after = s.page.evaluate(pct_text)
     s.note("card: switch redraws the dots", None if before != after else "same")
+    href = s.page.evaluate("() => document.querySelector('#gp-xl')?.href || ''")   # absolute
+    r = s.page.request.get(href) if href else None
+    s.note("card: Excel downloads a workbook",
+           None if r is not None and r.status == 200 and r.body()[:2] == b"PK" else f"{href} -> {r.status if r else 'no link'}")
+    s.step("card: Overall tab", lambda p: p.locator('#gp-tabs [data-gp="overall"]').click(timeout=3000))
     box.scroll_into_view_if_needed()
     try:
         box.screenshot(path=str(s.out / f"card_game_performances_{w}.png"))

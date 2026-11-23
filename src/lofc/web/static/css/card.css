@@ -198,12 +198,42 @@ table.sim td.sim-why a{font-size:13px;white-space:nowrap}
 /* Game performances (owner 2026-11-23): % on every dot, Top / Average / Low as in Impect */
 #c-games{margin-top:14px}
 .gp-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
-#gp-tabs{display:inline-flex;border:1px solid #CDD1D7;border-radius:8px;overflow:hidden}
-#gp-tabs button{font:inherit;font-size:13px;padding:5px 12px;border:0;background:#fff;cursor:pointer;color:var(--ink)}
-#gp-tabs button+button{border-left:1px solid #CDD1D7}#gp-tabs button.on{background:var(--ink);color:#fff}
+.gp-ctl{display:flex;flex-direction:column;align-items:flex-end;gap:6px}.gp-r{display:flex;gap:10px;align-items:center}
+#gp-tabs,#gp-imp{display:inline-flex;border:1px solid #CDD1D7;border-radius:8px;overflow:hidden}
+#gp-tabs button,#gp-imp button{font:inherit;font-size:13px;padding:5px 12px;border:0;background:#fff;cursor:pointer;color:var(--ink)}
+#gp-imp button{font-size:12px;padding:3px 10px}
+#gp-tabs button+button,#gp-imp button+button{border-left:1px solid #CDD1D7}#gp-tabs button.on,#gp-imp button.on{background:var(--ink);color:#fff}
+#gp-imp[hidden],#gp-xl[hidden]{display:none}
+.gp-sel{fill:#E9ECF0}.gp-opp.on{font-weight:700}
+.gp-svg circle.gp-ring{fill:none;stroke:var(--ink);stroke-width:2;pointer-events:none}
+.gp-counts .s{background:var(--soft);color:var(--muted)}
+/* one game's panel (owner 2026-11-23, N21) */
+#gd{border-top:1px solid var(--line);margin-top:16px;padding-top:14px}
+.gd-h{margin-bottom:10px}.gd-h b{font-size:15.5px}
+.gd-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.gd-tile{background:var(--soft);border-radius:10px;padding:12px 14px;cursor:pointer;border:1.5px solid transparent;min-width:0}
+.gd-tile.on{border-color:var(--ink)}
+.gd-tile .k{font-size:13px;color:var(--muted);font-weight:500}
+.gd-tile .v{margin-top:4px;font-size:24px;font-weight:700;line-height:1.2}
+.gd-tile .v small{font-size:14px;font-weight:600;color:var(--muted);margin-left:6px}
+.gd-tile .x{font-size:12.5px;color:var(--muted);margin-top:4px}
+.lv{font-weight:700}.lv.Top{color:var(--hi)}.lv.Low{color:var(--lo)}.lv.Average{color:#7A5B00}
+#gd h3{font-size:14px;margin:18px 0 6px;font-weight:600}
+#gd .lib{font-size:12px;color:var(--muted);font-weight:400;margin-left:4px}
+table.gd-tbl{width:100%;border-collapse:collapse}
+table.gd-tbl th{font-size:12.5px;color:var(--muted);font-weight:600;text-align:left;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.gd-tbl td{padding:7px 8px;border-bottom:1px solid var(--line);font-size:14px;vertical-align:middle}
+table.gd-tbl th.n,table.gd-tbl td.n{text-align:right}table.gd-tbl th.c,table.gd-tbl td.c{text-align:center}
+table.gd-tbl td.g{white-space:nowrap}table.gd-tbl tr.out td{color:#9AA0A8}
+table.gd-tbl .kpi{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--muted);word-break:break-all;max-width:320px}
+table.gd-tbl .pb{display:flex;align-items:center;gap:8px;min-width:96px}
+table.gd-tbl .pb .t{flex:1;height:8px;background:var(--track,#E8EAED);border-radius:4px;position:relative}
+table.gd-tbl .pb .t i{position:absolute;left:0;top:0;bottom:0;border-radius:4px}
+table.gd-tbl .pb b{width:26px;text-align:right;font-size:14px}
+@media (max-width:1100px){.gd-tiles{grid-template-columns:1fr 1fr}}
 #gp{width:100%;overflow:hidden}
 .gp-svg{display:block;margin-top:6px}
-.gp-svg circle.gp-hit{fill:transparent;stroke:none;cursor:help;outline:none}
+.gp-svg circle.gp-hit{fill:transparent;stroke:none;cursor:pointer;outline:none}
 .gp-bt{fill:#EEF7F1}.gp-bl{fill:#FCEFEE}.gp-ln{stroke:#9AA0A8;stroke-dasharray:4 3}
 .gp-lbl{font-size:12px;fill:var(--muted);font-weight:600}.gp-opp{font-size:11px;fill:var(--ink);cursor:help}.gp-min{font-size:10.5px;fill:var(--muted)}
 .gp-pct{font-size:11.5px;font-weight:700;fill:var(--ink);pointer-events:none}

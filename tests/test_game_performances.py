@@ -56,3 +56,63 @@ def test_last_five_and_in_form():
     assert gp.in_form([81, 85, 90, 50, 60]) is True                     # 3 Top
     assert gp.in_form([81, 85, 20, 50, 60]) is False                    # 2 Top
     assert gp.last_five(g.head(0)) == []
+
+
+# --- the club's per-game scoring on the player page (owner 2026-11-23, N21) -------------------
+def test_block_carries_the_club_scores_beside_impects():
+    g = _games().assign(overall=3.8, performance=3.6, physical=None,
+                        overall_pct=78.4, performance_pct=71.0, physical_pct=None)
+    out = gp.block(g, league_names={4: "League One"})
+    s = out["games"][0]["scores"]
+    assert s["overall"] == {"pct": 78, "level": "Average", "value": 3.8}
+    assert s["physical"] == {"pct": None, "level": None, "value": None}
+    assert list(out["labels"]) == ["overall", "performance", "physical", "impect", "offensive", "defensive"]
+    assert out["counts"]["overall"]["Average"] == 9                    # 10 games, one under 45 min
+
+
+def _club_row():
+    perf = {"pass_completion_pct": {"v": 0.75, "n": 30.0, "d": 40.0},
+            "aerial_win_pct": {"v": None, "n": 0.0, "d": 0.0},
+            "ball_wins_p90": {"v": 6.0, "n": 6.0, "d": None},
+            "turnovers_p90": {"v": 9.0, "n": 9.0, "d": None}}
+    phys = {"distance_p90": {"v": 10400.0, "n": 10400.0, "d": None},
+            "psv99_kmh": {"v": 31.2, "n": 31.2, "d": None}}
+    return {"position_group": "Central Mid", "minutes": 90.0, "perf": perf, "phys": phys,
+            "metric_pcts": {"pass_completion_pct": 71.0, "ball_wins_p90": 90.0, "turnovers_p90": 30.0,
+                            "distance_p90": 60.0, "psv99_kmh": 85.0}}
+
+
+def test_detail_lists_every_metric_with_value_percentile_band_and_source():
+    d = gp.detail_tables(_club_row())
+    perf = {r["metric"]: r for r in d["perf"]}
+    pc = perf["pass_completion_pct"]
+    assert (pc["label"], pc["game"], pc["per90"], pc["pct"], pc["band"]) == ("Pass accuracy", "30 of 40 (75%)", None, 71, 4.05)
+    assert pc["source"] == "SUCCESSFUL_PASSES / (SUCCESSFUL_PASSES + UNSUCCESSFUL_PASSES)"
+    assert pc["weight"] in ("High", "Mid", "Low")
+    assert perf["aerial_win_pct"]["game"] == "none in this game" and perf["aerial_win_pct"]["out"] is True
+    assert perf["turnovers_p90"]["lower_better"] is True and perf["ball_wins_p90"]["per90"] == 6.0
+    # every Central Mid Performance metric is listed, in the club's order, even if the game lacks it
+    from lofc.model import scorecard as sc
+    assert [r["metric"] for r in d["perf"]] == sc._resolved_performance("Central Mid")
+    phys = {r["metric"]: r for r in d["phys"]}
+    assert phys["distance_p90"]["game"] == "10,400 m" and phys["distance_p90"]["source"] == "total_distance_full_all"
+    assert phys["top5_psv99_kmh"]["game"] == "not available per game" and phys["top5_psv99_kmh"]["out"] is True
+    assert phys["hsr_count_p90"]["game"] == "no SkillCorner data"
+
+
+def test_games_workbook_has_one_row_per_game_and_a_sources_sheet():
+    import io
+    from openpyxl import load_workbook
+    g = _games().head(3).assign(overall=3.8, performance=3.6, physical=4.1, overall_pct=78.0,
+                         performance_pct=71.0, physical_pct=86.0, impect_pct=85.0,
+                         perf=[_club_row()["perf"]] * 3, phys=[_club_row()["phys"]] * 3,
+                         metric_pcts=[_club_row()["metric_pcts"]] * 3)
+    wb = load_workbook(io.BytesIO(gp.games_xlsx(g, "Example Player", "League One")))
+    ws = wb["Games"]
+    head = [c.value for c in ws[1]]
+    assert head[:6] == ["Date", "Opponent", "H/A", "Minutes", "Position", "Overall"]
+    assert "Pass accuracy · game" in head and "Pass accuracy · %" in head and "Pass accuracy · band" in head
+    assert ws.max_row == 4                                              # header + 3 games
+    assert ws.cell(row=2, column=head.index("Pass accuracy · game") + 1).value == "30 of 40"
+    src = {r[0].value: r[1].value for r in wb["Sources"].iter_rows(min_row=2)}
+    assert src["Distance"] == "SkillCorner: total_distance_full_all"
