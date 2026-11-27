@@ -17,7 +17,7 @@ import datetime as dt
 
 import pandas as pd
 
-TABS = ("all", "disagree", "activity")
+TABS = ("all", "disagree", "activity", "clubs")
 NOT_LINKED = ("This player is not in the platform's data — no rating, percentile or peer "
               "comparison exists for him. The report above is the whole record.")
 NO_RATED_SEASON = "Matched to our data, but he has no rated season yet — nothing to open."
@@ -140,7 +140,28 @@ def counts(frame: pd.DataFrame) -> dict:
 
 
 def tab_labels(c: dict) -> list[str]:
-    return [f"All reports ({c['total']:,})", f"Data disagrees ({c['disagree']})", "Scout activity"]
+    return [f"All reports ({c['total']:,})", f"Data disagrees ({c['disagree']})", "Scout activity", "By club"]
+
+
+VERDICTS = ("Sign", "Monitor Priority", "Monitor", "Don't sign")
+
+
+def club_rows(frame: pd.DataFrame) -> list[dict]:
+    """By club (owner 2026-11-27, phase 5b): per club in the reports, the players scouted, the
+    reports, the last game seen and the verdicts. Spellings of one club are one row (the
+    Fixtures page's name matching), shown by the spelling used most. Most reports first."""
+    from lofc.core.fixtures import _team_tokens
+    if frame is None or frame.empty or "club_name" not in frame.columns:
+        return []
+    f = frame[frame["club_name"].notna() & (frame["club_name"].astype(str).str.strip() != "")].copy()
+    f["_k"] = [" ".join(sorted(_team_tokens(c))) or str(c).lower() for c in f["club_name"]]
+    out = []
+    for _, g in f.groupby("_k"):
+        seen = pd.to_datetime(g["fixture_date"], errors="coerce").max() if "fixture_date" in g else pd.NaT
+        out.append({"club": g["club_name"].value_counts().index[0], "players": int(g["player_name"].nunique()),
+                    "reports": int(len(g)), "last_seen": None if pd.isna(seen) else str(seen.date()),
+                    "verdicts": {v: int((g["verdict"] == v).sum()) for v in VERDICTS}})
+    return sorted(out, key=lambda r: (-r["reports"], r["club"]))
 
 
 def browse_caption(shown: int, c: dict) -> str:

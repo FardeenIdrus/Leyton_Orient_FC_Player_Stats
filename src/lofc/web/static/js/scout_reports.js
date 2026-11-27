@@ -109,6 +109,22 @@ function drawActivity(d) {
   $('sr-tw').hidden = false;
 }
 
+// By club (owner 2026-11-27, phase 5b): what we already know about each club; a click shows
+// its reports (the search finds the club and the games it played in)
+function drawClubs(d) {
+  const V = ['Sign', 'Monitor Priority', 'Monitor', "Don't sign"];
+  $('sr-thead').innerHTML = '<tr><th>Club</th><th class="n">Players scouted</th><th class="n">Reports</th><th>Last seen</th><th>Verdicts</th></tr>';
+  const q = ($('f-club-q').value || '').trim().toLowerCase();
+  const clubs = d.clubs.filter(c => !q || c.club.toLowerCase().includes(q));
+  $('sr-body').innerHTML = clubs.map(c => `<tr class="click" data-club="${esc(c.club)}" tabindex="0"><td><b>${esc(c.club)}</b></td>`
+    + `<td class="n">${c.players}</td><td class="n">${c.reports}</td>`
+    + `<td>${c.last_seen ? new Date(c.last_seen + 'T00:00:00Z').toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC'}) : '—'}</td>`
+    + `<td>${V.filter(v => c.verdicts[v]).map(v => `${c.verdicts[v]} ${esc(v)}`).join(' · ') || '—'}</td></tr>`).join('');
+  $('sr-none').hidden = clubs.length > 0;
+  $('sr-none').textContent = clubs.length ? '' : 'No club matches.';
+  $('sr-tw').hidden = clubs.length === 0;
+}
+
 function drawSync(sync) {
   const el = $('sr-sync');
   el.textContent = sync.line;
@@ -125,11 +141,13 @@ function draw(d, s) {
   $('sr-empty').hidden = true; $('sr-main').hidden = false;
   drawTabs(d);
   $('sr-filters').hidden = d.tab !== 'all';
+  $('sr-clubfind').hidden = d.tab !== 'clubs';
+  if (d.tab !== 'clubs') $('sr-none').textContent = 'No reports match these filters.';
   drawControls(d, s);
   $('sr-cap').textContent = d.caption || '';
   $('sr-cap').hidden = !d.caption;
-  if (d.tab === 'activity') drawActivity(d); else drawTable(d, s);
-  loadDetail(d.tab === 'activity' ? '' : s.open, d);
+  if (d.tab === 'activity') drawActivity(d); else if (d.tab === 'clubs') drawClubs(d); else drawTable(d, s);
+  loadDetail(d.tab === 'activity' || d.tab === 'clubs' ? '' : s.open, d);
 }
 
 // ---- list height (owner 2026-11-23) --------------------------------------------------------
@@ -231,8 +249,14 @@ function init() {
     push(next);
     drawTable(last, state());
   };
+  $('f-club-q').oninput = () => { if (last && last.tab === 'clubs') drawClubs(last); };
+  const openClub = tr => { push({tab: 'all', q: tr.dataset.club, open: ''}); load(); };
+  $('sr-body').onkeydown = ev => { const tr = ev.target.closest && ev.target.closest('tr[data-club]');
+    if (tr && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); openClub(tr); } };
   $('sr-body').onclick = ev => {
     if (ev.target.closest('a')) return;                     // the name opens the card
+    const club = ev.target.closest('tr[data-club]');
+    if (club) { openClub(club); return; }                   // By club: that club's reports
     const tr = ev.target.closest('tr[data-row]');
     if (!tr || !last) return;
     push({open: tr.dataset.row});

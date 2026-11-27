@@ -18,8 +18,8 @@
 
     <div class="filters" id="sr-filters">
       <div class="fl">
-        <div class="f grow"><label for="f-q">Search for a player</label>
-          <input class="ctl" id="f-q" name="q" type="search" autocomplete="off" placeholder="Start typing a name…"></div>
+        <div class="f grow"><label for="f-q">Search a player, club or game</label>
+          <input class="ctl" id="f-q" name="q" type="search" autocomplete="off" placeholder="Name, club or a team in the game…"></div>
         <div class="f f-league"><label for="f-league">League</label><select class="ctl" id="f-league" name="league"></select></div>
         <div class="f f-age"><label for="f-max_age">Max age</label>
           <input class="ctl num" id="f-max_age" name="max_age" type="number" min="16" max="40" step="1" value="40"></div>
@@ -31,6 +31,11 @@
         <div class="f f-{{ key }}"><label for="f-{{ key }}">{{ label }}</label><select class="ctl" id="f-{{ key }}" name="{{ key }}" data-label="{{ label }}"></select></div>
         {% endfor %}
       </div>
+    </div>
+
+    <div class="fl sr-clubfind" id="sr-clubfind" hidden>
+      <div class="f grow"><label for="f-club-q">Find a club</label>
+        <input class="ctl" id="f-club-q" type="search" autocomplete="off" placeholder="Start typing a club…"></div>
     </div>
 
     <div class="card" id="sr-card">

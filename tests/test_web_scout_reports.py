@@ -98,7 +98,8 @@ def test_all_tab_rows_columns_and_counts(fake):
     d = _client().get("/api/scout-reports").json()
     assert d["tabs"] == [{"key": "all", "label": "All reports (4)"},
                          {"key": "disagree", "label": "Data disagrees (1)"},
-                         {"key": "activity", "label": "Scout activity"}]
+                         {"key": "activity", "label": "Scout activity"},
+                         {"key": "clubs", "label": "By club"}]
     assert d["caption"] == "4 of 4 reports · 4 players · 2 scouts · 3 matched to our data"
     heads = [c["label"] for c in d["columns"]]
     assert heads == ["Watched", "Player", "Fixture", "Club", "Position", "Scout", "Seen",

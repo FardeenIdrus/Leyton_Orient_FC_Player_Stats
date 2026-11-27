@@ -425,3 +425,15 @@ def test_the_refresh_button_handles_a_failed_read():
 
 def test_never_synced_says_so_plainly():
     assert "never" in sync_status(None, NOW).lower()
+
+
+
+def test_search_also_finds_the_club_and_either_team_in_the_game():
+    """Owner 2026-11-27 (phase 5b): a club name finds its players' reports and every report
+    written at a game it played in."""
+    frame = pd.DataFrame([
+        {"player_name": "A One", "club_name": "Cambridge United", "home_team": "Leyton Orient", "away_team": "Bolton"},
+        {"player_name": "B Two", "club_name": "Brighton U21", "home_team": "Cambridge United", "away_team": "Brighton U21"},
+        {"player_name": "C Three", "club_name": "Exeter City", "home_team": "Exeter City", "away_team": "Port Vale"}])
+    assert _names(filter_reports(frame, search="cambridge")) == ["A One", "B Two"]
+    assert _names(filter_reports(frame, search="three")) == ["C Three"]

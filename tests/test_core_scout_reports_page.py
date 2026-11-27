@@ -67,7 +67,7 @@ def test_counts_and_captions():
 
 def test_tab_labels():
     assert sp.tab_labels({"total": 1234, "disagree": 5}) == [
-        "All reports (1,234)", "Data disagrees (5)", "Scout activity"]
+        "All reports (1,234)", "Data disagrees (5)", "Scout activity", "By club"]
 
 
 def test_sync_line_and_warning():
@@ -181,3 +181,19 @@ def test_squad_role_filter_narrows_and_combines():
     assert list(sp.apply_filters(f, {"role": ROLES[0], "data": "In our data"})["submission_id"]) == ["a"]
     assert len(sp.apply_filters(f, {"role": "All"})) == 3
     assert len(sp.apply_filters(f, {"role": ""})) == 3
+
+
+
+def test_by_club_counts_players_reports_last_seen_and_verdicts():
+    """Owner 2026-11-27 (phase 5b): what we already know about each club. One club however the
+    scouts spell it ("Dundee Utd" / "Dundee United"); shown by its most used spelling."""
+    import datetime as dt
+    f = pd.DataFrame({"club_name": ["Dundee United", "Dundee Utd", "Dundee United", "Exeter City", None],
+                      "player_name": ["A", "A", "B", "C", "D"],
+                      "verdict": ["Sign", "Monitor", "Don't sign", "Monitor Priority", "Sign"],
+                      "fixture_date": [dt.date(2026, 11, 3), dt.date(2026, 11, 20), dt.date(2026, 10, 1),
+                                       dt.date(2026, 9, 1), dt.date(2026, 9, 2)]})
+    rows = sp.club_rows(f)
+    assert rows[0] == {"club": "Dundee United", "players": 2, "reports": 3, "last_seen": "2026-11-20",
+                       "verdicts": {"Sign": 1, "Monitor Priority": 0, "Monitor": 1, "Don't sign": 1}}
+    assert [r["club"] for r in rows] == ["Dundee United", "Exeter City"]           # no club: left out

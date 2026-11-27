@@ -152,6 +152,9 @@ def page_json(query: dict) -> dict:
                            "rows": [[v.item() if hasattr(v, "item") else v for v in r]
                                     for r in act.itertuples(index=False)]}
         return out
+    if tab == "clubs":
+        out["clubs"] = sp.club_rows(frame)
+        return out
     if tab == "disagree":
         view = sp.disagree_view(frame)
         out["caption"] = sp.disagree_caption(len(view))

@@ -86,8 +86,13 @@ def filter_reports(frame: pd.DataFrame, scout: str | None = None,
         # Substring, case-insensitive: a recruiter looking for "bangura" should not have
         # to reproduce "Ra'ess Bangura-Williams" -- including its typo, which the live
         # sheet actually carries.
-        out = out[out["player_name"].str.contains(search.strip(), case=False, na=False,
-                                                  regex=False)]
+        # owner 2026-11-27 (phase 5b): also the player's club and either team in the game the
+        # report was written at, so a club name finds what we know about that club's games
+        hit = out["player_name"].str.contains(search.strip(), case=False, na=False, regex=False)
+        for col in ("club_name", "home_team", "away_team"):
+            if col in out.columns:
+                hit = hit | out[col].astype("string").str.contains(search.strip(), case=False, na=False, regex=False)
+        out = out[hit]
     # The page's own League / Max age / Foot -- the platform's rules: an unknown age is
     # kept by an age cap, and Left/Right include two-footed players.
     if league and league != "All" and "league" in out.columns:
@@ -744,7 +749,8 @@ def render(rating_season_id: int, rating_label: str) -> None:
     totals = sp.counts(frame)
     options = sp.filter_options(frame)
 
-    browse, disagreements, scouts = st.tabs(sp.tab_labels(totals))
+    # the web page added "By club" (owner 2026-11-27); this retired page keeps its three tabs
+    browse, disagreements, scouts = st.tabs(sp.tab_labels(totals)[:3])
 
     with browse:
         s1, s2, s3, s4 = st.columns([3, 2, 1, 1])

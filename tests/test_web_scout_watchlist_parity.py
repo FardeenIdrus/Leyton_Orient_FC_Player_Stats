@@ -169,7 +169,7 @@ def test_scout_rows_are_streamlits(monkeypatch, engine, thin, case):
     moved = len(web["rows"]) - len(web_rows) - (len(shown) - len(st_rows))
     assert len(web["rows"]) == st_n + moved
     assert web["caption"].split(" of ", 1)[1] == caption.split(" of ", 1)[1]
-    assert [t["label"] for t in web["tabs"]] == st_log.get("tabs")[0][1]
+    assert [t["label"] for t in web["tabs"]][:3] == st_log.get("tabs")[0][1]   # "By club" is web-only (2026-11-27)
 
 
 def test_scout_disagree_and_activity_are_streamlits(monkeypatch, engine, thin):

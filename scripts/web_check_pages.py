@@ -2330,14 +2330,14 @@ def _sr_ready(s):
 
 
 def scout_first_view(s, w):
-    """Sync line, three tabs, the filters and the table; Refresh is never pressed."""
+    """Sync line, four tabs (By club added 2026-11-27), the filters and the table; Refresh is never pressed."""
     s.goto(SR_PATH, check=True, desc="scout reports: first view")
     if not _sr_ready(s):
         return s.note("scout reports: page draws", "main never shown: " + s.page.inner_text("main")[:120])
     s.note("scout reports: sync line", None if re.search(r"synced", s.page.inner_text("#sr-sync"), re.I)
            else s.page.inner_text("#sr-sync"))
     tabs = s.page.locator("#sr-tabs button")
-    s.note("scout reports: three tabs", None if tabs.count() == 3 else f"{tabs.count()} tabs")
+    s.note("scout reports: four tabs", None if tabs.count() == 4 else f"{tabs.count()} tabs")
     s.note("scout reports: rows drawn", None if _sr_rows(s).count() > 0 else "no rows")
     s.note("scout reports: caption", None if re.search(r"\d+ of [\d,]+ reports", s.page.inner_text("#sr-cap"))
            else s.page.inner_text("#sr-cap"))
@@ -2405,9 +2405,34 @@ def scout_squad_role(s, w):
            and 0 < _sr_rows(s).count() < before else sel.input_value())
 
 
+def scout_by_club(s, w):
+    """Owner 2026-11-27 (phase 5b): By club lists each club we hold reports on; a click shows its
+    reports, and the search finds a club's players and the games it played in."""
+    s.goto(SR_PATH, check=False)
+    try:
+        s.page.locator('#sr-tabs [data-tab="clubs"]').wait_for(timeout=8000)
+    except Exception:                                   # noqa: BLE001
+        return s.note("scout reports: By club", skipped="no reports here")
+    s.step("scout reports: By club tab", lambda p: p.locator('#sr-tabs [data-tab="clubs"]').click(timeout=3000))
+    s.page.locator("#sr-body tr[data-club]").first.wait_for(timeout=8000)
+    heads = s.page.locator("#sr-thead th").all_inner_texts()
+    s.note("scout reports: By club columns", None if heads == ["Club", "Players scouted", "Reports", "Last seen", "Verdicts"] else str(heads))
+    total = s.page.locator("#sr-body tr[data-club]").count()
+    club = s.page.locator("#sr-body tr[data-club]").first.get_attribute("data-club")
+    s.step("scout reports: Find a club", lambda p: p.locator("#f-club-q").fill(club[:4], timeout=3000))
+    shown = s.page.locator("#sr-body tr[data-club]").all_inner_texts()
+    s.note("scout reports: Find a club narrows the list", None if shown and len(shown) <= total
+           and all(club[:4].lower() in t.lower() for t in shown) else str(shown[:3]))
+    s.step("scout reports: open a club", lambda p: p.locator("#sr-body tr[data-club]").first.click(timeout=3000))
+    s.page.wait_for_timeout(800)
+    s.note("scout reports: a club opens its reports", None if "tab=clubs" not in s.page.url and s.page.locator("#f-q").input_value() == club
+           and _sr_rows(s).count() > 0 else f"{s.page.url} / {_sr_rows(s).count()} rows")
+    s.goto(SR_PATH, check=False)
+
+
 def scout_search_and_age(s, w):
     s.goto(SR_PATH, check=False)
-    box = _need(s, "Search for a player", "text")
+    box = _need(s, "Search a player, club or game", "text")
     if box is None:
         return
     s.step("scout reports: search", lambda p: (box.fill("Samba", timeout=3000), box.press("Enter")))
@@ -4239,7 +4264,7 @@ PAGES = {
         squads_scroll_draws_more, squads_download, squads_history_and_url,
         squads_remembers]},
     "scout-reports": {"path": "/scout-reports", "exercise": True, "scenarios": [
-        scout_first_view, scout_filters_url, scout_squad_role, scout_search_and_age, scout_tabs, scout_list_height, scout_open_report,
+        scout_first_view, scout_filters_url, scout_squad_role, scout_search_and_age, scout_by_club, scout_tabs, scout_list_height, scout_open_report,
         scout_name_opens_card, scout_sort, scout_remembers]},
     "fixtures": {"path": "/fixtures", "exercise": False, "scenarios": [
         fixtures_first_view, fixtures_views_and_filters, fixtures_player_link_and_past, fixtures_remembers]},
