@@ -55,8 +55,10 @@ _ASSESSING = {"assess_psychological", "assess_medical", "enter_injury"}
 _PERMISSIONS: dict[str, frozenset[str]] = {
     "scout": frozenset(_ASSESSING),
     "medical": frozenset(_ASSESSING),
-    "head_of_recruitment": frozenset(_ASSESSING | {"sign_off"}),
-    "admin": frozenset(_ASSESSING | {"sign_off", "manage_users"}),
+    # owner 2026-11-27 (Fixtures, D5): assigning scouts to games and linking a scout report to a
+    # player are for the head of recruitment and admin; scouts see "Assigned to me".
+    "head_of_recruitment": frozenset(_ASSESSING | {"sign_off", "assign_scouts"}),
+    "admin": frozenset(_ASSESSING | {"sign_off", "manage_users", "assign_scouts"}),
 }
 
 

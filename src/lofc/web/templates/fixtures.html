@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Fixtures{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ static_url('css/fixtures.css') }}">
+<section class="view on" id="v-fixtures" data-page="fixtures">
+  <div class="fx-top">
+    <div>
+      <div class="section-label">{{ page.group }}</div>
+      <h1>Fixtures</h1>
+      <div class="meta" id="fx-summary">Loading the games…</div>
+    </div>
+    <div class="fx-top-r">
+      <a class="btn" id="fx-xl" href="/api/fixtures/xlsx" download>⬇ Excel</a>
+      <button type="button" class="btn" id="fx-add-open">+ Add a game</button>
+      <div class="fx-seg" role="group" aria-label="Games" id="fx-win">
+        <button type="button" data-w="7" aria-pressed="true">Next 7 days</button>
+        <button type="button" data-w="14" aria-pressed="false">Next 14 days</button>
+        <button type="button" data-w="past" aria-pressed="false">Past 3 weeks</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="fx-filters">
+    <div class="fx-views" role="group" aria-label="Views" id="fx-views"></div>
+    <div class="fx-bar">
+      <div class="f"><label for="fx-lg">League</label><select class="ctl" id="fx-lg"><option value="">All UK &amp; Irish</option></select></div>
+      <div class="f"><label for="fx-region">Region</label><select class="ctl" id="fx-region"><option value="">All regions</option></select></div>
+      <div class="f grow"><label for="fx-q">Club or player</label><input class="ctl" id="fx-q" type="search" placeholder="Search" autocomplete="off"></div>
+      <div class="f" id="fx-by-f"><span class="fx-lbl" id="fx-by-l">Show</span>
+        <div class="fx-seg sm" role="group" aria-labelledby="fx-by-l" id="fx-by">
+          <button type="button" data-b="game" aria-pressed="true">By game</button>
+          <button type="button" data-b="player" aria-pressed="false">By player</button>
+        </div></div>
+      <div class="f"><label for="fx-sort">Order</label><select class="ctl" id="fx-sort"><option value="time">Kick-off</option><option value="most">Most matching players</option></select></div>
+      <label class="fx-chk"><input type="checkbox" id="fx-mine"> Assigned to me</label>
+      <label class="fx-chk"><input type="checkbox" id="fx-free"> Not assigned</label>
+    </div>
+
+    <form class="fx-add" id="fx-add" hidden>
+      <div class="f"><label for="fx-add-date">Date</label><input class="ctl" type="date" id="fx-add-date" required></div>
+      <div class="f"><label for="fx-add-time">Kick-off (UK)</label><input class="ctl" type="time" id="fx-add-time" value="15:00" required></div>
+      <div class="f"><label for="fx-add-comp">Competition</label><input class="ctl" id="fx-add-comp" placeholder="e.g. EFL Trophy" list="fx-comps"></div>
+      <div class="f grow"><label for="fx-add-home">Home club</label><input class="ctl" id="fx-add-home" list="fx-clubs" required autocomplete="off"></div>
+      <div class="f grow"><label for="fx-add-away">Away club</label><input class="ctl" id="fx-add-away" list="fx-clubs" required autocomplete="off"></div>
+      <datalist id="fx-clubs"></datalist>
+      <datalist id="fx-comps"><option value="EFL Trophy"><option value="FA Cup"><option value="FA Trophy"><option value="Scottish Cup"><option value="Friendly"></datalist>
+      <div class="fx-add-btns"><button type="submit" class="btn primary">Add game</button><button type="button" class="btn" id="fx-add-cancel">Cancel</button></div>
+      <p class="note fx-add-msg" id="fx-add-msg">A club from the list brings its players; any other club is shown by name.</p>
+    </form>
+
+    <details class="fx-more" id="fx-more">
+      <summary>More filters <span class="note" id="fx-more-n"></span></summary>
+      <div class="fx-grid">
+        <div class="fx-grp"><span class="fx-lbl">Scout verdict (any report)</span><div class="fx-chips" data-g="verdict">
+          <label><input type="checkbox" value="Sign">Sign</label><label><input type="checkbox" value="Monitor Priority">Monitor Priority</label>
+          <label><input type="checkbox" value="Monitor">Monitor</label><label><input type="checkbox" value="Don't sign">Don't sign</label>
+          <label><input type="checkbox" value="disagree">Scouts disagree</label><label><input type="checkbox" value="none">Never scouted</label></div></div>
+        <div class="fx-grp"><span class="fx-lbl">Form (club Overall per game)</span><div class="fx-chips" data-g="form">
+          <label><input type="checkbox" value="f5">Top in 3+ of last 5</label><label><input type="checkbox" value="f10">Top in 6+ of last 10</label>
+          <label><input type="checkbox" value="rise">Rising</label><label><input type="checkbox" value="br">Breaking through</label></div></div>
+        <div class="fx-grp"><span class="fx-lbl">Season Overall (in his own league)</span><div class="fx-chips" data-g="ov">
+          <label><input type="radio" name="fx-ov" value="" checked>Any</label><label><input type="radio" name="fx-ov" value="3.5">3.5+</label><label><input type="radio" name="fx-ov" value="4">4.0+</label></div></div>
+        <div class="fx-grp"><span class="fx-lbl">Age</span><div class="fx-chips" data-g="age">
+          <label><input type="radio" name="fx-age" value="" checked>Any</label><label><input type="radio" name="fx-age" value="21">U21</label><label><input type="radio" name="fx-age" value="23">U23</label></div></div>
+        <div class="fx-grp wide"><span class="fx-lbl">Position</span><div class="fx-chips" data-g="pos" id="fx-pos"></div></div>
+        <div class="fx-grp"><span class="fx-lbl">Watchlist</span><div class="fx-chips" data-g="watch"><label><input type="checkbox" value="1">On the watchlist</label></div></div>
+        <div class="fx-grp"><span class="fx-lbl">Matching players per game</span><div class="fx-chips" data-g="least">
+          <label><input type="radio" name="fx-least" value="1" checked>1+</label><label><input type="radio" name="fx-least" value="2">2+</label><label><input type="radio" name="fx-least" value="3">3+</label></div></div>
+      </div>
+      <p class="note">Filters in different boxes must all be true of the same player; ticks in one box are alternatives.</p>
+    </details>
+    <div class="fx-status" id="fx-status"></div>
+  </div>
+
+  <div class="card" id="fx-list" data-writes><p class="note">Loading…</p></div>
+</section>
+{% endblock %}
+{% block scripts %}<script type="module" src="{{ static_url('js/fixtures.js') }}"></script>{% endblock %}

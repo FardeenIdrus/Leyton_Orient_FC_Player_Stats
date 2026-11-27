@@ -1208,3 +1208,47 @@ class PlayerMatchClub(Base):
     performance_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     physical_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     overall_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class FixtureAssignment(Base):
+    """Which scout goes to which game (owner 2026-11-27, phase 5). fixture_key: "m:<Impect
+    match id>" or "x:<manual_fixtures id>". USER DATA: never written by the pipeline."""
+
+    __tablename__ = "fixture_assignments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fixture_key: Mapped[str] = mapped_column(String, unique=True)
+    user_id: Mapped[int] = mapped_column(Integer)
+    assigned_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    assigned_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ManualFixture(Base):
+    """A game added by hand (EFL Trophy, FA Cup, friendlies: not in our Impect licence).
+    A club we hold has its squad id, so its players are listed. USER DATA."""
+
+    __tablename__ = "manual_fixtures"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scheduled_at: Mapped[datetime.datetime] = mapped_column(DateTime, index=True)
+    competition: Mapped[str | None] = mapped_column(String, nullable=True)
+    home_name: Mapped[str] = mapped_column(String)
+    away_name: Mapped[str] = mapped_column(String)
+    home_squad_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    away_squad_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    added_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    added_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ScoutReportLink(Base):
+    """A person confirmed which of our players a scout report is about (owner 2026-11-27, G2).
+    The automatic linking stage (`model.scout_report_link.relink`) keeps these over its own
+    result. USER DATA."""
+
+    __tablename__ = "scout_report_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    submission_id: Mapped[str] = mapped_column(String, unique=True)
+    player_id: Mapped[int] = mapped_column(BigInteger)
+    linked_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    linked_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())

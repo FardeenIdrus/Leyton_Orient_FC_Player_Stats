@@ -4033,6 +4033,74 @@ def similar_page(s, w):
         s.page.set_viewport_size(size)
 
 
+
+# ---- Fixtures (owner 2026-11-27, phase 5) ---------------------------------------------------
+def _fx_ready(s):
+    try:
+        s.page.locator("#fx-list .fx-row, #fx-list .note").first.wait_for(timeout=12000)
+        return s.page.locator("#fx-list .fx-row").count() > 0
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+def fixtures_first_view(s, w):
+    """Everything listed by default; seven views with counts; the busiest game open with its
+    players, why, last 5, Overall and every scout report; nothing clipped."""
+    s.goto("/fixtures", check=True, desc="fixtures: first view")
+    if not _fx_ready(s):
+        return s.note("fixtures: games", skipped="no fixtures in the next 7 days here")
+    views = s.page.locator("#fx-views .fx-view").count()
+    s.note("fixtures: seven views with counts", None if views == 7 else f"{views} views")
+    st = s.page.inner_text("#fx-status")
+    s.note("fixtures: nothing hidden by default", None if "hidden" not in st else st)
+    s.note("fixtures: one game open on arrival", None if s.page.locator("tr.fx-open").count() == 1 else "none open")
+    heads = s.page.locator("tr.fx-open table.fx-ps").first.locator("th").all_inner_texts()
+    s.note("fixtures: player columns", None if heads == ["Player", "Why watch", "Last 5 games", "Season Overall", "Scout reports"] else str(heads))
+    tips = s.page.evaluate("() => [...document.querySelectorAll('.fx-why')].every(e => e.title && e.title.length > 10)")
+    s.note("fixtures: every reason says what it means (hover)", None if tips else "a reason without a meaning")
+    s.shot("fixtures_first_view", w, full=True)
+
+
+def fixtures_views_and_filters(s, w):
+    """A view narrows the list and says how many games it hides; Clear filters brings them back;
+    a filter group applies to the same player."""
+    s.goto("/fixtures", check=False)
+    if not _fx_ready(s):
+        return s.note("fixtures: filters", skipped="no fixtures here")
+    total = s.page.locator("#fx-list .fx-row").count()
+    s.step("fixtures: In form view", lambda p: p.locator('#fx-views [data-v="form"]').click(timeout=3000))
+    st = s.page.inner_text("#fx-status")
+    n = s.page.locator("#fx-list .fx-row").count()
+    s.note("fixtures: a view shows how many games it hides", None if n == total or "hidden by filters" in st else st)
+    s.step("fixtures: More filters", lambda p: p.locator("#fx-more summary").click(timeout=3000))
+    s.step("fixtures: U23", lambda p: p.locator('[data-g="age"] input[value="23"]').check(timeout=3000))
+    s.note("fixtures: filter count shown", None if "(1 on)" in s.page.inner_text("#fx-more-n") else s.page.inner_text("#fx-more-n"))
+    if s.page.locator("#fx-clear").count():
+        s.step("fixtures: Clear filters", lambda p: p.locator("#fx-clear").click(timeout=3000))
+    s.note("fixtures: Clear filters shows every game again", None if s.page.locator("#fx-list .fx-row").count() == total else "not all back")
+    s.step("fixtures: By player", lambda p: p.locator('#fx-by [data-b="player"]').click(timeout=3000))
+    heads = s.page.locator("#fx-list table.fx-ps th").all_inner_texts()
+    s.note("fixtures: By player lists each player's next game", None if "Next game" in heads else str(heads))
+    s.shot("fixtures_by_player", w, full=True)
+
+
+def fixtures_player_link_and_past(s, w):
+    """A player's name opens his page (and its back link returns here); Past 3 weeks lists the
+    games played with their scout reports; Excel downloads a workbook."""
+    s.goto("/fixtures", check=False)
+    if not _fx_ready(s):
+        return s.note("fixtures: links", skipped="no fixtures here")
+    href = s.page.evaluate("() => document.querySelector('tr.fx-open a.fx-pl')?.getAttribute('href') || ''")
+    s.note("fixtures: player name links to his page", None if href.startswith("/player/") and "back=%2Ffixtures" in href else href)
+    x = s.page.evaluate("() => document.querySelector('#fx-xl')?.href || ''")
+    r = s.page.request.get(x) if x else None
+    s.note("fixtures: Excel downloads a workbook", None if r is not None and r.status == 200 and r.body()[:2] == b"PK" else str(r.status if r else "no link"))
+    s.step("fixtures: Past 3 weeks", lambda p: p.locator('#fx-win [data-w="past"]').click(timeout=3000))
+    _fx_ready(s)
+    s.note("fixtures: past games listed", None if s.page.locator("#fx-list .fx-row").count() else "none")
+    s.note("fixtures: past has no views", None if s.page.locator("#fx-views").is_hidden() else "views shown")
+    s.shot("fixtures_past", w, full=True)
+
 PAGES = {
     "home": {"path": "/", "exercise": False, "scenarios": [home_first_view, nav_no_assess]},
     "players": {"path": "/players", "exercise": False, "scenarios": [
@@ -4064,6 +4132,8 @@ PAGES = {
     "scout-reports": {"path": "/scout-reports", "exercise": True, "scenarios": [
         scout_first_view, scout_filters_url, scout_squad_role, scout_search_and_age, scout_tabs, scout_list_height, scout_open_report,
         scout_name_opens_card, scout_sort, scout_remembers]},
+    "fixtures": {"path": "/fixtures", "exercise": False, "scenarios": [
+        fixtures_first_view, fixtures_views_and_filters, fixtures_player_link_and_past]},
     "watchlist": {"path": "/watchlist", "exercise": True, "scenarios": [
         watchlist_first_view, watchlist_filters, watchlist_editor, watchlist_suggestions,
         watchlist_name_opens_card, watchlist_download, watchlist_remembers]},

@@ -40,6 +40,9 @@ HOST = "https://api.impect.com/v5/customerapi"
 # Championship, L1, L2, National League, PL2, Scottish Premiership, Scottish Championship,
 # NIFL Premiership (10_000 + 305), Irish Premier Division (10_000 + 189) -- owner 2026-11-27 (N28)
 UK_IRELAND = {3, 4, 5, 65, 903, 901, 902, 10305, 10189}
+# Cups in our licence (owner 2026-11-27, G1): Impect competition id -> our id. FIXTURES ONLY:
+# a cup game's scores would put clubs of different leagues in one comparison.
+CUPS = {40: 10_040}                       # EFL Cup
 SCORES = {"impect": "IMPECT_SCORE_PACKING", "offensive": "OFFENSIVE_IMPECT_SCORE_PACKING",
           "defensive": "DEFENSIVE_IMPECT_SCORE_PACKING"}
 MIN_MINUTES = 45                          # games that count (owner 2026-11-23)
@@ -388,6 +391,36 @@ def pull_league(engine, api: Api, target, score_ids: dict, names: dict, dry_run:
     return out
 
 
+def cup_targets(catalogue: list, live_season_id) -> list:
+    """The licensed cups (CUPS) in the season being played, from Impect's catalogue."""
+    from types import SimpleNamespace
+    from lofc import leagues
+    out = []
+    for it in catalogue or []:
+        cid = it.get("competitionId")
+        if cid not in CUPS:
+            continue
+        try:
+            sid = leagues.season_id_for(it.get("season"))
+        except ValueError:
+            continue
+        if sid == live_season_id:
+            out.append(SimpleNamespace(iteration_id=int(it["id"]), competition_id=CUPS[cid], season_id=sid,
+                                       label=f"{it.get('competitionName') or 'Cup'} {leagues.season_label(sid)}"))
+    return out
+
+
+def pull_cup(engine, api: Api, target, names: dict, dry_run: bool = False) -> dict:
+    """A cup's fixture list only (one call, plus one for its club names: a cup brings clubs
+    from leagues we do not hold)."""
+    raw = api.get(f"/iterations/{target.iteration_id}/matches")
+    squads = {int(s["id"]): s.get("name") for s in (api.get(f"/iterations/{target.iteration_id}/squads") or [])}
+    matches = parse_matches(raw, target.iteration_id, target.competition_id, target.season_id, {**squads, **names})
+    if not dry_run:
+        write_matches(engine, matches)
+    return {"league": target.label, "fixtures": len(matches)}
+
+
 def gsc_parse(payload: dict, kpi_names: dict) -> pd.DataFrame:
     from lofc.model.game_scoring import parse_player_kpis
     return parse_player_kpis(payload, kpi_names)
@@ -416,6 +449,15 @@ def main(argv=None) -> None:
               if args.iteration is None or t.iteration_id == args.iteration]
     for t in chosen:
         print(pull_league(engine, api, t, score_ids, names, dry_run=args.dry_run, kpi_names=kpi_names), flush=True)
+    if args.iteration is None:
+        import json
+        from lofc.ingest.impect import iterations_catalogue_path
+        try:
+            catalogue = json.loads(iterations_catalogue_path().read_text())
+        except (OSError, ValueError):
+            catalogue = []
+        for t in cup_targets(catalogue, settings.live_season_id):
+            print(pull_cup(engine, api, t, names, dry_run=args.dry_run), flush=True)
     print(f"Impect calls made: {api.calls}")
 
 

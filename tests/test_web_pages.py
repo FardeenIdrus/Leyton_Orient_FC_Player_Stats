@@ -38,7 +38,7 @@ def test_users_page_exists_for_admin_and_is_403_for_others():
     assert r.status_code == 403 and "Your role cannot open this page" in r.text
 
 
-NAV_LABELS = ["Players", "Squads &amp; loans", "Compare", "Similar players", "Scout reports", "Watchlist", "Report",
+NAV_LABELS = ["Players", "Fixtures", "Squads &amp; loans", "Compare", "Similar players", "Scout reports", "Watchlist", "Report",
               "Physical", "Club vs League One", "What goes into each rating",
               "How playing styles work", "Glossary"]
 

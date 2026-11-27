@@ -133,3 +133,37 @@ def test_gives_up_after_four_tries(monkeypatch):
     with pytest.raises(requests.Timeout):
         api.get("/x")
     assert api.s.n == 4
+
+
+def test_efl_cup_is_found_in_the_licence_for_the_live_season():
+    """Owner 2026-11-27 (G1): the only cup in our Impect licence -- fixtures only (a cup game's
+    scores would mix leagues in one comparison)."""
+    cat = [{"id": 2227, "competitionId": 40, "competitionName": "EFL Cup", "season": "26/27"},
+           {"id": 1999, "competitionId": 40, "competitionName": "EFL Cup", "season": "25/26"},
+           {"id": 2117, "competitionId": 133, "competitionName": "League One", "season": "26/27"}]
+    got = im.cup_targets(cat, live_season_id=319)
+    assert [(t.iteration_id, t.competition_id, t.season_id, t.label) for t in got] == [(2227, 10040, 319, "EFL Cup 2026/27")]
+
+
+def test_cup_pull_writes_fixtures_and_makes_no_match_calls():
+    import sqlalchemy as sa
+    from sqlalchemy.pool import StaticPool
+    from types import SimpleNamespace as NS
+    from lofc.store.models import Base
+    e = sa.create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(e)
+
+    class FakeApi:
+        calls = []
+        def get(self, path):
+            self.calls.append(path)
+            if path.endswith("/matches"):
+                return [{"id": 9, "homeSquadId": 1, "awaySquadId": 2, "scheduledDate": "2026-12-16T19:45:00Z",
+                         "lastCalculationDate": None, "available": False, "goals": None}]
+            return [{"id": 1, "name": "Leyton Orient"}, {"id": 2, "name": "Arsenal FC"}]
+    api = FakeApi()
+    out = im.pull_cup(e, api, NS(iteration_id=2227, competition_id=10040, season_id=319, label="EFL Cup 2026/27"), {})
+    assert out == {"league": "EFL Cup 2026/27", "fixtures": 1}
+    assert api.calls == ["/iterations/2227/matches", "/iterations/2227/squads"]
+    row = pd.read_sql("SELECT home_name, away_name, competition_id FROM impect_matches", e).iloc[0]
+    assert (row["home_name"], row["away_name"], row["competition_id"]) == ("Leyton Orient", "Arsenal FC", 10040)

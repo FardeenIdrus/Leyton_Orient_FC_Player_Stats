@@ -566,3 +566,7 @@ docker compose exec -T app python -m lofc.model.club_crosswalk
 # The dry run prints kpis_to_pull too.
 docker compose exec -T app python -m lofc.ingest.impect_matches --dry-run
 docker compose exec -T app python -m lofc.ingest.impect_matches
+
+# --- Fixtures (owner 2026-11-27, phase 5) ---
+# The match pull above also refreshes EFL Cup fixtures (2 calls; fixtures only, no game scores).
+# Region list for English / PL2 clubs: src/lofc/reference/club_regions.csv (owner checks once).

@@ -16,7 +16,8 @@ class Page:
 
 # (group, [(key, path, title), ...]) -- Admin is filtered by permission in `nav_for`.
 _NAV: list[tuple[str, list[tuple[str, str, str]]]] = [
-    ("Find", [("players", "/players", "Players"), ("squads", "/squads", "Squads & loans")]),
+    ("Find", [("players", "/players", "Players"), ("fixtures", "/fixtures", "Fixtures"),
+              ("squads", "/squads", "Squads & loans")]),
     ("Assess a player", [("compare", "/compare", "Compare"),
                          ("similar", "/similar", "Similar players"),
                          ("scout-reports", "/scout-reports", "Scout reports")]),

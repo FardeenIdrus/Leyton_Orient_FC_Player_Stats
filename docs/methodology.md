@@ -472,6 +472,28 @@ Code: `model/game_scoring.py`, `ingest/impect_matches.py` (step 4), `core/game_p
 | Under 45 min | Values shown, no rating |
 | Player page | Overall / Performance / Physical / Impect tabs; click a game → every metric: game value, per 90, %, band, weight, source; Excel: every game this season + a Sources sheet |
 
+## 6g. Fixtures: which games to watch and why (owner 2026-11-27, phase 5) — display only
+
+Every UK and Irish league game (plus EFL Cup fixtures, and games a scout adds by hand) in the
+next 7 / 14 days or the past 3 weeks. Nothing is hidden by default; a filter says how many games
+it hides. A game's players = everyone who has played for either club this season (club of his
+latest game). Signals per player (`core/fixtures.py`):
+
+| Signal | Rule |
+|---|---|
+| Scout verdict | Any of his reports (all are listed); **Scouts disagree** = Sign or Monitor Priority and Don't sign |
+| In form | Top (club Overall per game better than 80% of games at his position) in 3+ of his last 5 rated games, or 6+ of his last 10 |
+| Rising | Average "better than %" of his last 5 rated games at least 20 points above the 5 before (needs 10) |
+| Breaking through | Under 23; 200+ minutes in his club's last 5 games and at least double the 5 before |
+| Not seen yet | Season Overall 3.5+ in his own league and no scout report (not shown when a report may be about him) |
+
+Filters in different groups must all be true of the same player; ticks in one group are
+alternatives. Scout priorities and watchlist players are always listed in an open game.
+Reports not linked to a player (no name + birth-date match) are **suggested** by club + surname
+and linked only when a person clicks Link (`scout_report_links`, kept by the linking stage).
+Regions: by league for Scotland and Ireland, else `reference/club_regions.csv`. EFL Cup:
+fixtures only (its game scores would compare clubs of different leagues).
+
 ## 7. Season shown
 
 The Players page **opens on the newest season held, the one being played (2026/27)**

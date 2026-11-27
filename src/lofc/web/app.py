@@ -355,6 +355,8 @@ def create_app(*, users=None, secret: str | None = None, info_items=None,
     reference_api.mount(app, render, shell)
     from lofc.web.api import club_vs_league as club_vs_league_api
     club_vs_league_api.mount(app, render, shell)
+    from lofc.web.api import fixtures as fixtures_api
+    fixtures_api.mount(app, render, shell)
 
     for page in pages.PAGES.values():
         register(page)

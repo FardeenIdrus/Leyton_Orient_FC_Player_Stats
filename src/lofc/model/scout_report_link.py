@@ -257,6 +257,16 @@ def relink(engine) -> int:
 
     linked = resolve_links(reports, lookup, ours)
     relink.review = _tolerant_review(linked, lookup, ours)
+    # A link a person confirmed on the Fixtures page (owner 2026-11-27, G2) wins over the
+    # automatic result, which would otherwise undo it on the next sync.
+    try:
+        manual = pd.read_sql("SELECT submission_id, player_id FROM scout_report_links", engine)
+    except Exception:                                   # noqa: BLE001 -- table not migrated yet
+        manual = pd.DataFrame(columns=["submission_id", "player_id"])
+    if len(manual):
+        by_hand = dict(zip(manual["submission_id"], manual["player_id"]))
+        linked = linked.copy()
+        linked["player_id"] = [by_hand.get(s, p) for s, p in zip(linked["submission_id"], linked["player_id"])]
     table = ScoutReport.__table__
     written = 0
     with engine.begin() as conn:
