@@ -121,7 +121,7 @@ def test_page_script_states_what_each_signal_means_and_links_players():
     from pathlib import Path
     import lofc.web
     js = (Path(lofc.web.__file__).parent / "static" / "js" / "fixtures.js").read_text()
-    assert "Rising: ${p.rise_from}% → ${p.rise_to}% (last 5 games vs 5 before)" in js and 'title="${esc(d)}"' in js
+    assert "Rising: ${p.rise_from}% → ${p.rise_to}% (last 5 games vs 5 before)" in js and 'data-tip="${esc(d)}"' in js
     assert "hidden by filters" in js and "Clear filters" in js
     assert "/player/${encodeURIComponent(p.id)}" in js and "back=" in js
     assert "Also in this game: scout priorities and watchlist" in js       # never filtered out of a game
@@ -210,3 +210,36 @@ def test_one_choice_filters_can_be_cleared_and_scouts_filter_and_by_scout():
     assert 'id="fx-scout-list" data-ms="scout"' in html and 'data-b="scout"' in html
     js = (root / "static" / "js" / "fixtures.js").read_text()
     assert "function drawScouts" in js and "Not assigned" in js
+
+
+def test_past_games_show_who_covered_them_and_who_stood_out():
+    """Owner 2026-11-27 (option A): a played game shows who covered it, its scout reports, the
+    players with a Top game, and "Missed" for a key player with a Top game and no report."""
+    from pathlib import Path
+    import lofc.web
+    js = (Path(lofc.web.__file__).parent / "static" / "js" / "fixtures.js").read_text()
+    assert "Covered by " in js and "Not covered" in js and "Missed: on our radar, no report" in js
+    assert "<b>Missed</b> = a standout on our radar" in js and 'id="fx-key"' in (Path(lofc.web.__file__).parent / "templates" / "fixtures.html").read_text()
+    assert "Top game: ${p.gamePct}%" in js and "function pastBody" in js
+
+
+def test_definitions_use_the_instant_tooltip_everywhere():
+    """Owner 2026-11-27: the browser's own hover text took seconds to appear and was missed;
+    every definition on Fixtures uses the site's instant tooltip (data-tip), filters included."""
+    from pathlib import Path
+    import lofc.web
+    root = Path(lofc.web.__file__).parent
+    js = (root / "static" / "js" / "fixtures.js").read_text()
+    html = (root / "templates" / "fixtures.html").read_text()
+    assert 'title="' not in js and "title=" not in html
+    assert "Any age: 200+ minutes in his club" in html and "Under 23: 200+ minutes in his club" in html
+
+
+def test_filters_are_kept_when_leaving_and_coming_back():
+    """Owner 2026-11-27: the filters were lost on moving to another page and back. They live in
+    the address and are remembered (as on Players, Squads, Watchlist)."""
+    from pathlib import Path
+    import lofc.web
+    js = (Path(lofc.web.__file__).parent / "static" / "js" / "fixtures.js").read_text()
+    assert "restoreState('fixtures');" in js and "rememberState('fixtures');" in js
+    assert "applyState(readState());" in js and "saveState();" in js

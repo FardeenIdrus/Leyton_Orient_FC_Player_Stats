@@ -137,3 +137,16 @@ def test_past_game_lists_the_reports_filed_at_it():
                          "fixture_date": pd.to_datetime(["2026-11-21", "2026-11-21", "2026-11-21"])})
     got = fx.reports_at(reps, pd.Timestamp("2026-11-21 15:00"), "Leyton Orient", "Bolton Wanderers")
     assert [r["p"] for r in got] == ["A", "B"]
+
+
+def test_standouts_are_top_games_of_45_minutes_best_first():
+    """Owner 2026-11-27 (Past 3 weeks, option A): who stood out in each played game -- a Top
+    game (club Overall better than 80% of games at his position), 45+ minutes."""
+    club = pd.DataFrame({"match_id": [1, 1, 1, 1, 2], "player_id": [7, 8, 9, None, 7],
+                         "minutes": [90, 90, 30, 90, 90], "overall_pct": [91.4, 80.0, 99.0, 95.0, 85.0]})
+    assert fx.standouts(club) == {1: [{"pid": 7, "pct": 91}], 2: [{"pid": 7, "pct": 85}]}
+
+
+def test_who_covered_a_past_game():
+    assert fx.covered_by([{"s": "Ann"}, {"s": "Bob"}, {"s": "Ann"}]) == [{"name": "Ann", "n": 2}, {"name": "Bob", "n": 1}]
+    assert fx.covered_by([]) == []

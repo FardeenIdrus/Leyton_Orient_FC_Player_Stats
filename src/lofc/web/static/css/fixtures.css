@@ -109,3 +109,7 @@ table.fx-ps tr.out td{opacity:.65}
 .fx-scout-h{display:flex;justify-content:space-between;align-items:baseline;padding:16px 0 6px;border-bottom:2px solid var(--ink);font-size:15px}
 .fx-scout-h:first-child{padding-top:0}
 .fx-scout-h span{font-size:13px;color:var(--muted)}
+.fx-key{margin:-4px 2px 10px;font-size:13px}.fx-key b{color:var(--ink)}
+/* a definition is one hover away, instantly (the site's tooltip); dotted underline = there is one */
+.fx-chips label[data-tip],.fx-why[data-tip],.fx-cnt[data-tip],.fx-view[data-tip]{cursor:help}
+.fx-chips label[data-tip]{text-decoration:underline dotted #9AA0A8;text-underline-offset:3px}

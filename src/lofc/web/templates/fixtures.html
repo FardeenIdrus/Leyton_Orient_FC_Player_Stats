@@ -62,20 +62,20 @@
       <summary>More filters <span class="note" id="fx-more-n"></span></summary>
       <div class="fx-grid">
         <div class="fx-grp"><span class="fx-lbl">Scout verdict (any report)</span><div class="fx-chips" data-g="verdict">
-          <label><input type="checkbox" value="Sign">Sign</label><label><input type="checkbox" value="Monitor Priority">Monitor Priority</label>
-          <label><input type="checkbox" value="Monitor">Monitor</label><label><input type="checkbox" value="Don't sign">Don't sign</label>
-          <label><input type="checkbox" value="disagree">Scouts disagree</label><label><input type="checkbox" value="none">Never scouted</label></div></div>
+          <label data-tip="A scout report with the verdict Sign"><input type="checkbox" value="Sign">Sign</label><label data-tip="A scout report with the verdict Monitor Priority"><input type="checkbox" value="Monitor Priority">Monitor Priority</label>
+          <label data-tip="A scout report with the verdict Monitor"><input type="checkbox" value="Monitor">Monitor</label><label data-tip="A scout report with the verdict Don't sign"><input type="checkbox" value="Don't sign">Don't sign</label>
+          <label data-tip="One report says Sign or Monitor Priority, another Don't sign"><input type="checkbox" value="disagree">Scouts disagree</label><label data-tip="No scout report on him yet"><input type="checkbox" value="none">Never scouted</label></div></div>
         <div class="fx-grp"><span class="fx-lbl">Form (club Overall per game)</span><div class="fx-chips" data-g="form">
-          <label title="Top 20% = better than 80% of games at his position in his league"><input type="checkbox" value="f5">3+ of last 5 games in the top 20%</label><label title="Top 20% = better than 80% of games at his position in his league"><input type="checkbox" value="f10">6+ of last 10 games in the top 20%</label>
-          <label><input type="checkbox" value="rise">Rising</label><label><input type="checkbox" value="br">Breaking through (U23)</label><label title="200+ minutes in his club's last 5 games, at least double the 5 before"><input type="checkbox" value="up">More minutes, any age</label></div></div>
+          <label data-tip="Top 20% = better than 80% of games at his position in his league (club Overall per game)"><input type="checkbox" value="f5">3+ of last 5 games in the top 20%</label><label data-tip="Top 20% = better than 80% of games at his position in his league (club Overall per game)"><input type="checkbox" value="f10">6+ of last 10 games in the top 20%</label>
+          <label data-tip="His last 5 games average 20+ points above the 5 before (&quot;better than %&quot;)"><input type="checkbox" value="rise">Rising</label><label data-tip="Under 23: 200+ minutes in his club's last 5 games, at least double the 5 before"><input type="checkbox" value="br">Breaking through (U23)</label><label data-tip="Any age: 200+ minutes in his club's last 5 games, at least double the 5 before"><input type="checkbox" value="up">More minutes, any age</label></div></div>
         <div class="fx-grp"><span class="fx-lbl">Season Overall (in his own league)</span><div class="fx-chips" data-g="ov" data-one>
-          <label><input type="checkbox" value="3.5">3.5+</label><label><input type="checkbox" value="4">4.0+</label></div></div>
+          <label data-tip="Season Overall 3.5+ in his own league"><input type="checkbox" value="3.5">3.5+</label><label data-tip="Season Overall 4.0+ in his own league"><input type="checkbox" value="4">4.0+</label></div></div>
         <div class="fx-grp"><span class="fx-lbl">Age</span><div class="fx-chips" data-g="age" data-one>
-          <label><input type="checkbox" value="21">U21</label><label><input type="checkbox" value="23">U23</label></div></div>
+          <label data-tip="Under 21 today"><input type="checkbox" value="21">U21</label><label data-tip="Under 23 today"><input type="checkbox" value="23">U23</label></div></div>
         <div class="fx-grp wide"><span class="fx-lbl">Position</span><div class="fx-chips" data-g="pos" id="fx-pos"></div></div>
-        <div class="fx-grp"><span class="fx-lbl">Watchlist</span><div class="fx-chips" data-g="watch"><label><input type="checkbox" value="1">On the watchlist</label></div></div>
+        <div class="fx-grp"><span class="fx-lbl">Watchlist</span><div class="fx-chips" data-g="watch"><label data-tip="On the watchlist at any stage"><input type="checkbox" value="1">On the watchlist</label></div></div>
         <div class="fx-grp"><span class="fx-lbl">Show only games with at least</span><div class="fx-chips" data-g="least" data-one>
-          <label><input type="checkbox" value="2">2 matching players</label><label><input type="checkbox" value="3">3 matching players</label></div></div>
+          <label data-tip="Only games where 2+ players pass every filter you chose"><input type="checkbox" value="2">2 matching players</label><label data-tip="Only games where 3+ players pass every filter you chose"><input type="checkbox" value="3">3 matching players</label></div></div>
       </div>
       <p class="note">Filters in different boxes must all be true of the same player; ticks in one box are alternatives. Click a ticked option again to clear it.</p>
     </details>
@@ -94,6 +94,7 @@
     </div>
   </div>
 
+  <p class="note fx-key" id="fx-key" hidden></p>
   <datalist id="fx-scouts"></datalist>
   <div class="card" id="fx-list" data-writes><p class="note">Loading…</p></div>
 </section>

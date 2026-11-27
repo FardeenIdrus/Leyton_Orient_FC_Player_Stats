@@ -162,6 +162,14 @@ def build(win: str, user: WebUser, now: pd.Timestamp | None = None) -> dict:
                                     "d": None if pd.isna(by_sid[s]["submitted_at"]) else str(pd.Timestamp(by_sid[s]["submitted_at"]).date())}
                                    for s in sids]
         out_players[pid]["ns"] = False      # a report may be about him: not "Not seen yet"
+    stand = {}
+    if win == "past":
+        ids = [int(g["key"][2:]) for g in games if g["key"].startswith("m:")]
+        if ids:
+            from sqlalchemy import text
+            club = pd.read_sql(text(f"SELECT match_id, player_id, minutes, overall_pct FROM player_match_club "
+                                    f"WHERE match_id IN ({','.join(str(i) for i in ids)})"), _engine())
+            stand = fx.standouts(club)
     people = _people()
     names_by_id = {u["id"]: u["name"] for u in people}
     for g in games:
@@ -171,6 +179,8 @@ def build(win: str, user: WebUser, now: pd.Timestamp | None = None) -> dict:
         g["region"] = [squads.get(g[k], {}).get("region") for k in ("hs", "as")]
         if win == "past":
             g["reports"] = fx.reports_at(reports, g["at"], g["home"], g["away"])
+            g["covered"] = fx.covered_by(g["reports"])
+            g["stand"] = stand.get(int(g["key"][2:]), []) if g["key"].startswith("m:") else []
     return {"window": win, "now": now.isoformat(), "season": season, "games": games, "players": {str(k): v for k, v in out_players.items()},
             "squads": {str(k): v for k, v in squads.items() if k in sq_in},
             "users": [{"id": u["id"], "name": u["name"]} for u in people],

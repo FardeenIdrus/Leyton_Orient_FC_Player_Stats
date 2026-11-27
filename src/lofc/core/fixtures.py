@@ -278,3 +278,25 @@ def reports_at(reports: pd.DataFrame, at, home: str, away: str) -> list:
             out.append({"p": x.get("player_name"), "v": x.get("verdict"), "s": x.get("scout"),
                         "pid": None if pid is None or pd.isna(pid) else int(pid)})
     return out
+
+
+def standouts(club: pd.DataFrame) -> dict:
+    """Past games (owner 2026-11-27): match -> the players who had a Top game in it (club
+    Overall per game better than 80% of games at his position, 45+ minutes), best first."""
+    if club is None or club.empty:
+        return {}
+    c = club.dropna(subset=["player_id", "overall_pct"])
+    c = c[(pd.to_numeric(c["minutes"], errors="coerce").fillna(0) >= 45) & (c["overall_pct"] > TOP)]
+    out: dict = {}
+    for mid, g in c.sort_values("overall_pct", ascending=False).groupby("match_id", sort=False):
+        out[int(mid)] = [{"pid": int(p), "pct": int(round(v))} for p, v in zip(g["player_id"], g["overall_pct"])]
+    return out
+
+
+def covered_by(reports: list) -> list:
+    """The scouts who filed reports at one game, with how many each."""
+    n: dict = {}
+    for r in reports:
+        if r.get("s"):
+            n[r["s"]] = n.get(r["s"], 0) + 1
+    return [{"name": k, "n": v} for k, v in sorted(n.items(), key=lambda x: (-x[1], x[0]))]

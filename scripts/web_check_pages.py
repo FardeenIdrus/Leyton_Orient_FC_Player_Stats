@@ -4056,7 +4056,7 @@ def fixtures_first_view(s, w):
     s.note("fixtures: one game open on arrival", None if s.page.locator("tr.fx-open").count() == 1 else "none open")
     heads = s.page.locator("tr.fx-open table.fx-ps").first.locator("th").all_inner_texts()
     s.note("fixtures: player columns", None if heads == ["Player", "Why watch", "Last 5 games", "Season Overall", "Scout reports"] else str(heads))
-    tips = s.page.evaluate("() => [...document.querySelectorAll('.fx-why')].every(e => e.title && e.title.length > 10)")
+    tips = s.page.evaluate("() => [...document.querySelectorAll('.fx-why')].every(e => e.dataset.tip && e.dataset.tip.length > 10)")
     s.note("fixtures: every reason says what it means (hover)", None if tips else "a reason without a meaning")
     # owner 2026-11-27 (C): the seven views in one row, the filters on one line, from 1280 px
     if w >= 1280:
@@ -4081,6 +4081,15 @@ def fixtures_views_and_filters(s, w):
     n = s.page.locator("#fx-list .fx-row").count()
     s.note("fixtures: a view shows how many games it hides", None if n == total or "hidden by filters" in st else st)
     s.step("fixtures: More filters", lambda p: p.locator("#fx-more summary").click(timeout=3000))
+    # owner 2026-11-27: a definition shows at once on hover (the site's tooltip, not the browser's)
+    lab = s.page.locator('[data-g="form"] label[data-tip]').last
+    if lab.count():
+        bb = lab.bounding_box()
+        s.page.mouse.move(bb["x"] + 5, bb["y"] + bb["height"] / 2)
+        s.page.mouse.move(bb["x"] + 8, bb["y"] + bb["height"] / 2)
+        s.page.wait_for_timeout(120)
+        tip = s.page.evaluate("() => { const t = document.querySelector('.tip'); return t && !t.hidden ? t.textContent : ''; }")
+        s.note("fixtures: filter definition shows at once on hover", None if "200+ minutes" in tip else repr(tip))
     s.step("fixtures: U23", lambda p: p.locator('[data-g="age"] input[value="23"]').check(timeout=3000))
     s.note("fixtures: filter count shown", None if "(1 on)" in s.page.inner_text("#fx-more-n") else s.page.inner_text("#fx-more-n"))
     if s.page.locator("#fx-clear").count():
@@ -4127,6 +4136,33 @@ def fixtures_views_and_filters(s, w):
     s.shot("fixtures_by_player", w, full=True)
 
 
+def fixtures_remembers(s, w):
+    """Owner 2026-11-27: filters survive leaving Fixtures and coming back by the menu link."""
+    s.goto("/fixtures", check=False)
+    if not _fx_ready(s):
+        return s.note("fixtures: remembers", skipped="no fixtures here")
+    s.step("fixtures: Next 14 days", lambda p: p.locator('#fx-win [data-w="14"]').click(timeout=3000))
+    _fx_ready(s)
+    s.step("fixtures: In form view", lambda p: p.locator('#fx-views [data-v="form"]').click(timeout=3000))
+    s.step("fixtures: More filters", lambda p: p.locator("#fx-more summary").click(timeout=3000))
+    s.step("fixtures: U23", lambda p: p.locator('[data-g="age"] input[value="23"]').check(timeout=3000))
+    s.step("fixtures: open Regions", lambda p: p.locator("#fx-region-btn").click(timeout=3000))
+    s.step("fixtures: tick Scotland", lambda p: p.locator('#fx-region-list input[value="Scotland"]').check(timeout=3000))
+    s.page.keyboard.press("Escape")
+    url = s.page.url
+    _nav_round_trip(s, "fixtures", "/fixtures")      # away and back by the menu links
+    _fx_ready(s)
+    s.page.wait_for_timeout(300)
+    kept = s.page.evaluate("""() => [document.querySelector('#fx-win [aria-pressed="true"]')?.dataset.w,
+        document.querySelector('#fx-views [aria-pressed="true"]')?.dataset.v,
+        document.querySelector('[data-g="age"] input[value="23"]').checked,
+        document.querySelector('#fx-region-btn').textContent]""")
+    s.note("fixtures: filters kept after leaving and coming back", None if kept == ["14", "form", True, "Scotland"] else f"{kept} | before {url} | after {s.page.url}")
+    if s.page.locator("#fx-clear").count():
+        s.step("fixtures: Clear filters", lambda p: p.locator("#fx-clear").click(timeout=3000))
+    s.step("fixtures: back to Next 7 days", lambda p: p.locator('#fx-win [data-w="7"]').click(timeout=3000))
+
+
 def fixtures_player_link_and_past(s, w):
     """A player's name opens his page (and its back link returns here); Past 3 weeks lists the
     games played with their scout reports; Excel downloads a workbook."""
@@ -4163,6 +4199,15 @@ def fixtures_player_link_and_past(s, w):
     _fx_ready(s)
     s.note("fixtures: past games listed", None if s.page.locator("#fx-list .fx-row").count() else "none")
     s.note("fixtures: past has no views", None if s.page.locator("#fx-views").is_hidden() else "views shown")
+    s.note("fixtures: past explains Standout and Missed", None if "Missed = a standout on our radar" in s.page.inner_text("#fx-key") else "no key line")
+    # owner 2026-11-27 (option A): each played game says who covered it and who stood out
+    cov = s.page.locator("#fx-list .fx-row .fx-who").all_inner_texts()
+    s.note("fixtures: past games say who covered them", None if cov and all(t.startswith(("Covered by", "Assigned:", "Not covered")) for t in cov) else str(cov[:3]))
+    first = s.page.locator("#fx-list .fx-row").first
+    if first.count():
+        s.step("fixtures: open a past game", lambda p: first.click(timeout=3000))
+        subs = s.page.locator("tr.fx-open .fx-sub").all_inner_texts()
+        s.note("fixtures: a past game shows reports and standouts", None if len(subs) == 2 and subs[1].startswith("Standouts") else str(subs))
     s.shot("fixtures_past", w, full=True)
 
 PAGES = {
@@ -4197,7 +4242,7 @@ PAGES = {
         scout_first_view, scout_filters_url, scout_squad_role, scout_search_and_age, scout_tabs, scout_list_height, scout_open_report,
         scout_name_opens_card, scout_sort, scout_remembers]},
     "fixtures": {"path": "/fixtures", "exercise": False, "scenarios": [
-        fixtures_first_view, fixtures_views_and_filters, fixtures_player_link_and_past]},
+        fixtures_first_view, fixtures_views_and_filters, fixtures_player_link_and_past, fixtures_remembers]},
     "watchlist": {"path": "/watchlist", "exercise": True, "scenarios": [
         watchlist_first_view, watchlist_filters, watchlist_editor, watchlist_suggestions,
         watchlist_name_opens_card, watchlist_download, watchlist_remembers]},

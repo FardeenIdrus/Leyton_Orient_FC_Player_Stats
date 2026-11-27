@@ -4,7 +4,7 @@
 //   Nothing is hidden by default; a filter always says how many games it hides.
 //   Filters in different groups must all be true of the SAME player; ticks in a group are
 //   alternatives. Scout priorities are always listed inside an open game, filters or not.
-import {api, esc} from './common.js';
+import {api, esc, readState, writeState, rememberState, restoreState} from './common.js';
 
 const $ = id => document.getElementById(id);
 const PRI = ['Sign', 'Monitor Priority'];
@@ -79,13 +79,19 @@ const byOrder = (a, b) => (!!b.watch - !!a.watch) || (!!b.pri - !!a.pri) || (!!b
   || (why(b).length - why(a).length) || ((b.ov || 0) - (a.ov || 0));
 const isKey = p => p.pri || !!p.watch;
 const dots = f => f.length ? `<div class="fx-dots" aria-label="Last 5 games">${f.slice(-5).map(x =>
-  `<span class="fx-dot ${lvl(x)}" title="${x == null ? 'under 45 min' : 'better than ' + x + '%'}"></span>`).join('')}</div>` : '<span class="note">no game data</span>';
+  `<span class="fx-dot ${lvl(x)}" data-tip="${x == null ? 'Under 45 min: no rating' : 'Better than ' + x + '% of games at his position'}"></span>`).join('')}</div>` : '<span class="note">no game data</span>';
 
 function gamesFor(F, v = view) {
   const q = $('fx-q').value.trim().toLowerCase();
   const on = v !== 'all' || nOn(F) - (F.least > 1 ? 1 : 0) > 0;
   return D.games.map(g => {
     const all = [...(bySq[g.hs] || []).map(p => ({...p, side: g.home})), ...(g.as === g.hs ? [] : (bySq[g.as] || []).map(p => ({...p, side: g.away})))];
+    if (win === 'past') {
+      // a played game's players to show are its standouts (Top games), best game first
+      const by = new Map(all.map(p => [String(p.id), p]));
+      const st = (g.stand || []).map(x => by.has(String(x.pid)) ? {...by.get(String(x.pid)), gamePct: x.pct} : null).filter(Boolean);
+      return {g, all, match: on ? st.filter(p => playerOk(p, F, 'all')) : st, on};
+    }
     const match = (on ? all.filter(p => playerOk(p, F, v)) : all.filter(p => why(p).length))
       .sort(byOrder);
     return {g, all, match, on};
@@ -95,7 +101,7 @@ function gamesFor(F, v = view) {
     // where the game is played (the home club); a club with no region is never hidden
     && (!sel.region.size || sel.region.has(x.g.region[0] || x.g.region[1]) || (x.g.region[0] == null && x.g.region[1] == null))
     && (!q || `${x.g.home} ${x.g.away} ${x.all.map(p => p.n).join(' ')}`.toLowerCase().includes(q))
-    && (!sel.scout.size || (x.g.scout ? sel.scout.has(x.g.scout) : sel.scout.has(NOT_ASSIGNED))));
+    && (!sel.scout.size || scoutsOf(x.g).some(n => sel.scout.has(n)) || (!scoutsOf(x.g).length && sel.scout.has(NOT_ASSIGNED))));
 }
 
 // the filters in words, printed at the top of the Excel (what the scout was sent)
@@ -108,21 +114,58 @@ function filterWords(F) {
   return [`${win === 'past' ? 'Past 3 weeks' : `Next ${win} days`}`, ...w.filter(Boolean)].join('; ');
 }
 
+// ---- remembered settings (owner 2026-11-27): every filter lives in the address (shareable) and is
+// remembered in this browser, so leaving Fixtures and coming back (the menu link) keeps them.
+const SEP = '|';
+const MORE = ['verdict', 'form', 'ov', 'age', 'pos', 'watch', 'least'];
+let pendingPos = new Set();
+function saveState() {
+  const ticks = g => [...document.querySelectorAll(`[data-g="${g}"] input:checked`)].map(i => i.value).join(SEP);
+  const patch = {win: win === '7' ? '' : win, view: view === 'all' ? '' : view, by: by === 'game' ? '' : by,
+    sort: $('fx-sort').value === 'time' ? '' : $('fx-sort').value, q: $('fx-q').value.trim(),
+    lg: [...sel.lg].join(SEP), region: [...sel.region].join(SEP), day: [...sel.day].join(SEP), scout: [...sel.scout].join(SEP)};
+  for (const g of MORE) patch[g] = g === 'pos' && !document.querySelector('#fx-pos input') ? [...pendingPos].join(SEP) : ticks(g);
+  writeState(patch, {replace: true});
+  rememberState('fixtures');
+}
+function applyState(st) {
+  const list = k => (st[k] || '').split(SEP).filter(Boolean);
+  win = ['7', '14', 'past'].includes(st.win) ? st.win : '7';
+  view = VIEWS.some(v => v[0] === st.view) ? st.view : 'all';
+  by = ['game', 'player', 'scout'].includes(st.by) ? st.by : 'game';
+  $('fx-sort').value = st.sort === 'most' ? 'most' : 'time';
+  $('fx-q').value = st.q || '';
+  for (const k of ['lg', 'region', 'day', 'scout']) sel[k] = new Set(list(k));
+  for (const g of MORE) {
+    const on = new Set(list(g));
+    if (g === 'pos') { pendingPos = on; continue; }
+    for (const i of document.querySelectorAll(`[data-g="${g}"] input`)) i.checked = on.has(i.value);
+  }
+  if (MORE.some(g => list(g).length)) $('fx-more').open = true;
+  for (const x of $('fx-win').querySelectorAll('button')) x.setAttribute('aria-pressed', String(x.dataset.w === win));
+  for (const x of $('fx-by').querySelectorAll('button')) x.setAttribute('aria-pressed', String(x.dataset.b === by));
+}
+
 function draw() {
   if (!D) return;
+  saveState();
   const F = filt(), past = win === 'past';
   $('fx-more-n').textContent = nOn(F) ? `(${nOn(F)} on)` : '';
   $('fx-views').hidden = past;
+  // Past 3 weeks: what Standout and Missed mean, in one line (owner 2026-11-27)
+  $('fx-key').hidden = !past;
+  $('fx-key').innerHTML = '<b>Standout</b> = a Top game here (better than 80% of games at his position). '
+    + '<b>Missed</b> = a standout on our radar (watchlist, Sign / MP, or never scouted 3.5+) with no report from this game.';
   if (!past) $('fx-views').innerHTML = VIEWS.map(([k, l, d, t]) => {
     const n = gamesFor(F, k).length;
-    return `<button type="button" class="fx-view" data-v="${k}" aria-pressed="${k === view}" title="${esc(t)}"><b>${n}</b><i>${esc(l)}</i><span>${esc(d)}</span></button>`;
+    return `<button type="button" class="fx-view" data-v="${k}" aria-pressed="${k === view}" data-tip="${esc(t)}"><b>${n}</b><i>${esc(l)}</i><span>${esc(d)}</span></button>`;
   }).join('');
   const rows = gamesFor(F, past ? 'all' : view);
   const total = D.games.length, hidden = total - rows.length;
   $('fx-summary').textContent = past
     ? `Past 3 weeks: ${total} games, ${D.games.filter(g => (g.reports || []).length).length} with scout reports`
     : `Next ${win} days: ${total} games`;
-  const filtered = hidden || view !== 'all' || nOn(F) || $('fx-q').value || sel.lg.size || sel.region.size || sel.day.size || sel.scout.size;
+  const filtered = hidden || (view !== 'all' && !past) || nOn(F) || $('fx-q').value || sel.lg.size || sel.region.size || sel.day.size || sel.scout.size;
   $('fx-status').innerHTML = `<span>Showing <b>${rows.length}</b> of ${total} games${hidden ? `, <b>${hidden}</b> hidden by filters` : ''}</span>`
     + (filtered ? '<button type="button" class="fx-link" id="fx-clear">Clear filters</button>' : '');
   // the Excel covers exactly what is shown: these games, and (with a player filter on) these players
@@ -185,7 +228,7 @@ function playerRow(p, out = false, next = null) {
     + (D.can_assign ? ` <button type="button" class="fx-link" data-link="${esc(s.sid)}" data-pid="${esc(p.id)}">Link</button>` : '') + '</div>').join('');
   return `<tr class="${out ? 'out' : ''}"><td class="fx-nm"><a href="${href(p)}" class="fx-pl"><b>${esc(p.n)}</b></a>`
     + `<div>${esc(club(p.side || sqName(p.sq)))} · ${esc(p.pos || '—')}${p.age != null ? ' · ' + p.age : ''}</div></td>`
-    + `<td>${w.map(([c, t, d]) => `<span class="fx-why ${c}" title="${esc(d)}">${esc(t)}</span>`).join('') || '<span class="note">—</span>'}${out ? '<div class="note">outside your filters</div>' : ''}</td>`
+    + `<td>${w.map(([c, t, d]) => `<span class="fx-why ${c}" data-tip="${esc(d)}">${esc(t)}</span>`).join('') || '<span class="note">—</span>'}${out ? '<div class="note">outside your filters</div>' : ''}</td>`
     + `<td>${dots(p.f)}</td>`
     + `<td>${p.ov != null ? `${p.ov.toFixed(2)}<div class="note">${ord(p.rk)} of ${p.of} at position</div>` : '<span class="note">not rated</span>'}</td>`
     + (next ? `<td>${next}</td>` : '') + `<td class="fx-hist">${hist}${sug}</td></tr>`;
@@ -204,16 +247,46 @@ function gameBody(r) {
   if (r.g.manual && (D.can_assign || r.g.added_by === D.me)) h += `<p><button type="button" class="fx-link" data-rm="${esc(r.g.key.slice(2))}">Remove this game</button></p>`;
   return h;
 }
+// Past 3 weeks (owner 2026-11-27, option A): who covered each game, and who stood out in it --
+// players with a Top game (club Overall better than 80% of games at his position, 45+ min).
+// "Missed" = a scout priority, watchlist or never-scouted 3.5+ player with a Top game, and no
+// report on him from that game.
+const isMissed = (p, g) => (p.pri || !!p.watch || p.ns) && !(g.reports || []).some(r => r.pid != null && String(r.pid) === String(p.id));
+function coveredText(g) {
+  if ((g.covered || []).length) return 'Covered by ' + g.covered.map(c => `${esc(c.name)} (${c.n} report${c.n > 1 ? 's' : ''})`).join(', ');
+  if (g.scout) return `Assigned: ${esc(g.scout)}, no report yet`;
+  return '<span class="note">Not covered</span>';
+}
 function pastRow(r) {
-  const g = r.g, o = open.has(g.key), n = (g.reports || []).length;
+  const g = r.g, o = open.has(g.key), n = (g.reports || []).length, miss = r.match.filter(p => isMissed(p, g)).length;
+  const chips = (n ? `<span class="fx-cnt pri"><b>${n}</b> scout report${n > 1 ? 's' : ''}</span>` : '')
+    + (r.match.length ? `<span class="fx-cnt form" data-tip="Standout = a Top game here (better than 80% of games at his position)."><b>${r.match.length}</b> ${r.on ? 'matching ' : ''}standout${r.match.length > 1 ? 's' : ''}</span>` : '')
+    + (miss ? `<span class="fx-cnt dis" data-tip="Missed = a standout on our radar (watchlist, Sign / MP, or never scouted 3.5+) with no report from this game."><b>${miss}</b> missed</span>` : '');
   let h = `<tr class="fx-row${o ? ' open' : ''}" data-k="${esc(g.key)}" tabindex="0" aria-expanded="${o}"><td class="fx-time">${hhmm(when(g.at))}</td>`
-    + `<td class="fx-game"><div><span class="fx-chev" aria-hidden="true">›</span><b>${esc(club(g.home))}</b> v <b>${esc(club(g.away))}</b></div><div class="fx-where">${where(g)}</div></td>`
-    + `<td class="fx-counts">${n ? `<span class="fx-cnt pri"><b>${n}</b> scout report${n > 1 ? 's' : ''}</span>` : '<span class="note">No scout report</span>'}</td>`
+    + `<td class="fx-game"><div><span class="fx-chev" aria-hidden="true">›</span><b>${esc(club(g.home))}</b> v <b>${esc(club(g.away))}</b></div><div class="fx-where">${where(g)}</div>`
+    + `<div class="fx-who">${coveredText(g)}</div></td>`
+    + `<td class="fx-counts"><div class="fx-chiprow">${chips || '<span class="note">No report, no standout</span>'}</div></td>`
     + `<td class="fx-assign-c">${n ? '<a href="/scout-reports" class="fx-link">Open Scout reports</a>' : ''}</td></tr>`;
-  if (o) h += `<tr class="fx-open"><td colspan="4">${n ? '<table class="fx-ps"><thead><tr><th>Player reported</th><th>Verdict</th><th>Scout</th></tr></thead><tbody>'
-    + g.reports.map(x => `<tr><td class="fx-nm"><b>${esc(x.p)}</b></td><td>${esc(x.v || '—')}</td><td>${esc(x.s || '')}</td></tr>`).join('') + '</tbody></table>'
-    : '<p class="note">No scout report for this game.</p>'}</td></tr>`;
+  if (o) h += `<tr class="fx-open"><td colspan="4">${pastBody(r)}</td></tr>`;
   return h;
+}
+function pastBody(r) {
+  const g = r.g;
+  let h = `<div class="fx-sub">Scout reports from this game (${(g.reports || []).length})</div>`;
+  h += (g.reports || []).length ? '<table class="fx-ps"><thead><tr><th>Player reported</th><th>Verdict</th><th>Scout</th></tr></thead><tbody>'
+    + g.reports.map(x => `<tr><td class="fx-nm"><b>${esc(x.p)}</b></td><td>${esc(x.v || '—')}</td><td>${esc(x.s || '')}</td></tr>`).join('') + '</tbody></table>'
+    : '<p class="note">No scout report for this game.</p>';
+  h += `<div class="fx-sub">${r.on ? 'Standouts matching your filters' : 'Standouts: a Top game (better than 80% of games at his position)'} (${r.match.length})<span class="fx-ord">${ORDER_LINE}</span></div>`;
+  if (!r.match.length) return h + '<p class="note">No one had a Top game here' + (r.on ? ' who matches your filters' : '') + '.</p>';
+  return h + '<table class="fx-ps"><thead><tr><th>Player</th><th>In this game</th><th>Why watch</th><th>Season Overall</th><th>Scout reports</th></tr></thead><tbody>'
+    + r.match.map(p => {
+      const miss = isMissed(p, g), w = why(p);
+      return `<tr><td class="fx-nm"><a href="${href(p)}" class="fx-pl"><b>${esc(p.n)}</b></a><div>${esc(club(p.side))} · ${esc(p.pos || '—')}${p.age != null ? ' · ' + p.age : ''}</div></td>`
+        + `<td><span class="fx-why form">Top game: ${p.gamePct}%</span>${miss ? '<span class="fx-why dis" data-tip="Missed = a standout on our radar (watchlist, Sign / MP, or never scouted 3.5+) with no report from this game.">Missed: on our radar, no report</span>' : ''}</td>`
+        + `<td>${w.map(([c, t, d]) => `<span class="fx-why ${c}" data-tip="${esc(d)}">${esc(t)}</span>`).join('') || '<span class="note">—</span>'}</td>`
+        + `<td>${p.ov != null ? `${p.ov.toFixed(2)}<div class="note">${ord(p.rk)} of ${p.of} at position</div>` : '<span class="note">not rated</span>'}</td>`
+        + `<td class="fx-hist">${p.rep.length ? p.rep.map(x => `<b>${esc(x.v || '—')}</b> ${esc(sDate(x.d))}${x.s ? ` (${esc(x.s)})` : ''}`).join('<br>') : '<span class="note">Never scouted</span>'}</td></tr>`;
+    }).join('') + '</tbody></table>';
 }
 function drawPlayers(rows) {
   const seen = new Map();
@@ -227,24 +300,28 @@ function drawPlayers(rows) {
   }).join('')}</tbody></table></div>`;
 }
 
-// Scouts filter: every scout assigned in this window, then "Not assigned"
+// a game's scouts: the one assigned, and (past games) everyone who filed a report at it
+const scoutsOf = g => [...new Set([g.scout, ...(g.covered || []).map(c => c.name)].filter(Boolean))];
+// Scouts filter: every scout in this window, then "Not assigned" (past: "Not covered")
 function scoutFilterList() {
-  const names = [...new Set(D.games.map(g => g.scout).filter(Boolean))].sort();
+  const names = [...new Set(D.games.flatMap(scoutsOf))].sort();
   for (const x of [...sel.scout]) if (x !== NOT_ASSIGNED && !names.includes(x)) sel.scout.delete(x);
-  $('fx-scout-list').innerHTML = [...names.map(n => [n, n]), [NOT_ASSIGNED, 'Not assigned']].map(([v, l]) =>
-    `<label><input type="checkbox" value="${esc(v)}"${sel.scout.has(v) ? ' checked' : ''}>${esc(l)} <span class="note">(${D.games.filter(g => v === NOT_ASSIGNED ? !g.scout : g.scout === v).length})</span></label>`).join('');
+  const none = win === 'past' ? 'Not covered' : 'Not assigned';
+  $('fx-scout-list').innerHTML = [...names.map(n => [n, n]), [NOT_ASSIGNED, none]].map(([v, l]) =>
+    `<label><input type="checkbox" value="${esc(v)}"${sel.scout.has(v) ? ' checked' : ''}>${esc(l)} <span class="note">(${D.games.filter(g => v === NOT_ASSIGNED ? !scoutsOf(g).length : scoutsOf(g).includes(v)).length})</span></label>`).join('');
   if (typeof msLabels === 'function' && $('fx-scout-btn')) msLabels();
 }
 // By scout: each scout and their games in date order (who is watching what, and when)
 function drawScouts(rows) {
   if (!rows.length) { $('fx-list').innerHTML = '<p class="note">No games match. Clear a filter to see more.</p>'; return; }
   const groups = {};
-  for (const r of rows) (groups[r.g.scout || NOT_ASSIGNED] ||= []).push(r);
+  for (const r of rows) { const ns = scoutsOf(r.g); for (const n of (ns.length ? ns : [NOT_ASSIGNED])) (groups[n] ||= []).push(r); }
+  const past = win === 'past';
   const keys = Object.keys(groups).filter(k => k !== NOT_ASSIGNED).sort().concat(groups[NOT_ASSIGNED] ? [NOT_ASSIGNED] : []);
   $('fx-list').innerHTML = keys.map(k => {
     const rs = groups[k].sort((a, b) => when(a.g.at) - when(b.g.at));
-    return `<div class="fx-scout-h"><b>${esc(k === NOT_ASSIGNED ? 'Not assigned' : k)}</b><span>${rs.length} game${rs.length > 1 ? 's' : ''}</span></div>`
-      + `<div class="tw"><table class="fx-ps"><thead><tr><th>Day</th><th>Kick-off</th><th>Game</th><th>Competition</th><th>Region</th><th>Players to watch</th></tr></thead><tbody>`
+    return `<div class="fx-scout-h"><b>${esc(k === NOT_ASSIGNED ? (past ? 'Not covered' : 'Not assigned') : k)}</b><span>${rs.length} game${rs.length > 1 ? 's' : ''}</span></div>`
+      + `<div class="tw"><table class="fx-ps"><thead><tr><th>Day</th><th>Kick-off</th><th>Game</th><th>Competition</th><th>Region</th><th>${past ? 'Standouts (Top games)' : 'Players to watch'}</th></tr></thead><tbody>`
       + rs.map(r => { const t = when(r.g.at), top = r.match.slice(0, 2).map(p => `<a class="fx-pl" href="${href(p)}">${esc(p.n)}</a>`).join(', ');
           return `<tr><td>${esc(dShort(t))}</td><td>${hhmm(t)}</td><td><b>${esc(club(r.g.home))}</b> v <b>${esc(club(r.g.away))}</b></td>`
             + `<td>${esc(r.g.lg)}</td><td>${esc(r.g.region[0] || r.g.region[1] || 'Region unknown')}</td>`
@@ -270,7 +347,8 @@ function fillSelects() {
   $('fx-day-list').innerHTML = Object.keys(days).sort().map(d =>
     `<label><input type="checkbox" value="${d}"${sel.day.has(d) ? ' checked' : ''}>${esc(dShort(new Date(d + 'T12:00:00Z')))} <span class="note">(${days[d]} game${days[d] > 1 ? 's' : ''})</span></label>`).join('');
   msLabels();
-  const posCur = new Set([...document.querySelectorAll('#fx-pos input:checked')].map(i => i.value));
+  const posCur = new Set([...document.querySelectorAll('#fx-pos input:checked')].map(i => i.value).concat([...pendingPos]));
+  pendingPos = new Set();
   $('fx-pos').innerHTML = [...new Set(Object.values(D.players).map(p => p.pos).filter(Boolean))].sort()
     .map(p => `<label><input type="checkbox" value="${esc(p)}"${posCur.has(p) ? ' checked' : ''}>${esc(p)}</label>`).join('');
   $('fx-clubs').innerHTML = D.clubs.map(c => `<option value="${esc(c.name)}">${esc(c.lg)}</option>`).join('');
@@ -378,4 +456,7 @@ $('fx-add').addEventListener('submit', async e => {
     $('fx-add').reset(); $('fx-add').hidden = true; await load();
   } catch (err) { $('fx-add-msg').textContent = (err.body && err.body.detail) || 'Could not add the game.'; }
 });
+// a bare /fixtures (the menu link) reopens the last settings; a full address wins
+restoreState('fixtures');
+applyState(readState());
 load();
