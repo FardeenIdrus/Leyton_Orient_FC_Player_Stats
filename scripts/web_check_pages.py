@@ -4058,6 +4058,14 @@ def fixtures_first_view(s, w):
     s.note("fixtures: player columns", None if heads == ["Player", "Why watch", "Last 5 games", "Season Overall", "Scout reports"] else str(heads))
     tips = s.page.evaluate("() => [...document.querySelectorAll('.fx-why')].every(e => e.title && e.title.length > 10)")
     s.note("fixtures: every reason says what it means (hover)", None if tips else "a reason without a meaning")
+    # owner 2026-11-27 (C): the seven views in one row, the filters on one line, from 1280 px
+    if w >= 1280:
+        rows = s.page.evaluate("() => new Set([...document.querySelectorAll('#fx-views .fx-view')].map(e => Math.round(e.getBoundingClientRect().top))).size")
+        s.note(f"fixtures: views in one row @{w}", None if rows == 1 else f"{rows} rows")
+        fr = s.page.evaluate("() => new Set([...document.querySelectorAll('.fx-bar > .f')].map(e => Math.round(e.getBoundingClientRect().top))).size")
+        s.note(f"fixtures: filters on one line @{w}", None if fr == 1 else f"{fr} lines")
+        cut = s.page.evaluate("() => [...document.querySelectorAll('#fx-views .fx-view i, #fx-views .fx-view span')].filter(e => e.scrollWidth > e.clientWidth + 1).map(e => e.textContent)")
+        s.note(f"fixtures: view names and lines not cut @{w}", None if not cut else str(cut))
     s.shot("fixtures_first_view", w, full=True)
 
 
@@ -4095,6 +4103,27 @@ def fixtures_player_link_and_past(s, w):
     x = s.page.evaluate("() => document.querySelector('#fx-xl')?.href || ''")
     r = s.page.request.get(x) if x else None
     s.note("fixtures: Excel downloads a workbook", None if r is not None and r.status == 200 and r.body()[:2] == b"PK" else str(r.status if r else "no link"))
+    # owner 2026-11-27: the Excel covers only what the filters show, split by region
+    s.step("fixtures: In form view", lambda p: p.locator('#fx-views [data-v="form"]').click(timeout=3000))
+    shown = s.page.locator("#fx-list .fx-row").count()
+    x2 = s.page.evaluate("() => document.querySelector('#fx-xl')?.href || ''")
+    r2 = s.page.request.get(x2) if x2 else None
+    ok = r2 is not None and r2.status == 200 and r2.body()[:2] == b"PK"
+    if ok:
+        (s.out / "fixtures_in_form.xlsx").write_bytes(r2.body())
+        import io
+        import re as _re
+        import zipfile
+        (s.out / "fixtures_in_form.xlsx").write_bytes(r2.body())
+        z = zipfile.ZipFile(io.BytesIO(r2.body()))
+        sheets = _re.findall(r'<sheet [^>]*name="([^"]+)"', z.read("xl/workbook.xml").decode())
+        strings = " ".join(z.read(n).decode() for n in z.namelist() if n.endswith(".xml"))
+        rows = sum(1 for n in _re.findall(r'<row r="(\d+)"', z.read("xl/worksheets/sheet1.xml").decode()) if int(n) >= 4)
+        s.note("fixtures: Excel has only the filtered games", None if rows == shown else f"{rows} in Excel, {shown} shown")
+        s.note("fixtures: Excel names the filters", None if "Filters: Next 7 days; In form" in strings else "filters line missing")
+        s.note("fixtures: Excel has a sheet per region", None if sheets[0] == "Games" and len(sheets) >= 2 else str(sheets))
+    else:
+        s.note("fixtures: filtered Excel downloads", str(r2.status if r2 else "no link"))
     s.step("fixtures: Past 3 weeks", lambda p: p.locator('#fx-win [data-w="past"]').click(timeout=3000))
     _fx_ready(s)
     s.note("fixtures: past games listed", None if s.page.locator("#fx-list .fx-row").count() else "none")

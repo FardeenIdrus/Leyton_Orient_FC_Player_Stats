@@ -9,13 +9,14 @@ import {api, esc} from './common.js';
 const $ = id => document.getElementById(id);
 const PRI = ['Sign', 'Monitor Priority'];
 const VIEWS = [
-  ['all', 'All games', 'everything', () => true],
-  ['pri', 'Scout priorities', 'Sign, Monitor Priority or scouts disagree', p => p.pri || p.dis],
-  ['form', 'In form', 'Top in 3+ of last 5 or 6+ of last 10', p => p.f5 || p.f10],
-  ['rise', 'Rising', 'last 5 games average 20+ points above the 5 before', p => p.rise],
-  ['br', 'Breaking through', 'under 23, minutes doubled to 200+ in 5 games', p => p.br && p.br.on],
-  ['ns', 'Not seen yet', 'Overall 3.5+ in his league, never scouted', p => p.ns],
-  ['watch', 'Watchlist', 'on the watchlist', p => !!p.watch],
+  // [key, name, short line on the tile, full meaning on hover, test]
+  ['all', 'All games', 'every game', 'Every game in the window', () => true],
+  ['pri', 'Scout priorities', 'Sign, MP or disagree', 'A player with a Sign or Monitor Priority report, or scouts who disagree about him', p => p.pri || p.dis],
+  ['form', 'In form', 'top 20% in 3 of last 5', 'A player in the top 20% (better than 80% of games at his position in his league) in 3+ of his last 5 games, or 6+ of his last 10', p => p.f5 || p.f10],
+  ['rise', 'Rising', 'last 5 up 20+ points', 'A player whose last 5 games average 20+ points above the 5 before', p => p.rise],
+  ['br', 'Breaking through', 'U23, 2× minutes', 'An under-23 whose minutes doubled to 200+ over his club\'s last 5 games', p => p.br && p.br.on],
+  ['ns', 'Not seen yet', '3.5+, never scouted', 'A player rated 3.5+ in his own league with no scout report', p => p.ns],
+  ['watch', 'Watchlist', 'on the list', 'A player on the watchlist', p => !!p.watch],
 ];
 let D = null, win = '7', view = 'all', by = 'game';
 const open = new Set(), showAll = new Set();
@@ -40,7 +41,7 @@ function filt() {
 const nOn = F => F.verdict.length + F.form.length + (F.ov ? 1 : 0) + (F.age ? 1 : 0) + F.pos.length + (F.watch ? 1 : 0) + (F.least > 1 ? 1 : 0);
 const playerFilterOn = F => view !== 'all' || nOn(F) - (F.least > 1 ? 1 : 0) > 0;
 function playerOk(p, F, v = view) {
-  if (!VIEWS.find(x => x[0] === v)[3](p)) return false;
+  if (!VIEWS.find(x => x[0] === v)[4](p)) return false;
   if (F.verdict.length && !F.verdict.some(x => x === 'disagree' ? p.dis : x === 'none' ? !p.seen : p.rep.some(r => r.v === x))) return false;
   if (F.form.length && !F.form.some(k => k === 'br' ? p.br && p.br.on : p[k])) return false;
   if (F.ov && !(p.ov != null && p.ov >= F.ov)) return false;
@@ -57,16 +58,19 @@ function why(p) {
   const pr = p.rep.find(r => PRI.includes(r.v));
   if (pr) w.push(['pri', pr.d ? `${pr.v} (${sDate(pr.d)})` : pr.v, 'A scout report with this verdict; every report is listed on the right']);
   if (p.dis) w.push(['dis', 'Scouts disagree', 'One report says Sign or Monitor Priority, another Don\'t sign']);
-  if (p.f5) w.push(['form', `Top in ${p.t5} of last 5`, 'Top = better than 80% of games at his position in his league (club Overall per game, 45+ min)']);
-  else if (p.f10) w.push(['form', `Top in ${p.t10} of last 10`, 'Top = better than 80% of games at his position in his league (club Overall per game, 45+ min)']);
-  if (p.rise) w.push(['form', `Rising: avg ${p.rise_from}% → ${p.rise_to}%`, `His average "better than %" over his last 5 games (${p.rise_to}%) against the 5 before (${p.rise_from}%): up ${p.rise_by} points`]);
+  if (p.f5) w.push(['form', `Top 20% in ${p.t5} of last 5 games`, 'Top 20% = better than 80% of games at his position in his league (club Overall per game, 45+ min)']);
+  else if (p.f10) w.push(['form', `Top 20% in ${p.t10} of last 10 games`, 'Top 20% = better than 80% of games at his position in his league (club Overall per game, 45+ min)']);
+  if (p.rise) w.push(['form', `Rising: ${p.rise_from}% → ${p.rise_to}% (last 5 games vs 5 before)`, `His average "better than %" over his last 5 games (${p.rise_to}%) against the 5 before (${p.rise_from}%): up ${p.rise_by} points`]);
   if (p.br && p.br.on) w.push(['br', `Breaking through: ${p.br.before} → ${p.br.after} min`, `Under 23. Minutes in his club's last 5 games (${p.br.after}) against the 5 before (${p.br.before})`]);
   if (p.ns) w.push(['new', 'Not seen yet', 'Season Overall 3.5+ in his own league and no scout report']);
   if (p.sug && p.sug.length) w.push(['mu', 'Possible report', 'A scout report that may be about him is not linked to him yet']);
   return w;
 }
-const weight = p => (p.watch ? 8 : 0) + (p.pri ? 6 : 0) + (p.dis ? 3 : 0) + (p.f5 || p.f10 ? 2 : 0) + (p.rise ? 2 : 0)
-  + (p.br && p.br.on ? 2 : 0) + (p.ns ? 2 : 0);
+// Players are listed in a stated order (owner 2026-11-27; the Excel uses the same, api/fixtures._order):
+// watchlist, Sign / Monitor Priority, scouts disagree, most reasons to watch, then season Overall.
+const ORDER_LINE = 'Order: watchlist, Sign / Monitor Priority, scouts disagree, most reasons to watch, season Overall';
+const byOrder = (a, b) => (!!b.watch - !!a.watch) || (!!b.pri - !!a.pri) || (!!b.dis - !!a.dis)
+  || (why(b).length - why(a).length) || ((b.ov || 0) - (a.ov || 0));
 const isKey = p => p.pri || !!p.watch;
 const dots = f => f.length ? `<div class="fx-dots" aria-label="Last 5 games">${f.slice(-5).map(x =>
   `<span class="fx-dot ${lvl(x)}" title="${x == null ? 'under 45 min' : 'better than ' + x + '%'}"></span>`).join('')}</div>` : '<span class="note">no game data</span>';
@@ -78,14 +82,25 @@ function gamesFor(F, v = view) {
     const all = Object.entries(D.players).filter(([, p]) => p.sq === g.hs || p.sq === g.as)
       .map(([id, p]) => ({...p, id, side: p.sq === g.hs ? g.home : g.away}));
     const match = (on ? all.filter(p => playerOk(p, F, v)) : all.filter(p => why(p).length))
-      .sort((a, b) => weight(b) - weight(a) || (b.ov || 0) - (a.ov || 0));
+      .sort(byOrder);
     return {g, all, match, on};
   }).filter(x => (!x.on || x.match.length >= F.least)
     && (!lg || x.g.lg === lg)
-    && (!reg || x.g.region.includes(reg) || x.g.region.some(r => r == null))
+    // where the game is played (the home club); a club with no region is never hidden
+    && (!reg || (x.g.region[0] || x.g.region[1]) === reg || (x.g.region[0] == null && x.g.region[1] == null))
     && (!q || `${x.g.home} ${x.g.away} ${x.all.map(p => p.n).join(' ')}`.toLowerCase().includes(q))
-    && (!$('fx-mine').checked || x.g.assigned === D.me)
-    && (!$('fx-free').checked || !x.g.assigned));
+    && ($('fx-scout').value !== 'mine' || x.g.assigned === D.me)
+    && ($('fx-scout').value !== 'free' || !x.g.assigned));
+}
+
+// the filters in words, printed at the top of the Excel (what the scout was sent)
+function filterWords(F) {
+  const t = id => { const el = $(id); return el.value ? el.options ? el.options[el.selectedIndex].text : el.value : ''; };
+  const lab = g => [...document.querySelectorAll(`[data-g="${g}"] input:checked`)].filter(i => i.value).map(i => i.parentElement.textContent.trim());
+  const w = [view !== 'all' ? VIEWS.find(v => v[0] === view)[1] : '', ...lab('verdict'), ...lab('form'), ...lab('ov').map(x => 'Overall ' + x),
+    ...lab('age'), ...lab('pos'), ...lab('watch'), F.least > 1 ? `at least ${F.least} matching players` : '',
+    t('fx-lg'), t('fx-region'), t('fx-scout'), $('fx-q').value ? `search "${$('fx-q').value}"` : ''];
+  return [`${win === 'past' ? 'Past 3 weeks' : `Next ${win} days`}`, ...w.filter(Boolean)].join('; ');
 }
 
 function draw() {
@@ -93,20 +108,23 @@ function draw() {
   const F = filt(), past = win === 'past';
   $('fx-more-n').textContent = nOn(F) ? `(${nOn(F)} on)` : '';
   $('fx-views').hidden = past;
-  if (!past) $('fx-views').innerHTML = VIEWS.map(([k, l, d]) => {
+  if (!past) $('fx-views').innerHTML = VIEWS.map(([k, l, d, t]) => {
     const n = gamesFor(F, k).length;
-    return `<button type="button" class="fx-view" data-v="${k}" aria-pressed="${k === view}" title="${esc(d)}"><b>${n}</b>${esc(l)}<span>${esc(d)}</span></button>`;
+    return `<button type="button" class="fx-view" data-v="${k}" aria-pressed="${k === view}" title="${esc(t)}"><b>${n}</b><i>${esc(l)}</i><span>${esc(d)}</span></button>`;
   }).join('');
   const rows = gamesFor(F, past ? 'all' : view);
   const total = D.games.length, hidden = total - rows.length;
   $('fx-summary').textContent = past
     ? `Past 3 weeks: ${total} games, ${D.games.filter(g => (g.reports || []).length).length} with scout reports`
     : `Next ${win} days: ${total} games`;
-  const filtered = hidden || view !== 'all' || nOn(F) || $('fx-q').value || $('fx-lg').value || $('fx-region').value || $('fx-mine').checked || $('fx-free').checked;
+  const filtered = hidden || view !== 'all' || nOn(F) || $('fx-q').value || $('fx-lg').value || $('fx-region').value || $('fx-scout').value;
   $('fx-status').innerHTML = `<span>Showing <b>${rows.length}</b> of ${total} games${hidden ? `, <b>${hidden}</b> hidden by filters` : ''}</span>`
     + (filtered ? '<button type="button" class="fx-link" id="fx-clear">Clear filters</button>' : '');
-  $('fx-xl').href = `/api/fixtures/xlsx?win=${win}&keys=${encodeURIComponent(rows.map(r => r.g.key).join(','))}`;
-  $('fx-by-f').hidden = past;
+  // the Excel covers exactly what is shown: these games, and (with a player filter on) these players
+  const pids = !past && rows.length && rows[0].on ? [...new Set(rows.flatMap(r => r.match.map(p => p.id)))].join(',') : '';
+  $('fx-xl').href = `/api/fixtures/xlsx?win=${win}&keys=${encodeURIComponent(rows.map(r => r.g.key).join(','))}`
+    + (pids ? `&pids=${encodeURIComponent(pids)}` : '') + `&f=${encodeURIComponent(filterWords(F))}`;
+  $('fx-by').hidden = past;
   if (by === 'player' && !past) return drawPlayers(rows);
   if (!rows.length) { $('fx-list').innerHTML = `<p class="note">${total ? 'No games match. Clear a filter to see more.' : 'No games in this window.'}</p>`; return; }
   rows.sort((a, b) => past ? when(b.g.at) - when(a.g.at) : when(a.g.at) - when(b.g.at));
@@ -120,10 +138,11 @@ function draw() {
 function counts(r) {
   const c = (cls, n, l) => n ? `<span class="fx-cnt ${cls}"><b>${n}</b> ${l}</span>` : '';
   const a = r.all, reps = a.reduce((s, p) => s + p.rep.length, 0);
-  return c('pri', a.filter(p => p.pri).length, 'Sign / MP') + c('dis', a.filter(p => p.dis).length, 'disagree')
+  const chips = c('pri', a.filter(p => p.pri).length, 'Sign / MP') + c('dis', a.filter(p => p.dis).length, 'disagree')
     + c('form', a.filter(p => p.f5 || p.f10).length, 'in form') + c('form', a.filter(p => p.rise).length, 'rising')
-    + c('br', a.filter(p => p.br && p.br.on).length, 'breaking through') + c('new', a.filter(p => p.ns).length, 'not seen')
-    + c('', reps, reps === 1 ? 'report' : 'reports');
+    + c('br', a.filter(p => p.br && p.br.on).length, 'breaking through') + c('new', a.filter(p => p.ns).length, 'not seen');
+  return (chips ? `<div class="fx-chiprow">${chips}</div>` : '')
+    + `<div class="fx-reps">${reps ? `${reps} scout report${reps > 1 ? 's' : ''}` : 'No scout reports'}</div>`;
 }
 function assignCell(g) {
   const name = (D.users.find(u => u.id === g.assigned) || {}).name;
@@ -165,7 +184,7 @@ const HEAD = next => `<table class="fx-ps"><thead><tr><th>Player</th><th>Why wat
 function gameBody(r) {
   const shown = new Set(r.match.map(p => p.id));
   const keyOut = r.all.filter(p => isKey(p) && !shown.has(p.id));
-  let h = `<div class="fx-sub">${r.on ? 'Matching your filters' : 'Worth watching'} (${r.match.length})</div>`;
+  let h = `<div class="fx-sub">${r.on ? 'Matching your filters' : 'Worth watching'} (${r.match.length})<span class="fx-ord">${ORDER_LINE}</span></div>`;
   h += r.match.length ? HEAD() + r.match.map(p => playerRow(p)).join('') + '</tbody></table>' : '<p class="note">No one.</p>';
   if (keyOut.length) h += `<div class="fx-sub">Also in this game: scout priorities and watchlist (${keyOut.length})</div>${HEAD()}${keyOut.map(p => playerRow(p, true)).join('')}</tbody></table>`;
   const rest = r.all.filter(p => !shown.has(p.id) && !isKey(p)).sort((a, b) => (b.ov || 0) - (a.ov || 0));
@@ -190,7 +209,7 @@ function drawPlayers(rows) {
   const seen = new Map();
   for (const r of [...rows].sort((a, b) => when(a.g.at) - when(b.g.at)))
     for (const p of r.match) if (!seen.has(p.id)) seen.set(p.id, {p, g: r.g});
-  const list = [...seen.values()].sort((a, b) => weight(b.p) - weight(a.p) || (b.p.ov || 0) - (a.p.ov || 0));
+  const list = [...seen.values()].sort((a, b) => byOrder(a.p, b.p));
   if (!list.length) { $('fx-list').innerHTML = '<p class="note">No players match. Clear a filter to see more.</p>'; return; }
   $('fx-list').innerHTML = `<div class="tw">${HEAD(true)}${list.map(({p, g}) => {
     const t = when(g.at), home = p.sq === g.hs, as = (D.users.find(u => u.id === g.assigned) || {}).name;
@@ -238,19 +257,19 @@ $('fx-list').addEventListener('change', async e => {
   const g = D.games.find(x => x.key === s.dataset.as);
   try { await api('/api/fixtures/assign', {json: {key: s.dataset.as, user_id: s.value ? +s.value : null}}); g.assigned = s.value ? +s.value : null; }
   catch { s.value = g.assigned || ''; }
-  if ($('fx-mine').checked || $('fx-free').checked) draw();
+  if ($('fx-scout').value) draw();
 });
 $('fx-views').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (b) { view = b.dataset.v; draw(); } });
 $('fx-win').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; win = b.dataset.w;
   for (const x of $('fx-win').querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); load(); });
 $('fx-by').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; by = b.dataset.b;
   for (const x of $('fx-by').querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); draw(); });
-$('fx-filters').addEventListener('input', e => { if (e.target.closest('#fx-more,#fx-q,#fx-lg,#fx-region,#fx-sort,#fx-mine,#fx-free')) draw(); });
-$('fx-filters').addEventListener('click', e => {
+$('fx-filters').addEventListener('input', e => { if (e.target.closest('#fx-more,#fx-q,#fx-lg,#fx-region,#fx-scout')) draw(); });
+$('fx-sort').addEventListener('change', draw);
+$('fx-status').addEventListener('click', e => {
   if (e.target.id !== 'fx-clear') return;
   view = 'all';
-  for (const id of ['fx-q', 'fx-lg', 'fx-region']) $(id).value = '';
-  $('fx-mine').checked = $('fx-free').checked = false;
+  for (const id of ['fx-q', 'fx-lg', 'fx-region', 'fx-scout']) $(id).value = '';
   for (const i of document.querySelectorAll('#fx-more input')) i.checked = i.type === 'radio' && (i.value === '' || (i.name === 'fx-least' && i.value === '1'));
   draw();
 });

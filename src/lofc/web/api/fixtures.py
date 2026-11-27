@@ -183,15 +183,15 @@ def why(p: dict) -> list[str]:
         w.append(f"Watchlist: {p['watch']}")
     pr = next((r for r in p.get("rep", []) if r["v"] in ("Sign", "Monitor Priority")), None)
     if pr:
-        w.append(f"{pr['v']} ({pr['d']})" if pr["d"] else pr["v"])
+        w.append(f"{pr['v']} ({pd.Timestamp(pr['d']).strftime('%-d %b %Y')})" if pr["d"] else pr["v"])
     if p.get("dis"):
         w.append("Scouts disagree")
     if p.get("f5"):
-        w.append(f"Top in {p['t5']} of last 5")
+        w.append(f"Top 20% in {p['t5']} of last 5 games")
     elif p.get("f10"):
-        w.append(f"Top in {p['t10']} of last 10")
+        w.append(f"Top 20% in {p['t10']} of last 10 games")
     if p.get("rise"):
-        w.append(f"Rising: avg {p['rise_from']}% to {p['rise_to']}% (5 games before vs last 5)")
+        w.append(f"Rising: {p['rise_from']}% → {p['rise_to']}% (last 5 games vs 5 before)")
     if (p.get("br") or {}).get("on"):
         w.append(f"Breaking through: {p['br']['before']} to {p['br']['after']} min (5 club games before vs last 5)")
     if p.get("ns"):
@@ -199,39 +199,101 @@ def why(p: dict) -> list[str]:
     return w
 
 
-def workbook(data: dict, keys: list[str]) -> bytes:
-    """The games shown (in the page's order) and every player in them with a reason to watch."""
+def _order(p: dict) -> tuple:
+    """Players in a game, as on the page: watchlist, Sign / Monitor Priority, scouts disagree,
+    most reasons to watch, then season Overall."""
+    return (not p.get("watch"), not p.get("pri"), not p.get("dis"), -len(why(p)), -(p.get("ov") or 0))
+
+
+def workbook(data: dict, keys: list[str], pids: set | None = None, filters: str = "") -> bytes:
+    """The games shown, as the head of recruitment sends them to scouts (owner 2026-11-27):
+    a Games sheet (with the filters used), then one sheet per region -- where the game is
+    played, the home club -- each game a shaded row with one row per player under it. With
+    filters on (`pids`), only the players they kept, plus scout priorities and watchlist
+    players marked "outside your filters", as on the page."""
     import io
     from openpyxl import Workbook
-    from openpyxl.styles import Font
+    from openpyxl.styles import Alignment, Font, PatternFill
     users = {u["id"]: u["name"] for u in data["users"]}
-    games = {g["key"]: g for g in data["games"]}
+    games = [data["games_by_key"][k] if "games_by_key" in data else next((g for g in data["games"] if g["key"] == k), None)
+             for k in keys]
+    games = [g for g in games if g is not None]
+    squads = data.get("squads", {})
+    bold, head_fill = Font(bold=True), PatternFill("solid", fgColor="E6EEF8")
+    game_fill, wrap = PatternFill("solid", fgColor="F1F2F4"), Alignment(wrap_text=True, vertical="top")
+
+    def venue(g):
+        reg = g.get("region") or [None, None]
+        return reg[0] or reg[1] or "Region unknown"
+
+    def players(g):
+        inside, outside = [], []
+        for pid, p in data["players"].items():
+            if p["sq"] not in (g["hs"], g["as"]):
+                continue
+            if pids is None:
+                if why(p):
+                    inside.append((pid, p))
+            elif pid in pids:
+                inside.append((pid, p))
+            elif p.get("pri") or p.get("watch"):
+                outside.append((pid, p))
+        return sorted(inside, key=lambda x: _order(x[1])), sorted(outside, key=lambda x: _order(x[1]))
+
+    def when(g):
+        return pd.Timestamp(g["at"]).tz_localize("UTC").tz_convert(LONDON)
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Games"
-    ws.append(["Date", "Kick-off (UK)", "Competition", "Home", "Away", "Assigned", "Players to watch"])
-    ps = wb.create_sheet("Players")
-    ps.append(["Player", "Club", "Position", "Age", "Why watch", "Season Overall", "Rank at position",
-               "Scout reports", "Game", "Date"])
-    for c in (ws, ps):
-        for cell in c[1]:
-            cell.font = Font(bold=True)
-    for k in keys:
-        g = games.get(k)
-        if g is None:
-            continue
-        at = pd.Timestamp(g["at"]).tz_localize("UTC").tz_convert(LONDON)
-        flagged = [(pid, p) for pid, p in data["players"].items() if p["sq"] in (g["hs"], g["as"]) and why(p)]
-        ws.append([at.strftime("%a %d %b %Y"), at.strftime("%H:%M"), g["lg"], g["home"], g["away"],
-                   users.get(g.get("assigned"), ""), "; ".join(f"{p['n']} ({why(p)[0]})" for _, p in flagged)])
-        for pid, p in flagged:
-            ps.append([p["n"], data["squads"].get(str(p["sq"]), {}).get("name"), p["pos"], p["age"], "; ".join(why(p)),
-                       p["ov"], f"{p['rk']} of {p['of']}" if p.get("rk") else "",
-                       "; ".join(f"{r['v']} {r['d']} ({r['s']})" for r in p.get("rep", [])),
-                       f"{g['home']} v {g['away']}", at.strftime("%d %b")])
-    for c in (ws, ps):
-        for col in c.columns:
-            c.column_dimensions[col[0].column_letter].width = min(60, max(10, *(len(str(x.value or "")) for x in col)))
+    ws.append([f"Filters: {filters}" if filters else "Filters: none (every game)"])
+    ws["A1"].font = bold
+    ws.append([])
+    ws.append(["Date", "Kick-off (UK)", "Home", "Away", "Competition", "Region", "Assigned", "Players to watch"])
+    for c in ws[3]:
+        c.font, c.fill = bold, head_fill
+    for g in games:
+        at = when(g)
+        ins, outs = players(g)
+        ws.append([at.strftime("%a %d %b"), at.strftime("%H:%M"), g["home"], g["away"], g["lg"], venue(g),
+                   users.get(g.get("assigned"), ""), len(ins) + len(outs)])
+    for col, w in zip("ABCDEFGH", (14, 13, 26, 26, 24, 22, 20, 16)):
+        ws.column_dimensions[col].width = w
+    ws.freeze_panes = "A4"
+
+    from lofc.core.fixtures import REGIONS
+    order = REGIONS + ["Region unknown"]
+    for region in [r for r in order if any(venue(g) == r for g in games)]:
+        rs = wb.create_sheet(region[:31])
+        rs.append(["Player", "Club", "Position", "Age", "Why watch", "Last 5 games", "Season Overall",
+                   "Rank at position", "Scout reports"])
+        for c in rs[1]:
+            c.font, c.fill = bold, head_fill
+        for g in (g for g in games if venue(g) == region):
+            at = when(g)
+            who = users.get(g.get("assigned"))
+            rs.append([f"{at.strftime('%a %d %b %H:%M')} · {g['home']} v {g['away']} · {g['lg']}"
+                       + (f" · Assigned: {who}" if who else "")])
+            rs.merge_cells(start_row=rs.max_row, start_column=1, end_row=rs.max_row, end_column=9)
+            cell = rs.cell(rs.max_row, 1)
+            cell.font, cell.fill = bold, game_fill
+            ins, outs = players(g)
+            if not ins and not outs:
+                rs.append(["No one flagged in this game"])
+            for (pid, p), out in [(x, False) for x in ins] + [(x, True) for x in outs]:
+                reasons = "\n".join(why(p)) + ("\n(outside your filters)" if out else "")
+                last5 = " ".join("—" if x is None else f"{x}%" for x in (p.get("f") or [])[-5:])
+                reps = "\n".join(f"{r['v'] or '—'} {pd.Timestamp(r['d']).strftime('%d %b %Y') if r['d'] else ''} "
+                                 f"({r['s'] or '?'})".replace("  ", " ") for r in p.get("rep", []))
+                rs.append([p["n"], squads.get(str(p["sq"]), {}).get("name") or "", p.get("pos"), p.get("age"), reasons,
+                           last5 or "no game data", p.get("ov"), f"{p['rk']} of {p['of']}" if p.get("rk") else "not rated",
+                           reps or "Never scouted"])
+                for c in rs[rs.max_row]:
+                    c.alignment = wrap
+            rs.append([])
+        for col, w in zip("ABCDEFGHI", (24, 20, 16, 6, 40, 22, 14, 16, 40)):
+            rs.column_dimensions[col].width = w
+        rs.freeze_panes = "A2"
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -251,11 +313,15 @@ async def fixtures_json(win: str = "7", user: WebUser = Depends(current_user)):
 
 
 @router.get("/api/fixtures/xlsx")
-async def fixtures_xlsx(win: str = "7", keys: str = "", user: WebUser = Depends(current_user)):
+async def fixtures_xlsx(win: str = "7", keys: str = "", pids: str = "", f: str = "",
+                        user: WebUser = Depends(current_user)):
+    """The games shown (`keys`, in the page's order); `pids` = the players the filters kept
+    (empty: no player filter on); `f` = the filters in words, printed on the Games sheet."""
     from lofc.core.card import csv_disposition
     data = await run_in_threadpool(build, win if win in WINDOWS else "7", user)
     order = [k for k in keys.split(",") if k] or [g["key"] for g in data["games"]]
-    body = await run_in_threadpool(workbook, data, order)
+    chosen = {p for p in pids.split(",") if p} if pids else None
+    body = await run_in_threadpool(workbook, data, order, chosen, f[:300])
     return Response(body, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": csv_disposition(f"Fixtures {pd.Timestamp.now().date()}.xlsx")})
 

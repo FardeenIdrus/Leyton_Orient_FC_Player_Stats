@@ -77,28 +77,76 @@ def test_any_user_adds_a_game_in_uk_time_and_only_they_or_the_hor_remove_it(db):
 
 def test_why_reads_the_same_as_the_page():
     p = _data()["players"]["7"]
-    assert api.why(p) == ["Sign (2026-11-12)", "Top in 3 of last 5"]
+    assert api.why(p) == ["Sign (12 Nov 2026)", "Top 20% in 3 of last 5 games"]
     p2 = {**p, "rep": [], "pri": False, "f5": False, "rise": True, "rise_by": 25, "rise_from": 40, "rise_to": 65,
           "br": {"on": True, "before": 37, "after": 343}}
-    assert api.why(p2) == ["Rising: avg 40% to 65% (5 games before vs last 5)",
+    assert api.why(p2) == ["Rising: 40% → 65% (last 5 games vs 5 before)",
                            "Breaking through: 37 to 343 min (5 club games before vs last 5)"]
 
 
-def test_workbook_lists_games_and_their_players():
+def test_workbook_by_region_one_row_per_player_and_only_the_filtered_players():
+    """Owner 2026-11-27: the head of recruitment sends the Excel to scouts -- a Games sheet (with
+    the filters used), then one sheet per region (where the game is played: the home club), each
+    game a shaded row with one row per player under it; only the players the filters kept, plus
+    scout priorities marked "outside your filters"."""
     from io import BytesIO
     from openpyxl import load_workbook
-    wb = load_workbook(BytesIO(api.workbook(_data(), ["m:1"])))
-    g = list(wb["Games"].values)
-    assert g[1][3:6] == ("Leyton Orient", "Bolton", "Ann Scout") and "Form Man (Sign (2026-11-12))" in g[1][6]
-    pl = list(wb["Players"].values)
-    assert pl[1][0] == "Form Man" and pl[1][6] == "2 of 20" and "Sign 2026-11-12 (Ann)" in pl[1][7]
+    d = _data()
+    d["games"][0]["region"] = ["London & South East", "North"]
+    other = {**d["players"]["7"], "n": "Other Man", "rep": [], "pri": False, "f5": False, "ns": True}
+    key = {**d["players"]["7"], "n": "Key Man", "f5": False}
+    d["players"].update({"8": other, "9": key})
+    wb = load_workbook(BytesIO(api.workbook(d, ["m:1"], pids={"7"}, filters="In form; U23")))
+    assert wb.sheetnames == ["Games", "London & South East"]
+    g = [r for r in wb["Games"].values]
+    assert g[0][0] == "Filters: In form; U23"
+    assert ("Leyton Orient", "Bolton", "League One", "London & South East", "Ann Scout", 2) == tuple(g[3][2:8])
+    rows = [r for r in wb["London & South East"].values]
+    assert rows[1][0].startswith("Sun 29 Nov 15:00") and "Leyton Orient v Bolton" in rows[1][0]
+    names = [r[0] for r in rows[2:] if r[0]]
+    assert names == ["Form Man", "Key Man"]                       # Other Man was filtered out
+    form = next(r for r in rows if r[0] == "Form Man")
+    assert form[4] == "Sign (12 Nov 2026)\nTop 20% in 3 of last 5 games" and form[5] == "90% 90% 90%"
+    assert form[8] == "Sign 12 Nov 2026 (Ann)"
+    assert "outside your filters" in next(r for r in rows if r[0] == "Key Man")[4]
 
 
 def test_page_script_states_what_each_signal_means_and_links_players():
     from pathlib import Path
     import lofc.web
     js = (Path(lofc.web.__file__).parent / "static" / "js" / "fixtures.js").read_text()
-    assert "Rising: avg ${p.rise_from}% → ${p.rise_to}%" in js and 'title="${esc(d)}"' in js
+    assert "Rising: ${p.rise_from}% → ${p.rise_to}% (last 5 games vs 5 before)" in js and 'title="${esc(d)}"' in js
     assert "hidden by filters" in js and "Clear filters" in js
     assert "/player/${encodeURIComponent(p.id)}" in js and "back=" in js
     assert "Also in this game: scout priorities and watchlist" in js       # never filtered out of a game
+
+
+def test_wording_says_what_top_and_matching_mean_and_excel_follows_filters():
+    """Owner 2026-11-27: "Top in 3+ of 5" and "Matching players per game" were unclear; the
+    Excel must cover only what the filters show."""
+    from pathlib import Path
+    import lofc.web
+    root = Path(lofc.web.__file__).parent
+    html = (root / "templates" / "fixtures.html").read_text()
+    assert "3+ of last 5 games in the top 20%" in html and "6+ of last 10 games in the top 20%" in html
+    assert "Show games with at least" in html and "2 matching players" in html
+    assert "Matching players per game" not in html and "Top in 3+ of last 5" not in html
+    js = (root / "static" / "js" / "fixtures.js").read_text()
+    assert "Top 20% in ${p.t5} of last 5 games" in js
+    assert "&pids=" in js and "&f=" in js
+
+
+def test_players_follow_a_stated_order_on_the_page_and_in_the_excel():
+    """Owner 2026-11-27: no hidden points -- watchlist, Sign / Monitor Priority, scouts disagree,
+    most reasons to watch, season Overall; said in one line above the players."""
+    from pathlib import Path
+    import lofc.web
+    js = (Path(lofc.web.__file__).parent / "static" / "js" / "fixtures.js").read_text()
+    assert "weight(" not in js and "? 8 : 0" not in js
+    assert "Order: watchlist, Sign / Monitor Priority, scouts disagree, most reasons to watch, season Overall" in js
+    base = _data()["players"]["7"]
+    a = {**base, "rep": [], "pri": False, "watch": "Watching", "f5": False}
+    b = {**base, "dis": True}
+    c = {**base, "rep": [], "pri": False, "rise": True, "rise_by": 25, "rise_from": 40, "rise_to": 65, "ov": 2.0}
+    d = {**base, "rep": [], "pri": False, "ov": 3.9}
+    assert sorted([d, c, b, a], key=api._order) == [a, b, c, d]
