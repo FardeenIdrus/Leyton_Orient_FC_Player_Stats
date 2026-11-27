@@ -135,3 +135,22 @@ def test_write_club_scores_joins_physical_by_player_and_date_and_keeps_old_games
     done = pd.read_sql("SELECT kpis_pulled_at FROM impect_matches", e)
     assert done["kpis_pulled_at"].notna().all()
     assert im.to_pull_kpis(e, 4, 319) == []
+
+
+def test_refreshing_the_fixture_list_keeps_when_kpis_were_pulled():
+    """Owner 2026-11-27: the server pull made 1,766 calls where the dry run expected ~880 --
+    rewriting the fixture list dropped kpis_pulled_at, so every played match's KPIs were pulled
+    again on every run. Both pulled-at times survive a fixture refresh."""
+    import datetime
+    from lofc.ingest import impect_matches as im
+    e = _engine()
+    f = pd.DataFrame({"match_id": [1, 2], "iteration_id": 1, "competition_id": 4, "season_id": 319,
+                      "scheduled_at": [datetime.datetime(2026, 9, 1, 15)] * 2, "available": True,
+                      "last_calculated_at": [datetime.datetime(2026, 9, 2)] * 2})
+    im.write_matches(e, f)
+    with e.begin() as c:
+        c.exec_driver_sql("UPDATE impect_matches SET scores_pulled_at = '2026-09-03', kpis_pulled_at = '2026-09-03'")
+    im.write_matches(e, f)                                   # the next run refreshes the fixtures
+    assert im.to_pull_kpis(e, 4, 319) == []
+    got = pd.read_sql("SELECT scores_pulled_at, kpis_pulled_at FROM impect_matches", e)
+    assert got.notna().all().all()

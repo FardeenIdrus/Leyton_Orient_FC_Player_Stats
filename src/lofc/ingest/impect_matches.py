@@ -187,16 +187,20 @@ def _squad_names(engine) -> dict:
 
 
 def write_matches(engine, f: pd.DataFrame) -> None:
-    """Replace one league season's fixture rows, keeping when each match's scores were pulled."""
+    """Replace one league season's fixture rows, keeping when each match's scores and KPIs were
+    pulled (owner 2026-11-27: dropping kpis_pulled_at here re-pulled every match's KPIs on every
+    run -- 1,766 calls where ~880 were due)."""
     from sqlalchemy import text
     if f.empty:
         return
     c, s = int(f["competition_id"].iloc[0]), int(f["season_id"].iloc[0])
     with engine.begin() as conn:
-        pulled = dict(conn.execute(text("SELECT match_id, scores_pulled_at FROM impect_matches "
-                                        "WHERE competition_id = :c AND season_id = :s"), {"c": c, "s": s}).all())
+        rows = conn.execute(text("SELECT match_id, scores_pulled_at, kpis_pulled_at FROM impect_matches "
+                                 "WHERE competition_id = :c AND season_id = :s"), {"c": c, "s": s}).all()
+        scores = {r[0]: r[1] for r in rows}
+        kpis = {r[0]: r[2] for r in rows}
         conn.execute(text("DELETE FROM impect_matches WHERE competition_id = :c AND season_id = :s"), {"c": c, "s": s})
-        f.assign(scores_pulled_at=f["match_id"].map(pulled)).to_sql(
+        f.assign(scores_pulled_at=f["match_id"].map(scores), kpis_pulled_at=f["match_id"].map(kpis)).to_sql(
             "impect_matches", conn, if_exists="append", index=False, method="multi", chunksize=2000)
 
 
