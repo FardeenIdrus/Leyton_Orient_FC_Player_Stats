@@ -19,6 +19,9 @@ const VIEWS = [
   ['watch', 'Watchlist', 'on the list', 'A player on the watchlist', p => !!p.watch],
 ];
 let D = null, win = '7', view = 'all', by = 'game';
+let bySq = {};                    // players by club, built once per load (speed)
+// Leagues and Regions: tick any number; none ticked = all
+const sel = {lg: new Set(), region: new Set()};
 const open = new Set(), showAll = new Set();
 
 const when = s => new Date(s + (s.endsWith('Z') ? '' : 'Z'));
@@ -76,18 +79,17 @@ const dots = f => f.length ? `<div class="fx-dots" aria-label="Last 5 games">${f
   `<span class="fx-dot ${lvl(x)}" title="${x == null ? 'under 45 min' : 'better than ' + x + '%'}"></span>`).join('')}</div>` : '<span class="note">no game data</span>';
 
 function gamesFor(F, v = view) {
-  const q = $('fx-q').value.trim().toLowerCase(), lg = $('fx-lg').value, reg = $('fx-region').value;
+  const q = $('fx-q').value.trim().toLowerCase();
   const on = v !== 'all' || nOn(F) - (F.least > 1 ? 1 : 0) > 0;
   return D.games.map(g => {
-    const all = Object.entries(D.players).filter(([, p]) => p.sq === g.hs || p.sq === g.as)
-      .map(([id, p]) => ({...p, id, side: p.sq === g.hs ? g.home : g.away}));
+    const all = [...(bySq[g.hs] || []).map(p => ({...p, side: g.home})), ...(g.as === g.hs ? [] : (bySq[g.as] || []).map(p => ({...p, side: g.away})))];
     const match = (on ? all.filter(p => playerOk(p, F, v)) : all.filter(p => why(p).length))
       .sort(byOrder);
     return {g, all, match, on};
   }).filter(x => (!x.on || x.match.length >= F.least)
-    && (!lg || x.g.lg === lg)
+    && (!sel.lg.size || sel.lg.has(x.g.lg))
     // where the game is played (the home club); a club with no region is never hidden
-    && (!reg || (x.g.region[0] || x.g.region[1]) === reg || (x.g.region[0] == null && x.g.region[1] == null))
+    && (!sel.region.size || sel.region.has(x.g.region[0] || x.g.region[1]) || (x.g.region[0] == null && x.g.region[1] == null))
     && (!q || `${x.g.home} ${x.g.away} ${x.all.map(p => p.n).join(' ')}`.toLowerCase().includes(q))
     && ($('fx-scout').value !== 'mine' || x.g.assigned === D.me)
     && ($('fx-scout').value !== 'free' || !x.g.assigned));
@@ -99,7 +101,7 @@ function filterWords(F) {
   const lab = g => [...document.querySelectorAll(`[data-g="${g}"] input:checked`)].filter(i => i.value).map(i => i.parentElement.textContent.trim());
   const w = [view !== 'all' ? VIEWS.find(v => v[0] === view)[1] : '', ...lab('verdict'), ...lab('form'), ...lab('ov').map(x => 'Overall ' + x),
     ...lab('age'), ...lab('pos'), ...lab('watch'), F.least > 1 ? `at least ${F.least} matching players` : '',
-    t('fx-lg'), t('fx-region'), t('fx-scout'), $('fx-q').value ? `search "${$('fx-q').value}"` : ''];
+    sel.lg.size ? [...sel.lg].join(', ') : '', sel.region.size ? [...sel.region].join(', ') : '', t('fx-scout'), $('fx-q').value ? `search "${$('fx-q').value}"` : ''];
   return [`${win === 'past' ? 'Past 3 weeks' : `Next ${win} days`}`, ...w.filter(Boolean)].join('; ');
 }
 
@@ -117,7 +119,7 @@ function draw() {
   $('fx-summary').textContent = past
     ? `Past 3 weeks: ${total} games, ${D.games.filter(g => (g.reports || []).length).length} with scout reports`
     : `Next ${win} days: ${total} games`;
-  const filtered = hidden || view !== 'all' || nOn(F) || $('fx-q').value || $('fx-lg').value || $('fx-region').value || $('fx-scout').value;
+  const filtered = hidden || view !== 'all' || nOn(F) || $('fx-q').value || sel.lg.size || sel.region.size || $('fx-scout').value;
   $('fx-status').innerHTML = `<span>Showing <b>${rows.length}</b> of ${total} games${hidden ? `, <b>${hidden}</b> hidden by filters` : ''}</span>`
     + (filtered ? '<button type="button" class="fx-link" id="fx-clear">Clear filters</button>' : '');
   // the Excel covers exactly what is shown: these games, and (with a player filter on) these players
@@ -144,11 +146,13 @@ function counts(r) {
   return (chips ? `<div class="fx-chiprow">${chips}</div>` : '')
     + `<div class="fx-reps">${reps ? `${reps} scout report${reps > 1 ? 's' : ''}` : 'No scout reports'}</div>`;
 }
+// The scout for a game: a platform user or any typed name (most scouts have no account,
+// owner 2026-11-27); names used before are suggested as you type.
 function assignCell(g) {
-  const name = (D.users.find(u => u.id === g.assigned) || {}).name;
+  const name = g.scout;
   if (!D.can_assign) return name ? `<span class="fx-as">${esc(name)}</span>` : '<span class="note">Not assigned</span>';
-  return `<select class="ctl fx-assign" data-as="${esc(g.key)}" aria-label="Assign a scout to ${esc(club(g.home))} v ${esc(club(g.away))}">`
-    + `<option value="">Not assigned</option>${D.users.map(u => `<option value="${u.id}"${u.id === g.assigned ? ' selected' : ''}>${esc(u.name)}</option>`).join('')}</select>`;
+  return `<input class="ctl fx-assign" list="fx-scouts" data-as="${esc(g.key)}" value="${esc(name || '')}" placeholder="Assign a scout"`
+    + ` autocomplete="off" aria-label="Scout for ${esc(club(g.home))} v ${esc(club(g.away))}">`;
 }
 function where(g) {
   const reg = [...new Set(g.region.map(r => r || 'Region unknown'))].join(' / ');
@@ -212,16 +216,22 @@ function drawPlayers(rows) {
   const list = [...seen.values()].sort((a, b) => byOrder(a.p, b.p));
   if (!list.length) { $('fx-list').innerHTML = '<p class="note">No players match. Clear a filter to see more.</p>'; return; }
   $('fx-list').innerHTML = `<div class="tw">${HEAD(true)}${list.map(({p, g}) => {
-    const t = when(g.at), home = p.sq === g.hs, as = (D.users.find(u => u.id === g.assigned) || {}).name;
+    const t = when(g.at), home = p.sq === g.hs, as = g.scout;
     return playerRow(p, false, `${dShort(t)} ${hhmm(t)}<div class="note">${home ? 'v ' + esc(club(g.away)) : '@ ' + esc(club(g.home))}${as ? ' · ' + esc(as) : ''}</div>`);
   }).join('')}</tbody></table></div>`;
 }
 
+function scoutList() {
+  const names = [...new Set([...D.users.map(u => u.name), ...(D.typed_scouts || [])])].sort();
+  $('fx-scouts').innerHTML = names.map(n => `<option value="${esc(n)}">`).join('');
+}
 function fillSelects() {
-  const keep = (id, vals, first) => { const el = $(id), cur = el.value;
-    el.innerHTML = `<option value="">${first}</option>` + vals.map(v => `<option${v === cur ? ' selected' : ''}>${esc(v)}</option>`).join(''); };
-  keep('fx-lg', [...new Set(D.games.map(g => g.lg))].sort(), 'All UK &amp; Irish');
-  keep('fx-region', D.regions, 'All regions');
+  const list = (k, vals) => { $(`fx-${k}-list`).innerHTML = vals.map(v =>
+    `<label><input type="checkbox" value="${esc(v)}"${sel[k].has(v) ? ' checked' : ''}>${esc(v)}</label>`).join(''); };
+  scoutList();
+  list('lg', [...new Set(D.games.map(g => g.lg))].sort());
+  list('region', D.regions);
+  msLabels();
   const posCur = new Set([...document.querySelectorAll('#fx-pos input:checked')].map(i => i.value));
   $('fx-pos').innerHTML = [...new Set(Object.values(D.players).map(p => p.pos).filter(Boolean))].sort()
     .map(p => `<label><input type="checkbox" value="${esc(p)}"${posCur.has(p) ? ' checked' : ''}>${esc(p)}</label>`).join('');
@@ -231,6 +241,8 @@ async function load() {
   $('fx-list').innerHTML = '<p class="note">Loading…</p>';
   try { D = await api(`/api/fixtures?win=${win}`); }
   catch (e) { $('fx-list').innerHTML = `<p class="note">Could not load the games (${esc(e.message)}).</p>`; return; }
+  bySq = {};
+  for (const [id, p] of Object.entries(D.players)) (bySq[p.sq] ||= []).push({...p, id});
   open.clear(); showAll.clear();
   fillSelects();
   if (win !== 'past') { const r = gamesFor(filt()).sort((a, b) => b.match.length - a.match.length)[0]; if (r) open.add(r.g.key); }
@@ -254,9 +266,14 @@ $('fx-list').addEventListener('keydown', e => {
 });
 $('fx-list').addEventListener('change', async e => {
   const s = e.target.closest('[data-as]'); if (!s) return;
-  const g = D.games.find(x => x.key === s.dataset.as);
-  try { await api('/api/fixtures/assign', {json: {key: s.dataset.as, user_id: s.value ? +s.value : null}}); g.assigned = s.value ? +s.value : null; }
-  catch { s.value = g.assigned || ''; }
+  const g = D.games.find(x => x.key === s.dataset.as), name = s.value.trim();
+  try {
+    await api('/api/fixtures/assign', {json: {key: s.dataset.as, name}});
+    g.scout = name || null;
+    g.assigned = (D.users.find(u => u.name.toLowerCase() === name.toLowerCase()) || {}).id ?? null;
+    if (name && !D.typed_scouts.includes(name) && !D.users.some(u => u.name === name)) { D.typed_scouts.push(name); scoutList(); }
+    s.classList.add('saved'); setTimeout(() => s.classList.remove('saved'), 900);
+  } catch { s.value = g.scout || ''; }
   if ($('fx-scout').value) draw();
 });
 $('fx-views').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (b) { view = b.dataset.v; draw(); } });
@@ -264,12 +281,39 @@ $('fx-win').addEventListener('click', e => { const b = e.target.closest('button'
   for (const x of $('fx-win').querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); load(); });
 $('fx-by').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; by = b.dataset.b;
   for (const x of $('fx-by').querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); draw(); });
-$('fx-filters').addEventListener('input', e => { if (e.target.closest('#fx-more,#fx-q,#fx-lg,#fx-region,#fx-scout')) draw(); });
+$('fx-filters').addEventListener('input', e => { if (e.target.closest('#fx-more,#fx-q,#fx-scout')) draw(); });
+// the two tick lists
+function msLabels() {
+  const lab = (k, all, many) => { const n = sel[k].size;
+    $(`fx-${k}-btn`).textContent = !n ? all : n === 1 ? [...sel[k]][0] : `${n} ${many}`; };
+  lab('lg', 'All UK & Irish', 'leagues'); lab('region', 'All regions', 'regions');
+}
+const pops = ['fx-lg', 'fx-region'];
+const closePops = except => { for (const id of pops) if (id !== except) { $(`${id}-pop`).hidden = true; $(`${id}-btn`).setAttribute('aria-expanded', 'false'); } };
+for (const id of pops) $(`${id}-btn`).addEventListener('click', () => {
+  const pop = $(`${id}-pop`), open = pop.hidden;
+  closePops(id); pop.hidden = !open; $(`${id}-btn`).setAttribute('aria-expanded', String(open));
+});
+document.addEventListener('click', e => { if (!e.target.closest('.fx-popwrap')) closePops(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePops(); });
+$('fx-filters').addEventListener('change', e => {
+  const list = e.target.closest('[data-ms]'); if (!list) return;
+  const k = list.dataset.ms;
+  sel[k] = new Set([...list.querySelectorAll('input:checked')].map(i => i.value));
+  msLabels(); draw();
+});
+$('fx-filters').addEventListener('click', e => {
+  const b = e.target.closest('[data-all]'); if (!b || !b.closest('.fx-pop')) return;
+  const k = b.dataset.all === 'fx-lg' ? 'lg' : 'region';
+  sel[k].clear(); for (const i of $(`${b.dataset.all}-list`).querySelectorAll('input')) i.checked = false;
+  msLabels(); draw();
+});
 $('fx-sort').addEventListener('change', draw);
 $('fx-status').addEventListener('click', e => {
   if (e.target.id !== 'fx-clear') return;
   view = 'all';
-  for (const id of ['fx-q', 'fx-lg', 'fx-region', 'fx-scout']) $(id).value = '';
+  for (const id of ['fx-q', 'fx-scout']) $(id).value = '';
+  sel.lg.clear(); sel.region.clear(); fillSelects();
   for (const i of document.querySelectorAll('#fx-more input')) i.checked = i.type === 'radio' && (i.value === '' || (i.name === 'fx-least' && i.value === '1'));
   draw();
 });

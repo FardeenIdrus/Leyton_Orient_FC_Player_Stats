@@ -4086,6 +4086,23 @@ def fixtures_views_and_filters(s, w):
     if s.page.locator("#fx-clear").count():
         s.step("fixtures: Clear filters", lambda p: p.locator("#fx-clear").click(timeout=3000))
     s.note("fixtures: Clear filters shows every game again", None if s.page.locator("#fx-list .fx-row").count() == total else "not all back")
+    # owner 2026-11-27: several regions at once
+    s.step("fixtures: open Regions", lambda p: p.locator("#fx-region-btn").click(timeout=3000))
+    boxes = s.page.locator("#fx-region-list input")
+    if boxes.count() >= 2:
+        s.step("fixtures: tick Scotland", lambda p: p.locator('#fx-region-list input[value="Scotland"]').check(timeout=3000))
+        s.step("fixtures: tick London & South East", lambda p: p.locator('#fx-region-list input[value="London & South East"]').check(timeout=3000))
+        s.note("fixtures: Regions shows two ticked", None if s.page.inner_text("#fx-region-btn") == "2 regions" else s.page.inner_text("#fx-region-btn"))
+        # every game left is played in one of the two (or has no region: never hidden)
+        wrong = s.page.evaluate("""() => [...document.querySelectorAll('#fx-list .fx-row .fx-where')].map(e => e.textContent)
+            .filter(t => { const venue = (t.split(' · ')[1] || '').split(' / ')[0];
+                           return !['Scotland', 'London & South East', 'Region unknown'].includes(venue); })""")
+        s.note("fixtures: two regions show only their games", None if not wrong else str(wrong[:3]))
+        s.page.keyboard.press("Escape")
+        s.note("fixtures: Escape closes the list", None if s.page.locator("#fx-region-pop").is_hidden() else "still open")
+        if s.page.locator("#fx-clear").count():
+            s.step("fixtures: Clear filters", lambda p: p.locator("#fx-clear").click(timeout=3000))
+        s.note("fixtures: Clear resets Regions", None if s.page.inner_text("#fx-region-btn") == "All regions" else s.page.inner_text("#fx-region-btn"))
     s.step("fixtures: By player", lambda p: p.locator('#fx-by [data-b="player"]').click(timeout=3000))
     heads = s.page.locator("#fx-list table.fx-ps th").all_inner_texts()
     s.note("fixtures: By player lists each player's next game", None if "Next game" in heads else str(heads))

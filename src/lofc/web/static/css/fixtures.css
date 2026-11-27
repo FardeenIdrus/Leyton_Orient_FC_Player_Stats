@@ -57,7 +57,8 @@ td.fx-counts{width:300px}
 .fx-chiprow{display:flex;flex-wrap:wrap;gap:4px}
 .fx-reps{font-size:12.5px;color:var(--muted);margin-top:4px}
 td.fx-assign-c{width:170px;text-align:right}
-.fx-assign{width:100%;font-size:13px;height:32px}
+.fx-assign{width:100%;font-size:13px;height:32px;box-sizing:border-box}
+.fx-assign.saved{border-color:var(--hi);box-shadow:0 0 0 2px #E7F2EC}
 .fx-as{font-size:13.5px;font-weight:600}
 .fx-chev{display:inline-block;width:14px;color:var(--muted);transition:transform .15s}
 tr.open .fx-chev{transform:rotate(90deg)}
@@ -96,3 +97,12 @@ table.fx-ps tr.out td{opacity:.65}
 @media (max-width:760px){.fx-views{grid-template-columns:repeat(2,minmax(0,1fr))}.fx-grid{grid-template-columns:1fr}.fx-grp.wide{grid-column:auto}
   td.fx-counts{display:none}tr.fx-open>td{padding-left:8px}td.fx-game{min-width:0}}
 @media (prefers-reduced-motion:reduce){.fx-chev{transition:none}}
+/* League and Region: tick several (the Players page's league picker, owner 2026-11-27) */
+.fx-popwrap{position:relative}
+.fx-pop-btn{width:100%;cursor:pointer;text-align:left;font:inherit;font-size:14px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fx-pop-btn::after{content:"▾";color:var(--muted);margin-left:auto}
+.fx-pop{position:absolute;z-index:20;top:calc(100% + 4px);left:0;width:100%;box-sizing:border-box;background:#fff;border:1px solid #CDD1D7;border-radius:8px;box-shadow:0 8px 24px rgba(20,22,27,.14);padding:10px}
+.fx-pop-actions{display:flex;gap:8px}
+.fx-pop-list{max-height:320px;overflow:auto;margin-top:8px;display:flex;flex-direction:column;gap:2px}
+.fx-pop-list label{display:flex;gap:8px;align-items:center;font-size:14px;padding:4px 2px;cursor:pointer}
+.fx-pop-btn:focus-visible{outline:2px solid var(--orient);outline-offset:2px}

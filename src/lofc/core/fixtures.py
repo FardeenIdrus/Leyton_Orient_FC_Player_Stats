@@ -16,6 +16,7 @@ Display only: nothing here feeds the ranking (register P11).
 """
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
 
@@ -72,14 +73,16 @@ _ALIAS = {"utd": "united", "man": "manchester", "st": "st", "saint": "st", "wedn
 _DROP = {"fc", "afc", "cf", "the", "and", "glasgow", "hove", "albion"}
 
 
+@functools.lru_cache(maxsize=20000)
 def _fold(s) -> str:
     s = unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode().lower()
     return re.sub(r"[^a-z0-9 ]", " ", s.replace("-", " "))
 
 
-def _team_tokens(name) -> set:
+@functools.lru_cache(maxsize=5000)
+def _team_tokens(name) -> frozenset:
     toks = {_ALIAS.get(t, t) for t in _fold(name).split()}
-    return {t for t in toks if t not in _DROP}
+    return frozenset(t for t in toks if t not in _DROP)
 
 
 def same_team(a, b) -> bool:
@@ -129,18 +132,23 @@ def suggest_links(unlinked: pd.DataFrame, players: pd.DataFrame) -> dict:
     out: dict = {}
     if unlinked is None or unlinked.empty or players is None or players.empty:
         return out
+    # owner 2026-11-27 (speed): compare each report with the clubs (~200), not every player,
+    # then only with that club's players
+    by_team: dict = {}
+    for p in players.to_dict("records"):
+        by_team.setdefault(p.get("team_name"), []).append((int(p["player_id"]), _person(p.get("player_name"))))
     for r in unlinked.to_dict("records"):
         rn = _person(r.get("player_name"))
         if len(rn) < 2:
             continue
         first, last = rn[0], rn[-1]
         cands = []
-        for p in players.to_dict("records"):
-            if not same_team(r.get("club_name"), p.get("team_name")):
+        for team, roster in by_team.items():
+            if not same_team(r.get("club_name"), team):
                 continue
-            pn = _person(p.get("player_name"))
-            if last in pn[1:] and pn and (pn[0] == first or (len(first) == 1 and pn[0].startswith(first))):
-                cands.append(int(p["player_id"]))
+            for pid, pn in roster:
+                if last in pn[1:] and pn and (pn[0] == first or (len(first) == 1 and pn[0].startswith(first))):
+                    cands.append(pid)
         if len(cands) == 1:
             out.setdefault(cands[0], []).append(r["submission_id"])
     return out

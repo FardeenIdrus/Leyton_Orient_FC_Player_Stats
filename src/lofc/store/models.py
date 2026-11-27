@@ -1218,7 +1218,8 @@ class FixtureAssignment(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     fixture_key: Mapped[str] = mapped_column(String, unique=True)
-    user_id: Mapped[int] = mapped_column(Integer)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)        # a platform user, or
+    scout_name: Mapped[str | None] = mapped_column(String, nullable=True)     # a typed name (no account)
     assigned_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
     assigned_at: Mapped[datetime.datetime] = mapped_column(DateTime, server_default=func.now())
 

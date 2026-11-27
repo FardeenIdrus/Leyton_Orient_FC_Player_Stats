@@ -36,7 +36,7 @@ def _data():
          "rep": [{"v": "Sign", "d": "2026-11-12", "s": "Ann", "g": "Orient v Bolton"}], "pri": True, "dis": False,
          "seen": True, "ns": False, "watch": None}
     return {"games": [{"key": "m:1", "at": "2026-11-29T15:00:00", "lg": "League One", "home": "Leyton Orient",
-                       "away": "Bolton", "hs": 10, "as": 20, "manual": False, "assigned": 1}],
+                       "away": "Bolton", "hs": 10, "as": 20, "manual": False, "assigned": 1, "scout": "Ann Scout"}],
             "players": {"7": p}, "squads": {"10": {"name": "Leyton Orient"}}, "users": [{"id": 1, "name": "Ann Scout"}]}
 
 
@@ -52,9 +52,12 @@ def test_a_scout_cannot_assign_or_link_the_head_of_recruitment_can(db):
     assert _client("scout").post("/api/fixtures/link", json={"submission_id": "s", "player_id": 1}, headers=H).status_code == 403
     c = _client("head_of_recruitment")
     assert c.post("/api/fixtures/assign", json={"key": "m:1", "user_id": 4}, headers=H).json() == {"ok": True}
-    assert st.assignments(db) == {"m:1": 4}
+    assert st.assignments(db) == {"m:1": {"user_id": 4, "name": None}}
+    # a scout with no account: any name (owner 2026-11-27)
+    assert c.post("/api/fixtures/assign", json={"key": "m:2", "name": "John Smith"}, headers=H).json() == {"ok": True}
+    assert st.assignments(db)["m:2"] == {"user_id": None, "name": "John Smith"}
     assert c.post("/api/fixtures/assign", json={"key": "m:1", "user_id": None}, headers=H).json() == {"ok": True}
-    assert st.assignments(db) == {}
+    assert list(st.assignments(db)) == ["m:2"]
     assert c.post("/api/fixtures/assign", json={"key": "bad", "user_id": 4}, headers=H).status_code == 400
 
 
@@ -150,3 +153,24 @@ def test_players_follow_a_stated_order_on_the_page_and_in_the_excel():
     c = {**base, "rep": [], "pri": False, "rise": True, "rise_by": 25, "rise_from": 40, "rise_to": 65, "ov": 2.0}
     d = {**base, "rep": [], "pri": False, "ov": 3.9}
     assert sorted([d, c, b, a], key=api._order) == [a, b, c, d]
+
+
+def test_leagues_and_regions_take_several_ticks():
+    """Owner 2026-11-27: pick several leagues and several regions at once (none ticked = all)."""
+    from pathlib import Path
+    import lofc.web
+    root = Path(lofc.web.__file__).parent
+    html = (root / "templates" / "fixtures.html").read_text()
+    assert 'id="fx-lg-list" data-ms="lg"' in html and 'id="fx-region-list" data-ms="region"' in html
+    assert 'id="fx-lg"' not in html and 'id="fx-region"' not in html          # the one-choice menus are gone
+    js = (root / "static" / "js" / "fixtures.js").read_text()
+    assert "sel.lg.has(x.g.lg)" in js and "sel.region.has(" in js
+
+
+def test_the_scout_box_takes_any_typed_name():
+    from pathlib import Path
+    import lofc.web
+    root = Path(lofc.web.__file__).parent
+    js = (root / "static" / "js" / "fixtures.js").read_text()
+    assert 'list="fx-scouts"' in js and 'placeholder="Assign a scout"' in js and "json: {key: s.dataset.as, name}" in js
+    assert 'id="fx-scouts"' in (root / "templates" / "fixtures.html").read_text()

@@ -73,7 +73,7 @@ def test_every_built_page_registers_its_warmup(monkeypatch):
     create_app(users=_NoUsers(), secret="x" * 40, info_items=lambda: [])
     assert webcache.registered_warmups() == [
         "players", "card", "compare", "report", "squads", "scout-reports", "watchlist", "physical",
-        "club-vs-league"]
+        "club-vs-league", "fixtures"]
 
 
 class _NoUsers:

@@ -16,14 +16,16 @@ def _engine():
     return e
 
 
-def test_assign_replaces_and_clears():
+def test_assign_a_user_or_any_typed_name_replaces_and_clears():
+    """Owner 2026-11-27: most scouts have no platform account -- any name can be typed."""
     e = _engine()
     st.assign(e, "m:1", 5, by=2)
     st.assign(e, "m:1", 7, by=2)
-    st.assign(e, "x:3", 5, by=2)
-    assert st.assignments(e) == {"m:1": 7, "x:3": 5}
+    st.assign(e, "x:3", None, by=2, name="  John Smith ")
+    assert st.assignments(e) == {"m:1": {"user_id": 7, "name": None}, "x:3": {"user_id": None, "name": "John Smith"}}
+    assert st.typed_names(e) == ["John Smith"]
     st.assign(e, "m:1", None, by=2)
-    assert st.assignments(e) == {"x:3": 5}
+    assert list(st.assignments(e)) == ["x:3"]
 
 
 def test_manual_games_in_a_window_and_removed_by_id():

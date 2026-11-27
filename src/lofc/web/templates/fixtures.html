@@ -23,8 +23,16 @@
   <div class="card" id="fx-filters">
     <div class="fx-views" role="group" aria-label="Views" id="fx-views"></div>
     <div class="fx-bar">
-      <div class="f"><label for="fx-lg">League</label><select class="ctl" id="fx-lg"><option value="">All UK &amp; Irish</option></select></div>
-      <div class="f"><label for="fx-region">Region</label><select class="ctl" id="fx-region"><option value="">All regions</option></select></div>
+      <div class="f"><span class="fx-lbl" id="fx-lg-l">Leagues</span>
+        <div class="fx-popwrap">
+          <button type="button" class="ctl fx-pop-btn" id="fx-lg-btn" aria-labelledby="fx-lg-l" aria-haspopup="true" aria-expanded="false">All UK &amp; Irish</button>
+          <div class="fx-pop" id="fx-lg-pop" hidden><div class="fx-pop-actions"><button type="button" class="btn small" data-all="fx-lg">All leagues</button></div><div class="fx-pop-list" id="fx-lg-list" data-ms="lg"></div></div>
+        </div></div>
+      <div class="f"><span class="fx-lbl" id="fx-region-l">Regions</span>
+        <div class="fx-popwrap">
+          <button type="button" class="ctl fx-pop-btn" id="fx-region-btn" aria-labelledby="fx-region-l" aria-haspopup="true" aria-expanded="false">All regions</button>
+          <div class="fx-pop" id="fx-region-pop" hidden><div class="fx-pop-actions"><button type="button" class="btn small" data-all="fx-region">All regions</button></div><div class="fx-pop-list" id="fx-region-list" data-ms="region"></div></div>
+        </div></div>
       <div class="f"><label for="fx-scout">Scout</label><select class="ctl" id="fx-scout"><option value="">Any game</option><option value="mine">Assigned to me</option><option value="free">Not assigned</option></select></div>
       <div class="f grow"><label for="fx-q">Club or player</label><input class="ctl" id="fx-q" type="search" placeholder="Search" autocomplete="off"></div>
     </div>
@@ -76,6 +84,7 @@
     </div>
   </div>
 
+  <datalist id="fx-scouts"></datalist>
   <div class="card" id="fx-list" data-writes><p class="note">Loading…</p></div>
 </section>
 {% endblock %}

@@ -162,15 +162,19 @@ def build(win: str, user: WebUser, now: pd.Timestamp | None = None) -> dict:
                                     "d": None if pd.isna(by_sid[s]["submitted_at"]) else str(pd.Timestamp(by_sid[s]["submitted_at"]).date())}
                                    for s in sids]
         out_players[pid]["ns"] = False      # a report may be about him: not "Not seen yet"
+    people = _people()
+    names_by_id = {u["id"]: u["name"] for u in people}
     for g in games:
-        g["assigned"] = assigned.get(g["key"])
+        a = assigned.get(g["key"]) or {}
+        g["assigned"] = a.get("user_id")                       # "Assigned to me"
+        g["scout"] = names_by_id.get(a.get("user_id")) or a.get("name")
         g["region"] = [squads.get(g[k], {}).get("region") for k in ("hs", "as")]
         if win == "past":
             g["reports"] = fx.reports_at(reports, g["at"], g["home"], g["away"])
-    people = _people()
     return {"window": win, "now": now.isoformat(), "season": season, "games": games, "players": {str(k): v for k, v in out_players.items()},
             "squads": {str(k): v for k, v in squads.items() if k in sq_in},
             "users": [{"id": u["id"], "name": u["name"]} for u in people],
+            "typed_scouts": st.typed_names(_engine()),
             "me": user.id, "can_assign": auth.can(user.role, "assign_scouts"), "regions": fx.REGIONS,
             "clubs": sorted(({"id": k, "name": v["name"], "lg": names.get(v["comp"], "")} for k, v in squads.items()),
                             key=lambda c: c["name"] or "")}
@@ -214,7 +218,6 @@ def workbook(data: dict, keys: list[str], pids: set | None = None, filters: str 
     import io
     from openpyxl import Workbook
     from openpyxl.styles import Alignment, Font, PatternFill
-    users = {u["id"]: u["name"] for u in data["users"]}
     games = [data["games_by_key"][k] if "games_by_key" in data else next((g for g in data["games"] if g["key"] == k), None)
              for k in keys]
     games = [g for g in games if g is not None]
@@ -256,7 +259,7 @@ def workbook(data: dict, keys: list[str], pids: set | None = None, filters: str 
         at = when(g)
         ins, outs = players(g)
         ws.append([at.strftime("%a %d %b"), at.strftime("%H:%M"), g["home"], g["away"], g["lg"], venue(g),
-                   users.get(g.get("assigned"), ""), len(ins) + len(outs)])
+                   g.get("scout") or "", len(ins) + len(outs)])
     for col, w in zip("ABCDEFGH", (14, 13, 26, 26, 24, 22, 20, 16)):
         ws.column_dimensions[col].width = w
     ws.freeze_panes = "A4"
@@ -271,7 +274,7 @@ def workbook(data: dict, keys: list[str], pids: set | None = None, filters: str 
             c.font, c.fill = bold, head_fill
         for g in (g for g in games if venue(g) == region):
             at = when(g)
-            who = users.get(g.get("assigned"))
+            who = g.get("scout")
             rs.append([f"{at.strftime('%a %d %b %H:%M')} · {g['home']} v {g['away']} · {g['lg']}"
                        + (f" · Assigned: {who}" if who else "")])
             rs.merge_cells(start_row=rs.max_row, start_column=1, end_row=rs.max_row, end_column=9)
@@ -331,10 +334,14 @@ async def assign(request: Request, user: WebUser = Depends(write_user)):
     from lofc.store import fixtures as st
     _need_assign(user)
     body = await request.json()
-    key, uid = str(body.get("key") or ""), body.get("user_id")
+    key, uid, name = str(body.get("key") or ""), body.get("user_id"), str(body.get("name") or "").strip()[:80]
     if not (key.startswith("m:") or key.startswith("x:")):
         raise HTTPException(status_code=400, detail="bad game")
-    await run_in_threadpool(st.assign, _engine(), key, None if uid in (None, "") else int(uid), user.id)
+    if uid in (None, "") and name:
+        # a typed name that is a platform user's name is that user ("Assigned to me" then works)
+        uid = next((u["id"] for u in _people() if u["name"].strip().lower() == name.lower()), None)
+    await run_in_threadpool(st.assign, _engine(), key, None if uid in (None, "") else int(uid), user.id,
+                            None if uid not in (None, "") else name)
     return {"ok": True}
 
 
@@ -386,8 +393,31 @@ async def link(request: Request, user: WebUser = Depends(write_user)):
     return {"ok": True}
 
 
+def warm() -> None:
+    """Build the players' signals before anyone asks (owner 2026-11-27: the first open was slow).
+    Runs at start-up and again after every data change (webcache.rewarm_on_change)."""
+    from lofc.config import settings
+    now = pd.Timestamp.utcnow().tz_localize(None)
+    _base(settings.live_season_id, str(now.date()))
+
+
 def mount(app, render, shell) -> None:
     app.include_router(router)
+    webcache.register_warmup("fixtures", warm)
+
+    def start() -> None:
+        import threading
+
+        def run() -> None:
+            # after the Players warm-up, one at a time (as the other pages do)
+            from lofc.web.api import players as players_api
+            players_api.PLAYERS_WARM.wait(timeout=900)
+            try:
+                warm()
+            except Exception:                           # noqa: BLE001 -- the page builds on demand
+                pass
+        threading.Thread(target=run, name="lofc-fixtures-warmup", daemon=True).start()
+    app.router.on_startup.append(start)
 
     @app.get("/fixtures", response_class=HTMLResponse, name="page_fixtures")
     async def fixtures_page(request: Request, user: WebUser = Depends(current_user)):

@@ -18,18 +18,30 @@ _M = ManualFixture.__table__
 _L = ScoutReportLink.__table__
 
 
-def assign(engine, key: str, user_id: int | None, by: int | None) -> None:
-    """Set (or with None clear) the scout for one game."""
+def assign(engine, key: str, user_id: int | None, by: int | None, name: str | None = None) -> None:
+    """Set the scout for one game: a platform user, or any typed name (most scouts have no
+    account, owner 2026-11-27). Neither clears it."""
+    name = (name or "").strip() or None
     with engine.begin() as conn:
         conn.execute(delete(_A).where(_A.c.fixture_key == key))
-        if user_id is not None:
-            conn.execute(insert(_A).values(fixture_key=key, user_id=int(user_id), assigned_by=by,
+        if user_id is not None or name:
+            conn.execute(insert(_A).values(fixture_key=key, user_id=None if user_id is None else int(user_id),
+                                           scout_name=None if user_id is not None else name, assigned_by=by,
                                            assigned_at=datetime.datetime.now()))
 
 
 def assignments(engine) -> dict:
+    """fixture key -> {"user_id", "name"} (name = a typed scout name)."""
     with engine.connect() as conn:
-        return {k: int(u) for k, u in conn.execute(select(_A.c.fixture_key, _A.c.user_id)).all()}
+        rows = conn.execute(select(_A.c.fixture_key, _A.c.user_id, _A.c.scout_name)).all()
+    return {k: {"user_id": None if u is None else int(u), "name": n} for k, u, n in rows}
+
+
+def typed_names(engine) -> list[str]:
+    """Names typed before, to suggest them again."""
+    with engine.connect() as conn:
+        rows = conn.execute(select(_A.c.scout_name).where(_A.c.scout_name.isnot(None)).distinct()).all()
+    return sorted(r[0] for r in rows)
 
 
 def add_manual(engine, when: datetime.datetime, competition, home: str, away: str,
