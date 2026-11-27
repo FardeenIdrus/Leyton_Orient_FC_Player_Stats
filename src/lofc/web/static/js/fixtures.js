@@ -21,7 +21,9 @@ const VIEWS = [
 let D = null, win = '7', view = 'all', by = 'game';
 let bySq = {};                    // players by club, built once per load (speed)
 // Leagues and Regions: tick any number; none ticked = all
-const sel = {lg: new Set(), region: new Set()};
+const sel = {lg: new Set(), region: new Set(), day: new Set(), scout: new Set()};
+const NOT_ASSIGNED = '__none';    // + Days (owner 2026-11-27)
+const dayKey = g => when(g.at).toLocaleDateString('en-CA', {timeZone: 'Europe/London'});        // YYYY-MM-DD, UK date
 const open = new Set(), showAll = new Set();
 
 const when = s => new Date(s + (s.endsWith('Z') ? '' : 'Z'));
@@ -46,7 +48,7 @@ const playerFilterOn = F => view !== 'all' || nOn(F) - (F.least > 1 ? 1 : 0) > 0
 function playerOk(p, F, v = view) {
   if (!VIEWS.find(x => x[0] === v)[4](p)) return false;
   if (F.verdict.length && !F.verdict.some(x => x === 'disagree' ? p.dis : x === 'none' ? !p.seen : p.rep.some(r => r.v === x))) return false;
-  if (F.form.length && !F.form.some(k => k === 'br' ? p.br && p.br.on : p[k])) return false;
+  if (F.form.length && !F.form.some(k => k === 'br' ? p.br && p.br.on : k === 'up' ? p.br && p.br.up : p[k])) return false;
   if (F.ov && !(p.ov != null && p.ov >= F.ov)) return false;
   if (F.age && !(p.age != null && p.age < F.age)) return false;
   if (F.pos.length && !F.pos.includes(p.pos)) return false;
@@ -64,9 +66,10 @@ function why(p) {
   if (p.f5) w.push(['form', `Top 20% in ${p.t5} of last 5 games`, 'Top 20% = better than 80% of games at his position in his league (club Overall per game, 45+ min)']);
   else if (p.f10) w.push(['form', `Top 20% in ${p.t10} of last 10 games`, 'Top 20% = better than 80% of games at his position in his league (club Overall per game, 45+ min)']);
   if (p.rise) w.push(['form', `Rising: ${p.rise_from}% → ${p.rise_to}% (last 5 games vs 5 before)`, `His average "better than %" over his last 5 games (${p.rise_to}%) against the 5 before (${p.rise_from}%): up ${p.rise_by} points`]);
-  if (p.br && p.br.on) w.push(['br', `Breaking through: ${p.br.before} → ${p.br.after} min`, `Under 23. Minutes in his club's last 5 games (${p.br.after}) against the 5 before (${p.br.before})`]);
-  if (p.ns) w.push(['new', 'Not seen yet', 'Season Overall 3.5+ in his own league and no scout report']);
-  if (p.sug && p.sug.length) w.push(['mu', 'Possible report', 'A scout report that may be about him is not linked to him yet']);
+  if (p.br && p.br.on) w.push(['br', `U23, minutes ${p.br.before} → ${p.br.after}`, `Breaking through: under 23, ${p.br.after} minutes in his club's last 5 games against ${p.br.before} in the 5 before`]);
+  else if (p.br && p.br.up) w.push(['br', `Minutes up: ${p.br.before} → ${p.br.after}`, `${p.br.after} minutes in his club's last 5 games against ${p.br.before} in the 5 before (any age)`]);
+  if (p.ns) w.push(['new', 'Never scouted, rated 3.5+', 'Season Overall 3.5+ in his own league and no scout report']);
+  if (p.sug && p.sug.length) w.push(['mu', 'Possible scout report, not linked', 'A scout report that may be about him is not linked to him yet']);
   return w;
 }
 // Players are listed in a stated order (owner 2026-11-27; the Excel uses the same, api/fixtures._order):
@@ -88,11 +91,11 @@ function gamesFor(F, v = view) {
     return {g, all, match, on};
   }).filter(x => (!x.on || x.match.length >= F.least)
     && (!sel.lg.size || sel.lg.has(x.g.lg))
+    && (!sel.day.size || sel.day.has(dayKey(x.g)))
     // where the game is played (the home club); a club with no region is never hidden
     && (!sel.region.size || sel.region.has(x.g.region[0] || x.g.region[1]) || (x.g.region[0] == null && x.g.region[1] == null))
     && (!q || `${x.g.home} ${x.g.away} ${x.all.map(p => p.n).join(' ')}`.toLowerCase().includes(q))
-    && ($('fx-scout').value !== 'mine' || x.g.assigned === D.me)
-    && ($('fx-scout').value !== 'free' || !x.g.assigned));
+    && (!sel.scout.size || (x.g.scout ? sel.scout.has(x.g.scout) : sel.scout.has(NOT_ASSIGNED))));
 }
 
 // the filters in words, printed at the top of the Excel (what the scout was sent)
@@ -101,7 +104,7 @@ function filterWords(F) {
   const lab = g => [...document.querySelectorAll(`[data-g="${g}"] input:checked`)].filter(i => i.value).map(i => i.parentElement.textContent.trim());
   const w = [view !== 'all' ? VIEWS.find(v => v[0] === view)[1] : '', ...lab('verdict'), ...lab('form'), ...lab('ov').map(x => 'Overall ' + x),
     ...lab('age'), ...lab('pos'), ...lab('watch'), F.least > 1 ? `at least ${F.least} matching players` : '',
-    sel.lg.size ? [...sel.lg].join(', ') : '', sel.region.size ? [...sel.region].join(', ') : '', t('fx-scout'), $('fx-q').value ? `search "${$('fx-q').value}"` : ''];
+    sel.day.size ? [...sel.day].sort().map(d => dShort(new Date(d + 'T12:00:00Z'))).join(', ') : '', sel.lg.size ? [...sel.lg].join(', ') : '', sel.region.size ? [...sel.region].join(', ') : '', sel.scout.size ? [...sel.scout].map(x => x === NOT_ASSIGNED ? 'Not assigned' : x).join(', ') : '', $('fx-q').value ? `search "${$('fx-q').value}"` : ''];
   return [`${win === 'past' ? 'Past 3 weeks' : `Next ${win} days`}`, ...w.filter(Boolean)].join('; ');
 }
 
@@ -119,15 +122,17 @@ function draw() {
   $('fx-summary').textContent = past
     ? `Past 3 weeks: ${total} games, ${D.games.filter(g => (g.reports || []).length).length} with scout reports`
     : `Next ${win} days: ${total} games`;
-  const filtered = hidden || view !== 'all' || nOn(F) || $('fx-q').value || sel.lg.size || sel.region.size || $('fx-scout').value;
+  const filtered = hidden || view !== 'all' || nOn(F) || $('fx-q').value || sel.lg.size || sel.region.size || sel.day.size || sel.scout.size;
   $('fx-status').innerHTML = `<span>Showing <b>${rows.length}</b> of ${total} games${hidden ? `, <b>${hidden}</b> hidden by filters` : ''}</span>`
     + (filtered ? '<button type="button" class="fx-link" id="fx-clear">Clear filters</button>' : '');
   // the Excel covers exactly what is shown: these games, and (with a player filter on) these players
   const pids = !past && rows.length && rows[0].on ? [...new Set(rows.flatMap(r => r.match.map(p => p.id)))].join(',') : '';
   $('fx-xl').href = `/api/fixtures/xlsx?win=${win}&keys=${encodeURIComponent(rows.map(r => r.g.key).join(','))}`
     + (pids ? `&pids=${encodeURIComponent(pids)}` : '') + `&f=${encodeURIComponent(filterWords(F))}`;
-  $('fx-by').hidden = past;
+  // Past 3 weeks: By game or By scout (who went where); By player is for coming games
+  $('fx-by').querySelector('[data-b="player"]').hidden = past;
   if (by === 'player' && !past) return drawPlayers(rows);
+  if (by === 'scout') return drawScouts(rows);
   if (!rows.length) { $('fx-list').innerHTML = `<p class="note">${total ? 'No games match. Clear a filter to see more.' : 'No games in this window.'}</p>`; return; }
   rows.sort((a, b) => past ? when(b.g.at) - when(a.g.at) : when(a.g.at) - when(b.g.at));
   const days = [];
@@ -142,7 +147,8 @@ function counts(r) {
   const a = r.all, reps = a.reduce((s, p) => s + p.rep.length, 0);
   const chips = c('pri', a.filter(p => p.pri).length, 'Sign / MP') + c('dis', a.filter(p => p.dis).length, 'disagree')
     + c('form', a.filter(p => p.f5 || p.f10).length, 'in form') + c('form', a.filter(p => p.rise).length, 'rising')
-    + c('br', a.filter(p => p.br && p.br.on).length, 'breaking through') + c('new', a.filter(p => p.ns).length, 'not seen');
+    + c('br', a.filter(p => p.br && p.br.on).length, 'breaking through') + c('br', a.filter(p => p.br && p.br.up && !p.br.on).length, 'minutes up')
+    + c('new', a.filter(p => p.ns).length, 'not seen');
   return (chips ? `<div class="fx-chiprow">${chips}</div>` : '')
     + `<div class="fx-reps">${reps ? `${reps} scout report${reps > 1 ? 's' : ''}` : 'No scout reports'}</div>`;
 }
@@ -221,6 +227,31 @@ function drawPlayers(rows) {
   }).join('')}</tbody></table></div>`;
 }
 
+// Scouts filter: every scout assigned in this window, then "Not assigned"
+function scoutFilterList() {
+  const names = [...new Set(D.games.map(g => g.scout).filter(Boolean))].sort();
+  for (const x of [...sel.scout]) if (x !== NOT_ASSIGNED && !names.includes(x)) sel.scout.delete(x);
+  $('fx-scout-list').innerHTML = [...names.map(n => [n, n]), [NOT_ASSIGNED, 'Not assigned']].map(([v, l]) =>
+    `<label><input type="checkbox" value="${esc(v)}"${sel.scout.has(v) ? ' checked' : ''}>${esc(l)} <span class="note">(${D.games.filter(g => v === NOT_ASSIGNED ? !g.scout : g.scout === v).length})</span></label>`).join('');
+  if (typeof msLabels === 'function' && $('fx-scout-btn')) msLabels();
+}
+// By scout: each scout and their games in date order (who is watching what, and when)
+function drawScouts(rows) {
+  if (!rows.length) { $('fx-list').innerHTML = '<p class="note">No games match. Clear a filter to see more.</p>'; return; }
+  const groups = {};
+  for (const r of rows) (groups[r.g.scout || NOT_ASSIGNED] ||= []).push(r);
+  const keys = Object.keys(groups).filter(k => k !== NOT_ASSIGNED).sort().concat(groups[NOT_ASSIGNED] ? [NOT_ASSIGNED] : []);
+  $('fx-list').innerHTML = keys.map(k => {
+    const rs = groups[k].sort((a, b) => when(a.g.at) - when(b.g.at));
+    return `<div class="fx-scout-h"><b>${esc(k === NOT_ASSIGNED ? 'Not assigned' : k)}</b><span>${rs.length} game${rs.length > 1 ? 's' : ''}</span></div>`
+      + `<div class="tw"><table class="fx-ps"><thead><tr><th>Day</th><th>Kick-off</th><th>Game</th><th>Competition</th><th>Region</th><th>Players to watch</th></tr></thead><tbody>`
+      + rs.map(r => { const t = when(r.g.at), top = r.match.slice(0, 2).map(p => `<a class="fx-pl" href="${href(p)}">${esc(p.n)}</a>`).join(', ');
+          return `<tr><td>${esc(dShort(t))}</td><td>${hhmm(t)}</td><td><b>${esc(club(r.g.home))}</b> v <b>${esc(club(r.g.away))}</b></td>`
+            + `<td>${esc(r.g.lg)}</td><td>${esc(r.g.region[0] || r.g.region[1] || 'Region unknown')}</td>`
+            + `<td>${r.match.length ? `${r.match.length}: ${top}${r.match.length > 2 ? ' …' : ''}` : '<span class="note">—</span>'}</td></tr>`; }).join('')
+      + '</tbody></table></div>';
+  }).join('');
+}
 function scoutList() {
   const names = [...new Set([...D.users.map(u => u.name), ...(D.typed_scouts || [])])].sort();
   $('fx-scouts').innerHTML = names.map(n => `<option value="${esc(n)}">`).join('');
@@ -229,8 +260,15 @@ function fillSelects() {
   const list = (k, vals) => { $(`fx-${k}-list`).innerHTML = vals.map(v =>
     `<label><input type="checkbox" value="${esc(v)}"${sel[k].has(v) ? ' checked' : ''}>${esc(v)}</label>`).join(''); };
   scoutList();
+  scoutFilterList();
   list('lg', [...new Set(D.games.map(g => g.lg))].sort());
   list('region', D.regions);
+  // the days in this window, with their number of games
+  const days = {};
+  for (const g of D.games) days[dayKey(g)] = (days[dayKey(g)] || 0) + 1;
+  for (const d of [...sel.day]) if (!days[d]) sel.day.delete(d);
+  $('fx-day-list').innerHTML = Object.keys(days).sort().map(d =>
+    `<label><input type="checkbox" value="${d}"${sel.day.has(d) ? ' checked' : ''}>${esc(dShort(new Date(d + 'T12:00:00Z')))} <span class="note">(${days[d]} game${days[d] > 1 ? 's' : ''})</span></label>`).join('');
   msLabels();
   const posCur = new Set([...document.querySelectorAll('#fx-pos input:checked')].map(i => i.value));
   $('fx-pos').innerHTML = [...new Set(Object.values(D.players).map(p => p.pos).filter(Boolean))].sort()
@@ -274,21 +312,31 @@ $('fx-list').addEventListener('change', async e => {
     if (name && !D.typed_scouts.includes(name) && !D.users.some(u => u.name === name)) { D.typed_scouts.push(name); scoutList(); }
     s.classList.add('saved'); setTimeout(() => s.classList.remove('saved'), 900);
   } catch { s.value = g.scout || ''; }
-  if ($('fx-scout').value) draw();
+  scoutFilterList();
+  if (sel.scout.size) draw();
 });
 $('fx-views').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if (b) { view = b.dataset.v; draw(); } });
 $('fx-win').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; win = b.dataset.w;
-  for (const x of $('fx-win').querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); load(); });
+  for (const x of $('fx-win').querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); sel.day.clear(); load(); });
 $('fx-by').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; by = b.dataset.b;
   for (const x of $('fx-by').querySelectorAll('button')) x.setAttribute('aria-pressed', String(x === b)); draw(); });
-$('fx-filters').addEventListener('input', e => { if (e.target.closest('#fx-more,#fx-q,#fx-scout')) draw(); });
+$('fx-filters').addEventListener('input', e => { if (e.target.closest('#fx-more,#fx-q')) draw(); });
+// one-choice groups (Overall, Age, At least): ticking one clears the others; click it again to clear
+$('fx-more').addEventListener('change', e => {
+  const grp = e.target.closest('[data-one]');
+  if (grp && e.target.checked) for (const i of grp.querySelectorAll('input')) if (i !== e.target) i.checked = false;
+});
 // the two tick lists
 function msLabels() {
   const lab = (k, all, many) => { const n = sel[k].size;
     $(`fx-${k}-btn`).textContent = !n ? all : n === 1 ? [...sel[k]][0] : `${n} ${many}`; };
   lab('lg', 'All UK & Irish', 'leagues'); lab('region', 'All regions', 'regions');
+  const sn = sel.scout.size;
+  $('fx-scout-btn').textContent = !sn ? 'All games' : sn === 1 ? ([...sel.scout][0] === NOT_ASSIGNED ? 'Not assigned' : [...sel.scout][0]) : `${sn} scouts`;
+  const n = sel.day.size;
+  $('fx-day-btn').textContent = !n ? 'All days' : n === 1 ? dShort(new Date([...sel.day][0] + 'T12:00:00Z')) : `${n} days`;
 }
-const pops = ['fx-lg', 'fx-region'];
+const pops = ['fx-day', 'fx-lg', 'fx-region', 'fx-scout'];
 const closePops = except => { for (const id of pops) if (id !== except) { $(`${id}-pop`).hidden = true; $(`${id}-btn`).setAttribute('aria-expanded', 'false'); } };
 for (const id of pops) $(`${id}-btn`).addEventListener('click', () => {
   const pop = $(`${id}-pop`), open = pop.hidden;
@@ -304,7 +352,7 @@ $('fx-filters').addEventListener('change', e => {
 });
 $('fx-filters').addEventListener('click', e => {
   const b = e.target.closest('[data-all]'); if (!b || !b.closest('.fx-pop')) return;
-  const k = b.dataset.all === 'fx-lg' ? 'lg' : 'region';
+  const k = b.dataset.all.slice(3);
   sel[k].clear(); for (const i of $(`${b.dataset.all}-list`).querySelectorAll('input')) i.checked = false;
   msLabels(); draw();
 });
@@ -312,9 +360,9 @@ $('fx-sort').addEventListener('change', draw);
 $('fx-status').addEventListener('click', e => {
   if (e.target.id !== 'fx-clear') return;
   view = 'all';
-  for (const id of ['fx-q', 'fx-scout']) $(id).value = '';
-  sel.lg.clear(); sel.region.clear(); fillSelects();
-  for (const i of document.querySelectorAll('#fx-more input')) i.checked = i.type === 'radio' && (i.value === '' || (i.name === 'fx-least' && i.value === '1'));
+  $('fx-q').value = '';
+  sel.lg.clear(); sel.region.clear(); sel.day.clear(); sel.scout.clear(); fillSelects();
+  for (const i of document.querySelectorAll('#fx-more input')) i.checked = false;
   draw();
 });
 // add a game by hand

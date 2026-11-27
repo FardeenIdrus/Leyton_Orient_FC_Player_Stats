@@ -57,9 +57,11 @@ def breaking_through(age, club_minutes) -> dict:
     """`club_minutes`: his minutes in each of his club's games, oldest first (0 = did not play)."""
     m = [float(x or 0) for x in club_minutes][-10:]
     before, after = (round(sum(m[:5])), round(sum(m[5:]))) if len(m) == 10 else (None, None)
-    on = (age is not None and age < BREAK_AGE and before is not None
-          and after >= BREAK_MINUTES and after >= 2 * before)
-    return {"on": bool(on), "before": before, "after": after}
+    # the minutes jump itself, at any age ("Minutes up", owner 2026-11-27); under 23 it is
+    # "Breaking through"
+    up = before is not None and after >= BREAK_MINUTES and after >= 2 * before
+    on = up and age is not None and age < BREAK_AGE
+    return {"on": bool(on), "up": bool(up), "before": before, "after": after}
 
 
 def verdict_flags(reports) -> dict:

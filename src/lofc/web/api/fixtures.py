@@ -196,10 +196,13 @@ def why(p: dict) -> list[str]:
         w.append(f"Top 20% in {p['t10']} of last 10 games")
     if p.get("rise"):
         w.append(f"Rising: {p['rise_from']}% → {p['rise_to']}% (last 5 games vs 5 before)")
-    if (p.get("br") or {}).get("on"):
-        w.append(f"Breaking through: {p['br']['before']} to {p['br']['after']} min (5 club games before vs last 5)")
+    br = p.get("br") or {}
+    if br.get("on"):
+        w.append(f"U23, minutes {br['before']} → {br['after']} (last 5 club games vs 5 before)")
+    elif br.get("up"):
+        w.append(f"Minutes up: {br['before']} → {br['after']} (last 5 club games vs 5 before)")
     if p.get("ns"):
-        w.append("Not seen yet")
+        w.append("Never scouted, rated 3.5+")
     return w
 
 

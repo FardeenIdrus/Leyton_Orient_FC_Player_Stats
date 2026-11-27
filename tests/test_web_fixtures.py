@@ -84,7 +84,10 @@ def test_why_reads_the_same_as_the_page():
     p2 = {**p, "rep": [], "pri": False, "f5": False, "rise": True, "rise_by": 25, "rise_from": 40, "rise_to": 65,
           "br": {"on": True, "before": 37, "after": 343}}
     assert api.why(p2) == ["Rising: 40% → 65% (last 5 games vs 5 before)",
-                           "Breaking through: 37 to 343 min (5 club games before vs last 5)"]
+                           "U23, minutes 37 → 343 (last 5 club games vs 5 before)"]
+    older = {**p2, "rise": False, "br": {"on": False, "up": True, "before": 37, "after": 343}}
+    assert api.why(older) == ["Minutes up: 37 → 343 (last 5 club games vs 5 before)"]
+    assert api.why({**older, "br": {"on": False, "up": False}, "ns": True}) == ["Never scouted, rated 3.5+"]
 
 
 def test_workbook_by_region_one_row_per_player_and_only_the_filtered_players():
@@ -132,7 +135,7 @@ def test_wording_says_what_top_and_matching_mean_and_excel_follows_filters():
     root = Path(lofc.web.__file__).parent
     html = (root / "templates" / "fixtures.html").read_text()
     assert "3+ of last 5 games in the top 20%" in html and "6+ of last 10 games in the top 20%" in html
-    assert "Show games with at least" in html and "2 matching players" in html
+    assert "Show only games with at least" in html and "2 matching players" in html
     assert "Matching players per game" not in html and "Top in 3+ of last 5" not in html
     js = (root / "static" / "js" / "fixtures.js").read_text()
     assert "Top 20% in ${p.t5} of last 5 games" in js
@@ -174,3 +177,36 @@ def test_the_scout_box_takes_any_typed_name():
     js = (root / "static" / "js" / "fixtures.js").read_text()
     assert 'list="fx-scouts"' in js and 'placeholder="Assign a scout"' in js and "json: {key: s.dataset.as, name}" in js
     assert 'id="fx-scouts"' in (root / "templates" / "fixtures.html").read_text()
+
+
+def test_labels_say_why_never_scouted_possible_report_and_minutes():
+    from pathlib import Path
+    import lofc.web
+    js = (Path(lofc.web.__file__).parent / "static" / "js" / "fixtures.js").read_text()
+    assert "'Never scouted, rated 3.5+'" in js and "'Possible scout report, not linked'" in js
+    assert "`U23, minutes ${p.br.before} → ${p.br.after}`" in js and "`Minutes up: ${p.br.before} → ${p.br.after}`" in js
+    assert 'value="up"' in (Path(lofc.web.__file__).parent / "templates" / "fixtures.html").read_text()
+
+
+def test_days_filter_in_every_window():
+    """Owner 2026-11-27: pick one or several days (Next 7 / 14 days, Past 3 weeks)."""
+    from pathlib import Path
+    import lofc.web
+    root = Path(lofc.web.__file__).parent
+    assert 'id="fx-day-list" data-ms="day"' in (root / "templates" / "fixtures.html").read_text()
+    js = (root / "static" / "js" / "fixtures.js").read_text()
+    assert "sel.day.has(dayKey(x.g))" in js and "sel.day.clear(); load();" in js
+
+
+def test_one_choice_filters_can_be_cleared_and_scouts_filter_and_by_scout():
+    """Owner 2026-11-27: "at least N matching players" (and Overall, Age) could not be
+    unticked; filter by scout and see who watches what, when."""
+    from pathlib import Path
+    import lofc.web
+    root = Path(lofc.web.__file__).parent
+    html = (root / "templates" / "fixtures.html").read_text()
+    assert 'type="radio"' not in html and html.count("data-one") == 3
+    assert "Show only games with at least" in html and "1 matching player" not in html
+    assert 'id="fx-scout-list" data-ms="scout"' in html and 'data-b="scout"' in html
+    js = (root / "static" / "js" / "fixtures.js").read_text()
+    assert "function drawScouts" in js and "Not assigned" in js

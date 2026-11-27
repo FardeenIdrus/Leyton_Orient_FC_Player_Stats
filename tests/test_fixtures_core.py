@@ -27,8 +27,10 @@ def test_rising_is_20_points_up_on_the_5_games_before():
 def test_breaking_through_under_23_minutes_doubled_to_200_plus():
     before, after = [0, 12, 0, 25, 0], [90, 78, 90, 0, 85]
     b = fx.breaking_through(19, before + after)
-    assert b == {"on": True, "before": 37, "after": 343}
-    assert fx.breaking_through(23, before + after)["on"] is False                     # not under 23
+    assert b == {"on": True, "up": True, "before": 37, "after": 343}
+    # owner 2026-11-27: the same minutes jump at any age is "Minutes up"
+    assert fx.breaking_through(23, before + after) == {"on": False, "up": True, "before": 37, "after": 343}
+    assert fx.breaking_through(31, [90] * 10)["up"] is False
     assert fx.breaking_through(19, [90] * 5 + [90] * 5)["on"] is False                # no jump
     assert fx.breaking_through(19, [0] * 5 + [45, 45, 45, 45, 0])["on"] is False      # 180 < 200
     assert fx.breaking_through(None, before + after)["on"] is False                   # age unknown
@@ -109,7 +111,7 @@ def _frames():
 
 def test_players_get_their_squad_signals_and_rank():
     P, squads = fx.players(_frames(), today=pd.Timestamp("2026-11-27"))
-    assert P[1]["br"] == {"on": True, "before": 0, "after": 450} and P[1]["age"] == 19
+    assert P[1]["br"] == {"on": True, "up": True, "before": 0, "after": 450} and P[1]["age"] == 19
     assert P[2]["f5"] is True and P[2]["sq"] == 10 and P[2]["ov"] == 3.2 and P[2]["rk"] == 1 and P[2]["of"] == 1
     assert P[3]["sq"] == 30 and P[3]["pos"] == "Centre Back" and P[3]["f"] == []   # no games: from squad minutes
     assert squads[30]["name"] == "Port Vale"

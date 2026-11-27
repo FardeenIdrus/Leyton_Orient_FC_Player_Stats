@@ -4086,6 +4086,18 @@ def fixtures_views_and_filters(s, w):
     if s.page.locator("#fx-clear").count():
         s.step("fixtures: Clear filters", lambda p: p.locator("#fx-clear").click(timeout=3000))
     s.note("fixtures: Clear filters shows every game again", None if s.page.locator("#fx-list .fx-row").count() == total else "not all back")
+    # owner 2026-11-27: one day
+    s.step("fixtures: open Days", lambda p: p.locator("#fx-day-btn").click(timeout=3000))
+    first_day = s.page.locator("#fx-day-list input").first
+    if first_day.count():
+        d = first_day.get_attribute("value")
+        s.step("fixtures: tick the first day", lambda p: first_day.check(timeout=3000))
+        n_day = s.page.locator("#fx-list .fx-day").count()
+        s.note("fixtures: one day shows one day's games", None if n_day == 1 else f"{n_day} day headings")
+        s.page.keyboard.press("Escape")
+        if s.page.locator("#fx-clear").count():
+            s.step("fixtures: Clear filters", lambda p: p.locator("#fx-clear").click(timeout=3000))
+        s.note("fixtures: Clear resets Days", None if s.page.inner_text("#fx-day-btn") == "All days" else s.page.inner_text("#fx-day-btn"))
     # owner 2026-11-27: several regions at once
     s.step("fixtures: open Regions", lambda p: p.locator("#fx-region-btn").click(timeout=3000))
     boxes = s.page.locator("#fx-region-list input")
@@ -4103,6 +4115,12 @@ def fixtures_views_and_filters(s, w):
         if s.page.locator("#fx-clear").count():
             s.step("fixtures: Clear filters", lambda p: p.locator("#fx-clear").click(timeout=3000))
         s.note("fixtures: Clear resets Regions", None if s.page.inner_text("#fx-region-btn") == "All regions" else s.page.inner_text("#fx-region-btn"))
+    # owner 2026-11-27: a one-choice filter can be cleared by clicking it again
+    s.step("fixtures: tick 2 matching players", lambda p: p.locator('[data-g="least"] input[value="2"]').check(timeout=3000))
+    s.step("fixtures: untick 2 matching players", lambda p: p.locator('[data-g="least"] input[value="2"]').uncheck(timeout=3000))
+    s.note("fixtures: 'at least' can be cleared", None if not s.page.locator('[data-g="least"] input:checked').count() else "still ticked")
+    s.step("fixtures: By scout", lambda p: p.locator('#fx-by [data-b="scout"]').click(timeout=3000))
+    s.note("fixtures: By scout groups games by scout", None if s.page.locator("#fx-list .fx-scout-h").count() else "no scout groups")
     s.step("fixtures: By player", lambda p: p.locator('#fx-by [data-b="player"]').click(timeout=3000))
     heads = s.page.locator("#fx-list table.fx-ps th").all_inner_texts()
     s.note("fixtures: By player lists each player's next game", None if "Next game" in heads else str(heads))

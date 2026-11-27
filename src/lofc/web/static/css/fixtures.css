@@ -15,7 +15,7 @@
 .fx-view span{display:block;font-size:12px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fx-view[aria-pressed=true]{border-color:var(--ink);background:var(--soft)}
 .fx-view:hover{background:var(--soft)}
-.fx-bar{display:grid;grid-template-columns:repeat(3,minmax(150px,200px)) minmax(200px,1fr);gap:12px;align-items:end;margin-top:14px}
+.fx-bar{display:grid;grid-template-columns:repeat(4,minmax(140px,190px)) minmax(180px,1fr);gap:12px;align-items:end;margin-top:14px}
 .fx-bar .f{min-width:0}
 .fx-bar .ctl{height:36px;box-sizing:border-box}
 .fx-lbl{font-size:12.5px;color:var(--muted);font-weight:500}
@@ -92,7 +92,7 @@ table.fx-ps tr.out td{opacity:.65}
 .fx-dot{width:12px;height:12px;border-radius:6px;border:2px solid #fff}
 .fx-dot.T{background:var(--hi)}.fx-dot.A{background:#A87B00}.fx-dot.L{background:var(--lo)}.fx-dot.N{background:#fff;border-color:#CDD1D7}
 .fx-seg button:focus-visible,.fx-view:focus-visible,tr.fx-row:focus-visible,.fx-link:focus-visible,.fx-more summary:focus-visible{outline:2px solid var(--orient);outline-offset:2px}
-@media (max-width:1180px){.fx-views{grid-template-columns:repeat(4,minmax(0,1fr))}.fx-bar{grid-template-columns:repeat(3,minmax(0,1fr))}.fx-bar .f:last-child{grid-column:1/-1}}
+@media (max-width:1180px){.fx-views{grid-template-columns:repeat(4,minmax(0,1fr))}.fx-bar{grid-template-columns:repeat(4,minmax(0,1fr))}.fx-bar .f:last-child{grid-column:1/-1}}
 @media (max-width:1100px){.fx-grid{grid-template-columns:repeat(2,minmax(0,1fr))}td.fx-counts{width:220px}}
 @media (max-width:760px){.fx-views{grid-template-columns:repeat(2,minmax(0,1fr))}.fx-grid{grid-template-columns:1fr}.fx-grp.wide{grid-column:auto}
   td.fx-counts{display:none}tr.fx-open>td{padding-left:8px}td.fx-game{min-width:0}}
@@ -106,3 +106,6 @@ table.fx-ps tr.out td{opacity:.65}
 .fx-pop-list{max-height:320px;overflow:auto;margin-top:8px;display:flex;flex-direction:column;gap:2px}
 .fx-pop-list label{display:flex;gap:8px;align-items:center;font-size:14px;padding:4px 2px;cursor:pointer}
 .fx-pop-btn:focus-visible{outline:2px solid var(--orient);outline-offset:2px}
+.fx-scout-h{display:flex;justify-content:space-between;align-items:baseline;padding:16px 0 6px;border-bottom:2px solid var(--ink);font-size:15px}
+.fx-scout-h:first-child{padding-top:0}
+.fx-scout-h span{font-size:13px;color:var(--muted)}
