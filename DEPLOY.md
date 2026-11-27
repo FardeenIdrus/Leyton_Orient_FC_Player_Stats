@@ -28,7 +28,7 @@
 | Daily 19:30 | `scripts/db_backup.sh` | Dumps OUR database to `/opt/lofc/backups` (14 kept, each verified) |
 | Sunday 03:30 | `docker builder prune -f --filter until=168h` | Clears Docker build cache (it grew 22 GB from deploys) |
 | Sunday 04:00 | `scripts/db_maintenance.sh` | `VACUUM (ANALYZE)` on the tables the pipeline rewrites weekly |
-| **Monday 04:15** and **Thursday 04:15** | `scripts/weekly_refresh.sh` | The full pipeline: Impect + SkillCorner pull, rebuild, re-score, then the per-match Impect scores of the English leagues (only matches not pulled yet). Result in `data/ops/last_success` / `last_failure`; the site's top bar shows the last pull dates |
+| **Monday 04:15** and **Thursday 04:15** | `scripts/weekly_refresh.sh` | The full pipeline: Impect + SkillCorner pull, rebuild, re-score, then the per-match Impect scores of the UK and Irish leagues (only matches not pulled yet). Result in `data/ops/last_success` / `last_failure`; the site's top bar shows the last pull dates |
 
 ### How data stays fresh
 

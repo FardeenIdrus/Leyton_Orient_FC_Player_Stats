@@ -557,7 +557,7 @@ docker compose exec -T app python -m lofc.model.squad_minutes
 # Transfermarkt club -> Impect squad list (src/lofc/reference/club_crosswalk.csv): report unmatched clubs; --seed rewrites it (hand rows kept)
 docker compose exec -T app python -m lofc.model.club_crosswalk
 
-# --- Match scores (owner 2026-11-23, phase 4): per-match IMPECT / Offensive / Defensive, English leagues ---
+# --- Match scores (owner 2026-11-23, phase 4): per-match IMPECT / Offensive / Defensive + club scores, UK & Irish leagues (N28, 2026-11-27) ---
 # MONITORING ONLY (never scoring). Needs the migration (deploy.sh applies it). Pipeline step "Match scores"
 # runs it after every refresh (only matches not pulled yet, ~55 calls a week). First pull ~800 calls.
 # --dry-run: fixture lists only (5 calls), prints how many matches would be pulled. --iteration N: one league.

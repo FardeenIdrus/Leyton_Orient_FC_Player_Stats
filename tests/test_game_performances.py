@@ -40,8 +40,19 @@ def test_counts_only_games_of_45_minutes():
     assert out["counts"]["impect"] == {"Top": 5, "Average": 4, "Low": 0}
     shown = [(x["scores"]["impect"]["pct"], x["scores"]["impect"]["level"]) for x in out["games"]]
     assert (20, "Average") in shown and (80, "Average") in shown and (81, "Top") in shown
-    assert out["note"] == ("Match totals, as in Impect (not scaled to 90). Each game: better than X% of games "
-                           "at the position he played, in League One this season (45+ minutes).")
+    assert out["note"] == "Match totals, as in Impect (not scaled to 90)."
+
+
+def test_one_line_names_the_pool_of_games():
+    """Owner 2026-11-27 (N26, option A): the two-line paragraph under the chart is replaced by one
+    line under the heading naming what each game is compared with. The position is named only
+    when every game shown was at one position (each game is measured at the position he played)."""
+    out = gp.block(_games(), league_names={4: "League One"})
+    assert out["pool"] == "Each game vs every Winger game (45+ min), League One this season"
+    assert "club_note" not in out
+    mixed = _games().assign(position_group=["Winger"] * 11 + ["Striker"])
+    assert gp.block(mixed, league_names={4: "League One"})["pool"] == (
+        "Each game vs every game at the position he played (45+ min), League One this season")
 
 
 def test_no_games_no_block():

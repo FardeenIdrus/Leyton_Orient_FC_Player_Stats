@@ -1,10 +1,12 @@
-"""Impect fixtures and per-match player scores for the English leagues (owner 2026-11-23, phase 4).
+"""Impect fixtures and per-match player scores for the UK and Irish leagues (owner 2026-11-23, phase 4;
+Scottish, Northern Irish and Irish leagues added 2026-11-27, N28).
 
-    python -m lofc.ingest.impect_matches            # this season, every English league
+    python -m lofc.ingest.impect_matches            # this season, every UK and Irish league
     python -m lofc.ingest.impect_matches --dry-run  # counts what would be pulled; no call made
 
-For each of the five English leagues (Championship, League One, League Two, National League,
-Premier League 2) in the season being played:
+For each UK and Irish league (Championship, League One, League Two, National League, Premier
+League 2, Scottish Premiership, Scottish Championship, NIFL Premiership, Irish Premier Division)
+in the season being played:
 
   1. the fixture list (one call per league): every match, played or not, into `impect_matches`;
   2. each played match not pulled yet, or recalculated by Impect since (one call per match):
@@ -35,7 +37,9 @@ import pandas as pd
 from lofc.ingest.impect_map import IMPECT_POSITION_GROUPS
 
 HOST = "https://api.impect.com/v5/customerapi"
-ENGLISH = {3, 4, 5, 65, 903}             # Championship, L1, L2, National League, PL2
+# Championship, L1, L2, National League, PL2, Scottish Premiership, Scottish Championship,
+# NIFL Premiership (10_000 + 305), Irish Premier Division (10_000 + 189) -- owner 2026-11-27 (N28)
+UK_IRELAND = {3, 4, 5, 65, 903, 901, 902, 10305, 10189}
 SCORES = {"impect": "IMPECT_SCORE_PACKING", "offensive": "OFFENSIVE_IMPECT_SCORE_PACKING",
           "defensive": "DEFENSIVE_IMPECT_SCORE_PACKING"}
 MIN_MINUTES = 45                          # games that count (owner 2026-11-23)
@@ -171,9 +175,9 @@ class Api:
 
 
 def targets(settings) -> list:
-    """The English leagues in the season being played."""
+    """The UK and Irish leagues in the season being played."""
     live = settings.live_season_id
-    return [t for t in settings.impect_targets if t.competition_id in ENGLISH and t.season_id == live]
+    return [t for t in settings.impect_targets if t.competition_id in UK_IRELAND and t.season_id == live]
 
 
 def _squad_names(engine) -> dict:

@@ -521,8 +521,18 @@ def card_game_performances(s, w):
     s.note("card: a % above every rated dot", None if dots and pcts >= dots else f"{dots} dots, {pcts} %")
     s.note("card: Top / Average / Low counts", None if all(k in s.page.inner_text("#gp-counts") for k in ("Top", "Average", "Low"))
            else s.page.inner_text("#gp-counts"))
-    s.note("card: club note on the club tabs", None if s.page.inner_text("#gp-note").startswith("Our club formula applied to one game")
-           else s.page.inner_text("#gp-note"))
+    # owner 2026-11-27 (N26, option A): one line names the pool; a game's scores are one table
+    s.note("card: one line names the pool of games", None if s.page.inner_text("#gp-sub").startswith("Each game vs every")
+           else s.page.inner_text("#gp-sub"))
+    s.note("card: no paragraph under the chart on the club tabs", None if s.page.locator("#gp-note").is_hidden() else "shown")
+    heads = s.page.locator("#gd table.gd-score thead").inner_text() if s.page.locator("#gd table.gd-score").count() else ""
+    rows = s.page.locator("#gd table.gd-score tbody tr").count()
+    s.note("card: game scores: Score / Band (1 to 5) / Better than",
+           None if "Band (1 to 5)" in heads and "Better than (% of games)" in heads and rows == 4 else f"{heads!r} {rows} rows")
+    s.note("card: Impect row says no band", None if "no band" in s.page.locator("#gd table.gd-score tbody tr").last.inner_text() else "missing")
+    cut = s.page.evaluate("() => [...document.querySelectorAll('#gp svg .gp-opp')].some(t => t.textContent.includes('…'))")
+    rows2 = s.page.evaluate("() => { const t = [...document.querySelectorAll('#gp svg .gp-opp')]; return t.length > 1 && t[0].getAttribute('y') !== t[1].getAttribute('y'); }")
+    s.note("card: club names not cut when there is room", None if rows2 or not cut else "a name ends in …")
     # owner 2026-11-23: the metric tables are closed until asked for
     s.note("card: game metric tables closed on open",
            None if s.page.locator("#gd .gd-tbl").count() == 0 and s.page.locator("#gd-more").count() == 1
@@ -590,6 +600,25 @@ def card_game_performances(s, w):
     box.scroll_into_view_if_needed()
     try:
         box.screenshot(path=str(s.out / f"card_game_performances_{w}.png"))
+    except Exception:                                   # noqa: BLE001 -- screenshot only
+        pass
+
+
+def card_game_performances_empty(s, w):
+    """Owner 2026-11-27 (N26): a player with no game data keeps the section, with one line."""
+    s.goto("/player/47357/5/319", check=False)        # English league: no game data on the Mac
+    box = s.page.locator("#c-games")
+    try:
+        box.wait_for(state="visible", timeout=8000)
+    except Exception:                                   # noqa: BLE001
+        return s.note("card: no game data shows one line", "section hidden")
+    sub = s.page.inner_text("#gp-sub")
+    if sub.startswith("Each game vs"):
+        return s.note("card: no game data shows one line", skipped="this player has game data here")
+    s.note("card: no game data shows one line",
+           None if sub == "No game data for him this season." and s.page.locator("#gp-tabs").is_hidden() else repr(sub))
+    try:
+        box.screenshot(path=str(s.out / f"card_game_performances_empty_{w}.png"))
     except Exception:                                   # noqa: BLE001 -- screenshot only
         pass
 
@@ -4014,7 +4043,7 @@ PAGES = {
     "card": {"path": "/player/39154/5/318", "exercise": True, "scenarios": [
         card_no_assess, card_back_link, card_money_switch, card_rank_as, card_zones, card_squad_season,
         card_watchlist, card_radars, card_rated_tables, card_extra_tables, card_strengths_no_overlap,
-        card_other_players, card_similar, card_game_performances]},
+        card_other_players, card_similar, card_game_performances, card_game_performances_empty]},
     "compare": {"path": "/compare?season=318&position=Winger", "exercise": True, "scenarios": [
         compare_three_players_every_width, compare_defaults_fill_the_url,
         compare_position_season_back_forward, compare_pick_from_pool_list,

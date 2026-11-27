@@ -9,9 +9,23 @@ from lofc.ingest import impect_matches as im
 SCORE_IDS = {"IMPECT_SCORE_PACKING": 0, "OFFENSIVE_IMPECT_SCORE_PACKING": 1, "DEFENSIVE_IMPECT_SCORE_PACKING": 2}
 
 
-def test_english_targets_are_the_five_leagues_this_season():
-    from lofc.ingest.impect_matches import ENGLISH
-    assert ENGLISH == {3, 4, 5, 65, 903}
+def test_match_pull_covers_every_uk_and_irish_league():
+    """Owner 2026-11-27 (N28): all UK and Irish leagues, not only the English ones -- the five
+    English (with PL2), both Scottish, the NIFL Premiership and the Irish Premier Division."""
+    from lofc import leagues
+    from lofc.ingest.impect_matches import UK_IRELAND
+    names = {c.competition_id: c.name for c in leagues.LEAGUES}
+    assert {names[c] for c in UK_IRELAND} == {
+        "Championship", "League One", "League Two", "National League", "Premier League 2",
+        "Scottish Premiership", "Scottish Championship",
+        "NIFL Premiership (Northern Ireland)", "Irish Premier Division"}
+
+
+def test_targets_are_those_leagues_in_the_live_season_only():
+    from types import SimpleNamespace as NS
+    t = [NS(competition_id=c, season_id=s) for c, s in [(4, 319), (901, 319), (10189, 319), (4, 318), (10348, 319)]]
+    got = im.targets(NS(live_season_id=319, impect_targets=t))
+    assert [(x.competition_id, x.season_id) for x in got] == [(4, 319), (901, 319), (10189, 319)]
 
 
 def test_parse_matches_keeps_played_and_future_fixtures():

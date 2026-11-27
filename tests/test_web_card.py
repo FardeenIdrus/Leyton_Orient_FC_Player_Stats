@@ -349,3 +349,46 @@ def test_game_metric_tables_are_closed_until_asked_for():
     assert body.index("if (!gdOpen) return") < body.index("await api(")
     click = js[js.index("document.addEventListener('click'"):]
     assert "#gd-more" in click and "gdOpen = !gdOpen" in click
+
+
+def test_a_games_scores_are_a_table_of_band_and_better_than():
+    """Owner 2026-11-27 (N26, option A): the four grey tiles (headline = a band in three, a % in
+    Impect's) become one table -- Score / Band (1 to 5) / Better than (% of games); Impect has
+    "no band". Only the tabs switch the chart. The formula line (it gave 5.15 for a 3.69) is gone."""
+    from pathlib import Path
+    import lofc.web
+    root = Path(lofc.web.__file__).parent
+    js = (root / "static" / "js" / "card.js").read_text()
+    body = js[js.index("async function drawGameDetail"):js.index("async function loadGames")]
+    assert "Band (1 to 5)" in body and "Better than (% of games)" in body and "no band" in body
+    assert "/ 5" in body and "gd-score" in body
+    assert "gd-tile" not in js and "data-gt" not in js
+    assert "Band 1–5 = 3 + (% − 50) ÷ 20" not in js
+    games = js[js.index("function drawGames"):js.index("const gpRow")]
+    assert "GP.pool" in games and "GP.club_note" not in games
+    css = (root / "static" / "css" / "card.css").read_text()
+    assert ".gp-a{fill:#A87B00}" in css                      # Average dot readable (3.8:1, was 2.4:1)
+    assert ".gp-hit:focus-visible" in css
+
+
+def test_game_chart_names_clubs_in_full_on_two_lines():
+    """Owner 2026-11-27 (N26): "Heart of M..." / "St. Johnst..." were cut; when the games have
+    room (one row of names) a long name wraps onto a second line instead."""
+    from pathlib import Path
+    import lofc.web
+    js = (Path(lofc.web.__file__).parent / "static" / "js" / "card.js").read_text()
+    games = js[js.index("function drawGames"):js.index("const gpRow")]
+    assert "clubLines(" in games and "<tspan" in games
+
+
+def test_no_games_shows_one_line_instead_of_hiding_the_section():
+    """Owner 2026-11-27 (N26): with no game data the section vanished, which looked like a bug.
+    It now stays, with one line; a failed load says so instead."""
+    from pathlib import Path
+    import lofc.web
+    js = (Path(lofc.web.__file__).parent / "static" / "js" / "card.js").read_text()
+    games = js[js.index("function drawGames"):js.index("const gpRow")]
+    assert "if (!GP) { box.hidden = true; return; }" not in games
+    assert "No game data for him this season." in games and "Could not load the games." in js
+    load = js[js.index("async function loadGames"):]
+    assert "gpErr = true" in load[:300]

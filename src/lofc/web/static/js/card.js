@@ -633,11 +633,24 @@ function prefetchLenses() {
 // a short club name under the dot (the full one on hover): no "FC", at most 11 characters
 const shortClub = n => { const t = String(n || '').replace(/\b(A?FC|Glasgow)\b/g, '').replace(/\s+/g, ' ').trim();
   return t.length > 11 ? t.slice(0, 10).trim() + '…' : t; };
+// Owner 2026-11-27 (N26): with room for one row of names, a long name wraps onto a second line
+// ("Heart of" / "Midlothian") instead of being cut.
+const clubLines = n => {
+  const t = String(n || '').replace(/\b(A?FC|Glasgow)\b/g, '').replace(/\s+/g, ' ').trim();
+  if (t.length <= 11 || !t.includes(' ')) return [t];
+  const w = t.split(' ');
+  let best = [t], gap = Infinity;
+  for (let i = 1; i < w.length; i++) {
+    const a = w.slice(0, i).join(' '), b = w.slice(i).join(' ');
+    if (Math.max(a.length, b.length) < gap) { gap = Math.max(a.length, b.length); best = [a, b]; }
+  }
+  return best;
+};
 // Each of his last games: better than X% of that position's games in his league (45+ minutes),
 // Top above 80 / Low below 20, as in Impect. Hollow dot = under 45 minutes (not counted).
 // Owner 2026-11-23 (N21): the club's own Overall / Performance / Physical per game beside
 // Impect's scores; click a game for every metric behind it; Excel holds every game.
-let GP = null, gpTab = 'overall', gpImp = 'impect', gpSel = null, gpW = 0;
+let GP = null, gpErr = false, gpTab = 'overall', gpImp = 'impect', gpSel = null, gpW = 0;
 const GP_TABS = [['overall', 'Overall'], ['performance', 'Performance'], ['physical', 'Physical'], ['impect', 'Impect']];
 const GP_IMP = [['impect', 'IMPECT'], ['offensive', 'Offensive'], ['defensive', 'Defensive']];
 const gpKey = () => gpTab === 'impect' ? gpImp : gpTab;
@@ -647,8 +660,14 @@ const gpDetail = new Map();
 let gdOpen = false;
 function drawGames() {
   const box = $('c-games');
-  if (!GP) { box.hidden = true; return; }
   box.hidden = false;
+  if (!GP) {
+    // Owner 2026-11-27 (N26): one line instead of a section that silently disappears.
+    $('gp-sub').textContent = gpErr ? 'Could not load the games.' : 'No game data for him this season.';
+    for (const id of ['gp-tabs', 'gp-imp', 'gp-xl', 'gp-note', 'gd']) $(id).hidden = true;
+    $('gp').innerHTML = ''; $('gp-counts').innerHTML = '';
+    return;
+  }
   if (!GP.has_club && gpClub(gpTab)) gpTab = 'impect';
   // With Impect's scores only, the one switch is IMPECT / Offensive / Defensive (owner
   // 2026-11-23: an "Impect" tab above its own switch read as a duplicate).
@@ -674,23 +693,28 @@ function drawGames() {
   const y = p => top + (100 - p) * (PH - top - 8) / 100;
   const step = g.length > 1 ? (x1 - x0) / (g.length - 1) : 0;
   const rows = g.length > 1 && step < 96 ? 2 : 1;
-  const H = PH + (rows === 2 ? 58 : 44);
+  const H = PH + 58, dateY = PH + 42;   // names: one or two lines (wrapped or staggered)
   if (gpSel == null || !g.some(m => m.match_id === gpSel)) gpSel = g.length ? g[g.length - 1].match_id : null;
   const xs = i => g.length > 1 ? x0 + i * step : (x0 + x1) / 2;
   const si = g.findIndex(m => m.match_id === gpSel), sw = Math.min(step || 68, 68);
   let svg = `<svg width="${W}" height="${H}" class="gp-svg" role="img" aria-label="Game performances">`
-    + (si >= 0 ? `<rect x="${xs(si) - sw / 2}" y="${top - 18}" width="${sw}" height="${PH + rows * 14 + 22 - top}" rx="6" class="gp-sel"/>` : '')
+    + (si >= 0 ? `<rect x="${xs(si) - sw / 2}" y="${top - 18}" width="${sw}" height="${dateY + 8 - (top - 18)}" rx="6" class="gp-sel"/>` : '')
     + `<rect x="${x0 - 14}" y="${y(100)}" width="${x1 - x0 + 28}" height="${y(80) - y(100)}" class="gp-bt"/>`
     + `<rect x="${x0 - 14}" y="${y(20)}" width="${x1 - x0 + 28}" height="${y(0) - y(20)}" class="gp-bl"/>`
     + [80, 20].map(v => `<line x1="${x0 - 14}" x2="${x1 + 14}" y1="${y(v)}" y2="${y(v)}" class="gp-ln"/>`).join('')
-    + `<text x="4" y="${y(90) + 4}" class="gp-lbl">Top</text><text x="4" y="${y(50) + 4}" class="gp-lbl">Average</text><text x="4" y="${y(10) + 4}" class="gp-lbl">Low</text>`;
+    + `<text x="4" y="${y(90) + 4}" class="gp-lbl t">Top</text><text x="4" y="${y(80) + 3}" class="gp-lbs">80%+</text>`
+    + `<text x="4" y="${y(50) + 4}" class="gp-lbl a">Average</text>`
+    + `<text x="4" y="${y(10) + 4}" class="gp-lbl l">Low</text><text x="4" y="${y(0) + 2}" class="gp-lbs">under 20%</text>`;
   let short = 0;
   g.forEach((m, i) => {
     const x = xs(i), sc = m.scores[key];
     const row = rows === 2 ? i % 2 : 0, ly = PH + 14 + row * 14;
     const where = (m.home ? 'v ' : '@ ') + m.opponent;
-    svg += `<text x="${x}" y="${ly}" class="gp-opp${m.match_id === gpSel ? ' on' : ''}" text-anchor="middle" data-tip="${esc(where)}">${esc((m.home ? '' : '@ ') + shortClub(m.opponent))}</text>`
-      + `<text x="${x}" y="${PH + 14 + rows * 14}" class="gp-min" text-anchor="middle">${esc(m.date)}</text>`;
+    const lines = rows === 2 ? [shortClub(m.opponent)] : clubLines(m.opponent);
+    if (!m.home) lines[0] = '@ ' + lines[0];
+    const name = lines.map((t, j) => `<tspan x="${x}" dy="${j ? 14 : 0}">${esc(t)}</tspan>`).join('');
+    svg += `<text x="${x}" y="${ly}" class="gp-opp${m.match_id === gpSel ? ' on' : ''}" text-anchor="middle" data-tip="${esc(where)}">${name}</text>`
+      + `<text x="${x}" y="${dateY}" class="gp-min" text-anchor="middle">${esc(m.date)}</text>`;
     const base = `${where} · ${m.date} · ${m.minutes ?? '—'} min`;
     if (sc.pct == null) {
       // a club score is not given for a game under 45 minutes: shown, never rated
@@ -714,8 +738,10 @@ function drawGames() {
   $('gp-counts').innerHTML = `<span class="c t">${c.Top} Top</span><span class="c a">${c.Average} Average</span><span class="c l">${c.Low} Low</span>`
     + (short ? `<span class="c s">${short} under 45 min</span>` : '')
     + `<span class="note">last ${g.length} games · click a dot for the game</span>`;
-  $('gp-sub').textContent = gpClub(key) ? `Club ${name.toLowerCase()} score per game` : `Impect ${name} per game`;
-  $('gp-note').textContent = gpClub(key) ? GP.club_note : GP.note;
+  // Owner 2026-11-27 (N26): one line names the pool; the Impect tab adds that its scores are match totals.
+  $('gp-sub').textContent = GP.pool;
+  $('gp-note').textContent = gpClub(key) ? '' : GP.note;
+  $('gp-note').hidden = gpClub(key);
   drawGameDetail();
 }
 const gpRow = r => {
@@ -730,20 +756,24 @@ async function drawGameDetail() {
   const m = GP ? GP.games.find(x => x.match_id === gpSel) : null;
   if (!m) { box.hidden = true; return; }
   box.hidden = false;
-  const head = `${m.home ? 'v' : '@'} ${esc(m.opponent)} (${m.home ? 'H' : 'A'}) · ${esc(m.date)} · ${m.minutes ?? '—'} min · ${esc(m.position || '')}`;
+  const head = `${m.home ? 'v' : '@'} ${esc(m.opponent)} <span class="gd-m">${m.home ? 'Home' : 'Away'}, ${esc(m.date)}, ${m.minutes ?? '—'} min${m.position ? ', ' + esc(m.position) : ''}</span>`;
   const s = m.scores;
-  const tile = (k, label, v, sc, extra = '') => `<div class="gd-tile${(gpTab === k || (k === 'impect' && gpTab === 'impect')) ? ' on' : ''}" data-gt="${k}">
-      <div class="k">${label}</div><div class="v">${v}${sc.pct == null ? '' : `<small>${sc.pct}%</small>`}</div>
-      <div class="x">${sc.level ? `<span class="lv ${sc.level}">${sc.level}</span>` : '<span class="lv">no rating</span>'}${extra}</div></div>`;
-  const cv = sc => sc.value == null ? '—' : sc.value.toFixed(2);
-  let h = `<div class="gd-h"><b>${head}</b></div><div class="gd-tiles">`
-    + tile('overall', 'Overall', cv(s.overall), s.overall)
-    + tile('performance', 'Performance', cv(s.performance), s.performance)
-    + tile('physical', 'Physical', cv(s.physical), s.physical)
-    + tile('impect', 'Impect', s.impect.pct == null ? '—' : `${s.impect.pct}%`, {pct: null, level: s.impect.level},
-      `<br>Offensive ${s.offensive.pct ?? '—'}% · Defensive ${s.defensive.pct ?? '—'}%`)
-    + `</div><p class="note">Overall = Performance 65% + Physical 35%. Band 1–5 = 3 + (% − 50) ÷ 20.</p>`;
-  if (!m.counted) h += `<p class="note">No rating: under 45 min. Values shown, not compared.</p>`;
+  // Owner 2026-11-27 (N26, option A): one table, band and "better than" each in their own named
+  // column (the tiles put a band in three and a % in Impect's, in the same place).
+  const lvc = l => l === 'Top' ? 'Top' : l === 'Low' ? 'Low' : 'Average';
+  const better = (sc, extra = '') => sc.pct == null
+    ? `<span class="mu">${m.counted ? '—' : 'no rating: under 45 min'}</span>`
+    : `<div class="gd-b"><div class="t"><i class="${lvc(sc.level)}" style="width:${sc.pct}%"></i></div>`
+      + `<b>${sc.pct}%</b><span class="lv ${esc(sc.level || '')}">${esc(sc.level || '')}</span>${extra}</div>`;
+  const band = sc => sc.value == null ? `<span class="mu">${m.counted ? '—' : 'no rating: under 45 min'}</span>` : `${chip(sc.value)}<span class="of">/ 5</span>`;
+  const row = (label, b, sc, extra) => `<tr><th scope="row">${label}</th><td>${b}</td><td>${better(sc, extra)}</td></tr>`;
+  const imp = row('Impect', '<span class="mu">no band</span>', s.impect,
+    `<span class="mu">Offensive ${s.offensive.pct ?? '—'}%, Defensive ${s.defensive.pct ?? '—'}%</span>`);
+  let h = `<div class="gd-h"><b>${head}</b></div><div class="tw"><table class="gd-score"><thead><tr><th>Score</th>`
+    + `<th>Band (1 to 5)</th><th>Better than (% of games)</th></tr></thead><tbody>`
+    + (GP.has_club ? row('Overall', band(s.overall), s.overall) + row('Performance', band(s.performance), s.performance)
+      + row('Physical', band(s.physical), s.physical) : '')
+    + imp + '</tbody></table></div>';
   if (!GP.has_club) { box.innerHTML = h + '<p class="note">Club scores for this game are not in yet.</p>'; return; }
   const more = `<button type="button" id="gd-more" class="gd-more" aria-expanded="${gdOpen}" aria-controls="gd-t">`
     + `${gdOpen ? 'Hide all metrics' : 'Show all metrics'} <span aria-hidden="true">${gdOpen ? '▴' : '▾'}</span></button>`;
@@ -765,7 +795,8 @@ async function drawGameDetail() {
       <thead><tr><th>Metric</th><th class="n">This game</th><th class="n">Per 90</th><th>% vs games</th><th class="c">Band</th><th>SkillCorner column</th></tr></thead><tbody>${phys}</tbody></table></div>` : '');
 }
 async function loadGames() {
-  try { GP = (await api(`/api/card/${KEY}/games`)).block; } catch { GP = null; }
+  gpErr = false;
+  try { GP = (await api(`/api/card/${KEY}/games`)).block; } catch { GP = null; gpErr = true; }
   drawGames();
 }
 
@@ -854,8 +885,6 @@ document.addEventListener('click', e => {
   if (b) { gpTab = b.dataset.gp; drawGames(); return; }
   const i = e.target.closest('#gp-imp [data-gpi]');
   if (i) { gpImp = i.dataset.gpi; drawGames(); return; }
-  const t = e.target.closest('#gd [data-gt]');
-  if (t) { gpTab = t.dataset.gt; drawGames(); return; }
   if (e.target.closest('#gd-more')) { gdOpen = !gdOpen; drawGameDetail(); return; }
   const d = e.target.closest('#gp [data-g]');
   if (d && GP) { gpSel = +d.dataset.g; drawGames(); }

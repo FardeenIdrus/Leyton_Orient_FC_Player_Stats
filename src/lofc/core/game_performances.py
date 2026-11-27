@@ -73,12 +73,13 @@ def block(games: pd.DataFrame, league_names: dict) -> dict | None:
     # each game is measured at the position he played in THAT game
     has_club = any(x["scores"]["overall"]["value"] is not None or x["scores"]["performance"]["value"] is not None
                    for x in rows)
+    # Owner 2026-11-27 (N26): one line under the heading names the pool (it replaced a two-line
+    # paragraph); the position is named only when every game shown was at that one position.
+    positions = {x["position"] for x in rows if x["position"]}
+    who = f"every {positions.pop()} game" if len(positions) == 1 else "every game at the position he played"
     return {"games": rows, "counts": counts, "labels": LABELS, "has_club": has_club,
-            "club_note": (f"Our club formula applied to one game (per 90). Each game: better than X% of games "
-                          f"at the position he played, in {league} this season ({MIN_MINUTES}+ minutes). "
-                          f"Never changes the ranking."),
-            "note": (f"Match totals, as in Impect (not scaled to 90). Each game: better than X% of games "
-                     f"at the position he played, in {league} this season ({MIN_MINUTES}+ minutes).")}
+            "pool": f"Each game vs {who} ({MIN_MINUTES}+ min), {league} this season",
+            "note": "Match totals, as in Impect (not scaled to 90)."}
 
 
 def last_five(games: pd.DataFrame, score: str = "impect") -> list:
@@ -96,7 +97,7 @@ def in_form(last: list) -> bool:
 
 
 def load(engine, player_ids, season_id: int) -> pd.DataFrame:
-    """Every game row of `player_ids` in `season_id` (any English league), with the fixture."""
+    """Every game row of `player_ids` in `season_id` (any UK or Irish league), with the fixture."""
     ids = [int(i) for i in player_ids]
     if not ids:
         return pd.DataFrame()

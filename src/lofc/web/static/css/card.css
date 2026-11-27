@@ -209,14 +209,18 @@ table.sim td.sim-why a{font-size:13px;white-space:nowrap}
 .gp-counts .s{background:var(--soft);color:var(--muted)}
 /* one game's panel (owner 2026-11-23, N21) */
 #gd{border-top:1px solid var(--line);margin-top:16px;padding-top:14px}
-.gd-h{margin-bottom:10px}.gd-h b{font-size:15.5px}
-.gd-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
-.gd-tile{background:var(--soft);border-radius:10px;padding:12px 14px;cursor:pointer;border:1.5px solid transparent;min-width:0}
-.gd-tile.on{border-color:var(--ink)}
-.gd-tile .k{font-size:13px;color:var(--muted);font-weight:500}
-.gd-tile .v{margin-top:4px;font-size:24px;font-weight:700;line-height:1.2}
-.gd-tile .v small{font-size:14px;font-weight:600;color:var(--muted);margin-left:6px}
-.gd-tile .x{font-size:12.5px;color:var(--muted);margin-top:4px}
+.gd-h{margin-bottom:6px}.gd-h b{font-size:15.5px;font-weight:600}.gd-h .gd-m{font-weight:400;color:var(--muted);margin-left:4px}
+/* owner 2026-11-27 (N26, option A): a game's scores -- Score / Band (1 to 5) / Better than */
+table.gd-score{width:100%;border-collapse:collapse;font-size:14px}
+table.gd-score th{font-size:12.5px;color:var(--muted);font-weight:600;text-align:left;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.gd-score th:first-child{padding-left:0;width:150px}table.gd-score thead th:nth-child(2){width:170px}
+table.gd-score tbody th{color:var(--ink);font-size:14px}
+table.gd-score td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+table.gd-score .of{color:var(--muted);margin-left:6px}table.gd-score .mu{color:var(--muted);font-size:13.5px}
+.gd-b{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.gd-b b{min-width:40px;text-align:right}
+.gd-b .t{width:240px;max-width:40%;height:8px;background:var(--track);border-radius:4px;position:relative}
+.gd-b .t i{position:absolute;left:0;top:0;bottom:0;border-radius:4px}
+.gd-b .t i.Top{background:var(--hi)}.gd-b .t i.Average{background:#A87B00}.gd-b .t i.Low{background:var(--lo)}
 .lv{font-weight:700}.lv.Top{color:var(--hi)}.lv.Low{color:var(--lo)}.lv.Average{color:#7A5B00}
 button.gd-more{margin-top:12px;background:none;border:1px solid var(--line);border-radius:8px;padding:7px 12px;font:inherit;font-size:13.5px;font-weight:600;color:var(--ink);cursor:pointer}
 button.gd-more:hover{background:var(--soft)}
@@ -232,14 +236,14 @@ table.gd-tbl .pb{display:flex;align-items:center;gap:8px;min-width:96px}
 table.gd-tbl .pb .t{flex:1;height:8px;background:var(--track,#E8EAED);border-radius:4px;position:relative}
 table.gd-tbl .pb .t i{position:absolute;left:0;top:0;bottom:0;border-radius:4px}
 table.gd-tbl .pb b{width:30px;text-align:right;font-size:14px}
-@media (max-width:1100px){.gd-tiles{grid-template-columns:1fr 1fr}}
 #gp{width:100%;overflow:hidden}
 .gp-svg{display:block;margin-top:6px}
 .gp-svg circle.gp-hit{fill:transparent;stroke:none;cursor:pointer;outline:none}
+.gp-svg circle.gp-hit:focus-visible{stroke:var(--orient);stroke-width:2}
 .gp-bt{fill:#EEF7F1}.gp-bl{fill:#FCEFEE}.gp-ln{stroke:#9AA0A8;stroke-dasharray:4 3}
-.gp-lbl{font-size:12px;fill:var(--muted);font-weight:600}.gp-opp{font-size:11px;fill:var(--ink);cursor:help}.gp-min{font-size:10.5px;fill:var(--muted)}
+.gp-lbl{font-size:12px;fill:var(--muted);font-weight:600}.gp-lbl.t{fill:var(--hi)}.gp-lbl.a{fill:#7A5B00}.gp-lbl.l{fill:var(--lo)}.gp-lbs{font-size:10.5px;fill:var(--muted)}.gp-opp{font-size:11px;fill:var(--ink);cursor:help}.gp-min{font-size:10.5px;fill:var(--muted)}
 .gp-pct{font-size:11.5px;font-weight:700;fill:var(--ink);pointer-events:none}
-.gp-svg circle{stroke:#fff;stroke-width:2;cursor:help}.gp-t{fill:var(--hi)}.gp-a{fill:#C9A227}.gp-l{fill:var(--lo)}
+.gp-svg circle{stroke:#fff;stroke-width:2;cursor:help}.gp-t{fill:var(--hi)}.gp-a{fill:#A87B00}.gp-l{fill:var(--lo)}
 .gp-sub{fill:#fff;stroke:#9AA0A8!important;stroke-width:2}
 .gp-counts{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:6px}
 .gp-counts .c{font-weight:700;font-size:13px;border-radius:5px;padding:2px 8px}
